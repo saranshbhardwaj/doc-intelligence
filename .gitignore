@@ -34,3 +34,41 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+ Environment variables
+.env
+.env.local
+.env.production
+
+# API Keys
+**/secrets/
+**/*_key.txt
+
+# Python
+__pycache__/
+*.py[cod]
+venv/
+.venv/
+
+# Node
+node_modules/
+.next/
+dist/
+build/
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+
+# Uploads (if storing locally)
+uploads/
+temp/
