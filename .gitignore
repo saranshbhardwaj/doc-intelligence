@@ -72,3 +72,6 @@ logs/
 # Uploads (if storing locally)
 uploads/
 temp/
+backend/.env.example
+backend/Sample_CIM.pdf
+frontend/.env.development
