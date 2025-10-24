@@ -13,6 +13,7 @@ export default function FeedbackForm({ requestId, onClose }) {
   const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
 
   const handleSubmit = async (e) => {
+    if (submitting) return;
     e.preventDefault()
     
     if (rating === 0) {

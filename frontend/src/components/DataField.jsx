@@ -1,19 +1,27 @@
-//src/components/DataField.jsx
-export default function DataField({ label, value, format = 'text' }) {
-  const formatValue = (val) => {
-    if (val === null || val === undefined || val === '') return 'N/A'
-    if (format === 'currency') {
-      const num = typeof val === 'string' ? parseFloat(val.replace(/[^0-9.-]+/g, '')) : val
-      if (isNaN(num)) return val
-      return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', minimumFractionDigits: 0 }).format(num)
-    }
-    return val
+// src/components/DataField.jsx
+import { safeText, formatCurrency, formatPercentage } from '../utils/formatters';
+
+export default function DataField({ label, value, format = 'text', highlight = false }) {
+  let displayValue = value;
+  
+  if (format === 'currency') {
+    displayValue = formatCurrency(value);
+  } else if (format === 'percentage') {
+    displayValue = formatPercentage(value);
+  } else if (format === 'number') {
+    displayValue = typeof value === 'number' ? value.toLocaleString() : value;
+  } else {
+    displayValue = safeText(value);
   }
 
   return (
-    <div className="bg-gray-50 p-3 rounded-lg">
-      <div className="text-xs text-gray-600 mb-1 uppercase tracking-wide">{label}</div>
-      <div className="text-base font-semibold text-gray-900">{formatValue(value)}</div>
+    <div className={`p-3 rounded-lg ${highlight ? 'bg-blue-50 border border-blue-200' : 'bg-gray-50'}`}>
+      <div className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-1">
+        {label}
+      </div>
+      <div className={`text-lg font-bold ${highlight ? 'text-blue-900' : 'text-gray-900'}`}>
+        {displayValue}
+      </div>
     </div>
-  )
+  );
 }

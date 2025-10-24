@@ -18,11 +18,11 @@ class Settings(BaseSettings):
     
     # File Upload Limits
     max_file_size_mb: int = 5
-    max_pages: int = 30
+    max_pages: int = 60
     
     # LLM Settings
     llm_model: str = "claude-sonnet-4-5-20250929"
-    llm_max_tokens: int = 8192
+    llm_max_tokens: int = 16000
     llm_max_input_chars: int = 100000
     
     # Paths
@@ -30,6 +30,7 @@ class Settings(BaseSettings):
     raw_dir: Path = Path("logs/raw")
     parsed_dir: Path = Path("logs/parsed")
     cache_dir: Path = log_dir / "cache" 
+    raw_llm_dir: Path = log_dir / "raw_llm_response" 
 
     feedback_dir: Path = log_dir / "feedback"
     analytics_dir: Path = log_dir / "analytics" 
@@ -58,7 +59,7 @@ class Settings(BaseSettings):
         super().__init__(**kwargs)
         # Create directories if they don't exist
         # Create directories if they don't exist
-        for directory in [self.log_dir, self.raw_dir, self.parsed_dir, self.cache_dir]:
+        for directory in [self.log_dir, self.raw_dir, self.parsed_dir, self.cache_dir, self.feedback_dir, self.raw_llm_dir]:
             directory.mkdir(parents=True, exist_ok=True)
 
 # Global settings instance

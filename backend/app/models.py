@@ -1,25 +1,40 @@
 # backend/app/models.py
 from pydantic import BaseModel, Field
-from typing import Optional, Dict, List, Any  # Added Any here
+from typing import Optional, Dict, List, Any
 from datetime import datetime
 
+# ---------- Helper small models ----------
+class Provenance(BaseModel):
+    """Where a field/value came from in the doc (optional)."""
+    section_heading: Optional[str] = None
+    page_numbers: Optional[List[int]] = None
+    text_excerpt: Optional[str] = None
+
+class TimeSeriesItem(BaseModel):
+    """Optional array-style timeseries (alternate to dict-style)."""
+    year_key: str  # e.g., "2023" or "projected_2025"
+    value: Optional[float] = None
+    unit: Optional[str] = None
+    note: Optional[str] = None
+
+# ---------- Core models ----------
 class ExtractionMetadata(BaseModel):
-    """Metadata about the extraction process"""
     request_id: str
     filename: str
-    pages: int
-    characters_extracted: int
-    processing_time_seconds: float
-    timestamp: datetime = Field(default_factory=datetime.now)
+    file_label: Optional[str] = None   # human friendly label (date + name + id)
+    pages: Optional[int] = None
+    characters_extracted: Optional[int] = None
+    processing_time_seconds: Optional[float] = None
+    timestamp: datetime = Field(default_factory=datetime.utcnow)
+    is_scanned_pdf: Optional[bool] = False
+    ocr_used: Optional[bool] = False
 
 class RateLimitInfo(BaseModel):
-    """Rate limit information"""
     remaining_uploads: int
     reset_in_hours: int
     limit_per_window: int
 
 class CompanyInfo(BaseModel):
-    """Company information structure"""
     company_name: Optional[str] = None
     company_id: Optional[str] = None
     industry: Optional[str] = None
@@ -27,23 +42,31 @@ class CompanyInfo(BaseModel):
     founded_year: Optional[int] = None
     employees: Optional[int] = None
     headquarters: Optional[str] = None
+    website: Optional[str] = None
     business_structure: Optional[str] = None
     naics_codes: Optional[str] = None
     sic_codes: Optional[str] = None
+    # optional: provenance + confidence for the whole block (coarse)
+    provenance: Optional[Provenance] = None
+    confidence: Optional[float] = None  # 0..1
 
 class Financials(BaseModel):
-    """Financial data structure"""
-    currency: str = "USD"
+    currency: Optional[str] = "USD"
     fiscal_year_end: Optional[str] = None
-    revenue_by_year: Dict[str, float] = {}
-    ebitda_by_year: Dict[str, float] = {}
-    adjusted_ebitda_by_year: Dict[str, float] = {}
-    net_income_by_year: Dict[str, float] = {}
-    gross_margin_by_year: Dict[str, float] = {}
-    other_metrics: Dict[str, Any] = {}  # Changed 'any' to 'Any'
+    # Keep dict style (backwards compat). Keys like "2023" or "projected_2025"
+    revenue_by_year: Dict[str, float] = Field(default_factory=dict)
+    ebitda_by_year: Dict[str, float] = Field(default_factory=dict)
+    adjusted_ebitda_by_year: Dict[str, float] = Field(default_factory=dict)
+    net_income_by_year: Dict[str, float] = Field(default_factory=dict)
+    gross_margin_by_year: Dict[str, float] = Field(default_factory=dict)
+    other_metrics: Dict[str, Any] = Field(default_factory=dict)
+    # optional array representation (if you prefer uniform lists)
+    revenue_timeseries: Optional[List[TimeSeriesItem]] = None
+    ebitda_timeseries: Optional[List[TimeSeriesItem]] = None
+    provenance: Optional[Provenance] = None
+    confidence: Optional[float] = None
 
 class BalanceSheet(BaseModel):
-    """Balance sheet data"""
     most_recent_year: Optional[int] = None
     total_assets: Optional[float] = None
     current_assets: Optional[float] = None
@@ -53,9 +76,10 @@ class BalanceSheet(BaseModel):
     long_term_debt: Optional[float] = None
     stockholders_equity: Optional[float] = None
     working_capital: Optional[float] = None
+    provenance: Optional[Provenance] = None
+    confidence: Optional[float] = None
 
 class FinancialRatios(BaseModel):
-    """Financial ratios"""
     current_ratio: Optional[float] = None
     quick_ratio: Optional[float] = None
     debt_to_equity: Optional[float] = None
@@ -63,76 +87,178 @@ class FinancialRatios(BaseModel):
     return_on_equity: Optional[float] = None
     inventory_turnover: Optional[float] = None
     accounts_receivable_turnover: Optional[float] = None
+    # derived ratios
+    ebitda_margin: Optional[float] = None
+    capex_pct_revenue: Optional[float] = None
+    net_debt_to_ebitda: Optional[float] = None
+    provenance: Optional[Provenance] = None
+    confidence: Optional[float] = None
 
 class KeyRisk(BaseModel):
-    """Individual risk item"""
     risk: str
-    severity: str  # High, Medium, Low
-    description: str
+    severity: Optional[str] = None  # "High"/"Medium"/"Low"
+    description: Optional[str] = None
+    inferred: Optional[bool] = False  # inferred by model vs explicit section
+    mitigation: Optional[str] = None
+    provenance: Optional[Provenance] = None
+    confidence: Optional[float] = None
 
 class ManagementMember(BaseModel):
-    """Management team member"""
     name: str
-    title: str
+    title: Optional[str] = None
     background: Optional[str] = None
+    linkedin: Optional[str] = None
+    provenance: Optional[Provenance] = None
+    confidence: Optional[float] = None
+
+class CustomerInfo(BaseModel):
+    total_count: Optional[int] = None
+    top_customer_concentration: Optional[str] = None
+    top_customer_concentration_pct: Optional[float] = None
+    customer_retention_rate: Optional[str] = None
+    notable_customers: Optional[List[str]] = None
+    recurring_revenue_pct: Optional[float] = None
+    revenue_mix_by_segment: Optional[Dict[str, float]] = None
+    provenance: Optional[Provenance] = None
+    confidence: Optional[float] = None
+
+class MarketInfo(BaseModel):
+    market_size: Optional[str] = None
+    market_size_estimate: Optional[float] = None
+    market_growth_rate: Optional[str] = None
+    competitive_position: Optional[str] = None
+    market_share: Optional[str] = None
+    provenance: Optional[Provenance] = None
+    confidence: Optional[float] = None
 
 class TransactionDetails(BaseModel):
-    """Transaction information"""
     seller_motivation: Optional[str] = None
     post_sale_involvement: Optional[str] = None
     auction_deadline: Optional[str] = None
     assets_for_sale: Optional[str] = None
+    deal_type: Optional[str] = None  # e.g., "majority", "minority", "divestiture"
+    asking_price: Optional[float] = None
+    implied_valuation_hint: Optional[str] = None
+    provenance: Optional[Provenance] = None
+    confidence: Optional[float] = None
+
+class GrowthAnalysis(BaseModel):
+    historical_cagr: Optional[float] = None  # as decimal, e.g., 0.15 = 15%
+    projected_cagr: Optional[float] = None   # as decimal
+    organic_pct: Optional[float] = None      # as decimal, e.g., 0.80 = 80%
+    m_and_a_pct: Optional[float] = None      # as decimal, e.g., 0.20 = 20%
+    
+    # NEW: Text descriptions for context
+    organic_growth_estimate: Optional[str] = None  # Text explanation
+    m_and_a_summary: Optional[str] = None          # Text explanation of M&A impact
+    notes: Optional[str] = None                    # Additional context
+    
+    provenance: Optional[Provenance] = None
+    confidence: Optional[float] = None
+
+class ValuationMultiples(BaseModel):
+    """Purchase and exit multiples"""
+    asking_ev_ebitda: Optional[float] = None
+    asking_ev_revenue: Optional[float] = None
+    asking_price_ebitda: Optional[float] = None
+    exit_ev_ebitda_estimate: Optional[float] = None
+    comparable_multiples_range: Optional[str] = None  # e.g., "8-12x EBITDA"
+    provenance: Optional[Provenance] = None
+    confidence: Optional[float] = None
+
+class CapitalStructure(BaseModel):
+    """Debt and equity structure"""
+    existing_debt: Optional[float] = None
+    debt_to_ebitda: Optional[float] = None
+    proposed_leverage: Optional[float] = None  # e.g., 5.0x
+    equity_contribution_estimate: Optional[float] = None
+    provenance: Optional[Provenance] = None
+    confidence: Optional[float] = None
+
+class OperatingMetrics(BaseModel):
+    """Key operating KPIs"""
+    capex_by_year: Optional[Dict[str, float]] = None
+    fcf_by_year: Optional[Dict[str, float]] = None  # Free Cash Flow
+    working_capital_pct_revenue: Optional[float] = None
+    pricing_power: Optional[str] = None  # "High", "Medium", "Low"
+    contract_structure: Optional[str] = None  # Description
+    provenance: Optional[Provenance] = None
+    confidence: Optional[float] = None
+
+class StrategicRationale(BaseModel):
+    """Deal thesis and strategic fit"""
+    deal_thesis: Optional[str] = None  # Why this deal makes sense
+    value_creation_plan: Optional[str] = None  # How to improve the business
+    add_on_opportunities: Optional[str] = None  # Bolt-on acquisition potential
+    competitive_advantages: Optional[List[str]] = None  # USPs
+    key_risks_summary: Optional[str] = None
+    provenance: Optional[Provenance] = None
+    confidence: Optional[float] = None
 
 class ExtractedData(BaseModel):
-    """Complete extracted data structure"""
-    company_info: CompanyInfo
-    financials: Financials
-    balance_sheet: BalanceSheet
-    financial_ratios: FinancialRatios
-    customers: Dict[str, Any] = {}  # Changed 'any' to 'Any'
-    market: Dict[str, Any] = {}  # Changed 'any' to 'Any'
-    key_risks: List[KeyRisk] = []
+    company_info: Optional[CompanyInfo] = Field(default_factory=CompanyInfo)
+    financials: Optional[Financials] = Field(default_factory=Financials)
+    balance_sheet: Optional[BalanceSheet] = Field(default_factory=BalanceSheet)
+    financial_ratios: Optional[FinancialRatios] = Field(default_factory=FinancialRatios)
+    customers: Optional[CustomerInfo] = Field(default_factory=CustomerInfo)
+    market: Optional[MarketInfo] = Field(default_factory=MarketInfo)
+    key_risks: List[KeyRisk] = Field(default_factory=list)
     investment_thesis: Optional[str] = None
-    management_team: List[ManagementMember] = []
-    transaction_details: TransactionDetails = Field(default_factory=TransactionDetails)
+    management_team: List[ManagementMember] = Field(default_factory=list)
+    transaction_details: Optional[TransactionDetails] = Field(default_factory=TransactionDetails)
+
+    # Derived metrics & analysis (computed by model or post-processor)
+    derived_metrics: Optional[Dict[str, Any]] = None
+    # growth breakdown
+    growth_analysis: Optional[GrowthAnalysis] = None
+
+    valuation_multiples: Optional[ValuationMultiples] = None
+    capital_structure: Optional[CapitalStructure] = None
+    operating_metrics: Optional[OperatingMetrics] = None
+    strategic_rationale: Optional[StrategicRationale] = None
+    
+    # raw sections map (heading -> text + pages) useful for UI and audit
+    raw_sections: Optional[Dict[str, Dict[str, Any]]] = None
+    # per-field confidence & provenance maps (non-breaking — optional)
+    field_confidence: Optional[Dict[str, float]] = None
+    field_provenance: Optional[Dict[str, Provenance]] = None
+
+    # notes, free-text explanation of extraction choices
+    extraction_notes: Optional[str] = None
 
 class ExtractionResponse(BaseModel):
-    """API response for extraction"""
     success: bool
     data: ExtractedData
     metadata: ExtractionMetadata
-    rate_limit: RateLimitInfo
+    rate_limit: Optional[RateLimitInfo] = None
     from_cache: bool = False
 
 class ErrorResponse(BaseModel):
-    """API error response"""
     error: str
     message: str
     request_id: Optional[str] = None
 
+# Feedback and analytics (same as you had but kept here for convenience)
 class FeedbackRequest(BaseModel):
-    """User feedback on extraction"""
     request_id: str
-    rating: int = Field(ge=1, le=5, description="1-5 star rating")
+    rating: int = Field(ge=1, le=5)
     comment: Optional[str] = Field(None, max_length=1000)
     email: Optional[str] = Field(None, max_length=255)
-    accuracy_rating: Optional[int] = Field(None, ge=1, le=5, description="How accurate was the extraction?")
+    accuracy_rating: Optional[int] = Field(None, ge=1, le=5)
     would_pay: Optional[bool] = None
     timestamp: datetime = Field(default_factory=datetime.now)
 
 class FeedbackResponse(BaseModel):
-    """Response after submitting feedback"""
     success: bool
     message: str
     feedback_id: str
 
 class AnalyticsEvent(BaseModel):
-    """Track usage analytics"""
-    event_type: str  # "page_view", "upload_start", "upload_success", "upload_error", ""
+    event_type: str
     request_id: Optional[str] = None
-    client_ip: str
+    client_ip: Optional[str] = None
     user_agent: Optional[str] = None
     page_path: Optional[str] = None
     referrer: Optional[str] = None
     timestamp: datetime = Field(default_factory=datetime.now)
-    metadata: Dict[str, Any] = {}
+    metadata: Dict[str, Any] = Field(default_factory=dict)

@@ -11,6 +11,7 @@ import json
 import re
 import asyncio
 
+from app.utils import _normalize_llm_output
 from fastapi import FastAPI, UploadFile, File, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pythonjsonlogger import jsonlogger
@@ -24,6 +25,7 @@ from app.models import ExtractionResponse, ErrorResponse, ExtractionMetadata, Fe
 
 from app.cache_utils import list_cache_entries, clear_all_cache, preload_cache_mock
 from app.analytics import SimpleAnalytics
+from services.mock_responses import get_mock_cim_response
 
 # ---------- Logging Setup ----------
 logger = logging.getLogger(__name__)
@@ -61,22 +63,23 @@ async def lifespan(app: FastAPI):
         "max_pages": settings.max_pages,
         "max_file_size_mb": settings.max_file_size_mb
     })
-    cache.clear_expired()
+    # cache.clear_expired()
     rate_limiter.clear_expired()
 
     # Start background cleanup task
-    cleanup_task = asyncio.create_task(periodic_cleanup())
+    # cleanup_task = asyncio.create_task(periodic_cleanup())
 
     # yield control to the running app
     yield
 
     # ---------- Shutdown ----------
-    cleanup_task.cancel()  # Stop background task
-    try:
-        await cleanup_task
-    except asyncio.CancelledError:
-        pass
-    logger.info("Application shutting down")
+
+    # cleanup_task.cancel()  # Stop background task
+    # try:
+    #     await cleanup_task
+    # except asyncio.CancelledError:
+    #     pass
+    # logger.info("Application shutting down")
 
 
 app = FastAPI(
@@ -131,8 +134,9 @@ async def periodic_cleanup():
             logger.info("Running periodic cleanup...")
             
             # Clean cache
-            cache_removed = cache.clear_expired()
-            logger.info(f"Cache cleanup: removed {cache_removed} expired entries")
+
+            # cache_removed = cache.clear_expired()
+            # logger.info(f"Cache cleanup: removed {cache_removed} expired entries")
             
             # Clean rate limiter
             rate_limiter.clear_expired()
@@ -183,6 +187,16 @@ def save_parsed_result(request_id: str, data: dict, original_filename: str = "do
     except Exception as e:
         logger.warning(f"Failed to save parsed result: {e}")
 
+def save_raw_llm_response(request_id: str, data: dict, original_filename: str = "document"):
+    """Save raw llm result for audit with readable filenames."""
+    try:
+        label = make_file_label(original_filename, request_id)
+        file_path = settings.raw_llm_dir / f"{label}.json"
+        file_path.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
+        logger.info("Saved raw llm result", extra={"file_label": label, "path": str(file_path)})
+    except Exception as e:
+        logger.warning(f"Failed to save parsed result: {e}")
+
 # ---------- API Endpoints ----------
 
 @app.get("/")
@@ -214,10 +228,20 @@ async def extract_document(
     Extract structured data from uploaded PDF.
     
     Limits:
-    - 3 uploads per IP per 24 hours (cached results don't count)
-    - Max 30 pages
+    - 2 uploads per IP per 24 hours (cached results don't count)
+    - Max 50 pages
     - Max 5MB file size
     """
+    if settings.mock_mode:
+        logger.info("🎭 Mock mode enabled - returning test data")
+        mock_response = get_mock_cim_response()
+        return {
+            "success": True,
+            "data": mock_response["data"],
+            "metadata": mock_response["metadata"],
+            "from_cache": False
+        }
+    
     request_id = str(uuid.uuid4())
     file_label = make_file_label(file.filename, request_id)
     start_time = time.time()
@@ -317,6 +341,15 @@ async def extract_document(
         logger.info("Calling LLM", extra={"request_id": request_id})
         extracted_data = llm_client.extract_structured_data(text)
 
+        save_raw_llm_response(request_id, extracted_data, file.filename)
+
+        # Normalize LLM output to match our Pydantic models
+        try:
+            normalized_payload = _normalize_llm_output(extracted_data)
+        except Exception as e:
+            logger.exception("Normalization failed", extra={"request_id": request_id, "error": str(e)})
+            normalized_payload = extracted_data  # fallback to original
+
         analytics.track_event(
             "upload_success",
             client_ip=client_ip,
@@ -325,7 +358,7 @@ async def extract_document(
         )
         
         # Save parsed result
-        save_parsed_result(request_id, extracted_data, file.filename)
+        save_parsed_result(request_id, normalized_payload, file.filename)
         
         # Record upload for rate limiting (only after successful processing)
         rate_limiter.record_upload(client_ip)
@@ -335,7 +368,7 @@ async def extract_document(
         
         # Prepare response
         response_data = {
-            "data": extracted_data,
+            **normalized_payload,
             "metadata": {
                 "request_id": request_id,
                 "filename": file.filename,
@@ -356,7 +389,7 @@ async def extract_document(
         
         return ExtractionResponse(
             success=True,
-            data=extracted_data,
+            **normalized_payload,
             metadata=ExtractionMetadata(
                 request_id=request_id,
                 filename=file.filename,
@@ -395,6 +428,7 @@ async def submit_feedback(feedback: FeedbackRequest, request: Request):
     """
     feedback_id = str(uuid.uuid4())
     client_ip = get_client_ip(request)
+    user_agent = request.headers.get("User-Agent")
     
     logger.info("Feedback received", extra={
         "feedback_id": feedback_id,
@@ -416,7 +450,7 @@ async def submit_feedback(feedback: FeedbackRequest, request: Request):
             "email": feedback.email,
             "client_ip": client_ip,
             "timestamp": feedback.timestamp.isoformat(),
-            "user_agent": request.headers.get("User-Agent")
+            "user_agent": user_agent,
         }
         
         # Create feedback directory if doesn't exist
