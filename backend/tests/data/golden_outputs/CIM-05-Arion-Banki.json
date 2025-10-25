@@ -1,0 +1,577 @@
+{
+  "data": {
+    "company_information": {
+      "company_name": "Arion Banki hf",
+      "company_id": null,
+      "industry": "Banking",
+      "secondary_industry": "Financial Services",
+      "business_structure": "Public Limited Company (HF)",
+      "founded_year": 2008,
+      "employees": 1177,
+      "headquarters": "Borgartun 19, 105 Reykjavik, Iceland",
+      "website": null,
+      "provenance": {
+        "section_heading": "Bank and business overview",
+        "page_numbers": [
+          1,
+          14
+        ],
+        "text_excerpt": "The Bank was established on 18 October 2008 and is incorporated in Reykjavik and domiciled in Iceland. Arion Bank is the second largest bank on Iceland measured by total assets."
+      },
+      "confidence": 0.95
+    },
+    "financial_performance": {
+      "revenue_by_year": {
+        "2009": 31865000000.0,
+        "2010": 35623000000.0,
+        "2011": 33276000000.0
+      },
+      "ebitda_by_year": {
+        "2009": 17278000000.0,
+        "2010": 18150000000.0,
+        "2011": 12216000000.0
+      },
+      "adjusted_ebitda_by_year": {},
+      "net_income_by_year": {
+        "2009": 12871000000.0,
+        "2010": 12557000000.0,
+        "2011": 11094000000.0
+      },
+      "gross_margin_by_year": {},
+      "fiscal_year_end": "December 31",
+      "currency": "ISK",
+      "other_metrics": {
+        "net_interest_income_2009": 12188000000.0,
+        "net_interest_income_2010": 19785000000.0,
+        "net_interest_income_2011": 23388000000.0,
+        "net_interest_income_9M2012": 20134000000.0,
+        "impairment_on_loans_2009": -9939000000.0,
+        "impairment_on_loans_2010": -26787000000.0,
+        "impairment_on_loans_2011": -27424000000.0,
+        "impairment_on_loans_9M2012": -7594000000.0,
+        "net_earnings_9M2012": 14537000000.0,
+        "operating_income_9M2012": 34359000000.0,
+        "assumptions": "All figures in ISK (Icelandic kr\u00f3na). Operating income used as proxy for revenue. EBITDA calculated as Earnings before tax + Depreciation and amortisation. EUR equivalents also provided in document using period-specific exchange rates."
+      },
+      "provenance": {
+        "section_heading": "Key data / Income statements",
+        "page_numbers": [
+          12,
+          13,
+          18,
+          19
+        ],
+        "text_excerpt": "Operating income 31,865 35,623 33,276 34,359 (ISK million). Net earnings 12,871 12,557 11,094 14,537"
+      },
+      "confidence": 0.9
+    },
+    "growth_analysis": {
+      "historical_cagr": 0.022,
+      "projected_cagr": null,
+      "organic_pct": null,
+      "m_and_a_pct": null,
+      "organic_growth_estimate": "The Bank's total business has grown in the past three years primarily through the takeover of a mortgage loan fund from Kaupthing. The loan portfolio of the fund is primarily housing loans to individual customers. The Bank's loans and receivables to credit institutions and to customers amounted to ISK 631 billion, ISK 519 billion and ISK 396 billion as at 31 December 2011, 2010 and 2009 respectively.",
+      "m_and_a_summary": "In January 2012 the Bank acquired a mortgage portfolio from Kaupthing bankruptcy estate valued at ISK 120 billion. In March 2009, the Bank acquired all deposits and card transactions of over 20,000 customers from SPRON Factoring hf. In April 2009, the Bank acquired M\u00fdras\u00fdsla Savings Bank (SPM) in Borgarnes. In June 2012 Verdis custody services merged with Arion Bank. In September 2012 \u00d3lafsfj\u00f6rdur Savings Bank (SP\u00d3L) merged into Arion Bank.",
+      "notes": "Historical CAGR calculated from operating income 2009-2011: ((33276/31865)^(1/2))-1 = 2.2%. Growth driven primarily by mortgage portfolio acquisition and branch consolidation strategy. No projected financials provided beyond 9M 2012.",
+      "provenance": {
+        "section_heading": "Bank and business overview / History of the Bank",
+        "page_numbers": [
+          12,
+          16,
+          17
+        ],
+        "text_excerpt": "The Bank's loans and receivables to credit institutions and to customers amounted to ISK 631 billion, ISK 519 billion and ISK 396 billion as at 31 December 2011, 2010 and 2009 respectively."
+      },
+      "confidence": 0.75
+    },
+    "valuation_multiples": {
+      "asking_ev_ebitda": null,
+      "asking_ev_revenue": null,
+      "asking_price_ebitda": null,
+      "exit_ev_ebitda_estimate": null,
+      "comparable_multiples_range": null,
+      "provenance": {
+        "section_heading": "N/A",
+        "page_numbers": [],
+        "text_excerpt": "This is a bond offering document, not a private equity acquisition CIM. No valuation multiples or asking price provided."
+      },
+      "confidence": 1.0
+    },
+    "capital_structure": {
+      "existing_debt": 192412000000.0,
+      "debt_to_ebitda": null,
+      "proposed_leverage": null,
+      "equity_contribution_estimate": null,
+      "provenance": {
+        "section_heading": "Financial position",
+        "page_numbers": [
+          19,
+          20
+        ],
+        "text_excerpt": "Borrowings ISK 192,412 million as at 30 Sep 2012. Subordinated liabilities ISK 32,502 million. This is a NOK 500 million senior unsecured bond offering at 3 month Nibor + 5.00%."
+      },
+      "confidence": 0.85
+    },
+    "operating_metrics": {
+      "capex_by_year": {},
+      "fcf_by_year": {},
+      "working_capital_pct_revenue": null,
+      "pricing_power": "Medium",
+      "contract_structure": "The Bank operates four principal reporting segments: Corporate Banking, Retail Banking, Asset Management, and Investment Banking. Services include universal financial services to corporations, retail banking through 25 branches, asset management with ISK 769 billion under management, and investment banking advisory services.",
+      "provenance": {
+        "section_heading": "Bank and business overview",
+        "page_numbers": [
+          14,
+          15,
+          16
+        ],
+        "text_excerpt": "The Bank's business operates in the following four principal reporting segments: Corporate Banking, Retail Banking, Asset Management, Investment Banking."
+      },
+      "confidence": 0.7
+    },
+    "balance_sheet": {
+      "most_recent_year": 2012,
+      "total_assets": 876245000000.0,
+      "current_assets": null,
+      "fixed_assets": null,
+      "total_liabilities": 747813000000.0,
+      "current_liabilities": null,
+      "long_term_debt": 192412000000.0,
+      "stockholders_equity": 124624000000.0,
+      "working_capital": null,
+      "provenance": {
+        "section_heading": "Financial position as at 30 September 2012",
+        "page_numbers": [
+          19,
+          20
+        ],
+        "text_excerpt": "Total assets 876,245 ISK million. Total liabilities 747,813 ISK million. Total shareholders' equity 124,624 ISK million as at 30 Sep 2012."
+      },
+      "confidence": 0.9
+    },
+    "financial_ratios": {
+      "current_ratio": null,
+      "quick_ratio": null,
+      "debt_to_equity": 6.0,
+      "return_on_assets": 0.022,
+      "return_on_equity": 0.159,
+      "inventory_turnover": null,
+      "accounts_receivable_turnover": null,
+      "ebitda_margin": null,
+      "capex_pct_revenue": null,
+      "net_debt_to_ebitda": null,
+      "tier_1_ratio": 0.182,
+      "capital_adequacy_ratio": 0.23,
+      "leverage_ratio": 0.139,
+      "loans_to_deposits_ratio": 1.26,
+      "provenance": {
+        "section_heading": "Key data / Profitability and Capitalisation",
+        "page_numbers": [
+          13
+        ],
+        "text_excerpt": "Return on equity 15.9% (9M 2012). Return on assets 2.2% (9M 2012). Tier 1 ratio 18.2%. Capital adequacy ratio 23.0%. Leverage ratio 13.9%. Loans to deposits ratio 126.0%."
+      },
+      "confidence": 0.85
+    },
+    "customers": {
+      "total_count": 100000,
+      "top_customer_concentration": "Top 10 largest customer loans",
+      "top_customer_concentration_pct": 0.22,
+      "customer_retention_rate": null,
+      "notable_customers": [],
+      "recurring_revenue_pct": null,
+      "revenue_mix_by_segment": {},
+      "provenance": {
+        "section_heading": "Retail Banking Division / Loan provisioning",
+        "page_numbers": [
+          14,
+          69
+        ],
+        "text_excerpt": "As at 30 September 2012, the Bank had 25 branches throughout Iceland and over 100,000 retail customers. As at 31 December 2011, the aggregate amount of the Bank's 10 largest customer loans and receivables equalled 22% of its total gross customer loans and receivables."
+      },
+      "confidence": 0.8
+    },
+    "market": {
+      "market_size": "Iceland banking sector",
+      "market_size_estimate": null,
+      "market_growth_rate": "Iceland GDP growth forecast: 2.6% (2013), 2.2% (2014), 3.7% (2015E)",
+      "competitive_position": "Second largest bank in Iceland measured by total assets. Operates in a three-bank oligopoly following the 2008 financial crisis restructuring.",
+      "market_share": "Second largest bank in Iceland",
+      "provenance": {
+        "section_heading": "Bank and business overview / The Icelandic economy and banking sector",
+        "page_numbers": [
+          11,
+          12,
+          28
+        ],
+        "text_excerpt": "Arion Bank is the second largest bank on Iceland measured by total assets. Real GDP growth 2.6% (2012), 2.1% (2013E), 3.7% (2014E), 3.9% (2015E)."
+      },
+      "confidence": 0.8
+    },
+    "transaction_details": {
+      "seller_motivation": "Not applicable - this is a bond offering, not an equity sale",
+      "post_sale_involvement": "Not applicable",
+      "auction_deadline": "Subscription Period: 18 February 2013 to 22 February 2013 at 18.00 CET",
+      "assets_for_sale": "NOK 500 million senior unsecured bonds",
+      "deal_type": "Bond offering",
+      "asking_price": 500000000.0,
+      "implied_valuation_hint": "Bond offering at 3 month Nibor + 5.00% interest rate, issue price 100%, maturity 4 March 2016",
+      "provenance": {
+        "section_heading": "The Bond Issue and the Bonds",
+        "page_numbers": [
+          1,
+          9
+        ],
+        "text_excerpt": "Arion Banki hf proposes to issue NOK 500 of 3 month Nibor+ 5.00% senior unsecured bonds on 4 March 2013. The Subscription Period will commence on 18 February 2013 and end on 22 February 2013 at 18.00 CET."
+      },
+      "confidence": 0.95
+    },
+    "strategic_rationale": {
+      "deal_thesis": "This is a bond offering document, not a private equity acquisition. The Bank is raising NOK 500 million in senior unsecured bonds for general corporate purposes. The Bank has successfully restructured following the 2008 Icelandic banking crisis, with improving asset quality, strong capital ratios (Tier 1: 18.2%, CAR: 23.0%), and a strategic focus on becoming a universal bank serving corporate, retail, asset management, and investment banking segments.",
+      "value_creation_plan": "Bank's strategic plan (finalized October 2010) focuses on: (1) Positioning as universal bank providing quality services, (2) Improving competitiveness, (3) Continuing loan portfolio restructuring and reducing non-performing loans (down to 6.6% by 9M 2012 from 24.7% in 2010), (4) Expanding funding sources including covered bond programme, (5) Maintaining high liquidity and capital levels, (6) Streamlining branch network (reduced by 15 branches), (7) Developing new products including leasing division and mortgage products.",
+      "add_on_opportunities": "Recent acquisitions include mortgage portfolio from Kaupthing (ISK 120 billion, January 2012), merger with Verdis custody services (June 2012), and merger with \u00d3lafsfj\u00f6rdur Savings Bank (September 2012). Branch consolidation strategy creates larger, stronger branches better able to meet customer needs.",
+      "competitive_advantages": [
+        "Second largest bank in Iceland by total assets",
+        "Strong capital position: Tier 1 ratio 18.2%, Capital adequacy ratio 23.0%",
+        "Diversified business model across four segments: Corporate Banking, Retail Banking, Asset Management (ISK 769 billion AUM), Investment Banking",
+        "Extensive branch network: 25 branches throughout Iceland serving 100,000+ retail customers",
+        "Successful loan portfolio restructuring: NPL ratio down to 6.6% (9M 2012) from 24.7% (2010)",
+        "Strong wholesale funding position with no significant redemption until 2020",
+        "First covered bond issuance in February 2012 under EUR 1 billion programme"
+      ],
+      "key_risks_summary": "Key risks include: (1) High customer concentration (top 10 customers = 22% of loans), (2) Significant exposure to Icelandic economy and capital controls, (3) Legacy issues from Kaupthing relationship including priority claims on covered bonds, (4) High debt-to-equity ratio (6.0x), (5) Asset quality risks with 14.7% problem loans, (6) Regulatory and legal uncertainties in post-crisis Iceland, (7) Liquidity risks from loans-to-deposits ratio of 126%, (8) Foreign exchange and interest rate risks.",
+      "provenance": {
+        "section_heading": "Executive summary / Bank and business overview / Strategy",
+        "page_numbers": [
+          11,
+          12,
+          26,
+          27
+        ],
+        "text_excerpt": "A new strategic plan was finalised in October 2010 which seeks to position the Bank as a universal bank providing a range of quality services and focuses on improving the Bank's competitiveness."
+      },
+      "confidence": 0.85
+    },
+    "key_risks": [
+      {
+        "risk": "Customer Concentration Risk",
+        "severity": "High",
+        "description": "As at 31 December 2011, the aggregate amount of the Bank's 10 largest customer loans and receivables equalled 22% of its total gross customer loans and receivables. Should a customer to which the Bank has a large exposure default, the Bank's business and ability to make payments would be materially adversely affected.",
+        "mitigation": "The Bank has developed solutions to assist customers experiencing payment difficulties, including debt restructuring, payment relief, and write-downs. Corporate recovery process includes independent business reviews and standardized solutions for SMEs.",
+        "inferred": false,
+        "provenance": {
+          "section_heading": "Risk factors / Loan provisioning",
+          "page_numbers": [
+            69
+          ],
+          "text_excerpt": "As at 31 December 2011, the aggregate amount of the Bank's 10 largest customer loans and receivables equalled 22% of its total gross customer loans and receivables."
+        },
+        "confidence": 0.9
+      },
+      {
+        "risk": "Asset Quality and Non-Performing Loans",
+        "severity": "High",
+        "description": "At 31 December 2011, 56% of the Bank's customer loan portfolio was classified as performing with remaining loans classified as watch (18%), sub performing (13%) or non performing (13%). Problem loans were 14.7% as at 9M 2012. The Bank is still exposed to credit risks relating to accuracy of transfer valuation from Kaupthing, loan performance, and success in restructuring non-performing loans.",
+        "mitigation": "Bank has made significant progress in loan restructuring. NPL ratio improved from 24.7% (2010) to 6.6% (9M 2012). Provisions on customer loan portfolio amounted to 9% of total portfolio at 31 December 2011. Standardized solutions implemented for individuals and SMEs, tailored solutions for larger companies.",
+        "inferred": false,
+        "provenance": {
+          "section_heading": "Risk factors / Credit monitoring / Loan provisioning",
+          "page_numbers": [
+            67,
+            69
+          ],
+          "text_excerpt": "At 31 December 2011, 56% of the Bank's customer loan portfolio was classified as performing with the remaining loans being classified as watch (18%), sub performing (13%) or non performing (13%)."
+        },
+        "confidence": 0.9
+      },
+      {
+        "risk": "Priority Claims from Covered Bonds",
+        "severity": "High",
+        "description": "In January 2012, the Bank acquired a mortgage portfolio (ISK 120 billion) and assumed covered bonds issued by Kaupthing secured by that portfolio. These covered bondholders have priority claims over the mortgage portfolio ahead of unsecured creditors. This creates structural subordination risk for unsecured bondholders.",
+        "mitigation": "The covered bonds provide secured funding with no significant redemption until 2020, improving the Bank's funding profile. However, this increases risk for unsecured creditors.",
+        "inferred": false,
+        "provenance": {
+          "section_heading": "History of the Bank / Funding",
+          "page_numbers": [
+            17,
+            22
+          ],
+          "text_excerpt": "In January 2012 the Bank acquired a mortgage portfolio valued at ISK 120 billion and assumed the rights and duties of the Issuer under that bond programme. The Bank has a strong wholesale funding position with no significant redemption until 2020."
+        },
+        "confidence": 0.85
+      },
+      {
+        "risk": "High Leverage and Debt-to-Equity Ratio",
+        "severity": "High",
+        "description": "Debt-to-equity ratio of 6.0x as at 30 September 2012 (calculated: 747,813 / 124,624). Total borrowings of ISK 192.4 billion plus subordinated liabilities of ISK 32.5 billion. High leverage increases financial risk and vulnerability to economic downturns.",
+        "mitigation": "Strong capital ratios partially offset leverage concerns: Tier 1 ratio 18.2%, Capital adequacy ratio 23.0%, both well above regulatory minimums. However, high debt burden remains a concern.",
+        "inferred": true,
+        "provenance": {
+          "section_heading": "Financial position / Key data",
+          "page_numbers": [
+            13,
+            20
+          ],
+          "text_excerpt": "Total liabilities 747,813 ISK million. Total shareholders' equity 124,624 ISK million. Borrowings 192,412 ISK million. Subordinated liabilities 32,502 ISK million."
+        },
+        "confidence": 0.75
+      },
+      {
+        "risk": "Icelandic Economic and Sovereign Risk",
+        "severity": "High",
+        "description": "Bank's loan portfolio is highly concentrated on Icelandic borrowers. Iceland suffered severe currency and banking crisis in 2008. While economy has recovered (GDP growth 2.6% in 2012), risks remain including capital controls, small market size, vulnerability to external shocks, and sovereign rating of Baa3/BBB-/BBB.",
+        "mitigation": "Icelandic economy has successfully turned around with real growth in 2011-2012. Unemployment modest compared to European peers. Government issued two international USD bonds post-crisis. Capital controls being gradually lifted. IMF support programme completed successfully.",
+        "inferred": false,
+        "provenance": {
+          "section_heading": "The Icelandic economy and banking sector / Risk factors",
+          "page_numbers": [
+            11,
+            28,
+            54
+          ],
+          "text_excerpt": "Towards the end of 2008, Iceland suffered a currency and banking crisis. Following the crisis, the Icelandic government has successfully turned the economy from subtraction in 2009 and 2010 into real growth in 2011 and 2012."
+        },
+        "confidence": 0.9
+      },
+      {
+        "risk": "Capital Controls and Foreign Exchange Risk",
+        "severity": "Medium",
+        "description": "Iceland maintains capital controls established in 2008 restricting currency movements. Trading on FX market significantly restricted. Bank has foreign exchange, interest rate and liquidity mismatches. Capital controls limit ability to hedge foreign currency exposures and may impact international funding.",
+        "mitigation": "Bank actively manages FX risk through Risk Management division. Capital controls expected to be gradually lifted as economy stabilizes. However, timing and impact of removal uncertain.",
+        "inferred": false,
+        "provenance": {
+          "section_heading": "Legal and regulatory matters / Capital controls / Risk factors",
+          "page_numbers": [
+            16,
+            51,
+            54
+          ],
+          "text_excerpt": "Trading on the FX market is significantly restricted in Iceland by the capital controls established in 2008. The Bank has foreign exchange, interest rate and liquidity mismatches."
+        },
+        "confidence": 0.85
+      },
+      {
+        "risk": "Liquidity Risk - High Loans-to-Deposits Ratio",
+        "severity": "Medium",
+        "description": "Loans-to-deposits ratio of 126.0% as at 9M 2012, indicating Bank is lending more than it holds in deposits. This creates funding gap and liquidity pressure, requiring reliance on wholesale funding markets.",
+        "mitigation": "Bank maintains strong liquidity position: secured liquidity ratio 30.6%, cash ratio 17.7%. Strong wholesale funding position with no significant redemption until 2020. Covered bond programme provides additional funding source.",
+        "inferred": true,
+        "provenance": {
+          "section_heading": "Key data / Liquidity",
+          "page_numbers": [
+            13,
+            24
+          ],
+          "text_excerpt": "Loans to deposits ratio 126.0%. Secured liquidity ratio 30.6%. Cash ratio 17.7%."
+        },
+        "confidence": 0.8
+      },
+      {
+        "risk": "Relations to Kaupthing and Legacy Issues",
+        "severity": "Medium",
+        "description": "Bank was created from assets transferred from failed Kaupthing Bank in 2008. Kaupthing creditors own 87% of Bank through Kaupskil. Ongoing legal and operational complexities from this relationship. Potential for disputes over asset valuations, priority claims, and historical liabilities.",
+        "mitigation": "Settlement agreement executed in June 2011 discharged compensation instrument and ECVRA. However, structural relationship with Kaupthing bankruptcy estate continues through ownership structure.",
+        "inferred": false,
+        "provenance": {
+          "section_heading": "History of the Bank / Risk factors - Relations to Kaupthing",
+          "page_numbers": [
+            16,
+            17,
+            60
+          ],
+          "text_excerpt": "In December 2009, the Kaupthing Resolution Committee acting through Kaupskil ehf., a wholly owned subsidiary of Kaupthing, exercised its option to acquire shares in the Bank and Kaupthing is currently the owner of 87% of the Bank."
+        },
+        "confidence": 0.85
+      },
+      {
+        "risk": "Regulatory and Legal Risk",
+        "severity": "Medium",
+        "description": "Bank operates in post-crisis regulatory environment with evolving rules. Subject to FME supervision, Basel II/III implementation, new taxes on financial institutions (6% profit tax, 6.75% payroll tax), depositors' guarantee fund requirements. Legal uncertainties around loan restructuring and priority claims.",
+        "mitigation": "Bank maintains strong capital ratios exceeding regulatory requirements. Active engagement with regulators. However, regulatory landscape remains uncertain and compliance costs are increasing.",
+        "inferred": false,
+        "provenance": {
+          "section_heading": "Legal and regulatory matters / Risk factors / Taxation in Iceland",
+          "page_numbers": [
+            47,
+            62,
+            71
+          ],
+          "text_excerpt": "A temporary tax of 6% on profit over ISK 1 billion of financial institutions was imposed in 2012 and extended for 2013. A new tax was imposed on financial undertakings, tax on financial activities at 6.75% on all remuneration paid to employees."
+        },
+        "confidence": 0.8
+      },
+      {
+        "risk": "Sector Concentration Risk",
+        "severity": "Medium",
+        "description": "Bank has credit concentrations to certain business sectors, such as the financial and insurance sector, the agriculture, forestry and fishing sector and the real estate sector. Sector-specific downturns could lead to correlated defaults.",
+        "mitigation": "Bank uses internal rating system to rate loans. Credit committees review and monitor exposures. Diversification across four business segments (Corporate, Retail, Asset Management, Investment Banking) provides some offset.",
+        "inferred": false,
+        "provenance": {
+          "section_heading": "Risk factors / Credit monitoring",
+          "page_numbers": [
+            67
+          ],
+          "text_excerpt": "The Bank also has credit concentrations to a few significant customers and to certain business sectors, such as the financial and insurance sector, the agriculture, forestry and fishing sector and the real estate sector."
+        },
+        "confidence": 0.8
+      },
+      {
+        "risk": "Market Risk - Interest Rate and Currency Exposure",
+        "severity": "Medium",
+        "description": "Bank exposed to interest rate risk from mismatches between interest-earning assets and interest-bearing liabilities. Currency risk from foreign currency denominated assets and liabilities. Inflation-linked loans create additional complexity in Icelandic market.",
+        "mitigation": "Risk Management division actively monitors and manages market risks. Bank uses derivatives for hedging. However, capital controls limit hedging options for foreign currency exposures.",
+        "inferred": false,
+        "provenance": {
+          "section_heading": "Risk factors / Risk management",
+          "page_numbers": [
+            65,
+            66
+          ],
+          "text_excerpt": "The Bank is exposed to interest rate risk from mismatches between interest-earning assets and interest-bearing liabilities. Currency risk from foreign currency denominated assets and liabilities."
+        },
+        "confidence": 0.75
+      },
+      {
+        "risk": "Operational and Integration Risk",
+        "severity": "Low",
+        "description": "Bank has undergone significant restructuring including branch consolidation (reduced by 15 branches), multiple mergers (Verdis, SP\u00d3L, SPM, SPRON), and integration of ISK 120 billion mortgage portfolio. Integration complexity and operational disruption risks.",
+        "mitigation": "Bank has successfully completed multiple integrations. Branch consolidation strategy creates stronger units. Operations division with 287 employees manages IT, HR, back office functions. However, ongoing integration work continues.",
+        "inferred": true,
+        "provenance": {
+          "section_heading": "Bank and business overview / History of the Bank",
+          "page_numbers": [
+            14,
+            16,
+            17
+          ],
+          "text_excerpt": "Following its establishment in late 2008, the Bank has sought to streamline its retail banking operations by merging a number of its branches. This strategy has resulted in a reduction of the branch network by 15 branches."
+        },
+        "confidence": 0.65
+      }
+    ],
+    "management_team": [
+      {
+        "name": "Not specified",
+        "title": "Chief Executive Officer",
+        "background": "New CEO appointed by Board on 1 June 2010",
+        "linkedin": null,
+        "provenance": {
+          "section_heading": "History of the Bank",
+          "page_numbers": [
+            17
+          ],
+          "text_excerpt": "In March 2010 a new board of directors (the Board) was appointed at the Bank's annual general meeting and, on 1 June 2010, the Board appointed a new chief executive officer (CEO)."
+        },
+        "confidence": 0.7
+      },
+      {
+        "name": "Not specified",
+        "title": "Chief Risk Officer",
+        "background": "Signatory on statements of responsibility",
+        "linkedin": null,
+        "provenance": {
+          "section_heading": "Statements of responsibility",
+          "page_numbers": [
+            7
+          ],
+          "text_excerpt": "The Chairman of the Board, Chief Executive Officer, Chief Risk Officer, Chief Financial Officer of Arion Bank confirm that, having taken all reasonable care..."
+        },
+        "confidence": 0.8
+      },
+      {
+        "name": "Not specified",
+        "title": "Chief Financial Officer",
+        "background": "Signatory on statements of responsibility. Finance division includes accounting, analysis, funding and treasury units with 57 employees at 31 December 2012.",
+        "linkedin": null,
+        "provenance": {
+          "section_heading": "Statements of responsibility / Support Divisions",
+          "page_numbers": [
+            7,
+            16
+          ],
+          "text_excerpt": "The Chairman of the Board, Chief Executive Officer, Chief Risk Officer, Chief Financial Officer of Arion Bank confirm... The Finance division had 57 employees at 31 December 2012."
+        },
+        "confidence": 0.8
+      }
+    ],
+    "investment_thesis": "This is a bond offering document for Arion Banki hf, not a private equity acquisition CIM. Arion Bank is the second largest bank in Iceland, established in 2008 from assets transferred from failed Kaupthing Bank. The Bank has successfully navigated the post-crisis restructuring period and is now positioned as a universal bank serving corporate, retail, asset management, and investment banking segments. Key investment highlights include: (1) Strong capital position with Tier 1 ratio of 18.2% and Capital adequacy ratio of 23.0%, well above regulatory minimums; (2) Significant improvement in asset quality with NPL ratio declining from 24.7% (2010) to 6.6% (9M 2012); (3) Diversified business model with 100,000+ retail customers across 25 branches, ISK 769 billion in assets under management, and comprehensive corporate banking services; (4) Strong wholesale funding position with no significant redemption until 2020 following covered bond programme launch; (5) Exposure to recovering Icelandic economy with GDP growth of 2.6% (2012) and improving sovereign credit ratings (Baa3/BBB-/BBB). Key risks include customer concentration (top 10 = 22% of loans), high leverage (debt-to-equity 6.0x), legacy issues from Kaupthing relationship, capital controls, and loans-to-deposits ratio of 126%. The Bank is issuing NOK 500 million in senior unsecured bonds at 3 month Nibor + 5.00% for general corporate purposes.",
+    "derived_metrics": {
+      "ttm_revenue": 34359000000.0,
+      "revenue_per_employee": 29188000.0,
+      "ebitda_per_employee": null,
+      "total_equity_to_total_assets": 0.147,
+      "net_interest_margin_on_total_assets": 0.03,
+      "cost_to_total_income_9M2012": 0.498,
+      "problem_loans_pct_9M2012": 0.147,
+      "non_performing_loans_pct_9M2012": 0.066,
+      "loans_to_individuals_pct_9M2012": 0.414,
+      "notes": "TTM revenue uses 9M 2012 operating income (ISK 34,359 million). Revenue per employee calculated as 34,359M / 1,177 = ISK 29.2M. Total equity to total assets = 128,432 / 876,245 = 14.7%. Net interest margin on total assets for 9M 2012 = 3.0% per key data table."
+    },
+    "extraction_notes": "DOCUMENT TYPE: This is a Confidential Information Memorandum for a BOND OFFERING (NOK 500 million senior unsecured bonds), NOT a private equity acquisition CIM. Therefore, many typical PE deal fields (asking_price for equity, valuation multiples, seller motivation, etc.) are not applicable. CURRENCY: All financial figures are in ISK (Icelandic kr\u00f3na) unless otherwise noted. EUR equivalents provided in document using period-specific exchange rates. ASSUMPTIONS: (1) 'Operating income' used as proxy for revenue as this is a bank with different income statement structure; (2) EBITDA calculated as Earnings before tax + Depreciation and amortisation where possible; (3) Historical CAGR calculated from operating income 2009-2011; (4) Debt-to-equity ratio calculated from balance sheet (total liabilities / stockholders' equity); (5) Return on equity and return on assets taken directly from key data table for 9M 2012. MISSING DATA: (1) No projected financials beyond 9M 2012; (2) CapEx not broken out separately in cash flow statements; (3) Detailed management team names not provided in document; (4) Current assets/liabilities breakdown not provided; (5) Working capital not explicitly stated; (6) Inventory and accounts receivable data not applicable for banking entity. DATA QUALITY: Document is well-structured with clear financial tables. Confidence is high for explicitly stated figures. Some metrics required calculation from available data. SPECIAL NOTES: (1) Bank has significant covered bond obligations creating priority claims (ISK 120 billion mortgage portfolio); (2) Kaupthing creditors own 87% of Bank; (3) Iceland maintains capital controls from 2008 crisis; (4) Bank subject to special taxes on financial institutions (6% profit tax, 6.75% payroll tax); (5) Strong improvement in asset quality metrics from 2010 to 9M 2012. RISK ANALYSIS: Identified 12 key risks including both explicit risks from Risk Factors section and inferred risks from financial ratios (high leverage, loans-to-deposits ratio), business factors (customer concentration, sector concentration), and market factors (Iceland economic risks, capital controls).",
+    "company_info": {
+      "company_name": "Arion Banki hf",
+      "company_id": null,
+      "industry": "Banking",
+      "secondary_industry": "Financial Services",
+      "business_structure": "Public Limited Company (HF)",
+      "founded_year": 2008,
+      "employees": 1177,
+      "headquarters": "Borgartun 19, 105 Reykjavik, Iceland",
+      "website": null,
+      "provenance": {
+        "section_heading": "Bank and business overview",
+        "page_numbers": [
+          1,
+          14
+        ],
+        "text_excerpt": "The Bank was established on 18 October 2008 and is incorporated in Reykjavik and domiciled in Iceland. Arion Bank is the second largest bank on Iceland measured by total assets."
+      },
+      "confidence": 0.95
+    },
+    "financials": {
+      "revenue_by_year": {
+        "2009": 31865000000.0,
+        "2010": 35623000000.0,
+        "2011": 33276000000.0
+      },
+      "ebitda_by_year": {
+        "2009": 17278000000.0,
+        "2010": 18150000000.0,
+        "2011": 12216000000.0
+      },
+      "adjusted_ebitda_by_year": {},
+      "net_income_by_year": {
+        "2009": 12871000000.0,
+        "2010": 12557000000.0,
+        "2011": 11094000000.0
+      },
+      "gross_margin_by_year": {},
+      "fiscal_year_end": "December 31",
+      "currency": "ISK",
+      "other_metrics": {
+        "net_interest_income_2009": 12188000000.0,
+        "net_interest_income_2010": 19785000000.0,
+        "net_interest_income_2011": 23388000000.0,
+        "net_interest_income_9M2012": 20134000000.0,
+        "impairment_on_loans_2009": -9939000000.0,
+        "impairment_on_loans_2010": -26787000000.0,
+        "impairment_on_loans_2011": -27424000000.0,
+        "impairment_on_loans_9M2012": -7594000000.0,
+        "net_earnings_9M2012": 14537000000.0,
+        "operating_income_9M2012": 34359000000.0,
+        "assumptions": "All figures in ISK (Icelandic kr\u00f3na). Operating income used as proxy for revenue. EBITDA calculated as Earnings before tax + Depreciation and amortisation. EUR equivalents also provided in document using period-specific exchange rates."
+      },
+      "provenance": {
+        "section_heading": "Key data / Income statements",
+        "page_numbers": [
+          12,
+          13,
+          18,
+          19
+        ],
+        "text_excerpt": "Operating income 31,865 35,623 33,276 34,359 (ISK million). Net earnings 12,871 12,557 11,094 14,537"
+      },
+      "confidence": 0.9
+    }
+  }
+}

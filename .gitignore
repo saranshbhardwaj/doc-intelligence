@@ -72,6 +72,11 @@ logs/
 # Uploads (if storing locally)
 uploads/
 temp/
+
+# Test PDFs (too large for git)
+backend/tests/data/sample_cims/*.pdf
+*.pdf
+
 backend/.env.example
 backend/Sample_CIM.pdf
 frontend/.env.development

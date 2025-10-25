@@ -61,7 +61,7 @@ async def extract_document(
                 "request_id": request_id,
                 "file_name": file.filename
             })
-            
+
             # Get current rate limit status
             _, remaining = rate_limiter.check_limit(client_ip)
 
@@ -71,10 +71,17 @@ async def extract_document(
                 filename=file.filename,
                 file_size=len(content)
             )
-            
+
+            # Apply normalization to cached data (in case normalization logic changed)
+            try:
+                normalized_cached = _normalize_llm_output(cached_result)
+            except Exception as e:
+                logger.warning(f"Failed to normalize cached data: {e}")
+                normalized_cached = cached_result  # fallback to original
+
             return ExtractionResponse(
                 success=True,
-                data=cached_result["data"],
+                data=normalized_cached.get("data", cached_result["data"]),
                 metadata=ExtractionMetadata(
                     request_id=request_id,
                     filename=file.filename,
@@ -172,17 +179,15 @@ async def extract_document(
                 "processing_time_seconds": processing_time
             }
         }
-        
-        # Cache the result
-        cache.set(content, response_data)
-        
+
         logger.info("Request completed successfully", extra={
             "request_id": request_id,
             "processing_time": round(processing_time, 2),
             "pages": page_count
         })
-        
-        return ExtractionResponse(
+
+        # Create response (validates data with Pydantic)
+        response = ExtractionResponse(
             success=True,
             **normalized_payload,
             metadata=ExtractionMetadata(
@@ -200,6 +205,11 @@ async def extract_document(
             ),
             from_cache=False
         )
+
+        # Cache ONLY after successful validation
+        cache.set(content, response_data)
+
+        return response
         
     except HTTPException:
         raise

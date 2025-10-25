@@ -24,6 +24,7 @@ class Settings(BaseSettings):
     llm_model: str = "claude-sonnet-4-5-20250929"
     llm_max_tokens: int = 16000
     llm_max_input_chars: int = 100000
+    llm_timeout_seconds: int = 300  # 5 minutes timeout for API calls (large documents can take 2-3 min)
     
     # Paths
     log_dir: Path = Path("logs")

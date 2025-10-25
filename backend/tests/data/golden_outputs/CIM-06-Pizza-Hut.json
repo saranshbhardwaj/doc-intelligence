@@ -1,0 +1,697 @@
+{
+  "data": {
+    "company_information": {
+      "company_name": "NPC International, Inc.",
+      "company_id": "NPC",
+      "industry": "Quick Service Restaurant (QSR) - Pizza",
+      "secondary_industry": "Franchisee Operations",
+      "business_structure": "C-Corporation (with parent NPC Acquisition Holdings LLC)",
+      "founded_year": 1962,
+      "employees": null,
+      "headquarters": "7300 West 129th Street, Overland Park, KS 66213",
+      "website": null,
+      "provenance": {
+        "section_heading": "Executive Summary and Company Overview",
+        "page_numbers": [
+          1,
+          24
+        ],
+        "text_excerpt": "NPC International, Inc. is the largest Pizza Hut franchisee in the world...Founded in 1962, the Company operated 1,153 Pizza Hut units in 28 states as of September 27, 2011"
+      },
+      "confidence": 0.95
+    },
+    "financial_performance": {
+      "revenue_by_year": {
+        "2006": 618000000.0,
+        "2007": 698000000.0,
+        "2008": 783000000.0,
+        "2009": 884000000.0,
+        "2010": 978000000.0,
+        "LTM_Q3_2011": 957000000.0
+      },
+      "ebitda_by_year": {
+        "2008": 94000000.0,
+        "2009": 95000000.0,
+        "2010": 105000000.0,
+        "LTM_Q3_2011": 112000000.0
+      },
+      "adjusted_ebitda_by_year": {
+        "2008": 94000000.0,
+        "2009": 95000000.0,
+        "2010": 105000000.0,
+        "LTM_Q3_2011": 111900000.0
+      },
+      "net_income_by_year": {
+        "LTM_Q3_2011": 21520000.0
+      },
+      "gross_margin_by_year": {
+        "LTM_Q3_2011": 0.699
+      },
+      "fiscal_year_end": "Last Tuesday in December (52 or 53 week year)",
+      "currency": "USD",
+      "other_metrics": {
+        "total_sales_2006": 618000000.0,
+        "total_sales_2007": 698000000.0,
+        "total_sales_2008": 783000000.0,
+        "total_sales_2009": 884000000.0,
+        "total_sales_2010": 978000000.0,
+        "total_sales_LTM_Q3_2011": 957000000.0,
+        "net_product_sales_LTM_Q3_2011": 915000000.0,
+        "adjusted_ebitdar_2008": 135000000.0,
+        "adjusted_ebitdar_2009": 144000000.0,
+        "adjusted_ebitdar_2010": 156000000.0,
+        "adjusted_ebitdar_LTM_Q3_2011": 162000000.0,
+        "cash_rent_expense_2008": 40000000.0,
+        "cash_rent_expense_2009": 50000000.0,
+        "cash_rent_expense_2010": 50000000.0,
+        "cash_rent_expense_LTM_Q3_2011": 50000000.0,
+        "depreciation_amortization_2008": 42000000.0,
+        "depreciation_amortization_2009": 52000000.0,
+        "depreciation_amortization_2010": 46000000.0,
+        "depreciation_amortization_LTM_Q3_2011": 46000000.0,
+        "cash_interest_2008": 32000000.0,
+        "cash_interest_2009": 29000000.0,
+        "cash_interest_2010": 27000000.0,
+        "cash_interest_LTM_Q3_2011": 24000000.0,
+        "assumptions": "All figures in dollars (not thousands or millions stated explicitly). Revenue figures labeled as 'Total Sales' include net product sales plus fees and other income (primarily delivery fees)."
+      },
+      "provenance": {
+        "section_heading": "Historical Financial Performance and Executive Summary",
+        "page_numbers": [
+          3,
+          9
+        ],
+        "text_excerpt": "For the LTM period ended September 27, 2011, the Company generated total sales and pro forma Adjusted EBITDA of $957 million and $112 million, respectively."
+      },
+      "confidence": 0.9
+    },
+    "growth_analysis": {
+      "historical_cagr": 0.096,
+      "projected_cagr": null,
+      "organic_pct": null,
+      "m_and_a_pct": null,
+      "organic_growth_estimate": "Positive comparable store sales in 44 of the past 53 quarters with an average of 2.5% through Q3 2011. Recent quarters show challenging rollover with -2.5% comp sales YTD Q3 2011 after strong 10.1% comp sales in 2010.",
+      "m_and_a_summary": "Acquired 508 units in 8 transactions since 2006. Major acquisitions include: Colonial Foods (92 units, $31M, Sep 2008), Tampa PHI (81 units, $22.3M, Dec 2008), Colorado PHI (55 units, $19.2M, Jan 2009), Atlanta PHI (50 units, $10.7M, Dec 2008), Kansas City PHI (51 units, $15.5M, Dec 2008), St. Louis PHI (49 units, $10M, Feb 2009). Total acquisition spend of $150.6M for 480 units at weighted average of $314k per unit.",
+      "notes": "Total sales CAGR of 9.6% from 2006 to LTM Q3 2011 driven by combination of acquisitions and organic growth. Unit count grew from 816 (2006) to 1,153 (Q3 2011). Company has been leading consolidator of underperforming units and refranchised units.",
+      "provenance": {
+        "section_heading": "Historical Total Sales Summary and Acquisition History",
+        "page_numbers": [
+          8,
+          17
+        ],
+        "text_excerpt": "Total sales have grown from $618 million in 2006 to $957 million in the LTM period ended September 27, 2011, reflecting a 9.6 percent CAGR. This revenue growth was achieved through a combination of acquisitions and, to a lesser extent, organic growth."
+      },
+      "confidence": 0.85
+    },
+    "valuation_multiples": {
+      "asking_ev_ebitda": 6.7,
+      "asking_ev_revenue": null,
+      "asking_price_ebitda": null,
+      "exit_ev_ebitda_estimate": null,
+      "comparable_multiples_range": null,
+      "provenance": {
+        "section_heading": "Transaction Overview - Executive Summary",
+        "page_numbers": [
+          1
+        ],
+        "text_excerpt": "Olympus Partners signed a definitive agreement to acquire NPC Acquisition Holdings LLC...for an enterprise value of approximately $755 million. Excluding fees and expenses, the Transaction represents an approximate 6.7x purchase multiple based on NPC's last twelve months ended September 27, 2011 pro forma adjusted EBITDA of $111.9 million."
+      },
+      "confidence": 0.95
+    },
+    "capital_structure": {
+      "existing_debt": 372700000.0,
+      "debt_to_ebitda": 3.3,
+      "proposed_leverage": 5.0,
+      "equity_contribution_estimate": 242000000.0,
+      "provenance": {
+        "section_heading": "Pro Forma Capitalization and Sources & Uses",
+        "page_numbers": [
+          3
+        ],
+        "text_excerpt": "Pro forma for the Transaction, the Company will have senior secured leverage of 3.4x and total leverage of 5.0x based on pro forma adjusted EBITDA of $111.9 million...New Sponsor Equity (Inc. $4mm Mgmt Rollover) $242 million"
+      },
+      "confidence": 0.9
+    },
+    "operating_metrics": {
+      "capex_by_year": {
+        "2008": 41000000.0,
+        "2009": 25000000.0,
+        "2010": 18000000.0,
+        "LTM_Q3_2011": 22000000.0
+      },
+      "fcf_by_year": {
+        "2006": 58000000.0,
+        "2007": 60000000.0,
+        "2008": 62000000.0,
+        "2009": 71000000.0,
+        "2010": 88000000.0
+      },
+      "working_capital_pct_revenue": null,
+      "pricing_power": "Medium",
+      "contract_structure": "Franchise agreements with Pizza Hut, Inc. Blended average royalty rate of 4.8% of total sales. Participates in UFPC for purchasing leverage. Controls approximately 81% of stores through local advertising cooperatives.",
+      "unit_count_by_year": {
+        "2006": 816,
+        "2007": 888,
+        "2008": 1098,
+        "2009": 1149,
+        "2010": 1136,
+        "Q3_2011": 1153
+      },
+      "comparable_store_sales_by_year": {
+        "2000": 0.02,
+        "2001": 0.028,
+        "2002": 0.063,
+        "2003": 0.013,
+        "2004": 0.066,
+        "2005": 0.032,
+        "2006": 0.032,
+        "2007": 0.022,
+        "2008": 0.022,
+        "2009": -0.102,
+        "2010": 0.101,
+        "YTD_Q3_2011": -0.025
+      },
+      "wpsa_weekly_per_store_average": {
+        "2006": 14600.0,
+        "2007": 15200.0,
+        "2008": 15600.0,
+        "2009": 14200.0,
+        "2010": 15800.0,
+        "LTM_Q3_2011": 15500.0
+      },
+      "provenance": {
+        "section_heading": "Historical Financial Performance and Operating Metrics",
+        "page_numbers": [
+          9,
+          21
+        ],
+        "text_excerpt": "Historically, Adjusted EBITDA less non-discretionary capital expenditures has averaged over $80 million from 2006 through 2010"
+      },
+      "confidence": 0.85
+    },
+    "balance_sheet": {
+      "most_recent_year": 2011,
+      "total_assets": null,
+      "current_assets": null,
+      "fixed_assets": null,
+      "total_liabilities": null,
+      "current_liabilities": null,
+      "long_term_debt": 372700000.0,
+      "stockholders_equity": 201600000.0,
+      "working_capital": null,
+      "cash": 66300000.0,
+      "provenance": {
+        "section_heading": "Pro Forma Capitalization",
+        "page_numbers": [
+          3
+        ],
+        "text_excerpt": "Current 9/27/11: Cash $66.3, Total Debt $372.7, Existing Shareholders' Equity $201.6"
+      },
+      "confidence": 0.7
+    },
+    "financial_ratios": {
+      "current_ratio": null,
+      "quick_ratio": null,
+      "debt_to_equity": 1.85,
+      "return_on_assets": null,
+      "return_on_equity": null,
+      "inventory_turnover": null,
+      "accounts_receivable_turnover": null,
+      "ebitda_margin": 0.117,
+      "capex_pct_revenue": 0.023,
+      "net_debt_to_ebitda": 2.7,
+      "ebitda_interest_coverage": 4.7,
+      "fcf_as_pct_ebitda": 0.8,
+      "provenance": {
+        "section_heading": "Historical Credit Statistics and Pro Forma Capitalization",
+        "page_numbers": [
+          3,
+          9
+        ],
+        "text_excerpt": "Net Debt/PF Adj. EBITDA 2.7x, PF Adj. EBITDA / Cash Interest Expense 4.7x, FCF as % of Adj. EBITDA 80%"
+      },
+      "confidence": 0.85
+    },
+    "customers": {
+      "total_count": null,
+      "top_customer_concentration": null,
+      "top_customer_concentration_pct": null,
+      "customer_retention_rate": null,
+      "notable_customers": [
+        "Pizza Hut franchisee - operates under Pizza Hut brand"
+      ],
+      "recurring_revenue_pct": null,
+      "revenue_mix_by_segment": {
+        "delivery": 0.37,
+        "carry_out": 0.45,
+        "dine_in": 0.18
+      },
+      "sales_by_day_part": {
+        "dinner": 0.73,
+        "lunch": 0.27
+      },
+      "product_mix": {
+        "pizza": 0.78,
+        "other": 0.22,
+        "beer": 0.01
+      },
+      "provenance": {
+        "section_heading": "Company Overview",
+        "page_numbers": [
+          7
+        ],
+        "text_excerpt": "Year-to-date for the third quarter of fiscal 2011, pizza sales accounted for approximately 78 percent of net product sales...Approximately 46 percent of NPC's units currently include the WingStreet product line."
+      },
+      "confidence": 0.8
+    },
+    "market": {
+      "market_size": "QSR Pizza market size approximately $29.5 billion as of 2010",
+      "market_size_estimate": 29500000000.0,
+      "market_growth_rate": "1.7% CAGR from 2004 to 2010",
+      "competitive_position": "Pizza Hut is the dominant player with 14.7% market share. NPC is the largest Pizza Hut franchisee (19% of domestic Pizza Hut system by units) and 8th largest restaurant operator in the U.S. by unit count.",
+      "market_share": "Pizza Hut: 14.7% of QSR pizza market. Domino's: 10.9%. Papa John's: 6.9%. Little Caesars: 4.6%. Regionals/Independents: 62.9%",
+      "provenance": {
+        "section_heading": "Industry Overview and Company Overview",
+        "page_numbers": [
+          5,
+          6
+        ],
+        "text_excerpt": "Pizza Hut leads the domestic pizza QSR segment, with 15 percent domestic market share as measured by sales as of the second quarter of 2011. QSR Pizza Sales $29.5 billion in 2010"
+      },
+      "confidence": 0.9
+    },
+    "transaction_details": {
+      "seller_motivation": "Private equity exit - BAML Capital acquired NPC in 2006",
+      "post_sale_involvement": "Management rollover of $4 million equity. Jim Schwartz (CEO) and management team continuing.",
+      "auction_deadline": "Lender commitments due December 13, 2011. Close and fund December 28, 2011.",
+      "assets_for_sale": "100% equity acquisition of NPC Acquisition Holdings LLC, parent company of NPC International, Inc.",
+      "deal_type": "100% equity - Leveraged Buyout",
+      "asking_price": 755000000.0,
+      "implied_valuation_hint": "6.7x LTM Pro Forma Adjusted EBITDA of $111.9 million",
+      "transaction_structure": "New $85M Revolver (unfunded), $375M Term Loan, $186M Unsecured Notes, $242M equity (including $4M management rollover)",
+      "provenance": {
+        "section_heading": "Transaction Overview and Sources & Uses",
+        "page_numbers": [
+          1,
+          3
+        ],
+        "text_excerpt": "On November 6, 2011, Olympus Partners signed a definitive agreement to acquire NPC Acquisition Holdings LLC...for an enterprise value of approximately $755 million"
+      },
+      "confidence": 0.95
+    },
+    "strategic_rationale": {
+      "deal_thesis": "Largest and most geographically diverse Pizza Hut franchisee with proven operational excellence. Strong brand leverage with Pizza Hut (15% QSR pizza market share). Demonstrated track record of positive comp sales (44 of past 53 quarters). Significant margin improvement opportunities through sourcing/procurement initiatives, labor optimization, and migratory trends (online ordering, carry-out mix shift). Growth platform through Delco-Lite expansion (35-50 units planned for 2012). Strong free cash flow generation and deleveraging profile.",
+      "value_creation_plan": "1) Margin expansion through supply chain initiatives (>$5M annualized savings to date, more expected over 24-30 months). 2) Labor optimization: tipped wage for delivery drivers and reduced Assistant Managers ($4-6M savings in FY2011, increasing over 24-30 months). 3) Benefit from migratory trends: online ordering growth (14% of orders, 75% CAGR since 2008, lower cost per order and higher average check) and carry-out mix shift (higher margin). 4) New unit growth: Delco-Lite format with attractive 51% cash-on-cash returns, 35-50 units planned for 2012. 5) Continued consolidation of fragmented franchisee system.",
+      "add_on_opportunities": "Highly fragmented Pizza Hut franchisee system provides ongoing acquisition opportunities. NPC has successfully acquired 508 units in 8 transactions since 2006 at attractive valuations (weighted average $314k per unit). As best-in-system operator with strong PHI relationships, well-positioned to continue consolidation of underperforming units and aging franchisees.",
+      "competitive_advantages": [
+        "Largest Pizza Hut franchisee (4x larger than next largest)",
+        "Scale benefits and purchasing leverage through UFPC",
+        "Strong PHI system relationships and leadership positions on key committees",
+        "Geographic diversification across 28 states",
+        "Significant presence in '1 to 2 Pizza Hut Towns' with favorable economics",
+        "Proprietary IT systems for real-time restaurant management",
+        "Experienced management team (17+ years average tenure)",
+        "Proven acquisition integration capabilities",
+        "Best-in-system operator with consistent positive comp sales"
+      ],
+      "key_risks_summary": "Customer concentration risk (single franchisor relationship with Pizza Hut). Commodity price volatility (cheese, dough, meat). Labor cost pressures from minimum wage increases and potential healthcare reform impacts. Competitive QSR pizza market with limited product differentiation. Economic sensitivity and consumer spending pressures. Integration risk from rapid acquisition growth. Execution risk on margin improvement initiatives.",
+      "provenance": {
+        "section_heading": "Key Investment Highlights",
+        "page_numbers": [
+          12,
+          18,
+          19,
+          20
+        ],
+        "text_excerpt": "Largest and Most Geographically Diverse Restaurant Franchisee...Significant Operational Initiatives and Migratory Trends Are Expected to Create Cost Savings...Growth Platform"
+      },
+      "confidence": 0.9
+    },
+    "key_risks": [
+      {
+        "risk": "Customer Concentration Risk - Single Franchisor Dependency",
+        "severity": "High",
+        "description": "100% of revenue dependent on Pizza Hut franchise relationship. Loss of franchise agreement or deterioration of Pizza Hut brand would be catastrophic. Company pays 4.8% royalty on all sales to PHI.",
+        "mitigation": "Strong 49-year relationship with Pizza Hut. Management holds key leadership positions on PHI committees (AdCom, UFPC, IPHFHA). Best-in-system operator status provides strategic value to PHI.",
+        "inferred": false,
+        "provenance": {
+          "section_heading": "Company Overview and Operating Metrics",
+          "page_numbers": [
+            6,
+            12
+          ],
+          "text_excerpt": "NPC is the largest PHI franchisee...blended average royalty rate of 4.8% of total sales"
+        },
+        "confidence": 0.95
+      },
+      {
+        "risk": "Commodity Price Volatility",
+        "severity": "High",
+        "description": "Significant exposure to cheese, dough (wheat), and meat price fluctuations. Block cheese price increased 24% ($0.35/lb) in Q3 YTD 2011 vs prior year. Expected to remain 10-13% above prior year in Q4 2011. Dough costs up 11%, meat up 7% in Q3 YTD 2011. Cost of sales represents 30% of net product sales.",
+        "mitigation": "Participates in UFPC hedging programs (30-50% of cheese purchases hedged). Supply chain cost savings initiative underway (>$5M annualized savings secured to date, more expected over 24-30 months). Ability to adjust pricing, though limited by competitive dynamics.",
+        "inferred": false,
+        "provenance": {
+          "section_heading": "Trends and Uncertainties - Commodity Prices",
+          "page_numbers": [
+            47
+          ],
+          "text_excerpt": "The block cheese price for the third quarter year-to-date period of fiscal 2011 averaged $1.84 per pound, an increase of $0.35 or 24 percent versus the average price for same period of fiscal year 2010"
+        },
+        "confidence": 0.9
+      },
+      {
+        "risk": "Labor Cost Inflation and Regulatory Risk",
+        "severity": "High",
+        "description": "Minimum wage increases expected to add $1.2M in labor costs in FY2012. Federal Health Care Acts (effective 2014) expected to materially increase costs, though amount uncertain. Potential union organizing changes could increase labor costs. Restaurant industry has high turnover (99% crew turnover, 23% manager turnover as of Q3 2011).",
+        "mitigation": "Labor optimization initiatives underway: tipped wage for delivery drivers and reduced Assistant Managers expected to save $4-6M in FY2011, increasing over 24-30 months. Improved retention (crew turnover down from 148% in 2006 to 99% in Q3 2011; manager turnover down from 36% to 23%).",
+        "inferred": false,
+        "provenance": {
+          "section_heading": "Trends and Uncertainties - Labor Cost",
+          "page_numbers": [
+            47,
+            48
+          ],
+          "text_excerpt": "NPC currently expects the increases in state minimum wage rates to increase direct labor expense by approximately $1.2 million in fiscal 2012...the Federal Health Care Acts will likely increase future costs and could have a material adverse effect"
+        },
+        "confidence": 0.85
+      },
+      {
+        "risk": "High Leverage and Debt Service",
+        "severity": "High",
+        "description": "Pro forma total leverage of 5.0x EBITDA and senior secured leverage of 3.4x. Interest coverage declining to 2.2x pro forma vs 4.7x current. Cash interest expense increasing from $23.7M to $50.4M annually. Significant debt service burden limits financial flexibility.",
+        "mitigation": "Strong historical deleveraging (from 5.2x in 2006 to 3.0x current). Strong FCF generation (80% of EBITDA historically). Low maintenance capex requirements ($3M annual average through 2020 for required upgrades).",
+        "inferred": true,
+        "provenance": {
+          "section_heading": "Pro Forma Capitalization and Credit Statistics",
+          "page_numbers": [
+            3
+          ],
+          "text_excerpt": "Pro forma for the Transaction, the Company will have senior secured leverage of 3.4x and total leverage of 5.0x...PF Adj. EBITDA / Cash Interest Expense 2.2x"
+        },
+        "confidence": 0.9
+      },
+      {
+        "risk": "Competitive Intensity in QSR Pizza Segment",
+        "severity": "Medium",
+        "description": "Highly competitive and fragmented market with national chains (Domino's 10.9% share, Papa John's 6.9%, Little Caesars 4.6%) and 62.9% regional/independent operators. Limited product differentiation. Heavy reliance on promotions and discounting. Frozen pizza and take-and-bake alternatives increasing competitive threat.",
+        "mitigation": "Pizza Hut brand strength (14.7% market share, largest player). Innovation leadership (Stuffed Crust, Big Italy, Cheesy Bites, Tuscani Pastas). Only national pizza chain offering full table service. NPC's operational excellence and best-in-system performance.",
+        "inferred": false,
+        "provenance": {
+          "section_heading": "Trends and Uncertainties - Competition",
+          "page_numbers": [
+            47
+          ],
+          "text_excerpt": "The restaurant business is highly competitive. The QSR industry is a fragmented market...frozen pizza and take-and-bake alternatives are becoming an increasingly intrusive competitive threat"
+        },
+        "confidence": 0.85
+      },
+      {
+        "risk": "Economic Sensitivity and Consumer Spending",
+        "severity": "Medium",
+        "description": "Negative comp sales of -2.5% YTD Q3 2011 after strong 10.1% in 2010, demonstrating sensitivity to economic conditions. -10.2% comp sales in 2009 during recession. Higher gas prices, unemployment, lower home values impact low and lower-middle income customers who are core demographic.",
+        "mitigation": "Value-focused strategy resonates in economic downturns. Delivery and carry-out formats provide convenience. Geographic diversification across 28 states. Presence in small-town markets with limited alternatives provides some insulation.",
+        "inferred": false,
+        "provenance": {
+          "section_heading": "Trends and Uncertainties - General Economic Conditions",
+          "page_numbers": [
+            46,
+            47
+          ],
+          "text_excerpt": "Higher gas prices, continued high unemployment rates, lower home values...have caused the consumer to experience a real and perceived reduction in disposable income which has negatively impacted consumer spending"
+        },
+        "confidence": 0.85
+      },
+      {
+        "risk": "Execution Risk on Margin Improvement Initiatives",
+        "severity": "Medium",
+        "description": "Significant value creation plan depends on successful execution of multiple initiatives: supply chain savings (24-30 month rollout), labor optimization (3-year rollout for tipped wage), Delco-Lite expansion (35-50 units in 2012). Initiatives are in various stages and full benefits not yet realized.",
+        "mitigation": "Initial results positive: >$5M supply chain savings secured, $4-6M labor savings in FY2011. Delco-Lite pilot showing strong results (WPSA $15,945, 51% cash-on-cash returns). Experienced management team with 17+ years average tenure.",
+        "inferred": true,
+        "provenance": {
+          "section_heading": "Key Investment Highlights - Operational Initiatives",
+          "page_numbers": [
+            18,
+            19,
+            20
+          ],
+          "text_excerpt": "Total program savings from this initiative could be significant and will be realized over the next 24 to 30 months...Total cost of labor savings...estimated to be between $4 million and $6 million in fiscal 2011"
+        },
+        "confidence": 0.7
+      },
+      {
+        "risk": "Acquisition Integration Risk",
+        "severity": "Medium",
+        "description": "Rapid growth through acquisitions: 508 units acquired in 8 transactions since 2006. Unit count grew from 816 (2006) to 1,153 (Q3 2011), a 41% increase. Integration challenges and potential for operational disruption or underperformance of acquired units.",
+        "mitigation": "Proven track record of successful integrations. Acquired units typically underperforming or from aging franchisees, providing improvement opportunity. Strong operational systems and training programs to integrate acquired units. Average acquisition price of $314k per unit suggests attractive valuations.",
+        "inferred": true,
+        "provenance": {
+          "section_heading": "Acquisition History",
+          "page_numbers": [
+            17
+          ],
+          "text_excerpt": "NPC has been a leading consolidator of underperforming units, refranchised units, and units owned by aging franchisees. Accordingly, NPC has also successfully grown by acquisition, having acquired 508 units in 8 transactions since 2006"
+        },
+        "confidence": 0.65
+      },
+      {
+        "risk": "Key Person Risk - Management Dependency",
+        "severity": "Medium",
+        "description": "CEO Jim Schwartz has been with company for 20 years and holds critical leadership positions in PHI system (AdCom, UFPC, IPHFHA board). CFO Troy Cook has 16-year tenure. Loss of key management could impact operations and PHI relationships.",
+        "mitigation": "Management rolling over $4M equity, demonstrating commitment. Experienced team with average 17+ years tenure. Succession planning and depth in operations (Territory VPs have 25+ years experience).",
+        "inferred": true,
+        "provenance": {
+          "section_heading": "Management Team",
+          "page_numbers": [
+            22
+          ],
+          "text_excerpt": "Jim Schwartz, President and CEO, has been a member of senior management since 1991...management team has an average tenure of 17 years at the Company"
+        },
+        "confidence": 0.6
+      },
+      {
+        "risk": "Gas Price Volatility Impact",
+        "severity": "Low",
+        "description": "Delivery operations exposed to gas price fluctuations. Every $0.25/gallon change impacts annual results by ~$0.8M through driver reimbursement costs. 37% of sales are delivery occasion.",
+        "mitigation": "Mitigated by shift to carry-out when gas prices rise (customers avoid delivery charges and tips). Carry-out is higher margin for NPC. Online ordering growth (14% of orders) facilitates carry-out. Delivery charges passed to customers.",
+        "inferred": false,
+        "provenance": {
+          "section_heading": "Trends and Uncertainties - Inflation and Deflation",
+          "page_numbers": [
+            48
+          ],
+          "text_excerpt": "NPC estimates that every $0.25 per gallon change in average gas prices in the Company's markets impacts annual operating results by approximately $0.8 million"
+        },
+        "confidence": 0.8
+      }
+    ],
+    "management_team": [
+      {
+        "name": "Jim Schwartz",
+        "title": "Chairman, CEO, President & COO",
+        "background": "20 years with NPC. Member of senior management since 1991, President since 1995. Age 50. Holds key PHI system positions: AdCom member, UFPC board member, IPHFHA board member (2012-2013 term).",
+        "linkedin": null,
+        "provenance": {
+          "section_heading": "Management Team and Contact Information",
+          "page_numbers": [
+            22,
+            7
+          ],
+          "text_excerpt": "Jim Schwartz, 50, President, CEO, Chairman and Director, 20 years with NPC"
+        },
+        "confidence": 0.95
+      },
+      {
+        "name": "Troy Cook",
+        "title": "EVP Finance, CFO, Secretary and Treasurer",
+        "background": "16 years with NPC. CFO since 1995. Age 48. Member of Pizza Hut Cheese Hedging Task Force.",
+        "linkedin": null,
+        "provenance": {
+          "section_heading": "Management Team and Contact Information",
+          "page_numbers": [
+            22,
+            7
+          ],
+          "text_excerpt": "Troy Cook, 48, EVP of Finance / Chief Financial Officer, 16 years with NPC"
+        },
+        "confidence": 0.95
+      },
+      {
+        "name": "Blayne Vaughn",
+        "title": "SVP / Head of Operations",
+        "background": "26 years with NPC. Age 55. Member of System Operations Committee.",
+        "linkedin": null,
+        "provenance": {
+          "section_heading": "Management Team",
+          "page_numbers": [
+            22
+          ],
+          "text_excerpt": "Blayne Vaughn, 55, SVP / Head of Operations, 26 years with NPC"
+        },
+        "confidence": 0.9
+      },
+      {
+        "name": "Linda Sheedy",
+        "title": "SVP Marketing",
+        "background": "13 years with NPC. Age 43. Member of Pizza Hut Marketing Advisory Counsel.",
+        "linkedin": null,
+        "provenance": {
+          "section_heading": "Management Team",
+          "page_numbers": [
+            22
+          ],
+          "text_excerpt": "Linda Sheedy, 43, SVP Marketing, 13 years with NPC"
+        },
+        "confidence": 0.9
+      },
+      {
+        "name": "Vonnie Walbert",
+        "title": "SVP of People Leadership",
+        "background": "12 years with NPC. Age 47. Member of People Capability and Training Committee and Government and Political Affairs Committee.",
+        "linkedin": null,
+        "provenance": {
+          "section_heading": "Management Team",
+          "page_numbers": [
+            22
+          ],
+          "text_excerpt": "Vonnie Walbert, 47, SVP of People Leadership, 12 years with NPC"
+        },
+        "confidence": 0.9
+      },
+      {
+        "name": "Mike Woods",
+        "title": "VP IT / CIO",
+        "background": "8 years with NPC. Age 50. Member of Pizza Hut Finance and Technology Committee.",
+        "linkedin": null,
+        "provenance": {
+          "section_heading": "Management Team",
+          "page_numbers": [
+            22
+          ],
+          "text_excerpt": "Mike Woods, 50, VP IT / CIO, 8 years with NPC"
+        },
+        "confidence": 0.9
+      },
+      {
+        "name": "Robert Cotton",
+        "title": "Executive Director of Development",
+        "background": "23 years with NPC. Age 51.",
+        "linkedin": null,
+        "provenance": {
+          "section_heading": "Management Team",
+          "page_numbers": [
+            22
+          ],
+          "text_excerpt": "Robert Cotton, 51, Executive Director of Development, 23 years with NPC"
+        },
+        "confidence": 0.9
+      }
+    ],
+    "investment_thesis": "NPC International represents a compelling investment opportunity as the largest and most geographically diverse Pizza Hut franchisee with demonstrated operational excellence. The company benefits from the strength of the Pizza Hut brand (15% QSR pizza market share) and has achieved positive comparable store sales in 44 of the past 53 quarters. The investment thesis is built on multiple value creation levers: (1) Significant margin expansion opportunities through supply chain initiatives (>$5M annualized savings secured, more expected over 24-30 months), labor optimization ($4-6M savings in FY2011, increasing over time), and favorable migratory trends including online ordering growth (75% CAGR, lower cost and higher average check) and carry-out mix shift (higher margin); (2) Growth platform through Delco-Lite expansion with attractive unit economics (51% cash-on-cash returns, 35-50 units planned for 2012); (3) Continued consolidation opportunities in fragmented franchisee system (508 units acquired since 2006 at attractive valuations); (4) Strong free cash flow generation (80% of EBITDA historically) and proven deleveraging capability (from 5.2x in 2006 to 3.0x current); (5) Experienced management team with 17+ years average tenure and strong PHI system relationships. The company is well-positioned to benefit from its scale, operational capabilities, and strategic initiatives to drive margin improvement and growth.",
+    "derived_metrics": {
+      "ttm_revenue": 957000000.0,
+      "revenue_per_employee": null,
+      "ebitda_per_employee": null,
+      "revenue_per_unit_LTM": 829835.0,
+      "ebitda_per_unit_LTM": 97049.0,
+      "pro_forma_senior_secured_leverage": 3.4,
+      "pro_forma_total_leverage": 5.0,
+      "pro_forma_interest_coverage": 2.2,
+      "enterprise_value": 755000000.0,
+      "ev_to_ltm_revenue": 0.79,
+      "ev_to_ltm_ebitda": 6.7,
+      "equity_value_at_close": 242000000.0,
+      "total_sources": 803000000.0,
+      "debt_paydown_2006_to_2011": 59000000.0,
+      "net_debt_reduction_2006_to_2011": 129000000.0,
+      "average_acquisition_price_per_unit": 314000.0,
+      "delco_lite_investment_per_unit": 305000.0,
+      "delco_lite_projected_cash_on_cash_return": 0.51
+    },
+    "extraction_notes": "DOCUMENT QUALITY: This is a high-quality CIM with clear financial tables and comprehensive disclosure. Text extraction is reliable. UNITS: All financial figures are in dollars (not thousands or millions) based on context from tables showing values like $957 million and $111.9 million. Revenue figures labeled 'Total Sales' include net product sales plus fees/other income (primarily delivery fees). CALCULATIONS: (1) Historical CAGR calculated as ((957/618)^(1/5))-1 = 9.6%. (2) EBITDA margin calculated as 111.9M / 957M = 11.7% for LTM. (3) CapEx % revenue = 22M / 957M = 2.3%. (4) Net debt to EBITDA = (372.7M - 66.3M) / 111.9M = 2.7x. (5) Debt to equity = 372.7M / 201.6M = 1.85x. (6) Pro forma leverage metrics provided directly in document. (7) FCF calculated from Adjusted EBITDA less CapEx per document methodology. RISKS: Extracted both explicit risks from 'Trends and Uncertainties' section and inferred risks from financial metrics (high leverage 5.0x, declining interest coverage to 2.2x), business factors (single franchisor dependency, commodity volatility), and operational factors (acquisition integration, management dependency). PROJECTIONS: No explicit forward-looking financial projections provided beyond management commentary on expected trends. MISSING DATA: Employee count not disclosed. Detailed balance sheet components (current assets, inventory, AR, AP) not provided. Working capital details limited. Specific customer counts and retention metrics not disclosed. ASSUMPTIONS: Organic vs M&A growth percentages not explicitly stated, only described qualitatively. Pricing power assessed as 'Medium' based on competitive dynamics and promotional intensity described. CONFIDENCE: High confidence (0.85-0.95) on explicitly stated financial metrics, transaction terms, and management information. Medium confidence (0.6-0.8) on inferred risks and derived calculations. Lower confidence on missing data points set to null.",
+    "company_info": {
+      "company_name": "NPC International, Inc.",
+      "company_id": "NPC",
+      "industry": "Quick Service Restaurant (QSR) - Pizza",
+      "secondary_industry": "Franchisee Operations",
+      "business_structure": "C-Corporation (with parent NPC Acquisition Holdings LLC)",
+      "founded_year": 1962,
+      "employees": null,
+      "headquarters": "7300 West 129th Street, Overland Park, KS 66213",
+      "website": null,
+      "provenance": {
+        "section_heading": "Executive Summary and Company Overview",
+        "page_numbers": [
+          1,
+          24
+        ],
+        "text_excerpt": "NPC International, Inc. is the largest Pizza Hut franchisee in the world...Founded in 1962, the Company operated 1,153 Pizza Hut units in 28 states as of September 27, 2011"
+      },
+      "confidence": 0.95
+    },
+    "financials": {
+      "revenue_by_year": {
+        "2006": 618000000.0,
+        "2007": 698000000.0,
+        "2008": 783000000.0,
+        "2009": 884000000.0,
+        "2010": 978000000.0,
+        "LTM_Q3_2011": 957000000.0
+      },
+      "ebitda_by_year": {
+        "2008": 94000000.0,
+        "2009": 95000000.0,
+        "2010": 105000000.0,
+        "LTM_Q3_2011": 112000000.0
+      },
+      "adjusted_ebitda_by_year": {
+        "2008": 94000000.0,
+        "2009": 95000000.0,
+        "2010": 105000000.0,
+        "LTM_Q3_2011": 111900000.0
+      },
+      "net_income_by_year": {
+        "LTM_Q3_2011": 21520000.0
+      },
+      "gross_margin_by_year": {
+        "LTM_Q3_2011": 0.699
+      },
+      "fiscal_year_end": "Last Tuesday in December (52 or 53 week year)",
+      "currency": "USD",
+      "other_metrics": {
+        "total_sales_2006": 618000000.0,
+        "total_sales_2007": 698000000.0,
+        "total_sales_2008": 783000000.0,
+        "total_sales_2009": 884000000.0,
+        "total_sales_2010": 978000000.0,
+        "total_sales_LTM_Q3_2011": 957000000.0,
+        "net_product_sales_LTM_Q3_2011": 915000000.0,
+        "adjusted_ebitdar_2008": 135000000.0,
+        "adjusted_ebitdar_2009": 144000000.0,
+        "adjusted_ebitdar_2010": 156000000.0,
+        "adjusted_ebitdar_LTM_Q3_2011": 162000000.0,
+        "cash_rent_expense_2008": 40000000.0,
+        "cash_rent_expense_2009": 50000000.0,
+        "cash_rent_expense_2010": 50000000.0,
+        "cash_rent_expense_LTM_Q3_2011": 50000000.0,
+        "depreciation_amortization_2008": 42000000.0,
+        "depreciation_amortization_2009": 52000000.0,
+        "depreciation_amortization_2010": 46000000.0,
+        "depreciation_amortization_LTM_Q3_2011": 46000000.0,
+        "cash_interest_2008": 32000000.0,
+        "cash_interest_2009": 29000000.0,
+        "cash_interest_2010": 27000000.0,
+        "cash_interest_LTM_Q3_2011": 24000000.0,
+        "assumptions": "All figures in dollars (not thousands or millions stated explicitly). Revenue figures labeled as 'Total Sales' include net product sales plus fees and other income (primarily delivery fees)."
+      },
+      "provenance": {
+        "section_heading": "Historical Financial Performance and Executive Summary",
+        "page_numbers": [
+          3,
+          9
+        ],
+        "text_excerpt": "For the LTM period ended September 27, 2011, the Company generated total sales and pro forma Adjusted EBITDA of $957 million and $112 million, respectively."
+      },
+      "confidence": 0.9
+    }
+  }
+}

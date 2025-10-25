@@ -27,7 +27,8 @@ llm_client = LLMClient(
     api_key=settings.anthropic_api_key,
     model=settings.llm_model,
     max_tokens=settings.llm_max_tokens,
-    max_input_chars=settings.llm_max_input_chars
+    max_input_chars=settings.llm_max_input_chars,
+    timeout_seconds=settings.llm_timeout_seconds
 )
 
 analytics = SimpleAnalytics(analytics_dir=settings.analytics_dir)

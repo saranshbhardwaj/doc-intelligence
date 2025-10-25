@@ -1,0 +1,631 @@
+{
+  "data": {
+    "company_information": {
+      "company_name": "American Casino and Entertainment Properties LLC",
+      "company_id": "ACEP",
+      "industry": "Gaming and Entertainment",
+      "secondary_industry": "Hospitality and Resorts",
+      "business_structure": "LLC",
+      "founded_year": 2003,
+      "employees": null,
+      "headquarters": "Las Vegas, Nevada",
+      "website": null,
+      "provenance": {
+        "section_heading": "Executive Summary and Business History",
+        "page_numbers": [
+          1,
+          13
+        ],
+        "text_excerpt": "American Casino and Entertainment Properties LLC ('ACEP' or the 'Company'), a wholly-owned indirect subsidiary of American Real Estate Partners, L.P. ('AREP') (NYSE: ACP)... ACEP is a holding company that was formed in Delaware on December 29, 2003"
+      },
+      "confidence": 0.95
+    },
+    "financial_performance": {
+      "revenue_by_year": {
+        "2001": 242500000.0,
+        "2002": 250000000.0,
+        "2003": 262800000.0,
+        "2004": 300000000.0,
+        "2005": 328000000.0,
+        "2006E": 385700000.0,
+        "projected_2007E": 450900000.0,
+        "projected_2008E": 472800000.0,
+        "2006E_PF": 429700000.0
+      },
+      "ebitda_by_year": {
+        "2001": 28100000.0,
+        "2002": 31300000.0,
+        "2003": 44100000.0,
+        "2004": 72400000.0,
+        "2005": 89400000.0,
+        "2006E": 86100000.0,
+        "projected_2007E": 106500000.0,
+        "projected_2008E": 112900000.0,
+        "2006E_PF": 91500000.0
+      },
+      "adjusted_ebitda_by_year": {},
+      "net_income_by_year": {
+        "2002": 900000.0,
+        "2003": 20700000.0,
+        "2004": 20900000.0,
+        "2005": 32000000.0,
+        "2006E": 25600000.0,
+        "projected_2007E": 31700000.0,
+        "projected_2008E": 35000000.0
+      },
+      "gross_margin_by_year": {},
+      "fiscal_year_end": "December 31",
+      "currency": "USD",
+      "other_metrics": {
+        "assumptions": "All figures in dollars. Pro Forma (PF) results include Aquarius acquisition completed May 2006.",
+        "ebitda_margin_2005": 0.273,
+        "ebitda_margin_2006E_PF": 0.213,
+        "ebitda_margin_projected_2007E": 0.236,
+        "ebitda_margin_projected_2008E": 0.239,
+        "depreciation_and_amortization_2005": 23300000.0,
+        "depreciation_and_amortization_2006E": 28600000.0,
+        "interest_expense_2005": 18800000.0,
+        "interest_expense_2006E": 21300000.0,
+        "promotional_allowances_2005": 22300000.0,
+        "promotional_allowances_2006E": 30300000.0
+      },
+      "provenance": {
+        "section_heading": "Financial Review and Historical Income Statement",
+        "page_numbers": [
+          2,
+          35,
+          37
+        ],
+        "text_excerpt": "From 2001 to 2005, consolidated net revenue and EBITDA grew at a compounded annual growth rate of 7.8% and 33.6%, respectively, with revenues increasing from $242.5 million to $328.0 million and EBITDA increasing from $28.1 million to $89.4 million."
+      },
+      "confidence": 0.9
+    },
+    "growth_analysis": {
+      "historical_cagr": 0.078,
+      "projected_cagr": 0.049,
+      "organic_pct": null,
+      "m_and_a_pct": null,
+      "organic_growth_estimate": "Growth driven by capital improvement programs completed across all properties, including $50 million in renovations. Stratosphere completed 1,444 room renovations positioning it as newest room product north of Wynn Las Vegas. Arizona Charlie's properties converted to TITO technology and expanded gaming space. Las Vegas market visitation grew at 2.5% CAGR 2001-2005.",
+      "m_and_a_summary": "Aquarius Casino Resort (formerly Flamingo Laughlin) acquired from Harrah's Entertainment in May 2006 for $114.0 million. Property has 1,907 rooms, largest hotel in Laughlin market. Company implementing $40 million capital improvement program at Aquarius. Historical acquisitions include Stratosphere (1998), Arizona Charlie's Decatur (1999), and Arizona Charlie's Boulder (2000).",
+      "notes": "2006 results temporarily impacted by construction disruptions from capital improvement programs and modest Las Vegas market softening. Management expects strong recovery in 2007-2008 as renovations complete. Projected CAGR 2006E PF to 2008E is 4.9% for revenue and 11.1% for EBITDA.",
+      "provenance": {
+        "section_heading": "Executive Summary and Financial Review",
+        "page_numbers": [
+          2,
+          3,
+          35
+        ],
+        "text_excerpt": "From 2001 to 2005, consolidated net revenue and EBITDA grew at a compounded annual growth rate of 7.8% and 33.6%... Beginning in 2005 and continuing throughout 2006, the Company embarked upon a comprehensive capital improvement program"
+      },
+      "confidence": 0.85
+    },
+    "valuation_multiples": {
+      "asking_ev_ebitda": null,
+      "asking_ev_revenue": null,
+      "asking_price_ebitda": null,
+      "exit_ev_ebitda_estimate": null,
+      "comparable_multiples_range": null,
+      "provenance": {
+        "section_heading": "Not explicitly stated",
+        "page_numbers": [],
+        "text_excerpt": "No asking price or valuation multiples explicitly stated in CIM"
+      },
+      "confidence": 0.0
+    },
+    "capital_structure": {
+      "existing_debt": 255000000.0,
+      "debt_to_ebitda": 2.96,
+      "proposed_leverage": null,
+      "equity_contribution_estimate": null,
+      "provenance": {
+        "section_heading": "Balance Sheet Information",
+        "page_numbers": [
+          36
+        ],
+        "text_excerpt": "Notes payable $255.0 million as of December 31, 2006E. Total Long-Term Liabilities $263.3 million."
+      },
+      "confidence": 0.85
+    },
+    "operating_metrics": {
+      "capex_by_year": {
+        "2002": 22100000.0,
+        "2003": 30400000.0,
+        "2004": 14000000.0,
+        "2005": 28200000.0,
+        "2006E": 46900000.0
+      },
+      "fcf_by_year": {
+        "2002": -900000.0,
+        "2003": 10500000.0,
+        "2004": 30400000.0,
+        "2005": 27100000.0,
+        "2006E": 7300000.0
+      },
+      "working_capital_pct_revenue": null,
+      "pricing_power": "Medium",
+      "contract_structure": "Value-oriented gaming and hospitality model targeting middle-market customers. Competitive gaming odds and payouts. Slot-heavy revenue mix (80%+ of gaming revenue). Loyalty program (A.C.E. Rewards) with approximately 1.9 million total members across properties.",
+      "provenance": {
+        "section_heading": "Historical Statement of Cash Flows and Business Strategy",
+        "page_numbers": [
+          38,
+          17,
+          22
+        ],
+        "text_excerpt": "Acquisition of property and equipment ranges from $14.0M to $46.9M annually. The Company believes that the property's pricing and gaming odds make it one of the best values in the gaming industry."
+      },
+      "confidence": 0.8
+    },
+    "balance_sheet": {
+      "most_recent_year": 2006,
+      "total_assets": 575800000.0,
+      "current_assets": 85600000.0,
+      "fixed_assets": 445800000.0,
+      "total_liabilities": 318100000.0,
+      "current_liabilities": 54800000.0,
+      "long_term_debt": 255000000.0,
+      "stockholders_equity": 257700000.0,
+      "working_capital": 30800000.0,
+      "provenance": {
+        "section_heading": "Consolidated Balance Sheet",
+        "page_numbers": [
+          36
+        ],
+        "text_excerpt": "TOTAL ASSETS $575.8M, Total Liabilities $318.1M, Total Member's/Stockholders' Equity $257.7M as of December 31, 2006E"
+      },
+      "confidence": 0.9
+    },
+    "financial_ratios": {
+      "current_ratio": 1.56,
+      "quick_ratio": 1.56,
+      "debt_to_equity": 1.23,
+      "return_on_assets": 0.044,
+      "return_on_equity": 0.099,
+      "inventory_turnover": null,
+      "accounts_receivable_turnover": null,
+      "ebitda_margin": 0.213,
+      "capex_pct_revenue": 0.122,
+      "net_debt_to_ebitda": 2.19,
+      "provenance": {
+        "section_heading": "Calculated from Balance Sheet and Income Statement",
+        "page_numbers": [
+          36,
+          37
+        ],
+        "text_excerpt": "Calculated ratios based on 2006E figures: Current Assets $85.6M, Current Liabilities $54.8M, Total Debt $255.0M, Cash $54.9M, EBITDA $86.1M (standalone) or $91.5M (PF)"
+      },
+      "confidence": 0.85
+    },
+    "customers": {
+      "total_count": null,
+      "top_customer_concentration": null,
+      "top_customer_concentration_pct": null,
+      "customer_retention_rate": null,
+      "notable_customers": [],
+      "recurring_revenue_pct": null,
+      "revenue_mix_by_segment": {
+        "gaming": 0.539,
+        "rooms": 0.18,
+        "food_and_beverage": 0.198,
+        "tower_retail_other": 0.083
+      },
+      "provenance": {
+        "section_heading": "Net Revenue and EBITDA by Property",
+        "page_numbers": [
+          3
+        ],
+        "text_excerpt": "2006E PF Gross Revenue by Segment: Gaming 53.9%, Rooms 18.0%, Food 15.2%, Beverage 4.6%, Retail 2.3%, Tower 3.2%, Other 2.8%"
+      },
+      "confidence": 0.75
+    },
+    "market": {
+      "market_size": "Las Vegas is one of the fastest growing gaming markets in the US. Visitation increased from 29.0 million in 1995 to 38.6 million in 2005 (2.9% CAGR). Clark County population grew at 5.5% CAGR 1995-2005 to 1.8 million residents. Laughlin market grew 7.6% in 2004 and 4.3% in 2005.",
+      "market_size_estimate": null,
+      "market_growth_rate": "Las Vegas visitation 2.5% CAGR 2001-2005. Clark County population 5.5% CAGR 1995-2005. Trade show attendees 7.7% CAGR 1995-2005 reaching 6.2 million in 2005.",
+      "competitive_position": "Stratosphere is one of most recognized landmarks on Las Vegas Strip with unique Tower attractions. Arizona Charlie's properties are well-known locals casinos in their respective markets. Aquarius is largest hotel in Laughlin with 1,907 rooms. All properties recently completed major renovations positioning them competitively.",
+      "market_share": "Not explicitly stated. Stratosphere competes with 7+ properties on northern Las Vegas Strip. Arizona Charlie's Decatur competes with 8+ properties in west Las Vegas locals market. Arizona Charlie's Boulder competes with 5+ properties in Boulder Strip locals market. Aquarius competes with 9+ properties in Laughlin market.",
+      "provenance": {
+        "section_heading": "Investment Considerations and Competitive Landscape",
+        "page_numbers": [
+          6,
+          7,
+          18,
+          23,
+          28,
+          33
+        ],
+        "text_excerpt": "Visitation to Las Vegas has increased from 29.0 million in 1995 to 38.6 million in 2005, a CAGR of 2.9%. Nevada has been the fastest-growing state in the United States for the last 19 years."
+      },
+      "confidence": 0.8
+    },
+    "transaction_details": {
+      "seller_motivation": "ACEP is a wholly-owned indirect subsidiary of American Real Estate Partners, L.P. (AREP) (NYSE: ACP). Seller motivation not explicitly stated but appears to be portfolio rationalization or monetization opportunity.",
+      "post_sale_involvement": "Not specified",
+      "auction_deadline": "Indications of interest due by 5:00 pm EST on Friday, March 2, 2007",
+      "assets_for_sale": "Four gaming and entertainment properties: (1) Stratosphere Casino Hotel & Tower on Las Vegas Strip, (2) Arizona Charlie's Decatur, (3) Arizona Charlie's Boulder, (4) Aquarius Casino Resort in Laughlin. Total 4,912 hotel rooms, 236,000 sq ft gaming space, 4,770 slot machines, 122 table games.",
+      "deal_type": "100% equity sale of American Casino and Entertainment Properties LLC",
+      "asking_price": null,
+      "implied_valuation_hint": null,
+      "provenance": {
+        "section_heading": "Executive Summary and Process Considerations",
+        "page_numbers": [
+          1,
+          41
+        ],
+        "text_excerpt": "This Memorandum relates to the possible sale of the Company... Interested parties should submit a written indication of interest no later than 5:00 pm EST on Friday, March 2, 2007"
+      },
+      "confidence": 0.85
+    },
+    "strategic_rationale": {
+      "deal_thesis": "Strategically located, diversified portfolio of casino assets in most stable gaming regulatory jurisdiction (Nevada) in one of fastest growing gaming markets in US. Recently completed $50M+ capital improvement program positions all properties for renewed growth. Unique development opportunity on 17 acres adjacent to Stratosphere on Las Vegas Strip. Emphasis on slot play produces strong, predictable free cash flow. Well-regarded management team with demonstrated turnaround track record.",
+      "value_creation_plan": "Capitalize on completed $50M capital improvements across portfolio. Exploit Stratosphere's position as only recently renovated property on northern Las Vegas Strip. Develop 17 acres of land adjacent to Stratosphere (potential 1,000 room expansion and/or convention center). Recapture Aquarius market position as preeminent Laughlin casino following $40M repositioning. Leverage locals market growth in Las Vegas (5.5% population CAGR). Optimize slot floor performance with TITO technology across all properties.",
+      "add_on_opportunities": "Potential to acquire additional locals casinos in Las Vegas market to create locals casino platform. Laughlin market consolidation opportunities. Development of 112,000 sq ft undeveloped retail space at Stratosphere. Third-party partnerships for entertainment amenities within Stratosphere.",
+      "competitive_advantages": [
+        "Stratosphere Tower - tallest freestanding observation tower in US, iconic Las Vegas landmark",
+        "Newest room product on northern Las Vegas Strip (1,444 rooms renovated 2004-2005)",
+        "Largest hotel in Laughlin market (1,907 rooms at Aquarius)",
+        "Value-oriented positioning with competitive gaming odds attracts middle-market customers",
+        "Slot-heavy revenue mix (80%+ of gaming revenue) provides predictable cash flow",
+        "Geographic and business mix diversification across 4 distinct markets",
+        "17 acres of undeveloped land adjacent to Stratosphere for expansion",
+        "Proximity to Las Vegas Convention Center (1.3 miles) provides convention demand",
+        "Experienced management team with 100+ years collective gaming industry experience"
+      ],
+      "key_risks_summary": "Customer concentration in middle-market segment vulnerable to economic downturns. High capital intensity with recent $50M+ investment program. Competitive Las Vegas market with new luxury supply coming online. Temporary 2006 performance decline due to construction disruptions. Laughlin market stabilization following California tribal casino openings. Regulatory risks inherent in gaming industry. Integration risk from recent Aquarius acquisition. Dependence on Las Vegas tourism and locals market growth.",
+      "provenance": {
+        "section_heading": "Investment Considerations",
+        "page_numbers": [
+          4,
+          5
+        ],
+        "text_excerpt": "Strategically located, diversified portfolio of casino assets in the most stable gaming regulatory jurisdiction in the world... Compelling development opportunity on the Las Vegas Strip on approximately 17 acres of land"
+      },
+      "confidence": 0.85
+    },
+    "key_risks": [
+      {
+        "risk": "Construction Disruption Impact",
+        "severity": "Medium",
+        "description": "2006 performance declined due to extensive capital improvement programs creating temporary construction disruptions across all properties. Combined with modest Las Vegas market softening, led to EBITDA decline from $89.4M (2005) to $86.1M (2006E standalone).",
+        "mitigation": "Capital improvement programs now virtually complete. Management expects renewed growth in 2007-2008 as properties capitalize on improvements. Projected EBITDA recovery to $106.5M (2007E) and $112.9M (2008E).",
+        "inferred": false,
+        "provenance": {
+          "section_heading": "Executive Summary and Financial Review",
+          "page_numbers": [
+            2,
+            35
+          ],
+          "text_excerpt": "Beginning in 2005 and continuing throughout 2006, the Company embarked upon a comprehensive capital improvement program... properties experienced temporary construction disruptions, which, in conjunction with a modest softening in the Las Vegas market overall, led to a modest decline in operating performance in 2006."
+        },
+        "confidence": 0.9
+      },
+      {
+        "risk": "Competitive Market Pressure",
+        "severity": "High",
+        "description": "Las Vegas Strip faces intense competition with new luxury supply coming online (Wynn's Encore, MGM's CityCenter). Arizona Charlie's Decatur impacted by opening of Station Casino's Red Rock Hotel & Casino. Stratosphere competes with 7+ properties on northern Strip. Locals markets highly competitive with multiple Station Casinos properties.",
+        "mitigation": "Stratosphere positioned as value alternative under luxury 'pricing umbrella'. Recently completed renovations provide newest room product north of Wynn. Management believes Red Rock impact on Decatur minimal as properties target different customer segments. Locals markets have demonstrated history of absorbing new supply growth.",
+        "inferred": false,
+        "provenance": {
+          "section_heading": "Investment Considerations and Competitive Landscape",
+          "page_numbers": [
+            9,
+            18,
+            23,
+            24
+          ],
+          "text_excerpt": "The luxury room product expected to come online over the next 2 to 3 years... will likely provide the Stratosphere with a 'pricing umbrella'... the opening of Station Casino's Red Rock Hotel & Casino presented additional competition in the Decatur market."
+        },
+        "confidence": 0.85
+      },
+      {
+        "risk": "Aquarius Integration and Turnaround Risk",
+        "severity": "High",
+        "description": "Aquarius acquired May 2006 for $114M with weak recent operating results (EBITDA declined from $22.5M in 2001 to $9.0M in 2006E). Property experienced management turnover and lack of maintenance capex under prior ownership. Requires successful execution of $40M capital improvement program and market repositioning.",
+        "mitigation": "Company implementing comprehensive $40M renovation including 1,000 new slot machines, casino redesign, room refurbishment, new F&B options. Access to 472,000 Harrah's customer database at acquisition. Experienced management team with demonstrated turnaround track record. Property has largest hotel in Laughlin (1,907 rooms) providing scale advantage.",
+        "inferred": false,
+        "provenance": {
+          "section_heading": "Investment Considerations and Aquarius Section",
+          "page_numbers": [
+            11,
+            31,
+            34
+          ],
+          "text_excerpt": "More recently, however, the Aquarius has experienced a weakness in operating results given the transition in ownership, related property management turnover and a lack of maintenance capital expenditures... Management believes this investment program will enable the property to recapture its position of prominence in the market."
+        },
+        "confidence": 0.85
+      },
+      {
+        "risk": "Leverage and Debt Service",
+        "severity": "Medium",
+        "description": "Total debt of $255M with debt-to-EBITDA of 2.96x (based on 2006E standalone EBITDA of $86.1M). Interest expense of $21.3M in 2006E represents 24.7% of EBITDA. Recent Aquarius acquisition and $50M+ capital program increased leverage.",
+        "mitigation": "Debt-to-EBITDA ratio manageable at under 3.0x. Projected EBITDA growth to $106.5M (2007E) and $112.9M (2008E) will improve coverage ratios. Slot-heavy business model generates predictable cash flow for debt service. Strong current ratio of 1.56x provides liquidity cushion.",
+        "inferred": true,
+        "provenance": {
+          "section_heading": "Balance Sheet and Income Statement",
+          "page_numbers": [
+            36,
+            37
+          ],
+          "text_excerpt": "Notes payable $255.0M, Interest expense $21.3M in 2006E, EBITDA $86.1M in 2006E"
+        },
+        "confidence": 0.75
+      },
+      {
+        "risk": "Economic Sensitivity and Middle-Market Focus",
+        "severity": "Medium",
+        "description": "Value-oriented positioning targets middle-market customers who may be more sensitive to economic downturns. Las Vegas visitation and gaming spend vulnerable to recessions. Locals casinos dependent on Las Vegas employment and household income levels.",
+        "mitigation": "Las Vegas market has shown remarkable resiliency to economic downturns and political events. Clark County median household income ($44,821 in 2004) above national average. Nevada fastest-growing state for 19 consecutive years. Diversification across tourist (Stratosphere, Aquarius) and locals (Arizona Charlie's) segments provides balance.",
+        "inferred": true,
+        "provenance": {
+          "section_heading": "Investment Considerations and Market Analysis",
+          "page_numbers": [
+            6,
+            7
+          ],
+          "text_excerpt": "The market has shown a remarkable resiliency to economic downturns and political events... Clark County has enjoyed a very strong economy and positive growing demographic"
+        },
+        "confidence": 0.7
+      },
+      {
+        "risk": "Capital Intensity and Maintenance Requirements",
+        "severity": "Medium",
+        "description": "Gaming industry requires ongoing capital investment to maintain competitive position. Recent $50M+ capital program across portfolio. CapEx averaged $28M annually 2002-2006E (12.2% of 2006E PF revenue). Slot machines require regular replacement cycles.",
+        "mitigation": "Recent major renovations position properties for multi-year period without significant capital needs. Slot-heavy model has lower maintenance requirements than table games. TITO technology conversion completed across all properties improves efficiency. Management emphasizes capital-efficient attractions.",
+        "inferred": true,
+        "provenance": {
+          "section_heading": "Operating Metrics and Cash Flow Statement",
+          "page_numbers": [
+            38
+          ],
+          "text_excerpt": "Acquisition of property and equipment: 2002 $22.1M, 2003 $30.4M, 2004 $14.0M, 2005 $28.2M, 2006E $46.9M"
+        },
+        "confidence": 0.7
+      },
+      {
+        "risk": "Laughlin Market Maturity",
+        "severity": "Medium",
+        "description": "Laughlin market faced challenges from California tribal casino openings. Market stabilized with growth of 7.6% (2004) and 4.3% (2005) but remains smaller and more mature than Las Vegas. Aquarius revenue declined from $119.6M (2001) to $101.6M (2006E).",
+        "mitigation": "Limited new gaming supply expected from California Native American casinos. Local residential development anticipated to nearly double surrounding customer base. Laughlin offers value-oriented alternative to Las Vegas with Colorado River attractions. Aquarius repositioning with $40M investment should recapture market share.",
+        "inferred": false,
+        "provenance": {
+          "section_heading": "Investment Considerations - Laughlin Market",
+          "page_numbers": [
+            11,
+            34
+          ],
+          "text_excerpt": "The Laughlin gaming market grew 7.6% and 4.3% in 2004 and 2005, respectively, as the market stabilized from the opening of tribal casinos in California... Limited new gaming supply is expected from California Native American casinos"
+        },
+        "confidence": 0.8
+      },
+      {
+        "risk": "Regulatory and Gaming License Risk",
+        "severity": "Low",
+        "description": "Gaming operations subject to extensive regulation by Nevada Gaming Commission and Nevada Gaming Control Board. License renewals, compliance requirements, and potential regulatory changes could impact operations. Any violations could result in fines or license suspension.",
+        "mitigation": "Nevada described as 'most stable gaming regulatory jurisdiction in the world'. Company has operated successfully in Nevada since 1998 with no indication of regulatory issues. Experienced management team familiar with Nevada gaming regulations.",
+        "inferred": true,
+        "provenance": {
+          "section_heading": "Investment Considerations and Transaction Details",
+          "page_numbers": [
+            4,
+            13
+          ],
+          "text_excerpt": "Strategically located, diversified portfolio of casino assets in the most stable gaming regulatory jurisdiction in the world... The transaction was approved by the Nevada Gaming Commission upon recommendation of the Nevada Gaming Control Board"
+        },
+        "confidence": 0.65
+      },
+      {
+        "risk": "Key Person and Management Dependency",
+        "severity": "Medium",
+        "description": "Success depends on experienced management team. CEO Richard Brown has been with company since 2000 and CEO since 2002. Property general managers have 1-8 years tenure. Loss of key executives could disrupt operations and turnaround initiatives.",
+        "mitigation": "Management team collectively has over 100 years of gaming industry experience. Property-level management teams have established track record. Organizational depth with senior vice presidents at each property. Demonstrated ability to integrate and operate multiple properties.",
+        "inferred": true,
+        "provenance": {
+          "section_heading": "Management Section",
+          "page_numbers": [
+            39,
+            40
+          ],
+          "text_excerpt": "The senior management team collectively has over 100 years of operating experience in the gaming industry. The executive and property-level management teams have an established record of developing, integrating and operating gaming and entertainment properties."
+        },
+        "confidence": 0.6
+      },
+      {
+        "risk": "Traffic and Access Disruption",
+        "severity": "Low",
+        "description": "Arizona Charlie's Decatur experienced external traffic disruption from Nevada Highway Authority and Nevada Gas construction projects in close proximity to property. Such infrastructure projects can temporarily impact customer access and visitation.",
+        "mitigation": "Construction projects are temporary and will be completed in near term. Management does not believe these factors will have long-term effect on property performance. Property has established customer base that should return once access improves.",
+        "inferred": false,
+        "provenance": {
+          "section_heading": "Arizona Charlie's Decatur Financial Summary",
+          "page_numbers": [
+            24
+          ],
+          "text_excerpt": "Construction projects by the Nevada Highway Authority, as well as Nevada Gas, in close proximity to the Decatur property, resulted in disrupting access to the property... Management does not believe these factors will have a long term effect on the property's performance"
+        },
+        "confidence": 0.75
+      }
+    ],
+    "management_team": [
+      {
+        "name": "Richard P. Brown",
+        "title": "President and CEO, Gaming",
+        "background": "Joined ACEP March 2000 as EVP of Marketing for Stratosphere and Arizona Charlie's properties. Promoted to COO January 2001, then President and CEO June 2002. Prior experience with Harrah's Entertainment and Hilton Gaming. Also held positions with New York Racing Association, Travelers Companies, and J. Walter Thompson Company. Bachelor's degree in Economics from Southern Connecticut State College. 7 years tenure with ACEP.",
+        "linkedin": null,
+        "provenance": {
+          "section_heading": "Senior Management Biographies",
+          "page_numbers": [
+            39
+          ],
+          "text_excerpt": "Richard Brown has served as President and CEO of the Company since June 2002... Prior to joining the Company, Mr. Brown held executive positions with Harrah's Entertainment and Hilton Gaming."
+        },
+        "confidence": 0.95
+      },
+      {
+        "name": "Denise Barton",
+        "title": "Senior Vice President, Chief Financial Officer",
+        "background": "Joined ACEP August 2002 as VP of Finance and CFO of Stratosphere. Promoted to SVP of Support Services and CFO February 2003. Oversees all consolidated support services. Prior CFO at Lowestfare.com. Spent 9 years at KPMG Las Vegas as audit senior manager serving gaming and hospitality clients. CPA with Bachelor of Science in Accounting from Southern Utah University. 4 years tenure with ACEP.",
+        "linkedin": null,
+        "provenance": {
+          "section_heading": "Senior Management Biographies",
+          "page_numbers": [
+            39
+          ],
+          "text_excerpt": "Denise Barton has served as Senior Vice President of Support Services and Chief Financial Officer of the Company since February, 2003... Ms. Barton spent nine years at KPMG in Las Vegas"
+        },
+        "confidence": 0.95
+      },
+      {
+        "name": "Ronald P. Lurie",
+        "title": "Executive Vice President and General Manager, Arizona Charlie's Decatur",
+        "background": "Joined Arizona Charlie's Decatur January 1999 as EVP and General Manager. Over 25 years gaming industry experience with prior positions at IGT and Sigma Games. Served 4 years as Mayor of Las Vegas and 14 years as Las Vegas City Councilman. Board member of multiple charitable organizations including West Charleston Lion's Club, Boys & Girls Clubs of Las Vegas, Valley Hospital, Youth Charities of Southern Nevada, Opportunity Village, and Community College of Southern Nevada. 8 years tenure with ACEP.",
+        "linkedin": null,
+        "provenance": {
+          "section_heading": "Senior Management Biographies",
+          "page_numbers": [
+            39
+          ],
+          "text_excerpt": "Ron Lurie has served as Executive Vice President and General Manager of Arizona Charlie's Decatur since January 1999... Mr. Lurie has been involved in the gaming industry for over 25 years... Mr. Lurie has served four years as the Mayor of the Las Vegas"
+        },
+        "confidence": 0.95
+      },
+      {
+        "name": "Mark Majetich",
+        "title": "Senior Vice President and General Manager, Arizona Charlie's Boulder",
+        "background": "Joined ACEP 2000 as Director of Hotel Operations at Stratosphere. Promoted to Director of Operations at Boulder, then VP and General Manager May 2001. Prior experience at Excalibur (1992-2000) and Caesars Tahoe (1980-1992). Board member of Nick and Kelly Children's Heart Fund. Bachelor of Science in Education from University of Nebraska, Lincoln. 6 years tenure with ACEP.",
+        "linkedin": null,
+        "provenance": {
+          "section_heading": "Senior Management Biographies",
+          "page_numbers": [
+            40
+          ],
+          "text_excerpt": "Mark Majetich has been Vice President and General Manager at Boulder since May 2001... Mr. Majetich originally joined the Company in 2000 as Director of Hotel Operations at Stratosphere"
+        },
+        "confidence": 0.95
+      },
+      {
+        "name": "John Lind",
+        "title": "Senior Vice President and General Manager, Aquarius (Laughlin)",
+        "background": "Joined as SVP and General Manager at Flamingo Laughlin June 2006. Prior SVP at Ramada Express Hotel/Casino, Laughlin (August 1995-2005). CFO at Lady Luck Casino, Bettendorf, Iowa (December 1994-August 1995). CFO at Peppermill Casinos, Reno (April 1984-June 1993). Assistant Controller at MGM Grand Hotel/Casino, Reno (April 1982-April 1984). CPA with degree in Business Administration from University of Montana, Missoula. 1 year tenure with ACEP.",
+        "linkedin": null,
+        "provenance": {
+          "section_heading": "Senior Management Biographies",
+          "page_numbers": [
+            40
+          ],
+          "text_excerpt": "Mr. Lind has been the Senior Vice President and General Manager at Flamingo Laughlin since June 14, 2006... Mr. Lind was a Senior Vice President at Ramada Express Hotel/Casino, Laughlin, Nevada from August 1995 to 2005"
+        },
+        "confidence": 0.95
+      }
+    ],
+    "investment_thesis": "American Casino and Entertainment Properties LLC represents a unique opportunity to acquire a strategically located, diversified portfolio of four casino assets in Nevada, the most stable gaming regulatory jurisdiction in the world, operating in one of the fastest growing gaming markets in the US. The portfolio includes the iconic Stratosphere Casino Hotel & Tower on the Las Vegas Strip, two successful locals casinos (Arizona Charlie's Decatur and Boulder), and the Aquarius Casino Resort, the largest hotel in Laughlin with 1,907 rooms. The Company has recently completed an approximately $50 million capital improvement program positioning all properties for renewed growth in their respective markets. Key investment highlights include: (1) Compelling development opportunity on 17 acres of undeveloped land adjacent to Stratosphere on the Las Vegas Strip, with potential for 1,000-room expansion and/or convention center; (2) Stratosphere now offers the newest room product north of Wynn Las Vegas following complete renovation of 1,444 rooms; (3) Unique opportunity to exploit growing Laughlin market with newly repositioned Aquarius following $40M investment; (4) Emphasis on slot play (80%+ of gaming revenue) produces strong, predictable free cash flow with relatively low maintenance capital requirements; (5) Well-regarded, experienced management team with over 100 years collective gaming industry experience and demonstrated track record for turning around neglected assets; (6) Geographic and business mix diversification across tourist and locals segments provides balanced revenue streams; (7) Properties well-positioned to benefit from Las Vegas market growth (2.5% visitation CAGR, 5.5% population CAGR in Clark County) and value-oriented positioning under luxury 'pricing umbrella' as new high-end supply comes online.",
+    "derived_metrics": {
+      "ttm_revenue": 429700000.0,
+      "revenue_per_employee": null,
+      "ebitda_per_employee": null,
+      "enterprise_value_estimate": null,
+      "net_debt": 200100000.0,
+      "cash_conversion_rate": 0.738,
+      "revenue_growth_2005_to_2006E": -0.176,
+      "revenue_growth_2006E_PF_to_2007E": 0.049,
+      "ebitda_growth_2005_to_2006E": -0.037,
+      "ebitda_growth_2006E_PF_to_2007E": 0.164,
+      "stratosphere_revenue_pct": 0.46,
+      "stratosphere_ebitda_pct": 0.463,
+      "decatur_revenue_pct": 0.192,
+      "decatur_ebitda_pct": 0.318,
+      "boulder_revenue_pct": 0.112,
+      "boulder_ebitda_pct": 0.12,
+      "laughlin_revenue_pct": 0.236,
+      "laughlin_ebitda_pct": 0.099,
+      "slot_revenue_pct_of_gaming": 0.809,
+      "total_hotel_rooms": 4912,
+      "total_slot_machines": 4770,
+      "total_table_games": 122,
+      "total_gaming_square_footage": 236000,
+      "revenue_per_hotel_room": 87476.0,
+      "revenue_per_slot_machine": 90063.0,
+      "ebitda_per_hotel_room": 18628.0,
+      "ebitda_per_slot_machine": 19182.0
+    },
+    "extraction_notes": "DOCUMENT QUALITY: High-quality CIM with comprehensive financial data and property details. All figures appear to be in US dollars. ASSUMPTIONS: (1) All revenue and EBITDA figures are in actual dollars (not thousands or millions) based on context and magnitude. (2) Pro Forma (PF) results for 2006E include full year of Aquarius operations (acquired May 2006). (3) EBITDA calculated as Income from Operations + Depreciation & Amortization based on income statement structure. (4) Free Cash Flow calculated as Net Income + D&A - CapEx - Change in Working Capital. (5) Projected years (2007E, 2008E) clearly marked with 'E' suffix in source document. CALCULATIONS PERFORMED: (1) All financial ratios calculated from balance sheet and income statement data. (2) EBITDA margins calculated for all years. (3) CapEx as % of revenue calculated. (4) Net Debt to EBITDA calculated as (Total Debt - Cash) / EBITDA. (5) Historical and projected CAGRs calculated from revenue and EBITDA series. (6) Debt-to-EBITDA calculated as $255M / $86.1M = 2.96x. (7) Per-unit metrics calculated (revenue per room, per slot machine, etc.). MISSING DATA: (1) No explicit asking price or valuation multiples stated in CIM. (2) Employee count not disclosed. (3) Detailed customer concentration metrics not provided. (4) Inventory data not available for inventory turnover calculation. (5) Quarterly financial data not provided for TTM calculations. (6) Specific organic vs. M&A growth breakdown not explicitly stated. RISKS: Identified both explicit risks from text (construction disruption, competition, Aquarius turnaround) and inferred risks from financial analysis (leverage, capital intensity, economic sensitivity). All inferred risks marked with inferred: true flag. CONFIDENCE SCORING: High confidence (0.85-0.95) for explicit financial data from tables and clear text statements. Medium confidence (0.6-0.8) for calculated metrics and inferred business characteristics. Lower confidence (0.4-0.7) for inferred risks and market positioning assessments. PROPERTY BREAKDOWN: Document provides detailed financial and operational data for each of four properties: Stratosphere (Las Vegas Strip), Arizona Charlie's Decatur (West Las Vegas locals), Arizona Charlie's Boulder (Boulder Strip locals), and Aquarius (Laughlin). Revenue and EBITDA mix by property extracted from page 3 charts. CAPITAL IMPROVEMENTS: Extensive documentation of recent $50M+ capital program across all properties completed 2005-2007, including room renovations, TITO slot conversion, casino redesigns, and new F&B options. Aquarius undergoing separate $40M repositioning program. MARKET DATA: Comprehensive Las Vegas and Laughlin market data provided including visitation trends, population growth, convention statistics, and competitive property counts. Nevada characterized as fastest-growing state for 19 consecutive years.",
+    "company_info": {
+      "company_name": "American Casino and Entertainment Properties LLC",
+      "company_id": "ACEP",
+      "industry": "Gaming and Entertainment",
+      "secondary_industry": "Hospitality and Resorts",
+      "business_structure": "LLC",
+      "founded_year": 2003,
+      "employees": null,
+      "headquarters": "Las Vegas, Nevada",
+      "website": null,
+      "provenance": {
+        "section_heading": "Executive Summary and Business History",
+        "page_numbers": [
+          1,
+          13
+        ],
+        "text_excerpt": "American Casino and Entertainment Properties LLC ('ACEP' or the 'Company'), a wholly-owned indirect subsidiary of American Real Estate Partners, L.P. ('AREP') (NYSE: ACP)... ACEP is a holding company that was formed in Delaware on December 29, 2003"
+      },
+      "confidence": 0.95
+    },
+    "financials": {
+      "revenue_by_year": {
+        "2001": 242500000.0,
+        "2002": 250000000.0,
+        "2003": 262800000.0,
+        "2004": 300000000.0,
+        "2005": 328000000.0,
+        "2006E": 385700000.0,
+        "projected_2007E": 450900000.0,
+        "projected_2008E": 472800000.0,
+        "2006E_PF": 429700000.0
+      },
+      "ebitda_by_year": {
+        "2001": 28100000.0,
+        "2002": 31300000.0,
+        "2003": 44100000.0,
+        "2004": 72400000.0,
+        "2005": 89400000.0,
+        "2006E": 86100000.0,
+        "projected_2007E": 106500000.0,
+        "projected_2008E": 112900000.0,
+        "2006E_PF": 91500000.0
+      },
+      "adjusted_ebitda_by_year": {},
+      "net_income_by_year": {
+        "2002": 900000.0,
+        "2003": 20700000.0,
+        "2004": 20900000.0,
+        "2005": 32000000.0,
+        "2006E": 25600000.0,
+        "projected_2007E": 31700000.0,
+        "projected_2008E": 35000000.0
+      },
+      "gross_margin_by_year": {},
+      "fiscal_year_end": "December 31",
+      "currency": "USD",
+      "other_metrics": {
+        "assumptions": "All figures in dollars. Pro Forma (PF) results include Aquarius acquisition completed May 2006.",
+        "ebitda_margin_2005": 0.273,
+        "ebitda_margin_2006E_PF": 0.213,
+        "ebitda_margin_projected_2007E": 0.236,
+        "ebitda_margin_projected_2008E": 0.239,
+        "depreciation_and_amortization_2005": 23300000.0,
+        "depreciation_and_amortization_2006E": 28600000.0,
+        "interest_expense_2005": 18800000.0,
+        "interest_expense_2006E": 21300000.0,
+        "promotional_allowances_2005": 22300000.0,
+        "promotional_allowances_2006E": 30300000.0
+      },
+      "provenance": {
+        "section_heading": "Financial Review and Historical Income Statement",
+        "page_numbers": [
+          2,
+          35,
+          37
+        ],
+        "text_excerpt": "From 2001 to 2005, consolidated net revenue and EBITDA grew at a compounded annual growth rate of 7.8% and 33.6%, respectively, with revenues increasing from $242.5 million to $328.0 million and EBITDA increasing from $28.1 million to $89.4 million."
+      },
+      "confidence": 0.9
+    }
+  }
+}

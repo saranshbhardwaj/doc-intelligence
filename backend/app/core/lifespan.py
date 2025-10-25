@@ -17,6 +17,14 @@ async def lifespan(app):
         "max_pages": settings.max_pages,
         "max_file_size_mb": settings.max_file_size_mb
     })
+
+    # Warn loudly if mock mode is enabled
+    if settings.mock_mode:
+        logger.warning("=" * 60)
+        logger.warning("MOCK MODE ENABLED - RETURNING TEST DATA ONLY")
+        logger.warning("Set MOCK_MODE=false in .env to use real API")
+        logger.warning("=" * 60)
+
     # cache.clear_expired()
     rate_limiter.clear_expired()
 
