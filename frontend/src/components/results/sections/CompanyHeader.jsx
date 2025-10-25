@@ -4,7 +4,11 @@ import { safeText } from "../../../utils/formatters";
 
 export default function CompanyHeader({ data, metadata }) {
   return (
-    <div className="bg-gradient-to-r from-blue-600 to-blue-800 rounded-xl shadow-xl p-8 text-white">
+    <div
+      className="bg-gradient-to-r from-blue-600 to-blue-800 
+                dark:from-blue-700 dark:to-blue-900 
+                rounded-xl shadow-xl p-8 text-white"
+    >
       <div className="flex items-center gap-4 mb-4">
         <Building2 className="w-12 h-12" />
         <div>

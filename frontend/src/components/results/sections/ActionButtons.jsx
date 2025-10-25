@@ -1,10 +1,15 @@
 // src/components/results/sections/ActionButtons.jsx
 import { Download, Share2, Printer } from "lucide-react";
+import { exportToExcel } from "../../../utils/excelExport/index";
 
-export default function ActionButtons({ onFeedbackClick }) {
-  const handleExportExcel = () => {
-    console.log("Export to Excel");
-    // TODO: Implement
+export default function ActionButtons({ onFeedbackClick, data, metadata }) {
+  const handleExportExcel = async () => {
+    try {
+      await exportToExcel(data, metadata);
+    } catch (error) {
+      console.error("Failed to export to Excel:", error);
+      alert("Failed to export to Excel. Please try again.");
+    }
   };
 
   const handlePrint = () => {

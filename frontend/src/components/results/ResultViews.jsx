@@ -35,9 +35,16 @@ export default function ResultsView({ result }) {
   const data = result.data;
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 py-8 px-4">
+    <div
+      className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100
+    dark:from-gray-900 dark:to-gray-800 py-8 px-4 transition-colors duration-200"
+    >
       <div className="max-w-7xl mx-auto space-y-6">
-        <ActionButtons onFeedbackClick={() => setShowFeedback(true)} />
+        <ActionButtons
+          onFeedbackClick={() => setShowFeedback(true)}
+          data={data}
+          metadata={result.metadata}
+        />
 
         <CompanyHeader data={data} metadata={result.metadata} />
 
