@@ -1,7 +1,7 @@
 /* eslint-disable no-unused-vars */
 // src/components/FileUploader.jsx
 import { useRef, useState, useEffect } from "react";
-import { uploadFile } from "../api";
+import { uploadFile } from "../../api";
 import classNames from "classnames";
 
 export default function FileUploader({

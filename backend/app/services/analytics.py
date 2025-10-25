@@ -1,9 +1,7 @@
 import json
 from pathlib import Path
 from datetime import datetime
-import logging
-
-logger = logging.getLogger(__name__)
+from app.utils.logging import logger
 
 class SimpleAnalytics:
     """Simple file-based analytics tracking"""

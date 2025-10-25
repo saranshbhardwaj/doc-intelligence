@@ -4,9 +4,7 @@ import json
 from pathlib import Path
 from typing import Optional, Tuple
 from datetime import datetime, timedelta
-import logging
-
-logger = logging.getLogger(__name__)
+from app.utils.logging import logger
 
 class DocumentCache:
     """

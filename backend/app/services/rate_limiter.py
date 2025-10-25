@@ -2,9 +2,7 @@
 from datetime import datetime, timedelta
 from collections import defaultdict
 from typing import Tuple
-import logging
-
-logger = logging.getLogger(__name__)
+from app.utils.logging import logger
 
 class RateLimiter:
     """

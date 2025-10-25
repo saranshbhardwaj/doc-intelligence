@@ -1,54 +1,5 @@
-# main.py (add near other helpers)
-from typing import Any, Dict, List, Union
-
-def _coerce_to_str(value: Any) -> Union[str, None]:
-    """Convert lists to joined string, keep strings, None stays None."""
-    if value is None:
-        return None
-    if isinstance(value, str):
-        return value
-    if isinstance(value, (list, tuple)):
-        # Filter Nones, join with " ; "
-        cleaned = [str(v).strip() for v in value if v is not None]
-        return " ; ".join(cleaned) if cleaned else None
-    # fallback
-    return str(value)
-
-def _merge_projection_years(financials: Dict[str, Any]) -> None:
-    """
-    If financials has 'projections' mapping years->objects, attempt to
-    merge `revenue`, `ebitda`, `net_income` into revenue_by_year/ebitda_by_year/net_income_by_year
-    without overwriting explicit entries.
-    """
-    projections = financials.get("projections")
-    if not isinstance(projections, dict):
-        return
-
-    # Ensure year maps exist
-    revenue_map = financials.setdefault("revenue_by_year", {})
-    ebitda_map = financials.setdefault("ebitda_by_year", {})
-    net_map = financials.setdefault("net_income_by_year", {})
-
-    for year_key, metrics in projections.items():
-        if not isinstance(metrics, dict):
-            continue
-        # prefer existing explicit entries; only set if key missing
-        if "revenue" in metrics and year_key not in revenue_map:
-            try:
-                revenue_map[year_key] = float(metrics["revenue"])
-            except Exception:
-                # leave as-is if not parseable
-                revenue_map.setdefault(year_key, None)
-        if "ebitda" in metrics and year_key not in ebitda_map:
-            try:
-                ebitda_map[year_key] = float(metrics["ebitda"])
-            except Exception:
-                ebitda_map.setdefault(year_key, None)
-        if "net_income" in metrics and year_key not in net_map:
-            try:
-                net_map[year_key] = float(metrics["net_income"])
-            except Exception:
-                net_map.setdefault(year_key, None)
+# app/utils/normalization.py
+from typing import Any, Dict, Union
 
 def _normalize_llm_output(raw: Dict[str, Any]) -> Dict[str, Any]:
     """
@@ -194,3 +145,52 @@ def _normalize_llm_output(raw: Dict[str, Any]) -> Dict[str, Any]:
         result["metadata"] = metadata
 
     return result
+
+def _coerce_to_str(value: Any) -> Union[str, None]:
+    """Convert lists to joined string, keep strings, None stays None."""
+    if value is None:
+        return None
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (list, tuple)):
+        # Filter Nones, join with " ; "
+        cleaned = [str(v).strip() for v in value if v is not None]
+        return " ; ".join(cleaned) if cleaned else None
+    # fallback
+    return str(value)
+
+def _merge_projection_years(financials: Dict[str, Any]) -> None:
+    """
+    If financials has 'projections' mapping years->objects, attempt to
+    merge `revenue`, `ebitda`, `net_income` into revenue_by_year/ebitda_by_year/net_income_by_year
+    without overwriting explicit entries.
+    """
+    projections = financials.get("projections")
+    if not isinstance(projections, dict):
+        return
+
+    # Ensure year maps exist
+    revenue_map = financials.setdefault("revenue_by_year", {})
+    ebitda_map = financials.setdefault("ebitda_by_year", {})
+    net_map = financials.setdefault("net_income_by_year", {})
+
+    for year_key, metrics in projections.items():
+        if not isinstance(metrics, dict):
+            continue
+        # prefer existing explicit entries; only set if key missing
+        if "revenue" in metrics and year_key not in revenue_map:
+            try:
+                revenue_map[year_key] = float(metrics["revenue"])
+            except Exception:
+                # leave as-is if not parseable
+                revenue_map.setdefault(year_key, None)
+        if "ebitda" in metrics and year_key not in ebitda_map:
+            try:
+                ebitda_map[year_key] = float(metrics["ebitda"])
+            except Exception:
+                ebitda_map.setdefault(year_key, None)
+        if "net_income" in metrics and year_key not in net_map:
+            try:
+                net_map[year_key] = float(metrics["net_income"])
+            except Exception:
+                net_map.setdefault(year_key, None)

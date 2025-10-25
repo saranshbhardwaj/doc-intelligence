@@ -1,15 +1,13 @@
 # backend/app/llm_client.py
 from datetime import datetime
 import json
-import logging
 import uuid
 from anthropic import Anthropic
 from typing import Dict
 
 from app.config import settings
-from services.extraction_prompt import SYSTEM_PROMPT, create_extraction_prompt
-
-logger = logging.getLogger(__name__)
+from app.services.extraction_prompt import SYSTEM_PROMPT, create_extraction_prompt
+from app.utils.logging import logger
 
 class LLMClient:
     """Handle Claude API interactions"""

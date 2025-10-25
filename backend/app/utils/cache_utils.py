@@ -1,11 +1,8 @@
 # backend/app/cache_utils.py
 from pathlib import Path
-from app.cache import DocumentCache
+from app.services.cache import DocumentCache
 import json
-import logging
-from datetime import datetime
-
-logger = logging.getLogger(__name__)
+from app.utils.logging import logger
 
 def list_cache_entries(cache: DocumentCache):
     """

@@ -1,8 +1,8 @@
 // src/App.jsx
 import { useState } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import FileUploader from "./components/FileUploader";
-import ResultsView from "./components/ResultsView";
+import FileUploader from "./components/upload/FileUploader";
+import ResultsView from "./components//results/ResultViews";
 
 const queryClient = new QueryClient();
 

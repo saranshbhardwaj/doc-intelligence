@@ -1,11 +1,10 @@
 # backend/app/document_processor.py
-import logging
 from io import BytesIO
 from PyPDF2 import PdfReader
 from typing import Tuple
 from fastapi import HTTPException
+from app.utils.logging import logger
 
-logger = logging.getLogger(__name__)
 
 class DocumentProcessor:
     """Handle PDF processing and text extraction"""
