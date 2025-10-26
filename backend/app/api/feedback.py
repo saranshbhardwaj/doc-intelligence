@@ -6,6 +6,7 @@ from app.api.dependencies import get_client_ip
 from fastapi import APIRouter, HTTPException, Request
 from app.models import FeedbackRequest, FeedbackResponse
 from app.utils.logging import logger
+from app.utils.notifications import send_feedback_notification
 from app.config import settings
 
 router = APIRouter()
@@ -50,9 +51,16 @@ async def submit_feedback(feedback: FeedbackRequest, request: Request):
         timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
         feedback_file = settings.feedback_dir / f"{timestamp}_{feedback_id[:8]}.json"
         feedback_file.write_text(json.dumps(feedback_data, indent=2))
-        
+
         logger.info("Feedback saved", extra={"feedback_id": feedback_id})
-        
+
+        # Send notification (Slack/email) - runs in background, won't block response
+        try:
+            await send_feedback_notification(feedback_data)
+        except Exception as e:
+            # Don't fail feedback submission if notification fails
+            logger.warning(f"Notification failed but feedback saved: {e}")
+
         return FeedbackResponse(
             success=True,
             message="Thank you for your feedback! It helps us improve.",

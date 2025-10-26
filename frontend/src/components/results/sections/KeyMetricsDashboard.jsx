@@ -7,6 +7,7 @@ export default function KeyMetricsDashboard({ data }) {
   const financials = data.financials || {};
   const tx = data.transaction_details || {};
   const ratios = data.financial_ratios || {};
+  const currency = financials.currency || 'USD';
 
   return (
     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
@@ -15,6 +16,7 @@ export default function KeyMetricsDashboard({ data }) {
           label="Asking Price"
           value={tx.asking_price}
           format="currency"
+          currency={currency}
           icon={DollarSign}
         />
       )}
@@ -27,6 +29,7 @@ export default function KeyMetricsDashboard({ data }) {
             ]
           }
           format="currency"
+          currency={currency}
           icon={TrendingUp}
         />
       )}
@@ -41,6 +44,7 @@ export default function KeyMetricsDashboard({ data }) {
             ]
           }
           format="currency"
+          currency={currency}
           icon={BarChart3}
         />
       )}

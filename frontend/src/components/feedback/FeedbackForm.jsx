@@ -62,8 +62,8 @@ export default function FeedbackForm({ requestId, onClose }) {
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
           </svg>
         </div>
-        <h3 className="text-xl font-semibold text-gray-900 mb-2">Thank you!</h3>
-        <p className="text-gray-600">Your feedback helps us improve.</p>
+        <h3 className="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-2">Thank you!</h3>
+        <p className="text-gray-600 dark:text-gray-400">Your feedback helps us improve.</p>
       </div>
     )
   }
@@ -72,7 +72,7 @@ export default function FeedbackForm({ requestId, onClose }) {
     <form onSubmit={handleSubmit} className="space-y-6">
       {/* Overall Rating */}
       <div>
-        <label className="block text-sm font-medium text-gray-700 mb-2">
+        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
           Overall Experience *
         </label>
         <div className="flex gap-2">
@@ -114,7 +114,7 @@ export default function FeedbackForm({ requestId, onClose }) {
 
       {/* Accuracy Rating */}
       <div>
-        <label className="block text-sm font-medium text-gray-700 mb-2">
+        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
           How accurate was the extraction?
         </label>
         <div className="flex gap-2">
@@ -147,7 +147,7 @@ export default function FeedbackForm({ requestId, onClose }) {
 
       {/* Would Pay */}
       <div>
-        <label className="block text-sm font-medium text-gray-700 mb-2">
+        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
           Would you pay for unlimited access?
         </label>
         <div className="flex gap-4">
@@ -156,8 +156,8 @@ export default function FeedbackForm({ requestId, onClose }) {
             onClick={() => setWouldPay(true)}
             className={`flex-1 py-2 px-4 rounded-lg border-2 transition-colors ${
               wouldPay === true
-                ? 'border-green-500 bg-green-50 text-green-700'
-                : 'border-gray-300 text-gray-700 hover:border-green-300'
+                ? 'border-green-500 bg-green-50 dark:bg-green-900/30 text-green-700 dark:text-green-400'
+                : 'border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:border-green-300 dark:hover:border-green-600'
             }`}
           >
             👍 Yes
@@ -167,8 +167,8 @@ export default function FeedbackForm({ requestId, onClose }) {
             onClick={() => setWouldPay(false)}
             className={`flex-1 py-2 px-4 rounded-lg border-2 transition-colors ${
               wouldPay === false
-                ? 'border-red-500 bg-red-50 text-red-700'
-                : 'border-gray-300 text-gray-700 hover:border-red-300'
+                ? 'border-red-500 bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-400'
+                : 'border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:border-red-300 dark:hover:border-red-600'
             }`}
           >
             👎 No
@@ -178,7 +178,7 @@ export default function FeedbackForm({ requestId, onClose }) {
 
       {/* Comment */}
       <div>
-        <label htmlFor="comment" className="block text-sm font-medium text-gray-700 mb-2">
+        <label htmlFor="comment" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
           Comments or suggestions
         </label>
         <textarea
@@ -188,14 +188,14 @@ export default function FeedbackForm({ requestId, onClose }) {
           rows={4}
           maxLength={1000}
           placeholder="What worked well? What could be improved?"
-          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
         />
-        <p className="text-xs text-gray-500 mt-1">{comment.length}/1000 characters</p>
+        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">{comment.length}/1000 characters</p>
       </div>
 
       {/* Email (optional) */}
       <div>
-        <label htmlFor="email" className="block text-sm font-medium text-gray-700 mb-2">
+        <label htmlFor="email" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
           Email (optional - for follow-up)
         </label>
         <input
@@ -204,7 +204,7 @@ export default function FeedbackForm({ requestId, onClose }) {
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           placeholder="your@email.com"
-          className="w-full px-3 py-2 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent placeholder:text-gray-400 dark:placeholder:text-gray-500"
         />
       </div>
 
@@ -214,7 +214,7 @@ export default function FeedbackForm({ requestId, onClose }) {
           type="submit"
           disabled={submitting || rating === 0}
           className="flex-1 bg-blue-600 text-white py-3 px-6 rounded-lg font-semibold
-            hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed
+            hover:bg-blue-700 disabled:bg-gray-400 dark:disabled:bg-gray-600 disabled:cursor-not-allowed
             transition-colors"
         >
           {submitting ? 'Submitting...' : 'Submit Feedback'}
@@ -222,8 +222,8 @@ export default function FeedbackForm({ requestId, onClose }) {
         <button
           type="button"
           onClick={onClose}
-          className="px-6 py-3 border border-gray-300 rounded-lg text-gray-700
-            hover:bg-gray-50 transition-colors"
+          className="px-6 py-3 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-700 dark:text-gray-300
+            hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
         >
           Cancel
         </button>

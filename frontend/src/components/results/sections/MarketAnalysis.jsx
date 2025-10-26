@@ -5,6 +5,7 @@ import DataField from "../DataField";
 
 export default function MarketAnalysis({ data }) {
   const market = data.market || {};
+  const currency = data.financials?.currency || 'USD';
 
   if (!market || !Object.values(market).some((v) => v != null)) {
     return null;
@@ -21,6 +22,7 @@ export default function MarketAnalysis({ data }) {
             label="Market Size (Est.)"
             value={market.market_size_estimate}
             format="currency"
+            currency={currency}
           />
         )}
         {market.market_growth_rate != null && (

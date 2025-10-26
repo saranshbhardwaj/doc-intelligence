@@ -5,6 +5,7 @@ import DataField from "../DataField";
 
 export default function CapitalStructure({ data }) {
   const capital = data.capital_structure;
+  const currency = data.financials?.currency || 'USD';
 
   if (!capital || !Object.values(capital).some((v) => v != null)) {
     return null;
@@ -18,6 +19,7 @@ export default function CapitalStructure({ data }) {
             label="Existing Debt"
             value={capital.existing_debt}
             format="currency"
+            currency={currency}
             highlight={true}
           />
         )}
@@ -39,6 +41,7 @@ export default function CapitalStructure({ data }) {
             label="Est. Equity Contribution"
             value={capital.equity_contribution_estimate}
             format="currency"
+            currency={currency}
           />
         )}
       </div>

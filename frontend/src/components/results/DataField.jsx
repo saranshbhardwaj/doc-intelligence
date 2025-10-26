@@ -10,11 +10,12 @@ export default function DataField({
   value,
   format = "text",
   highlight = false,
+  currency = "USD",
 }) {
   let displayValue = value;
 
   if (format === "currency") {
-    displayValue = formatCurrency(value);
+    displayValue = formatCurrency(value, currency);
   } else if (format === "percentage") {
     displayValue = formatPercentage(value);
   } else if (format === "number") {

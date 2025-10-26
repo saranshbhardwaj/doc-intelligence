@@ -53,7 +53,7 @@ export default function StrategicRationale({ data }) {
         {Array.isArray(rationale.competitive_advantages) &&
           rationale.competitive_advantages.length > 0 && (
             <div>
-              <h4 className="text-md font-semibold text-gray-700 mb-3">
+              <h4 className="text-md font-semibold text-gray-700 dark:text-gray-200 mb-3">
                 Competitive Advantages (USPs)
               </h4>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">

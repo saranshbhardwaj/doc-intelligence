@@ -8,6 +8,14 @@ class Settings(BaseSettings):
     
     # API Keys
     anthropic_api_key: str
+    admin_api_key: str = "change-this-in-production"  # For analytics endpoint access
+
+    # Notifications (optional - leave empty to disable)
+    slack_webhook_url: str = ""  # Get from: https://api.slack.com/messaging/webhooks
+
+    # Email notifications (simpler for MVP - using Gmail SMTP)
+    notification_email: str = ""  # Your email to receive feedback notifications
+    gmail_app_password: str = ""  # Gmail App Password (not your regular password!)
     
     # Rate Limiting
     rate_limit_uploads: int = 3

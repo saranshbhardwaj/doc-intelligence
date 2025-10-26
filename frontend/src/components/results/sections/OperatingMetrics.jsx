@@ -6,6 +6,7 @@ import { safeText, sortYearKeysDesc } from "../../../utils/formatters";
 
 export default function OperatingMetrics({ data }) {
   const metrics = data.operating_metrics;
+  const currency = data.financials?.currency || 'USD';
 
   if (!metrics || !Object.values(metrics).some((v) => v != null)) {
     return null;
@@ -35,7 +36,7 @@ export default function OperatingMetrics({ data }) {
         {/* FCF by Year */}
         {metrics.fcf_by_year && Object.keys(metrics.fcf_by_year).length > 0 && (
           <div>
-            <h4 className="text-lg font-bold text-gray-800 mb-3 flex items-center gap-2">
+            <h4 className="text-lg font-bold text-gray-800 dark:text-gray-200 mb-3 flex items-center gap-2">
               <div className="w-1 h-6 bg-green-600 rounded"></div>
               Free Cash Flow by Year
             </h4>
@@ -47,6 +48,7 @@ export default function OperatingMetrics({ data }) {
                     label={yearKey}
                     value={metrics.fcf_by_year[yearKey]}
                     format="currency"
+                    currency={currency}
                   />
                 )
               )}
@@ -58,7 +60,7 @@ export default function OperatingMetrics({ data }) {
         {metrics.capex_by_year &&
           Object.keys(metrics.capex_by_year).length > 0 && (
             <div>
-              <h4 className="text-lg font-bold text-gray-800 mb-3 flex items-center gap-2">
+              <h4 className="text-lg font-bold text-gray-800 dark:text-gray-200 mb-3 flex items-center gap-2">
                 <div className="w-1 h-6 bg-orange-600 rounded"></div>
                 CapEx by Year
               </h4>
@@ -70,6 +72,7 @@ export default function OperatingMetrics({ data }) {
                       label={yearKey}
                       value={metrics.capex_by_year[yearKey]}
                       format="currency"
+                      currency={currency}
                     />
                   )
                 )}
@@ -79,11 +82,11 @@ export default function OperatingMetrics({ data }) {
 
         {/* Contract Structure */}
         {metrics.contract_structure && (
-          <div className="bg-gray-50 p-4 rounded-lg">
-            <h4 className="text-sm font-semibold text-gray-700 mb-2">
+          <div className="bg-gray-50 dark:bg-gray-800 p-4 rounded-lg">
+            <h4 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
               Contract Structure
             </h4>
-            <p className="text-sm text-gray-600">
+            <p className="text-sm text-gray-600 dark:text-gray-400">
               {safeText(metrics.contract_structure)}
             </p>
           </div>

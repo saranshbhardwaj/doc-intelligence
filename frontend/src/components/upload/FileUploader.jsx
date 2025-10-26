@@ -254,7 +254,7 @@ export default function FileUploader({
               ></path>
             </svg>
             <p className="text-lg font-medium text-gray-900 dark:text-[#ececec]">
-              Analyzing document (this may take 1 minute)…
+              Analyzing document (this may take upto 3 minutes)…
             </p>
             <p className="text-sm text-gray-600 dark:text-[#a8a8a8] mt-2">
               Please don't close this tab

@@ -48,14 +48,28 @@ function AppInner() {
       <div className="max-w-4xl mx-auto">
         {/* Header */}
         <div className="text-center mb-12">
-          <h1 className="text-5xl font-bold text-gray-900 dark:text-white mb-4">
-            📄 Sand Cloud
-          </h1>
+          {/* Logo + Brand Name */}
+          <div className="flex items-center justify-center gap-4 mb-4">
+            {/* Logo - switches based on dark mode */}
+            <img
+              src="/Sand_cloud_logo_dark-gray.svg"
+              alt="Sand Cloud Logo"
+              className="h-16 w-auto dark:hidden"
+            />
+            <img
+              src="/Sand_cloud_logo_dark-gray.svg"
+              alt="Sand Cloud Logo"
+              className="h-16 w-auto hidden dark:block"
+            />
+            <h1 className="text-5xl font-bold text-gray-900 dark:text-white">
+              Sand Cloud
+            </h1>
+          </div>
           <p className="text-xl text-gray-700 dark:text-gray-300 mb-2">
-            Extract structured data from investment documents in seconds
+            Stop reading CIMs manually. Extract data in minutes.
           </p>
           <p className="text-sm text-gray-500 dark:text-gray-500">
-            Free demo: 2 uploads per day • Max 50 pages • 5MB limit
+            Free demo: 2 uploads per day • Max 60 pages • 5MB limit
           </p>
         </div>
 
@@ -83,12 +97,36 @@ function AppInner() {
             className="bg-red-50 dark:bg-red-950/30 border-l-4 border-red-400 dark:border-red-500 p-6 mb-8 rounded-r-lg backdrop-blur-sm"
             role="alert"
           >
-            <h3 className="text-sm font-medium text-red-800 dark:text-red-300">
-              Error
+            <h3 className="text-sm font-medium text-red-800 dark:text-red-300 mb-2">
+              ⚠️ Processing Error
             </h3>
-            <p className="text-sm text-red-700 dark:text-red-200 mt-1">
+            <p className="text-sm text-red-700 dark:text-red-200 mb-3">
               {error}
             </p>
+
+            {/* Helpful guidance */}
+            <div className="mt-4 pt-4 border-t border-red-200 dark:border-red-800">
+              <p className="text-sm font-semibold text-red-800 dark:text-red-300 mb-2">
+                💡 What to try:
+              </p>
+              <ul className="text-sm text-red-700 dark:text-red-200 space-y-1 list-disc list-inside">
+                <li>
+                  <strong>Try a different CIM document</strong> - Each document
+                  has unique formatting
+                </li>
+                <li>
+                  Ensure your PDF is text-based (not scanned images - we don't
+                  support OCR yet)
+                </li>
+                <li>
+                  Check file size is under 5MB and has fewer than 100 pages
+                </li>
+              </ul>
+              <p className="text-xs text-red-600 dark:text-red-400 mt-3 italic">
+                Note: Re-uploading the same file won't fix the issue. The system
+                uses the same processing logic each time.
+              </p>
+            </div>
           </div>
         )}
 

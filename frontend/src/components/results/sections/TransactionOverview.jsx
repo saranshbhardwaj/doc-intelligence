@@ -6,6 +6,7 @@ import { safeText } from "../../../utils/formatters";
 
 export default function TransactionOverview({ data }) {
   const tx = data.transaction_details || {};
+  const currency = data.financials?.currency || 'USD';
 
   if (!tx || !Object.values(tx).some((v) => v != null)) {
     return null;
@@ -19,6 +20,7 @@ export default function TransactionOverview({ data }) {
             label="Asking Price"
             value={tx.asking_price}
             format="currency"
+            currency={currency}
             highlight={true}
           />
         )}

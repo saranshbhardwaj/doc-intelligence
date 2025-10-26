@@ -1,0 +1,637 @@
+{
+  "data": {
+    "company_information": {
+      "company_name": null,
+      "company_id": "EMA 457635-01",
+      "industry": "Sporting Goods Manufacturing",
+      "secondary_industry": "Sporting Goods Wholesale",
+      "sic_code": "3949",
+      "naics_code": "339920",
+      "business_structure": "C-Corporation",
+      "founded_year": 1989,
+      "employees": null,
+      "headquarters": "Southern California",
+      "website": null,
+      "provenance": {
+        "section_heading": "Introduction",
+        "page_numbers": [
+          3
+        ],
+        "text_excerpt": "Company ID No. EMA 457635-01. The Company is located in Southern California. The Company is primarily engaged in the business of Sporting Goods Manufacturing and its secondary business activity is Sporting Goods Wholesale. The applicable SIC / NAICS codes for the Company's business activity are 3949 / 339920. The Company was established in 1989 and is organized under the laws of California. The Company is structured as a C-Corporation."
+      },
+      "confidence": 0.95
+    },
+    "financial_performance": {
+      "revenue_by_year": {
+        "2014": 25302860.0,
+        "2015": 26494580.0,
+        "2016": 28043400.0,
+        "2017": 29219270.0,
+        "2018": 31541420.0,
+        "projected_2019": 33029158.0,
+        "projected_2020": 34605870.0,
+        "projected_2021": 36277151.0,
+        "projected_2022": 38049272.0,
+        "projected_2023": 39928935.0
+      },
+      "ebitda_by_year": {
+        "2014": 2377930.0,
+        "2015": 2694760.0,
+        "2016": 2903970.0,
+        "2017": 3065364.0,
+        "2018": 3453460.0,
+        "projected_2019": 4816427.0,
+        "projected_2020": 5086663.0,
+        "projected_2021": 5233999.0,
+        "projected_2022": 5524690.0,
+        "projected_2023": 5853437.0
+      },
+      "adjusted_ebitda_by_year": {
+        "2014": 2422930.0,
+        "2015": 2764760.0,
+        "2016": 3003970.0,
+        "2017": 3195364.0,
+        "2018": 3613460.0
+      },
+      "net_income_by_year": {
+        "2014": 442816.0,
+        "2015": 549037.0,
+        "2016": 598005.0,
+        "2017": 687985.0,
+        "2018": 1060590.0
+      },
+      "gross_margin_by_year": {
+        "2014": 0.203,
+        "2015": 0.1817,
+        "2016": 0.2061,
+        "2017": 0.2148,
+        "2018": 0.2432,
+        "projected_2019": 0.266,
+        "projected_2020": 0.2618,
+        "projected_2021": 0.2749,
+        "projected_2022": 0.2765,
+        "projected_2023": 0.2756
+      },
+      "fiscal_year_end": "December 31",
+      "currency": "USD",
+      "trailing_twelve_months": {
+        "period_ending": "Jun 2019",
+        "revenue": 18924689.0,
+        "net_income": 1419183.0,
+        "adjusted_ebitda": 2799590.0
+      },
+      "other_metrics": {
+        "cogs_by_year": {
+          "2014": 20165679.0,
+          "2015": 21681757.0,
+          "2016": 22263336.0,
+          "2017": 22943789.0,
+          "2018": 23870297.0
+        },
+        "operating_income_by_year": {
+          "2015": 1513211.0,
+          "2016": 1543489.0,
+          "2017": 1661613.0,
+          "2018": 2224734.0
+        },
+        "depreciation_amortization_by_year": {
+          "2015": 1120139.0,
+          "2016": 1266711.0,
+          "2017": 1289091.0,
+          "2018": 1110806.0
+        },
+        "assumptions": "All financial figures are in USD. Historical data from 2014-2018 fiscal years. Projections from 2019-2023."
+      },
+      "provenance": {
+        "section_heading": "Financial Performance - Historic Income Statement Summary",
+        "page_numbers": [
+          5,
+          6,
+          15
+        ],
+        "text_excerpt": "The following table presents the last 5 years of income statement account groups along with their respective percentage of total revenues. The latest historic income statement is for fiscal year, 2018. Net Sales Revenue 2018: $31,541,420. Adjusted EBITDA 2018: $3,613,460."
+      },
+      "confidence": 0.95
+    },
+    "growth_analysis": {
+      "historical_cagr": 0.0566,
+      "projected_cagr": 0.0486,
+      "organic_pct": null,
+      "m_and_a_pct": null,
+      "organic_growth_estimate": "Historical revenue CAGR of 5.66% from 2014-2018. Projected revenue CAGR of 4.86% from 2019-2023. Growth driven by increasing gross margins from 20.30% in 2014 to 24.32% in 2018, with projected margins stabilizing around 27%.",
+      "m_and_a_summary": "No M&A activity explicitly mentioned in the document.",
+      "notes": "Historical CAGR calculated from 2014-2018 revenue data. Projected CAGR calculated from 2019-2023 projections. EBITDA growing faster than revenue, indicating margin expansion.",
+      "provenance": {
+        "section_heading": "Compound Average Growth Rates (CAGR)",
+        "page_numbers": [
+          8,
+          16
+        ],
+        "text_excerpt": "Historic Year 2018: Net Sales Revenue 5.66%, Net Income 24.40%, Adjusted EBITDA 10.51%. Projected Year 2023: Net Sales Revenue 4.86%, Net Income 14.79%, EBITDA 5.00%."
+      },
+      "confidence": 0.9
+    },
+    "valuation_multiples": {
+      "asking_ev_ebitda": null,
+      "asking_ev_revenue": null,
+      "asking_price_ebitda": null,
+      "exit_ev_ebitda_estimate": null,
+      "comparable_multiples_range": null,
+      "provenance": {
+        "section_heading": "Not explicitly stated",
+        "page_numbers": [],
+        "text_excerpt": "No asking price or valuation multiples explicitly stated in the document."
+      },
+      "confidence": 0.0
+    },
+    "capital_structure": {
+      "existing_debt": 5856580.0,
+      "debt_to_ebitda": 1.7,
+      "proposed_leverage": null,
+      "equity_contribution_estimate": null,
+      "debt_breakdown": {
+        "short_term_debt": 2656498.0,
+        "long_term_debt": 4257082.0,
+        "total_interest_bearing_debt": 5856580.0
+      },
+      "provenance": {
+        "section_heading": "Summary Historical Balance Sheets",
+        "page_numbers": [
+          8
+        ],
+        "text_excerpt": "Total Interest-Bearing Debt 2018: $5,856,580. Total Long-Term Debt 2018: $4,257,082. Calculated Debt to EBITDA: 5,856,580 / 3,453,460 = 1.70x"
+      },
+      "confidence": 0.85
+    },
+    "operating_metrics": {
+      "capex_by_year": {
+        "2015": 929999.0,
+        "2016": 930000.0,
+        "2017": 2180000.0,
+        "2018": 929999.0,
+        "projected_2019": 0.0,
+        "projected_2020": 2750000.0,
+        "projected_2021": 1500000.0,
+        "projected_2022": 1200000.0,
+        "projected_2023": 1100000.0
+      },
+      "fcf_by_year": {
+        "2015": 863359.0,
+        "2016": 1149964.0,
+        "2017": 198586.0,
+        "2018": 1422831.0
+      },
+      "working_capital_pct_revenue": 0.1042,
+      "pricing_power": "Medium",
+      "contract_structure": "Not explicitly described in document",
+      "inventory_turnover_by_year": {
+        "2014": 10.08,
+        "2015": 9.15,
+        "2016": 8.29,
+        "2017": 8.3,
+        "2018": 8.48
+      },
+      "accounts_receivable_turnover_by_year": {
+        "2014": 12.62,
+        "2015": 13.07,
+        "2016": 14.11,
+        "2017": 13.16,
+        "2018": 13.8
+      },
+      "provenance": {
+        "section_heading": "Adjusted Free Cash Flow and Financial Ratio Analysis",
+        "page_numbers": [
+          7,
+          9,
+          10
+        ],
+        "text_excerpt": "Invested Capital Net Cash Flows 2018: $1,422,831. Net Working Capital 2018: $3,286,880 (10.42% of Revenue). Inventory Turnover 2018: 8.48. Accounts Receivable Turnover 2018: 13.80."
+      },
+      "confidence": 0.9
+    },
+    "balance_sheet": {
+      "most_recent_year": 2018,
+      "total_assets": 15522587.0,
+      "current_assets": 7509604.0,
+      "fixed_assets": 5363423.0,
+      "total_liabilities": 7839480.0,
+      "current_liabilities": 3555398.0,
+      "long_term_debt": 4257082.0,
+      "stockholders_equity": 7683107.0,
+      "working_capital": 3954206.0,
+      "cash_and_equivalents": 2266824.0,
+      "accounts_receivable": 2285390.0,
+      "inventory": 2815000.0,
+      "intangible_assets": 208350.0,
+      "accounts_payable": 1368000.0,
+      "provenance": {
+        "section_heading": "Summary Historical Balance Sheets",
+        "page_numbers": [
+          8
+        ],
+        "text_excerpt": "2018: Total Assets $15,522,587, Total Current Assets $7,509,604, Net Fixed Assets $5,363,423, Total Liabilities $7,839,480, Total Stockholders' Equity $7,683,107."
+      },
+      "confidence": 0.95
+    },
+    "financial_ratios": {
+      "current_ratio": 2.11,
+      "quick_ratio": 1.28,
+      "debt_to_equity": 1.02,
+      "return_on_assets": 0.0683,
+      "return_on_equity": 0.138,
+      "inventory_turnover": 8.48,
+      "accounts_receivable_turnover": 13.8,
+      "ebitda_margin": 0.1095,
+      "capex_pct_revenue": 0.0295,
+      "net_debt_to_ebitda": 1.04,
+      "times_interest_earned": 3.88,
+      "fixed_assets_to_tangible_net_worth": 0.72,
+      "total_debt_to_tangible_net_worth": 1.05,
+      "net_sales_to_net_fixed_assets": 5.88,
+      "net_sales_to_total_assets": 2.03,
+      "provenance": {
+        "section_heading": "Financial Ratio Analysis",
+        "page_numbers": [
+          9,
+          10,
+          11
+        ],
+        "text_excerpt": "2018 ratios: Current 2.11, Quick 1.28, Times Interest Earned 3.88, Total Debt to Tangible Net Worth 1.05, Percent Return on Total Assets 11.20%, Percent Return on Tangible Net Worth 23.26%."
+      },
+      "confidence": 0.9
+    },
+    "customers": {
+      "total_count": null,
+      "top_customer_concentration": null,
+      "top_customer_concentration_pct": null,
+      "customer_retention_rate": null,
+      "notable_customers": [],
+      "recurring_revenue_pct": null,
+      "revenue_mix_by_segment": {},
+      "provenance": {
+        "section_heading": "Not provided",
+        "page_numbers": [],
+        "text_excerpt": "Customer information section heading exists but narrative content was not included in this sample document."
+      },
+      "confidence": 0.0
+    },
+    "market": {
+      "market_size": "Sporting and Athletic Goods Manufacturing industry",
+      "market_size_estimate": null,
+      "market_growth_rate": null,
+      "competitive_position": "Not explicitly described",
+      "market_share": null,
+      "provenance": {
+        "section_heading": "Industry Overview",
+        "page_numbers": [
+          4
+        ],
+        "text_excerpt": "Section heading for Industry Overview exists but narrative content was not included in this sample document."
+      },
+      "confidence": 0.2
+    },
+    "transaction_details": {
+      "seller_motivation": "Provide personal liquidity. Gain access to management expertise. Retirement from the business.",
+      "post_sale_involvement": "Will provide training to the buyer. Will sign a non-compete agreement.",
+      "auction_deadline": "Sept 30, 2019",
+      "assets_for_sale": "Substantially all business-related assets including: Accounts Receivable ($2,846,381), Inventory ($3,062,445), Other Current Assets ($147,017 adjusted), Fixed Assets ($4,554,828), Identifiable Intangible Assets ($5,080,000 adjusted), Other Non-Current Assets ($2,330,341 adjusted)",
+      "deal_type": "Asset sale - substantially all business-related assets",
+      "asking_price": null,
+      "implied_valuation_hint": null,
+      "total_assets_for_sale_historical_cost": 16061995.0,
+      "total_assets_for_sale_adjusted_value": 18021012.0,
+      "provenance": {
+        "section_heading": "Acquisition & Transaction Information",
+        "page_numbers": [
+          17
+        ],
+        "text_excerpt": "The proposed transaction is for the sale of substantially all of its business-related assets. Seller Motivations: Provide personal liquidity, Gain access to management expertise, Retirement from the business. The sale will be conducted as an auction. The initial deadline for submitting bids is Sept 30, 2019."
+      },
+      "confidence": 0.9
+    },
+    "strategic_rationale": {
+      "deal_thesis": "Established sporting goods manufacturer with 30+ year operating history showing consistent revenue growth (5.66% historical CAGR) and strong margin expansion (gross margin improved from 20.3% to 24.3% over 5 years). Company demonstrates operational efficiency with improving EBITDA margins and strong cash flow generation. Asset sale structure provides clean acquisition of operating business.",
+      "value_creation_plan": "Potential for continued margin expansion as gross margins projected to stabilize around 27%. Opportunity to leverage existing infrastructure and customer relationships. Strong working capital management with improving liquidity ratios. Potential to reduce owner compensation adjustments ($150K-220K annually) and optimize G&A expenses.",
+      "add_on_opportunities": "Platform for roll-up strategy in fragmented sporting goods manufacturing sector. Opportunity to add complementary product lines or expand geographic reach. Potential to leverage existing manufacturing capabilities for adjacent markets.",
+      "competitive_advantages": [
+        "30+ year operating history (established 1989)",
+        "Consistent revenue growth with 5-year CAGR of 5.66%",
+        "Improving gross margins from 20.3% to 24.3%",
+        "Strong cash flow generation with positive FCF",
+        "Better than industry performance on key metrics (ROA 11.2% vs industry 5.8%, ROE 23.3% vs industry 22.1%)",
+        "Efficient inventory and receivables management",
+        "Low debt leverage (1.7x Debt/EBITDA)"
+      ],
+      "key_risks_summary": "Customer concentration risk not disclosed. Founder dependency with retirement motivation. Auction process may drive competitive bidding. Working capital requirements increasing. Industry competitive dynamics unclear. Integration and transition risks with seller providing training only.",
+      "provenance": {
+        "section_heading": "Derived from Financial Performance and Transaction Details",
+        "page_numbers": [
+          5,
+          6,
+          8,
+          9,
+          17
+        ],
+        "text_excerpt": "Analysis based on historical financial performance, growth trends, margin expansion, and transaction structure."
+      },
+      "confidence": 0.75
+    },
+    "key_risks": [
+      {
+        "risk": "Customer Concentration Risk",
+        "severity": "High",
+        "description": "No customer concentration data disclosed in the CIM. For a $31.5M revenue business, lack of customer diversification information is a significant red flag. If top customers represent >30% of revenue, loss of key accounts could materially impact financial performance.",
+        "mitigation": null,
+        "inferred": true,
+        "provenance": {
+          "section_heading": "Customers and Customer Relationships",
+          "page_numbers": [
+            4
+          ],
+          "text_excerpt": "Section heading exists but no customer data provided in narrative sections."
+        },
+        "confidence": 0.6
+      },
+      {
+        "risk": "Founder/Owner Dependency Risk",
+        "severity": "High",
+        "description": "Seller motivation includes retirement from business. Post-sale involvement limited to training and non-compete. No information on management team depth or succession planning. Heavy reliance on founder knowledge and relationships could impact business continuity.",
+        "mitigation": "Seller will provide training to buyer and sign non-compete agreement",
+        "inferred": true,
+        "provenance": {
+          "section_heading": "Seller Motivations and Post-Sale Involvement",
+          "page_numbers": [
+            17
+          ],
+          "text_excerpt": "Seller motivations: Retirement from the business. After the sale, the seller: Will provide training to the buyer. Will sign a non-compete agreement."
+        },
+        "confidence": 0.8
+      },
+      {
+        "risk": "Auction Process Competitive Risk",
+        "severity": "Medium",
+        "description": "Sale conducted as auction with deadline of Sept 30, 2019. Competitive bidding process may drive valuation above strategic value. Limited time for due diligence (deadline pressure). Multiple bidders increase execution risk.",
+        "mitigation": null,
+        "inferred": false,
+        "provenance": {
+          "section_heading": "Auction Sale",
+          "page_numbers": [
+            17
+          ],
+          "text_excerpt": "The sale will be conducted as an auction. The initial deadline for submitting bids is Sept 30, 2019."
+        },
+        "confidence": 0.9
+      },
+      {
+        "risk": "Working Capital Requirements Increasing",
+        "severity": "Medium",
+        "description": "Net working capital as % of revenue increased from 8.66% (2014) to 10.42% (2018). Working capital increased by $338,500 in 2018 alone. Growing working capital needs could strain cash flow and require additional financing post-acquisition.",
+        "mitigation": null,
+        "inferred": true,
+        "provenance": {
+          "section_heading": "Changes in Net Working Capital Component of Free Cash Flow",
+          "page_numbers": [
+            7
+          ],
+          "text_excerpt": "Net Working Capital 2018: $3,286,880 (10.42% of Revenue). Change in Net Working Capital 2018: $338,500."
+        },
+        "confidence": 0.75
+      },
+      {
+        "risk": "High Capital Expenditure Volatility",
+        "severity": "Medium",
+        "description": "CapEx highly variable: $930K (2015-2016), $2.18M (2017), $930K (2018). Projected CapEx of $2.75M in 2020 represents 7.9% of projected revenue. Large projected CapEx requirements could impact cash flow and returns.",
+        "mitigation": null,
+        "inferred": true,
+        "provenance": {
+          "section_heading": "Adjusted Free Cash Flow and Projected EBITDA less CapEx",
+          "page_numbers": [
+            7,
+            16
+          ],
+          "text_excerpt": "Fixed Asset Purchases: 2017: $2,180,000, 2018: $929,999. Projected Capital Expenditures 2020: $2,750,000."
+        },
+        "confidence": 0.85
+      },
+      {
+        "risk": "Declining Inventory Turnover",
+        "severity": "Low",
+        "description": "Inventory turnover declined from 10.08x (2014) to 8.48x (2018), though stabilized in recent years. Days inventory increased from 35.7 to 42.5 days. Could indicate slower-moving inventory, obsolescence risk, or changing product mix.",
+        "mitigation": null,
+        "inferred": true,
+        "provenance": {
+          "section_heading": "Financial Ratio Analysis - Liquidity Ratios",
+          "page_numbers": [
+            11
+          ],
+          "text_excerpt": "Inventory Turnover: 2014: 10.08, 2018: 8.48. Days' Inventory: 2014: 35.70, 2018: 42.45."
+        },
+        "confidence": 0.7
+      },
+      {
+        "risk": "Limited Competitive and Market Information",
+        "severity": "Medium",
+        "description": "CIM lacks detailed competitive analysis, market positioning, and market share data. Industry trends section exists but narrative not provided. Difficult to assess competitive moat and sustainability of margins without this information.",
+        "mitigation": null,
+        "inferred": true,
+        "provenance": {
+          "section_heading": "Competitive Overview, Market Segments, Industry Trends",
+          "page_numbers": [
+            4
+          ],
+          "text_excerpt": "Section headings exist but narrative content not included in this sample document."
+        },
+        "confidence": 0.65
+      },
+      {
+        "risk": "Intangible Asset Valuation Risk",
+        "severity": "Medium",
+        "description": "Identifiable intangible assets adjusted from $25K historical cost to $5.08M adjusted value - a 203x increase. This represents 28% of total adjusted asset value. Valuation methodology not disclosed. Risk of overstated asset values.",
+        "mitigation": null,
+        "inferred": true,
+        "provenance": {
+          "section_heading": "Acquisition & Transaction Information - Assets Available for Acquisition",
+          "page_numbers": [
+            17
+          ],
+          "text_excerpt": "Identifiable Intangible Assets: Historical Cost $25,000, Adjusted Value $5,080,000."
+        },
+        "confidence": 0.7
+      },
+      {
+        "risk": "Information Verification Risk",
+        "severity": "High",
+        "description": "Document explicitly states: 'The Business Intermediary, employees, representatives and agents have not made any independent investigation, verification or audit of any of the information contained in this Memorandum.' All data is unverified and provided by seller. Requires extensive due diligence.",
+        "mitigation": "Conduct thorough due diligence including independent financial audit, customer verification, and operational assessment",
+        "inferred": false,
+        "provenance": {
+          "section_heading": "Disclaimer and Notice",
+          "page_numbers": [
+            1,
+            2
+          ],
+          "text_excerpt": "The Business Intermediary, employees, representatives and agents have not made any independent investigation, verification or audit of any of the information contained in this Memorandum. No representations or warranties, expressed or implied, are made regarding the accuracy or completeness of the information contained herein."
+        },
+        "confidence": 0.95
+      },
+      {
+        "risk": "Management Team Information Gap",
+        "severity": "Medium",
+        "description": "No information provided on management team composition, depth, experience, or retention plans. Critical for assessing post-acquisition operational continuity, especially given founder retirement.",
+        "mitigation": null,
+        "inferred": true,
+        "provenance": {
+          "section_heading": "Management and Employees",
+          "page_numbers": [
+            4
+          ],
+          "text_excerpt": "Section heading exists but narrative content not included in this sample document."
+        },
+        "confidence": 0.7
+      }
+    ],
+    "management_team": [],
+    "investment_thesis": "Established sporting goods manufacturer with 30-year operating history demonstrating consistent growth and margin expansion. Company shows 5.66% historical revenue CAGR (2014-2018) with revenue growing from $25.3M to $31.5M. Strong margin improvement story with gross margins expanding from 20.3% to 24.3% and projected to reach 27% range. EBITDA margins improved from 9.4% to 10.9% with adjusted EBITDA of $3.6M in 2018. Company generates positive free cash flow ($1.4M in 2018) with manageable debt leverage (1.7x Debt/EBITDA). Balance sheet shows strong liquidity with current ratio of 2.11 and quick ratio of 1.28. Working capital well-managed at 10.4% of revenue. Company outperforms industry benchmarks on key metrics including ROA (11.2% vs 5.8% industry) and ROE (23.3% vs 22.1% industry). Asset sale structure provides clean acquisition of operating business with adjusted asset value of $18M. Projections show continued growth with revenue reaching $39.9M by 2023 (4.86% CAGR) and EBITDA expanding to $5.9M. Platform opportunity for add-on acquisitions in fragmented sporting goods sector.",
+    "derived_metrics": {
+      "ttm_revenue": 18924689.0,
+      "revenue_per_employee": null,
+      "ebitda_per_employee": null,
+      "ebitda_margin_2018": 0.1095,
+      "ebitda_margin_2017": 0.1049,
+      "ebitda_margin_2016": 0.1036,
+      "ebitda_margin_2015": 0.1017,
+      "ebitda_margin_2014": 0.094,
+      "capex_pct_revenue_2018": 0.0295,
+      "capex_pct_revenue_2017": 0.0746,
+      "capex_pct_revenue_2016": 0.0332,
+      "capex_pct_revenue_2015": 0.0351,
+      "net_debt_to_ebitda_2018": 1.04,
+      "fcf_margin_2018": 0.0451,
+      "fcf_margin_2017": 0.0068,
+      "fcf_margin_2016": 0.041,
+      "fcf_margin_2015": 0.0326,
+      "revenue_growth_2018": 0.0795,
+      "revenue_growth_2017": 0.0419,
+      "revenue_growth_2016": 0.0585,
+      "revenue_growth_2015": 0.0471,
+      "ebitda_growth_2018": 0.1266,
+      "ebitda_growth_2017": 0.0556,
+      "ebitda_growth_2016": 0.0776,
+      "ebitda_growth_2015": 0.1332
+    },
+    "extraction_notes": "DOCUMENT QUALITY: This is a sample/template CIM document with complete financial data but missing narrative sections. Many section headings exist (Industry Overview, Customers, Management, etc.) but state 'The narrative needs to be added' or 'narrative content not included.' ASSUMPTIONS: (1) All dollar figures are in USD. (2) Financial years are fiscal years ending December 31. (3) Trailing twelve months data is for period ending June 2019. (4) Projected years 2019-2023 are management projections with no independent verification. CALCULATIONS PERFORMED: (1) Debt-to-EBITDA = Total Interest-Bearing Debt / EBITDA. (2) EBITDA margins calculated for all years. (3) CapEx as % of revenue calculated for all historical years. (4) Net Debt to EBITDA = (Total Debt - Cash) / EBITDA. (5) All financial ratios verified against stated ratios in document. (6) Historical and projected CAGRs calculated from revenue data. MISSING CRITICAL DATA: (1) No asking price or valuation multiples stated. (2) No customer concentration data. (3) No employee count. (4) No management team information. (5) No detailed competitive analysis or market share data. (6) Narrative sections for Industry Overview, Customers, Products/Services, Operations, Management are placeholder headings only. DATA QUALITY ISSUES: (1) Intangible assets show massive adjustment from $25K to $5.08M with no methodology disclosed. (2) Document explicitly states no independent verification of any information. (3) Some projected tax figures appear to equal pre-tax income (100% tax rate) which seems erroneous - may be placeholder data. RISK INFERENCE: Identified 10 key risks including 4 explicit risks from document text and 6 inferred risks from financial analysis, missing data, and transaction structure. Confidence scores assigned based on whether risks are explicitly stated vs. inferred from data patterns. PROVENANCE: Included source section headings and page numbers for all major financial data points. Text excerpts provided for key values to enable verification.",
+    "company_info": {
+      "company_name": null,
+      "company_id": "EMA 457635-01",
+      "industry": "Sporting Goods Manufacturing",
+      "secondary_industry": "Sporting Goods Wholesale",
+      "sic_codes": "3949",
+      "naics_codes": "339920",
+      "business_structure": "C-Corporation",
+      "founded_year": 1989,
+      "employees": null,
+      "headquarters": "Southern California",
+      "website": null,
+      "provenance": {
+        "section_heading": "Introduction",
+        "page_numbers": [
+          3
+        ],
+        "text_excerpt": "Company ID No. EMA 457635-01. The Company is located in Southern California. The Company is primarily engaged in the business of Sporting Goods Manufacturing and its secondary business activity is Sporting Goods Wholesale. The applicable SIC / NAICS codes for the Company's business activity are 3949 / 339920. The Company was established in 1989 and is organized under the laws of California. The Company is structured as a C-Corporation."
+      },
+      "confidence": 0.95
+    },
+    "financials": {
+      "revenue_by_year": {
+        "2014": 25302860.0,
+        "2015": 26494580.0,
+        "2016": 28043400.0,
+        "2017": 29219270.0,
+        "2018": 31541420.0,
+        "projected_2019": 33029158.0,
+        "projected_2020": 34605870.0,
+        "projected_2021": 36277151.0,
+        "projected_2022": 38049272.0,
+        "projected_2023": 39928935.0
+      },
+      "ebitda_by_year": {
+        "2014": 2377930.0,
+        "2015": 2694760.0,
+        "2016": 2903970.0,
+        "2017": 3065364.0,
+        "2018": 3453460.0,
+        "projected_2019": 4816427.0,
+        "projected_2020": 5086663.0,
+        "projected_2021": 5233999.0,
+        "projected_2022": 5524690.0,
+        "projected_2023": 5853437.0
+      },
+      "adjusted_ebitda_by_year": {
+        "2014": 2422930.0,
+        "2015": 2764760.0,
+        "2016": 3003970.0,
+        "2017": 3195364.0,
+        "2018": 3613460.0
+      },
+      "net_income_by_year": {
+        "2014": 442816.0,
+        "2015": 549037.0,
+        "2016": 598005.0,
+        "2017": 687985.0,
+        "2018": 1060590.0
+      },
+      "gross_margin_by_year": {
+        "2014": 0.203,
+        "2015": 0.1817,
+        "2016": 0.2061,
+        "2017": 0.2148,
+        "2018": 0.2432,
+        "projected_2019": 0.266,
+        "projected_2020": 0.2618,
+        "projected_2021": 0.2749,
+        "projected_2022": 0.2765,
+        "projected_2023": 0.2756
+      },
+      "fiscal_year_end": "December 31",
+      "currency": "USD",
+      "trailing_twelve_months": {
+        "period_ending": "Jun 2019",
+        "revenue": 18924689.0,
+        "net_income": 1419183.0,
+        "adjusted_ebitda": 2799590.0
+      },
+      "other_metrics": {
+        "cogs_by_year": {
+          "2014": 20165679.0,
+          "2015": 21681757.0,
+          "2016": 22263336.0,
+          "2017": 22943789.0,
+          "2018": 23870297.0
+        },
+        "operating_income_by_year": {
+          "2015": 1513211.0,
+          "2016": 1543489.0,
+          "2017": 1661613.0,
+          "2018": 2224734.0
+        },
+        "depreciation_amortization_by_year": {
+          "2015": 1120139.0,
+          "2016": 1266711.0,
+          "2017": 1289091.0,
+          "2018": 1110806.0
+        },
+        "assumptions": "All financial figures are in USD. Historical data from 2014-2018 fiscal years. Projections from 2019-2023."
+      },
+      "provenance": {
+        "section_heading": "Financial Performance - Historic Income Statement Summary",
+        "page_numbers": [
+          5,
+          6,
+          15
+        ],
+        "text_excerpt": "The following table presents the last 5 years of income statement account groups along with their respective percentage of total revenues. The latest historic income statement is for fiscal year, 2018. Net Sales Revenue 2018: $31,541,420. Adjusted EBITDA 2018: $3,613,460."
+      },
+      "confidence": 0.95
+    }
+  }
+}

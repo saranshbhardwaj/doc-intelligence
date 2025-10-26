@@ -5,6 +5,7 @@ import DataField from "../DataField";
 
 export default function BalanceSheet({ data }) {
   const balance = data.balance_sheet || {};
+  const currency = data.financials?.currency || 'USD';
 
   if (!balance || Object.keys(balance).length === 0) {
     return null;
@@ -13,10 +14,10 @@ export default function BalanceSheet({ data }) {
   return (
     <Section title="Balance Sheet" icon={BarChart3}>
       {balance.most_recent_year && (
-        <div className="mb-4 pb-4 border-b border-gray-200">
-          <span className="text-sm font-semibold text-gray-600">
+        <div className="mb-4 pb-4 border-b border-gray-200 dark:border-gray-700">
+          <span className="text-sm font-semibold text-gray-600 dark:text-gray-400">
             Most Recent Year:{" "}
-            <span className="text-gray-900 text-lg">
+            <span className="text-gray-900 dark:text-gray-100 text-lg">
               {balance.most_recent_year}
             </span>
           </span>
@@ -28,6 +29,7 @@ export default function BalanceSheet({ data }) {
             label="Total Assets"
             value={balance.total_assets}
             format="currency"
+            currency={currency}
             highlight={true}
           />
         )}
@@ -36,6 +38,7 @@ export default function BalanceSheet({ data }) {
             label="Current Assets"
             value={balance.current_assets}
             format="currency"
+            currency={currency}
           />
         )}
         {balance.fixed_assets != null && (
@@ -43,6 +46,7 @@ export default function BalanceSheet({ data }) {
             label="Fixed Assets"
             value={balance.fixed_assets}
             format="currency"
+            currency={currency}
           />
         )}
         {balance.total_liabilities != null && (
@@ -50,6 +54,7 @@ export default function BalanceSheet({ data }) {
             label="Total Liabilities"
             value={balance.total_liabilities}
             format="currency"
+            currency={currency}
             highlight={true}
           />
         )}
@@ -58,6 +63,7 @@ export default function BalanceSheet({ data }) {
             label="Current Liabilities"
             value={balance.current_liabilities}
             format="currency"
+            currency={currency}
           />
         )}
         {balance.long_term_debt != null && (
@@ -65,6 +71,7 @@ export default function BalanceSheet({ data }) {
             label="Long-Term Debt"
             value={balance.long_term_debt}
             format="currency"
+            currency={currency}
             highlight={true}
           />
         )}
@@ -73,6 +80,7 @@ export default function BalanceSheet({ data }) {
             label="Stockholders Equity"
             value={balance.stockholders_equity}
             format="currency"
+            currency={currency}
             highlight={true}
           />
         )}
@@ -81,6 +89,7 @@ export default function BalanceSheet({ data }) {
             label="Working Capital"
             value={balance.working_capital}
             format="currency"
+            currency={currency}
           />
         )}
       </div>

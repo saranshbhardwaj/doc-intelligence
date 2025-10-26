@@ -23,8 +23,8 @@ async def extract_document(
     Extract structured data from uploaded PDF.
     
     Limits:
-    - 2 uploads per IP per 24 hours (cached results don't count)
-    - Max 50 pages
+    - 2 uploads per IP per 24 hours
+    - Max 60 pages
     - Max 5MB file size
     """
     if settings.mock_mode:
