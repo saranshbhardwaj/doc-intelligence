@@ -3,11 +3,12 @@ from datetime import datetime
 import time
 from app.api.dependencies import rate_limiter
 from fastapi import APIRouter, Request, UploadFile, File, HTTPException
-from app.models import ExtractionMetadata, ExtractionResponse, RateLimitInfo
+from app.models import ExtractionMetadata, ExtractionResponse, RateLimitInfo, ExtractedData
 from app.api.dependencies import get_client_ip, llm_client, document_processor, cache, analytics
 from app.utils.file_utils import save_raw_text, save_parsed_result, save_raw_llm_response, make_file_label
 from app.utils.normalization import _normalize_llm_output
 from app.services.mock_responses import get_mock_cim_response
+from app.services.risk_detector import detect_red_flags
 from app.config import settings
 from app.utils.logging import logger
 import uuid
@@ -78,6 +79,19 @@ async def extract_document(
             except Exception as e:
                 logger.warning(f"Failed to normalize cached data: {e}")
                 normalized_cached = cached_result  # fallback to original
+
+            # Run red flag detection on cached data (in case rules changed)
+            try:
+                extracted_data_obj = ExtractedData(**normalized_cached.get("data", {}))
+                red_flags = detect_red_flags(extracted_data_obj)
+                if "data" not in normalized_cached:
+                    normalized_cached["data"] = {}
+                normalized_cached["data"]["red_flags"] = red_flags
+            except Exception as e:
+                logger.warning(f"Red flag detection failed on cached data: {e}")
+                if "data" not in normalized_cached:
+                    normalized_cached["data"] = {}
+                normalized_cached["data"]["red_flags"] = []
 
             return ExtractionResponse(
                 success=True,
@@ -151,6 +165,28 @@ async def extract_document(
         except Exception as e:
             logger.exception("Normalization failed", extra={"request_id": request_id, "error": str(e)})
             normalized_payload = extracted_data  # fallback to original
+
+        # Run automated red flag detection
+        try:
+            # Create ExtractedData instance for type-safe detection
+            extracted_data_obj = ExtractedData(**normalized_payload.get("data", {}))
+            red_flags = detect_red_flags(extracted_data_obj)
+
+            # Add red flags to normalized payload
+            if "data" not in normalized_payload:
+                normalized_payload["data"] = {}
+            normalized_payload["data"]["red_flags"] = red_flags
+
+            logger.info(f"Red flag detection complete: {len(red_flags)} flags found", extra={
+                "request_id": request_id,
+                "red_flag_count": len(red_flags)
+            })
+        except Exception as e:
+            logger.warning(f"Red flag detection failed: {e}", extra={"request_id": request_id})
+            # Non-critical - continue without red flags
+            if "data" not in normalized_payload:
+                normalized_payload["data"] = {}
+            normalized_payload["data"]["red_flags"] = []
 
         analytics.track_event(
             "upload_success",

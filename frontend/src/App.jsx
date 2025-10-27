@@ -69,7 +69,7 @@ function AppInner() {
             Stop reading CIMs manually. Extract data in minutes.
           </p>
           <p className="text-sm text-gray-500 dark:text-gray-500">
-            Free demo: 2 uploads per day • Max 60 pages • 5MB limit
+            Free demo: 2 uploads per day • Max 50 pages per upload • 5MB limit
           </p>
         </div>
 

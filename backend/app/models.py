@@ -216,7 +216,10 @@ class ExtractedData(BaseModel):
     capital_structure: Optional[CapitalStructure] = None
     operating_metrics: Optional[OperatingMetrics] = None
     strategic_rationale: Optional[StrategicRationale] = None
-    
+
+    # Automated red flag detection (quantitative rules applied to extracted data)
+    red_flags: Optional[List[Dict[str, Any]]] = Field(default_factory=list)
+
     # raw sections map (heading -> text + pages) useful for UI and audit
     raw_sections: Optional[Dict[str, Dict[str, Any]]] = None
     # per-field confidence & provenance maps (non-breaking — optional)

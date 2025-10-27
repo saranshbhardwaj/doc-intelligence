@@ -21,6 +21,7 @@ import MarketAnalysis from "./sections/MarketAnalysis";
 import InvestmentThesis from "./sections/InvestmentThesis";
 import StrategicRationale from "./sections/StrategicRationale";
 import DerivedMetrics from "./sections/DerivedMetrics";
+import RedFlags from "./sections/RedFlags";
 import KeyRisks from "./sections/KeyRisks";
 import ManagementTeam from "./sections/ManagementTeam";
 import ExtractionNotes from "./sections/ExtractionNotes";
@@ -49,6 +50,8 @@ export default function ResultsView({ result }) {
         <CompanyHeader data={data} metadata={result.metadata} />
 
         <KeyMetricsDashboard data={data} />
+
+        <RedFlags data={data} />
 
         <TransactionOverview data={data} />
 

@@ -26,12 +26,12 @@ class Settings(BaseSettings):
     
     # File Upload Limits
     max_file_size_mb: int = 5
-    max_pages: int = 60
+    max_pages: int = 50
     
     # LLM Settings
     llm_model: str = "claude-sonnet-4-5-20250929"
     llm_max_tokens: int = 16000
-    llm_max_input_chars: int = 100000
+    llm_max_input_chars: int = 130000
     llm_timeout_seconds: int = 300  # 5 minutes timeout for API calls (large documents can take 2-3 min)
     
     # Paths
