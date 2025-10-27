@@ -7,6 +7,7 @@ import { saveAs } from "file-saver";
 import { addExecutiveSummary } from "./executiveSummary.js";
 import { addCompanyOverview } from "./companyOverview.js";
 import { addFinancialPerformance } from "./financialPerformance.js";
+import { addRedFlags } from "./redFlags.js";
 import {
   addBalanceSheetAndRatios,
   addValuationMultiples,
@@ -33,6 +34,7 @@ export async function exportToExcel(data, metadata) {
 
   // Generate all sheets
   await addExecutiveSummary(workbook, data, metadata);
+  addRedFlags(workbook, data); // Add Red Flags sheet (right after summary)
   addCompanyOverview(workbook, data);
   addFinancialPerformance(workbook, data);
   addBalanceSheetAndRatios(workbook, data);
