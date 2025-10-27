@@ -61,12 +61,12 @@ export default function LandingPage() {
               >
                 Features
               </a>
-              <a
+              {/* <a
                 href="#pricing"
                 className="text-gray-600 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
               >
                 Pricing
-              </a>
+              </a> */}
               <a
                 href="#faq"
                 className="text-gray-600 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
@@ -178,14 +178,14 @@ export default function LandingPage() {
                     Features
                   </a>
                 </li>
-                <li>
+                {/* <li>
                   <a
                     href="#pricing"
                     className="hover:text-white transition-colors"
                   >
                     Pricing
                   </a>
-                </li>
+                </li> */}
                 <li>
                   <a href="#" className="hover:text-white transition-colors">
                     Changelog

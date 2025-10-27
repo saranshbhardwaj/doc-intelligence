@@ -1,7 +1,7 @@
 // src/pages/UploadPage.jsx
 // Main upload and results page (moved from App.jsx)
 import { useState, useEffect } from "react";
-import { useSearchParams } from "react-router-dom";
+import { useSearchParams, useNavigate } from "react-router-dom";
 import FileUploader from "../components/upload/FileUploader";
 import ResultsView from "../components/results/ResultViews";
 import DarkModeToggle from "../components/common/DarkModeToggle";
@@ -10,6 +10,7 @@ import { useDarkMode } from "../hooks/useDarkMode";
 export default function UploadPage() {
   const { isDark, toggle } = useDarkMode();
   const [searchParams] = useSearchParams();
+  const navigate = useNavigate();
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
   const [rateLimit, setRateLimit] = useState(null);
@@ -82,33 +83,58 @@ export default function UploadPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-[#1a1a1a] py-12 px-4 transition-colors duration-200">
-      <div className="max-w-4xl mx-auto">
-        {/* Header */}
-        <div className="text-center mb-12">
-          {/* Logo + Brand Name */}
-          <div className="flex items-center justify-center gap-4 mb-4">
-            <img
-              src="/Sand_cloud_logo_dark-gray.svg"
-              alt="Sand Cloud Logo"
-              className="h-16 w-auto dark:hidden"
-            />
-            <img
-              src="/Sand_cloud_logo_dark-gray.svg"
-              alt="Sand Cloud Logo"
-              className="h-16 w-auto hidden dark:block"
-            />
-            <h1 className="text-5xl font-bold text-gray-900 dark:text-white">
-              Sand Cloud
-            </h1>
+    <div className="min-h-screen bg-gray-50 dark:bg-[#1a1a1a] transition-colors duration-200">
+      {/* Navigation Bar */}
+      <nav className="sticky top-0 z-50 bg-white/80 dark:bg-gray-900/80 backdrop-blur-lg border-b border-gray-200 dark:border-gray-800">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex justify-between items-center h-16">
+            {/* Logo - clickable to go home */}
+            <button
+              onClick={() => navigate("/")}
+              className="flex items-center gap-3 hover:opacity-80 transition-opacity"
+            >
+              <img
+                src="/Sand_cloud_logo_dark-gray.svg"
+                alt="Sand Cloud"
+                className="h-8 w-auto"
+              />
+              <span className="text-xl font-bold text-gray-900 dark:text-white">
+                Sand Cloud
+              </span>
+            </button>
+
+            {/* Right side actions */}
+            <div className="flex items-center gap-4">
+              <DarkModeToggle
+                isDark={isDark}
+                toggle={toggle}
+                variant="inline"
+              />
+              <button
+                onClick={() => navigate("/")}
+                className="px-4 py-2 text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white transition-colors font-medium"
+              >
+                Back to Home
+              </button>
+            </div>
           </div>
-          <p className="text-xl text-gray-700 dark:text-gray-300 mb-2">
-            Stop reading CIMs manually. Extract data in minutes.
-          </p>
-          <p className="text-sm text-gray-500 dark:text-gray-500">
-            Free demo: 2 uploads per day • Max 60 pages per upload • 5MB limit
-          </p>
         </div>
+      </nav>
+
+      <div className="py-12 px-4">
+        <div className="max-w-4xl mx-auto">
+          {/* Header */}
+          <div className="text-center mb-12">
+            <h1 className="text-4xl font-bold text-gray-900 dark:text-white mb-4">
+              Upload Your CIM
+            </h1>
+            <p className="text-lg text-gray-700 dark:text-gray-300 mb-2">
+              Stop reading CIMs manually. Extract data in minutes.
+            </p>
+            <p className="text-sm text-gray-500 dark:text-gray-500">
+              Free demo: 2 uploads per day • Max 60 pages per upload • 5MB limit
+            </p>
+          </div>
 
         {/* Demo Banner */}
         {isDemo && (
@@ -189,10 +215,8 @@ export default function UploadPage() {
             <ResultsView result={result} />
           </div>
         )}
+        </div>
       </div>
-
-      {/* Dark Mode Toggle */}
-      <DarkModeToggle isDark={isDark} toggle={toggle} />
     </div>
   );
 }
