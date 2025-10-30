@@ -9,3 +9,12 @@ pydantic-settings==2.1.0
 python-json-logger==2.0.7
 httpx==0.27.2
 aiohttp==3.9.1
+
+# Database
+sqlalchemy==2.0.23
+psycopg2-binary==2.9.9  # PostgreSQL driver
+alembic==1.12.1  # Database migrations (optional, for future)
+
+# Document parsing
+PyMuPDF==1.23.8  # fitz - for PDF text extraction
+google-cloud-documentai==3.7.0  # Google Document AI client

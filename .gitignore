@@ -80,3 +80,5 @@ backend/tests/data/sample_cims/*.pdf
 backend/.env.example
 backend/Sample_CIM.pdf
 frontend/.env.development
+backend/resolute-clock-400618-967b7a8c060f.json
+backend/credentials/resolute-clock-400618-967b7a8c060f.json

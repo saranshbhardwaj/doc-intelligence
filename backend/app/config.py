@@ -5,10 +5,14 @@ from pydantic import field_validator
 
 class Settings(BaseSettings):
     """Application settings from environment variables"""
-    
+
     # API Keys
     anthropic_api_key: str
     admin_api_key: str = "change-this-in-production"  # For analytics endpoint access
+    llmwhisperer_api_key: str = ""  # Optional - for OCR support (Pro tier)
+
+    # Database
+    database_url: str = ""  # Leave empty for SQLite in development
 
     # Notifications (optional - leave empty to disable)
     slack_webhook_url: str = ""  # Get from: https://api.slack.com/messaging/webhooks
@@ -23,10 +27,62 @@ class Settings(BaseSettings):
 
     # cache ttl
     cache_ttl: int = 48
-    
+
+    # ===== PARSER CONFIGURATION =====
+    # Which parser to use for each tier + PDF type combination
+    parser_free_digital: str = "pymupdf"
+    parser_free_scanned: str = "none"  # "none" means not supported - will reject
+    parser_pro_digital: str = "pymupdf"
+    parser_pro_scanned: str = "llmwhisperer"
+    parser_enterprise_digital: str = "llmwhisperer"
+    parser_enterprise_scanned: str = "llmwhisperer"
+
+    # ===== RATE LIMITS PER TIER =====
+    # Free tier
+    rate_limit_free_daily: int = 2
+    rate_limit_free_monthly: int = 60
+    # Pro tier
+    rate_limit_pro_daily: int = 50
+    rate_limit_pro_monthly: int = 1500
+    # Enterprise tier (-1 means unlimited)
+    rate_limit_enterprise_daily: int = -1
+    rate_limit_enterprise_monthly: int = -1
+
+    # ===== PARSER TIMEOUTS =====
+    llmwhisperer_timeout_seconds: int = 300  # 5 minutes
+    parser_timeout_seconds: int = 300  # Generic parser timeout
+
+    # ===== LLMWHISPERER MODE =====
+    # Processing mode for LLMWhisperer OCR (determines price per page)
+    # Options: native_text ($0.001/page), low_cost ($0.005/page), high_quality ($0.010/page), form_elements ($0.015/page)
+    llmwhisperer_mode: str = "low_cost"  # Recommended for testing and comparison
+
+    # Output mode (FREE - just formatting)
+    # Options: layout_preserving (optimized for LLMs), text (raw text)
+    llmwhisperer_output_mode: str = "text"
+
+    # ===== GOOGLE DOCUMENT AI (Optional) =====
+    # Google Cloud settings for Document AI OCR
+    google_cloud_project_id: str = ""
+    google_application_credentials: str = ""
+    document_ai_processor_id: str = ""
+    document_ai_location: str = "us"
+    gcs_bucket_name: str = ""  # Required for batch processing (>15 pages)
+
+    # ===== TESTING OVERRIDES (Development Only - DO NOT USE IN PRODUCTION) =====
+    # Force specific parser for all requests (overrides tier logic)
+    # Example: FORCE_PARSER=llmwhisperer to test OCR
+    force_parser: str = ""
+
+    # Force specific user tier for all requests (overrides database lookup)
+    # Example: FORCE_USER_TIER=pro to test pro tier features
+    force_user_tier: str = ""
+
+    document_ai_timeout_seconds: int = 900
+
     # File Upload Limits
     max_file_size_mb: int = 5
-    max_pages: int = 50
+    max_pages: int = 60
     
     # LLM Settings
     llm_model: str = "claude-sonnet-4-5-20250929"
@@ -61,7 +117,8 @@ class Settings(BaseSettings):
     mock_mode: bool = False
     
     class Config:
-        env_file = ".env"
+        # Point explicitly to backend/.env so scripts run from repo root still load variables
+        env_file = Path(__file__).parent / ".env"
         case_sensitive = False
 
     def __init__(self, **kwargs):
