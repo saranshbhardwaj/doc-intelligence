@@ -14,6 +14,10 @@ class Settings(BaseSettings):
     # Database
     database_url: str = ""  # Leave empty for SQLite in development
 
+    # Azure Document Intelligence (optional)
+    azure_doc_intelligence_api_key: str = ""
+    azure_doc_intelligence_endpoint: str = ""
+
     # Notifications (optional - leave empty to disable)
     slack_webhook_url: str = ""  # Get from: https://api.slack.com/messaging/webhooks
 
@@ -118,8 +122,10 @@ class Settings(BaseSettings):
     
     class Config:
         # Point explicitly to backend/.env so scripts run from repo root still load variables
-        env_file = Path(__file__).parent / ".env"
+        # __file__ points to backend/app/config.py; we need the backend/.env (one directory up)
+        env_file = Path(__file__).resolve().parent.parent / ".env"
         case_sensitive = False
+        extra = "ignore"  # Allow future env vars without breaking startup
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
