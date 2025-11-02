@@ -9,21 +9,29 @@ from fastapi import HTTPException
 
 from app.config import settings
 from app.services.extraction_prompt import SYSTEM_PROMPT, create_extraction_prompt
+from app.services.summary_prompt import SUMMARY_SYSTEM_PROMPT, create_summary_prompt, create_batch_summary_prompt
 from app.utils.logging import logger
 from app.utils.file_utils import save_raw_llm_response
 
 class LLMClient:
-    """Handle Claude API interactions"""
+    """Handle Claude API interactions for both expensive and cheap LLM calls"""
 
     def __init__(self, api_key: str, model: str, max_tokens: int, max_input_chars: int, timeout_seconds: int = 120):
         # Create timeout object for Anthropic SDK
         # read timeout is the important one for long-running API calls
         timeout = Timeout(timeout=float(timeout_seconds), read=float(timeout_seconds), write=10.0, connect=5.0)
         self.client = Anthropic(api_key=api_key, timeout=timeout)
+
+        # Expensive LLM (for structured extraction)
         self.model = model
         self.max_tokens = max_tokens
         self.max_input_chars = max_input_chars
         self.timeout_seconds = timeout_seconds
+
+        # Cheap LLM (for summarization)
+        self.cheap_model = settings.cheap_llm_model
+        self.cheap_max_tokens = settings.cheap_llm_max_tokens
+        self.cheap_timeout_seconds = settings.cheap_llm_timeout_seconds
     
     def extract_structured_data(self, text: str) -> Dict:
         """
@@ -187,3 +195,115 @@ class LLMClient:
     def _create_prompt(self, text: str) -> str:
       """Create extraction prompt using the new comprehensive format"""
       return create_extraction_prompt(text)
+
+    async def summarize_chunk(self, chunk_text: str) -> str:
+        """Summarize a single chunk using cheap LLM (Haiku).
+
+        Args:
+            chunk_text: The chunk text to summarize
+
+        Returns:
+            Summary text (2-4 sentences preserving all numbers and key facts)
+
+        Raises:
+            HTTPException if API call fails
+        """
+        prompt = create_summary_prompt(chunk_text)
+
+        logger.info(
+            f"Calling cheap LLM ({self.cheap_model}) for chunk summary",
+            extra={"prompt_length": len(prompt)}
+        )
+
+        try:
+            message = self.client.messages.create(
+                model=self.cheap_model,
+                max_tokens=self.cheap_max_tokens,
+                temperature=0.0,
+                system=SUMMARY_SYSTEM_PROMPT,
+                messages=[{"role": "user", "content": prompt}]
+            )
+
+            summary = message.content[0].text.strip()
+            logger.debug(f"Cheap LLM summary: {len(summary)} chars")
+            return summary
+
+        except Exception as e:
+            logger.error(f"Cheap LLM summarization failed: {e}")
+            # Fall back to returning original text if summarization fails
+            logger.warning("Falling back to original chunk text")
+            return chunk_text
+
+    async def summarize_chunks_batch(self, chunks: list[dict]) -> list[str]:
+        """Summarize multiple chunks in a single cheap LLM call.
+
+        Args:
+            chunks: List of dicts with 'page' and 'text' keys
+
+        Returns:
+            List of summary strings (one per chunk)
+
+        Raises:
+            HTTPException if API call fails
+        """
+        if not chunks:
+            return []
+
+        prompt = create_batch_summary_prompt(chunks)
+
+        logger.info(
+            f"Calling cheap LLM ({self.cheap_model}) for batch summary of {len(chunks)} chunks",
+            extra={"prompt_length": len(prompt), "chunk_count": len(chunks)}
+        )
+
+        try:
+            message = self.client.messages.create(
+                model=self.cheap_model,
+                max_tokens=self.cheap_max_tokens,
+                temperature=0.0,
+                system=SUMMARY_SYSTEM_PROMPT,
+                messages=[{"role": "user", "content": prompt}]
+            )
+
+            batch_summary = message.content[0].text.strip()
+            logger.info(f"Batch summary received: {len(batch_summary)} chars")
+
+            # Parse out individual summaries
+            summaries = self._parse_batch_summaries(batch_summary, len(chunks))
+            return summaries
+
+        except Exception as e:
+            logger.error(f"Batch summarization failed: {e}")
+            # Fall back to returning original texts
+            logger.warning("Falling back to original chunk texts")
+            return [chunk["text"] for chunk in chunks]
+
+    def _parse_batch_summaries(self, batch_output: str, expected_count: int) -> list[str]:
+        """Parse individual summaries from batch output.
+
+        Expected format:
+        Page 1: [summary]
+        Key Numbers: [numbers]
+
+        Page 2: [summary]
+        Key Numbers: [numbers]
+        """
+        import re
+
+        summaries = []
+        # Split by "Page N:" pattern
+        page_pattern = r"Page \d+:\s*(.+?)(?=Page \d+:|$)"
+        matches = re.findall(page_pattern, batch_output, re.DOTALL)
+
+        if len(matches) >= expected_count:
+            summaries = [match.strip() for match in matches[:expected_count]]
+        else:
+            # Parsing failed, return full output split by double newlines
+            logger.warning(f"Failed to parse {expected_count} summaries, got {len(matches)}. Using fallback parsing.")
+            parts = batch_output.split("\n\n")
+            summaries = parts[:expected_count]
+            # Pad with empty strings if needed
+            while len(summaries) < expected_count:
+                summaries.append("")
+
+        return summaries

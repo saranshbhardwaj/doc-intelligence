@@ -12,6 +12,7 @@ class ParserType(str, Enum):
     LLMWHISPERER = "llmwhisperer"
     TEXTRACT = "textract"
     GOOGLE_LAYOUT = "google_layout"
+    AZURE_DOCUMENT_INTELLIGENCE = "azure_document_intelligence"
 
 
 @dataclass

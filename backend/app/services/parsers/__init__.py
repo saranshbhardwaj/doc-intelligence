@@ -13,5 +13,6 @@ __all__ = [
     "PyMuPDFParser",
     "LLMWhispererParser",
     "ParserFactory",
-    "GoogleDocumentAIParser"
+    "GoogleDocumentAIParser",
+    "AzureDocumentIntelligenceParser",
 ]

@@ -5,6 +5,8 @@ from app.services.document_processor import DocumentProcessor
 from app.services.cache import DocumentCache
 from app.services.rate_limiter import RateLimiter
 from app.services.analytics import SimpleAnalytics
+from app.services.extraction_pipeline import ExtractionPipeline
+from app.repositories import ExtractionRepository
 from app.config import settings
 
 # Initialize services
@@ -30,6 +32,12 @@ llm_client = LLMClient(
     max_input_chars=settings.llm_max_input_chars,
     timeout_seconds=settings.llm_timeout_seconds
 )
+
+# Extraction pipeline (orchestrates chunking + multi-stage LLM processing)
+extraction_pipeline = ExtractionPipeline(llm_client=llm_client)
+
+# Data access layer for extractions
+extraction_repository = ExtractionRepository()
 
 analytics = SimpleAnalytics(analytics_dir=settings.analytics_dir)
 

@@ -5,6 +5,7 @@ from .base import DocumentParser
 from .pymupdf_parser import PyMuPDFParser
 from .llmwhisperer_parser import LLMWhispererParser
 from .google_documentai_parser import GoogleDocumentAIParser
+from .azure_document_intelligence_parser import AzureDocumentIntelligenceParser
 from app.config import settings
 from app.utils.logging import logger
 
@@ -127,6 +128,13 @@ class ParserFactory:
                 processor_id=None,    # Fallback to env
                 gcs_bucket=None,      # Fallback to env
                 timeout_seconds=settings.document_ai_timeout_seconds
+            )
+        elif parser_name in ("azure_document_intelligence", "azure_doc_intelligence", "azure_docai"):
+            return AzureDocumentIntelligenceParser(
+                endpoint=settings.azure_doc_intelligence_endpoint or None,
+                api_key=settings.azure_doc_intelligence_api_key or None,
+                model_name=settings.azure_doc_model or None,
+                timeout_seconds=settings.azure_doc_timeout_seconds or None,
             )
 
         else:

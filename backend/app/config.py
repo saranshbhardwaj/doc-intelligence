@@ -17,6 +17,8 @@ class Settings(BaseSettings):
     # Azure Document Intelligence (optional)
     azure_doc_intelligence_api_key: str = ""
     azure_doc_intelligence_endpoint: str = ""
+    azure_doc_model: str = "prebuilt-layout"  # Azure Document Intelligence model to use
+    azure_doc_timeout_seconds: int = 700  # Timeout for Azure parsing
 
     # Notifications (optional - leave empty to disable)
     slack_webhook_url: str = ""  # Get from: https://api.slack.com/messaging/webhooks
@@ -88,18 +90,32 @@ class Settings(BaseSettings):
     max_file_size_mb: int = 5
     max_pages: int = 60
     
-    # LLM Settings
+    # LLM Settings - Expensive Model (Structured Extraction)
     llm_model: str = "claude-sonnet-4-5-20250929"
     llm_max_tokens: int = 16000
     llm_max_input_chars: int = 130000
     llm_timeout_seconds: int = 300  # 5 minutes timeout for API calls (large documents can take 2-3 min)
+
+    # LLM Settings - Cheap Model (Chunk Summarization)
+    cheap_llm_model: str = "claude-haiku-3-5-20241022"  # Much cheaper for summarization
+    cheap_llm_max_tokens: int = 4000  # Summaries are shorter
+    cheap_llm_timeout_seconds: int = 60  # Summaries are faster
+
+    # Chunking Settings
+    enable_chunking: bool = True  # Enable multi-stage LLM processing with chunking
+    chunk_batch_size: int = 10  # Number of narrative chunks to process per cheap LLM call
     
     # Paths
     log_dir: Path = Path("logs")
     raw_dir: Path = Path("logs/raw")
     parsed_dir: Path = Path("logs/parsed")
-    cache_dir: Path = log_dir / "cache" 
-    raw_llm_dir: Path = log_dir / "raw_llm_response" 
+    cache_dir: Path = log_dir / "cache"
+    raw_llm_dir: Path = log_dir / "raw_llm_response"
+
+    # Chunking pipeline paths (for debugging multi-stage LLM processing)
+    chunks_dir: Path = log_dir / "chunks"          # Chunker output
+    summaries_dir: Path = log_dir / "summaries"    # Cheap LLM summaries
+    combined_dir: Path = log_dir / "combined"      # Combined context for expensive LLM
 
     feedback_dir: Path = log_dir / "feedback"
     analytics_dir: Path = log_dir / "analytics" 
@@ -130,8 +146,11 @@ class Settings(BaseSettings):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         # Create directories if they don't exist
-        # Create directories if they don't exist
-        for directory in [self.log_dir, self.raw_dir, self.parsed_dir, self.cache_dir, self.feedback_dir, self.raw_llm_dir]:
+        for directory in [
+            self.log_dir, self.raw_dir, self.parsed_dir, self.cache_dir,
+            self.feedback_dir, self.raw_llm_dir, self.chunks_dir,
+            self.summaries_dir, self.combined_dir, self.analytics_dir
+        ]:
             directory.mkdir(parents=True, exist_ok=True)
 
 # Global settings instance

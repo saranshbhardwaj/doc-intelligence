@@ -6,7 +6,7 @@ import tempfile
 from app.api.dependencies import rate_limiter
 from fastapi import APIRouter, Request, UploadFile, File, HTTPException
 from app.models import ExtractionMetadata, ExtractionResponse, RateLimitInfo, ExtractedData
-from app.api.dependencies import get_client_ip, llm_client, document_processor, cache, analytics
+from app.api.dependencies import get_client_ip, llm_client, document_processor, cache, analytics, extraction_pipeline, extraction_repository
 from app.utils.file_utils import save_raw_text, save_parsed_result, save_raw_llm_response, make_file_label
 from app.utils.normalization import _normalize_llm_output
 from app.services.mock_responses import get_mock_cim_response
@@ -15,11 +15,9 @@ from app.config import settings
 from app.utils.logging import logger
 import uuid
 
-# New parser system imports
+# Parser system imports
 from app.services.parsers import ParserFactory
 from app.utils.pdf_utils import detect_pdf_type
-from app.database import SessionLocal
-from app.db_models import Extraction, ParserOutput, CacheEntry
 
 router = APIRouter()
 
@@ -200,63 +198,45 @@ async def extract_document(
                 "cost": parser_output.cost_usd
             })
 
-            # 7. Store extraction metadata in database
-            db = SessionLocal()
-            try:
-                extraction = Extraction(
-                    id=request_id,
-                    user_id=client_ip,  # TODO: Replace with actual user ID from auth
-                    user_tier=user_tier,
-                    filename=file.filename,
-                    file_size_bytes=len(content),
-                    page_count=page_count,
-                    pdf_type=pdf_type,
-                    parser_used=parser_output.parser_name,
-                    processing_time_ms=parser_output.processing_time_ms,
-                    cost_usd=parser_output.cost_usd,
-                    status="processing",
-                    from_cache=False
-                )
-                db.add(extraction)
-                db.commit()
+            # 7. Store extraction metadata in database using repository
+            extraction_repository.create_extraction(
+                extraction_id=request_id,
+                user_id=client_ip,  # TODO: Replace with actual user ID from auth
+                user_tier=user_tier,
+                filename=file.filename,
+                file_size_bytes=len(content),
+                page_count=page_count,
+                pdf_type=pdf_type,
+                parser_used=parser_output.parser_name,
+                processing_time_ms=parser_output.processing_time_ms,
+                cost_usd=parser_output.cost_usd,
+                from_cache=False
+            )
 
-                # 8. Store raw parser output
-                parser_db_output = ParserOutput(
-                    extraction_id=request_id,
-                    parser_name=parser_output.parser_name,
-                    parser_version=parser_output.parser_version,
-                    pdf_type=pdf_type,
-                    raw_output={"text": text[:10000]},  # Store first 10k chars (full text in cache)
-                    raw_output_length=len(text),
-                    processing_time_ms=parser_output.processing_time_ms,
-                    cost_usd=parser_output.cost_usd
-                )
-                db.add(parser_db_output)
-                db.commit()
-
-                logger.info("Stored extraction metadata in database", extra={"request_id": request_id})
-
-            except Exception as db_error:
-                logger.error(f"Failed to store in database: {db_error}", extra={"request_id": request_id})
-                # Non-critical - continue processing
-            finally:
-                db.close()
+            # 8. Store raw parser output
+            extraction_repository.create_parser_output(
+                extraction_id=request_id,
+                parser_name=parser_output.parser_name,
+                parser_version=parser_output.parser_version,
+                pdf_type=pdf_type,
+                raw_output={"text": text[:10000]},  # Store first 10k chars (full text in cache)
+                raw_output_length=len(text),
+                processing_time_ms=parser_output.processing_time_ms,
+                cost_usd=parser_output.cost_usd
+            )
 
         finally:
             # Clean up temp file
-            if temp_pdf_path and os.path.exists(temp_pdf_path):
-                try:
-                    os.unlink(temp_pdf_path)
-                    logger.debug(f"Cleaned up temp file: {temp_pdf_path}")
-                except Exception as e:
-                    logger.warning(f"Failed to delete temp file: {e}")
+            if temp_      
 
-        # Save raw text for debugging
+
+            c        # Save raw text for debugging
         save_raw_text(request_id, text, file.filename)
-        
-        # Call LLM to extract structured data
-        logger.info("Calling LLM", extra={"request_id": request_id})
-        extracted_data = llm_client.extract_structured_data(text)
+
+        # === Multi-stage extraction pipeline ===
+        # Orchestrates: Parse → Chunk → Summarize (cheap LLM) → Extract (expensive LLM)
+        pipeline_result = await extraction_pipeline.process(parser_output, request_id, file.filename)
+        extracted_data = pipeline_result.extracted_data
 
         save_raw_llm_response(request_id, extracted_data, file.filename)
 
@@ -306,18 +286,7 @@ async def extract_document(
         processing_time = time.time() - start_time
 
         # Update extraction status to completed in database
-        db = SessionLocal()
-        try:
-            extraction = db.query(Extraction).filter(Extraction.id == request_id).first()
-            if extraction:
-                extraction.status = "completed"
-                extraction.completed_at = datetime.now()
-                db.commit()
-                logger.debug("Updated extraction status to completed", extra={"request_id": request_id})
-        except Exception as db_error:
-            logger.error(f"Failed to update extraction status: {db_error}", extra={"request_id": request_id})
-        finally:
-            db.close()
+        extraction_repository.mark_completed(request_id)
 
         # Prepare response
         response_data = {
@@ -364,16 +333,7 @@ async def extract_document(
         
     except HTTPException:
         # Mark extraction as failed in database for known errors
-        try:
-            db = SessionLocal()
-            extraction = db.query(Extraction).filter(Extraction.id == request_id).first()
-            if extraction:
-                extraction.status = "failed"
-                extraction.error_message = "HTTP error occurred"
-                db.commit()
-            db.close()
-        except:
-            pass  # Don't fail on database error during error handling
+        extraction_repository.mark_failed(request_id, "HTTP error occurred")
         raise
     except Exception as e:
         logger.exception("Unexpected error", extra={
@@ -382,16 +342,7 @@ async def extract_document(
         })
 
         # Mark extraction as failed in database
-        try:
-            db = SessionLocal()
-            extraction = db.query(Extraction).filter(Extraction.id == request_id).first()
-            if extraction:
-                extraction.status = "failed"
-                extraction.error_message = str(e)[:500]  # Limit error message length
-                db.commit()
-            db.close()
-        except:
-            pass  # Don't fail on database error during error handling
+        extraction_repository.mark_failed(request_id, str(e)[:500])
 
         raise HTTPException(
             status_code=500,
