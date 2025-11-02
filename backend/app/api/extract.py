@@ -227,10 +227,9 @@ async def extract_document(
 
         finally:
             # Clean up temp file
-            if temp_      
-
-
-            c        # Save raw text for debugging
+            if temp_pdf_path and os.path.exists(temp_pdf_path):
+                os.remove(temp_pdf_path)
+                logger.info(f"Removed temporary PDF file: {temp_pdf_path}", extra={"request_id": request_id})
         save_raw_text(request_id, text, file.filename)
 
         # === Multi-stage extraction pipeline ===

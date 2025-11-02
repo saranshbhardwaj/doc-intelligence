@@ -18,4 +18,6 @@ alembic==1.12.1  # Database migrations (optional, for future)
 # Document parsing
 PyMuPDF==1.23.8  # fitz - for PDF text extraction
 google-cloud-documentai==3.7.0  # Google Document AI client
+google-cloud-storage==3.4.1
+
 azure-ai-documentintelligence==1.0.0
