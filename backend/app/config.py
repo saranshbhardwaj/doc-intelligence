@@ -97,7 +97,7 @@ class Settings(BaseSettings):
     llm_timeout_seconds: int = 300  # 5 minutes timeout for API calls (large documents can take 2-3 min)
 
     # LLM Settings - Cheap Model (Chunk Summarization)
-    cheap_llm_model: str = "claude-haiku-3-5-20241022"  # Much cheaper for summarization
+    cheap_llm_model: str = "claude-3-5-haiku-20241022"  # Much cheaper for summarization
     cheap_llm_max_tokens: int = 4000  # Summaries are shorter
     cheap_llm_timeout_seconds: int = 60  # Summaries are faster
 

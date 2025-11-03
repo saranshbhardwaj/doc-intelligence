@@ -70,16 +70,38 @@ class LLMClient:
             extra={"prompt_length": len(prompt), "timeout": self.timeout_seconds}
         )
 
+        # Retry logic for API overloads and rate limits
+        max_retries = 3
+        retry_delay = 2  # seconds
+
+        for attempt in range(max_retries):
+            try:
+                message = self.client.messages.create(
+                    model=self.model,
+                    max_tokens=self.max_tokens,
+                    temperature=0.0,
+                    system=SYSTEM_PROMPT,
+                    messages=[{"role": "user", "content": prompt}]
+                )
+                break  # Success, exit retry loop
+
+            except Exception as api_error:
+                # Check if it's a retryable error (500 overloaded, 529 rate limit)
+                error_str = str(api_error)
+                is_retryable = "Overloaded" in error_str or "overloaded_error" in error_str or "Error code: 529" in error_str
+
+                if is_retryable and attempt < max_retries - 1:
+                    wait_time = retry_delay * (2 ** attempt)  # Exponential backoff: 2s, 4s, 8s
+                    logger.warning(f"API overloaded, retrying in {wait_time}s (attempt {attempt + 1}/{max_retries})")
+                    print(f"⚠️  API overloaded, retrying in {wait_time}s...")
+                    import time
+                    time.sleep(wait_time)
+                else:
+                    # Not retryable or out of retries
+                    raise
+
+        # Extract text from response (after successful retry loop)
         try:
-            message = self.client.messages.create(
-                model=self.model,
-                max_tokens=self.max_tokens,
-                temperature=0.0,
-                system=SYSTEM_PROMPT,
-                messages=[{"role": "user", "content": prompt}]
-            )
-            
-            # Extract text from response
             response_text = message.content[0].text.strip()
 
             logger.info(f"Claude response: {len(response_text)} chars")
@@ -110,6 +132,7 @@ class LLMClient:
                 status_code=500,
                 detail="The AI returned invalid data format. Please try again or contact support."
             )
+
         except Exception as e:
             error_msg = str(e)
 
@@ -232,6 +255,8 @@ class LLMClient:
             logger.error(f"Cheap LLM summarization failed: {e}")
             # Fall back to returning original text if summarization fails
             logger.warning("Falling back to original chunk text")
+            print(f"⚠️  WARNING: Cheap LLM failed - {e}")
+            print(f"⚠️  Falling back to original text (no compression)")
             return chunk_text
 
     async def summarize_chunks_batch(self, chunks: list[dict]) -> list[str]:
@@ -276,6 +301,8 @@ class LLMClient:
             logger.error(f"Batch summarization failed: {e}")
             # Fall back to returning original texts
             logger.warning("Falling back to original chunk texts")
+            print(f"⚠️  WARNING: Cheap LLM failed - {e}")
+            print(f"⚠️  Falling back to original text (no compression)")
             return [chunk["text"] for chunk in chunks]
 
     def _parse_batch_summaries(self, batch_output: str, expected_count: int) -> list[str]:

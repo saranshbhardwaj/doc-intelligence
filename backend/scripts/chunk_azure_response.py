@@ -1,8 +1,5 @@
 """Chunk a saved Azure Document Intelligence response into page-wise chunks.
 
-UPDATED: Now uses the production chunking infrastructure from app/services/chunkers.
-This script is now a thin wrapper for testing the production code.
-
 Usage:
     python scripts/chunk_azure_response.py logs/azure_raw/2025-11-01_10-53-51_CIM-06-Pizza-Hut_298256c6.json
 

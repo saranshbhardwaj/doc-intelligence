@@ -111,7 +111,7 @@ class AzureDocumentIntelligenceParser(DocumentParser):
                 analyze_request = AnalyzeDocumentRequest(bytes_source=pdf_bytes)
                 poller = self.client.begin_analyze_document(
                     model_id=self.model_name,
-                    analyze_request=analyze_request
+                    body=analyze_request
                 )
                 try:
                     # Apply explicit timeout; Azure SDK raises TimeoutError on wait expiry
