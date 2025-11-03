@@ -64,41 +64,51 @@ def save_raw_azure_output(request_id: str, data: dict, original_filename: str = 
         logger.warning(f"Failed to save raw Azure output: {e}")
 
 
-def save_chunks(request_id: str, chunks_data: dict, original_filename: str = "document"):
+def save_chunks(request_id: str, chunks_data: dict, original_filename: str = "document") -> str:
     """Save chunking output for debugging chunking strategies.
 
     Args:
         request_id: Unique request ID
         chunks_data: Dictionary with 'chunks', 'strategy', 'metadata' keys
         original_filename: Original PDF filename
+
+    Returns:
+        Path to saved chunks file
     """
     try:
         label = make_file_label(original_filename, request_id)
         file_path = settings.chunks_dir / f"{label}_chunks.json"
         file_path.write_text(json.dumps(chunks_data, indent=2, ensure_ascii=False), encoding="utf-8")
         logger.info("Saved chunks", extra={"file_label": label, "chunk_count": len(chunks_data.get("chunks", []))})
+        return str(file_path)
     except Exception as e:
         logger.warning(f"Failed to save chunks: {e}")
+        return ""
 
 
-def save_summaries(request_id: str, summaries_data: dict, original_filename: str = "document"):
+def save_summaries(request_id: str, summaries_data: dict, original_filename: str = "document") -> str:
     """Save cheap LLM summaries for verifying summarization quality.
 
     Args:
         request_id: Unique request ID
         summaries_data: Dictionary with 'summaries', 'model', 'metadata' keys
         original_filename: Original PDF filename
+
+    Returns:
+        Path to saved summaries file
     """
     try:
         label = make_file_label(original_filename, request_id)
         file_path = settings.summaries_dir / f"{label}_summaries.json"
         file_path.write_text(json.dumps(summaries_data, indent=2, ensure_ascii=False), encoding="utf-8")
         logger.info("Saved summaries", extra={"file_label": label, "summary_count": len(summaries_data.get("summaries", []))})
+        return str(file_path)
     except Exception as e:
         logger.warning(f"Failed to save summaries: {e}")
+        return ""
 
 
-def save_combined_context(request_id: str, combined_text: str, metadata: dict, original_filename: str = "document"):
+def save_combined_context(request_id: str, combined_text: str, metadata: dict, original_filename: str = "document") -> str:
     """Save combined context sent to expensive LLM.
 
     This is useful for debugging what the final LLM actually sees.
@@ -108,6 +118,9 @@ def save_combined_context(request_id: str, combined_text: str, metadata: dict, o
         combined_text: The combined narrative summaries + raw tables
         metadata: Metadata about compression ratio, chunk counts, etc.
         original_filename: Original PDF filename
+
+    Returns:
+        Path to saved context text file
     """
     try:
         label = make_file_label(original_filename, request_id)
@@ -128,5 +141,7 @@ def save_combined_context(request_id: str, combined_text: str, metadata: dict, o
                 "compression_ratio": metadata.get("compression_ratio")
             }
         )
+        return str(text_path)
     except Exception as e:
         logger.warning(f"Failed to save combined context: {e}")
+        return ""

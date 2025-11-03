@@ -1,6 +1,7 @@
-fastapi==0.104.1
+fastapi==0.121.0
 uvicorn[standard]==0.24.0
 python-multipart==0.0.6
+sse-starlette==3.0.3
 anthropic==0.39.0
 PyPDF2==3.0.1
 python-dotenv==1.0.0
@@ -12,7 +13,7 @@ aiohttp==3.9.1
 
 # Database
 sqlalchemy==2.0.23
-psycopg2-binary==2.9.9  # PostgreSQL driver
+psycopg==3.1.18  # PostgreSQL driver (psycopg3 - better Python 3.13 support)
 alembic==1.12.1  # Database migrations (optional, for future)
 
 # Document parsing

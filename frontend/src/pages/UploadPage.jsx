@@ -193,7 +193,6 @@ export default function UploadPage() {
                 <li>
                   <strong>Try a different CIM document</strong> - Each document has unique formatting
                 </li>
-                <li>Ensure your PDF is text-based (not scanned images - we don't support OCR yet)</li>
                 <li>Check file size is under 5MB and has fewer than 60 pages</li>
               </ul>
             </div>

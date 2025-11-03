@@ -74,6 +74,45 @@ class CacheEntry(Base):
     access_count = Column(Integer, default=0)
 
 
+class JobState(Base):
+    """Track real-time job progress through extraction pipeline"""
+    __tablename__ = "job_states"
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    extraction_id = Column(String(36), ForeignKey("extractions.id"), nullable=False, index=True)
+
+    # Current status
+    status = Column(String(20), default="queued")  # queued, parsing, chunking, summarizing, extracting, completed, failed
+    current_stage = Column(String(50), nullable=True)  # Detailed stage name
+    progress_percent = Column(Integer, default=0)  # 0-100
+
+    # Stage tracking (completed stages)
+    parsing_completed = Column(Boolean, default=False)
+    chunking_completed = Column(Boolean, default=False)
+    summarizing_completed = Column(Boolean, default=False)
+    extracting_completed = Column(Boolean, default=False)
+
+    # File paths for cached intermediate results (for resume capability)
+    parsed_output_path = Column(String(500), nullable=True)  # Saved ParserOutput
+    chunks_path = Column(String(500), nullable=True)  # Saved chunks JSON
+    summaries_path = Column(String(500), nullable=True)  # Saved summaries JSON
+    combined_context_path = Column(String(500), nullable=True)  # Saved combined context
+
+    # Error handling
+    error_stage = Column(String(50), nullable=True)  # Stage where error occurred
+    error_message = Column(Text, nullable=True)
+    error_type = Column(String(50), nullable=True)  # parsing_error, llm_error, validation_error, etc.
+    is_retryable = Column(Boolean, default=True)
+
+    # Metadata
+    message = Column(Text, nullable=True)  # Current user-facing message
+    details = Column(JSON, nullable=True)  # Additional details (stats, metrics, etc.)
+
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    completed_at = Column(DateTime(timezone=True), nullable=True)
+
+
 class RateLimit(Base):
     """Rate limiting per user/IP with customizable limits"""
     __tablename__ = "rate_limits"

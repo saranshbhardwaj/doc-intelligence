@@ -39,7 +39,6 @@ class ExtractionRepository:
         """Context manager for database sessions.
 
         Ensures sessions are properly closed even on errors.
-        Similar to using() blocks in C#.
 
         Yields:
             Session: SQLAlchemy database session
@@ -173,6 +172,55 @@ class ExtractionRepository:
                 )
                 db.rollback()
                 return None
+
+    def update_extraction(
+        self,
+        extraction_id: str,
+        **kwargs
+    ) -> bool:
+        """Update extraction fields.
+
+        Args:
+            extraction_id: ID of extraction to update
+            **kwargs: Fields to update (page_count, pdf_type, parser_used, etc.)
+
+        Returns:
+            True if successful, False otherwise
+        """
+        with self._get_session() as db:
+            try:
+                extraction = db.query(Extraction).filter(
+                    Extraction.id == extraction_id
+                ).first()
+
+                if not extraction:
+                    logger.warning(
+                        f"Extraction not found for update: {extraction_id}",
+                        extra={"extraction_id": extraction_id}
+                    )
+                    return False
+
+                # Update provided fields
+                for key, value in kwargs.items():
+                    if hasattr(extraction, key) and value is not None:
+                        setattr(extraction, key, value)
+
+                db.commit()
+
+                logger.debug(
+                    f"Updated extraction fields: {list(kwargs.keys())}",
+                    extra={"extraction_id": extraction_id}
+                )
+
+                return True
+
+            except SQLAlchemyError as e:
+                logger.error(
+                    f"Failed to update extraction: {e}",
+                    extra={"extraction_id": extraction_id, "error": str(e)}
+                )
+                db.rollback()
+                return False
 
     def update_status(
         self,

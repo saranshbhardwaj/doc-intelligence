@@ -220,24 +220,16 @@ class LLMClient:
       return create_extraction_prompt(text)
 
     async def summarize_chunk(self, chunk_text: str) -> str:
-        """Summarize a single chunk using cheap LLM (Haiku).
+        """Async wrapper to summarize a single chunk using thread offload."""
+        import asyncio
+        return await asyncio.to_thread(self._summarize_chunk_sync, chunk_text)
 
-        Args:
-            chunk_text: The chunk text to summarize
-
-        Returns:
-            Summary text (2-4 sentences preserving all numbers and key facts)
-
-        Raises:
-            HTTPException if API call fails
-        """
+    def _summarize_chunk_sync(self, chunk_text: str) -> str:
         prompt = create_summary_prompt(chunk_text)
-
         logger.info(
             f"Calling cheap LLM ({self.cheap_model}) for chunk summary",
             extra={"prompt_length": len(prompt)}
         )
-
         try:
             message = self.client.messages.create(
                 model=self.cheap_model,
@@ -246,41 +238,27 @@ class LLMClient:
                 system=SUMMARY_SYSTEM_PROMPT,
                 messages=[{"role": "user", "content": prompt}]
             )
-
             summary = message.content[0].text.strip()
             logger.debug(f"Cheap LLM summary: {len(summary)} chars")
             return summary
-
         except Exception as e:
             logger.error(f"Cheap LLM summarization failed: {e}")
-            # Fall back to returning original text if summarization fails
             logger.warning("Falling back to original chunk text")
-            print(f"⚠️  WARNING: Cheap LLM failed - {e}")
-            print(f"⚠️  Falling back to original text (no compression)")
             return chunk_text
 
     async def summarize_chunks_batch(self, chunks: list[dict]) -> list[str]:
-        """Summarize multiple chunks in a single cheap LLM call.
+        """Async wrapper for batch summarization using thread offload."""
+        import asyncio
+        return await asyncio.to_thread(self._summarize_chunks_batch_sync, chunks)
 
-        Args:
-            chunks: List of dicts with 'page' and 'text' keys
-
-        Returns:
-            List of summary strings (one per chunk)
-
-        Raises:
-            HTTPException if API call fails
-        """
+    def _summarize_chunks_batch_sync(self, chunks: list[dict]) -> list[str]:
         if not chunks:
             return []
-
         prompt = create_batch_summary_prompt(chunks)
-
         logger.info(
             f"Calling cheap LLM ({self.cheap_model}) for batch summary of {len(chunks)} chunks",
             extra={"prompt_length": len(prompt), "chunk_count": len(chunks)}
         )
-
         try:
             message = self.client.messages.create(
                 model=self.cheap_model,
@@ -289,20 +267,12 @@ class LLMClient:
                 system=SUMMARY_SYSTEM_PROMPT,
                 messages=[{"role": "user", "content": prompt}]
             )
-
             batch_summary = message.content[0].text.strip()
             logger.info(f"Batch summary received: {len(batch_summary)} chars")
-
-            # Parse out individual summaries
-            summaries = self._parse_batch_summaries(batch_summary, len(chunks))
-            return summaries
-
+            return self._parse_batch_summaries(batch_summary, len(chunks))
         except Exception as e:
             logger.error(f"Batch summarization failed: {e}")
-            # Fall back to returning original texts
             logger.warning("Falling back to original chunk texts")
-            print(f"⚠️  WARNING: Cheap LLM failed - {e}")
-            print(f"⚠️  Falling back to original text (no compression)")
             return [chunk["text"] for chunk in chunks]
 
     def _parse_batch_summaries(self, batch_output: str, expected_count: int) -> list[str]:

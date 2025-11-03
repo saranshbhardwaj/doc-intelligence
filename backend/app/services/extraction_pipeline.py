@@ -6,7 +6,8 @@ This service encapsulates all the business logic for processing documents throug
 chunking pipeline, keeping the API endpoint handlers thin and focused on HTTP concerns.
 """
 from dataclasses import dataclass
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
+import asyncio
 
 from app.services.parsers.base import ParserOutput
 from app.services.chunkers import ChunkerFactory
@@ -14,6 +15,9 @@ from app.services.llm_client import LLMClient
 from app.config import settings
 from app.utils.logging import logger
 from app.utils.file_utils import save_chunks, save_summaries, save_combined_context
+
+if TYPE_CHECKING:
+    from app.api.jobs import JobProgressTracker
 
 
 @dataclass
@@ -55,7 +59,8 @@ class ExtractionPipeline:
         self,
         parser_output: ParserOutput,
         request_id: str,
-        filename: str
+        filename: str,
+        progress_tracker: Optional["JobProgressTracker"] = None
     ) -> PipelineResult:
         """Run the extraction pipeline on parser output.
 
@@ -73,19 +78,20 @@ class ExtractionPipeline:
         # Check if chunking is supported and enabled
         if settings.enable_chunking and ChunkerFactory.supports_chunking(parser_output.parser_name):
             logger.info("Using chunked extraction pipeline", extra={"request_id": request_id})
-            return await self._process_with_chunking(parser_output, request_id, filename)
+            return await self._process_with_chunking(parser_output, request_id, filename, progress_tracker)
         else:
             logger.info(
                 f"Using direct extraction pipeline (chunking {'disabled' if not settings.enable_chunking else 'not supported'})",
                 extra={"request_id": request_id, "parser": parser_output.parser_name}
             )
-            return await self._process_direct(parser_output, request_id, filename)
+            return await self._process_direct(parser_output, request_id, filename, progress_tracker)
 
     async def _process_with_chunking(
         self,
         parser_output: ParserOutput,
         request_id: str,
-        filename: str
+        filename: str,
+        progress_tracker: Optional["JobProgressTracker"] = None
     ) -> PipelineResult:
         """Process using multi-stage chunking pipeline.
 
@@ -99,11 +105,21 @@ class ExtractionPipeline:
             parser_output: Parsed document
             request_id: Request ID for logging
             filename: Original filename
+            progress_tracker: Optional job progress tracker for real-time updates
 
         Returns:
             PipelineResult with extracted data and metadata
         """
         # Step 1: Chunk the document
+        if progress_tracker:
+            progress_tracker.update_progress(
+                status="chunking",
+                current_stage="chunking",
+                progress_percent=20,
+                message="Chunking document into sections..."
+            )
+            await asyncio.sleep(0)
+
         chunker = ChunkerFactory.get_chunker(parser_output.parser_name)
         chunking_output = chunker.chunk(parser_output)
 
@@ -115,7 +131,7 @@ class ExtractionPipeline:
         )
 
         # Save chunks for debugging
-        save_chunks(
+        chunks_path = save_chunks(
             request_id,
             {
                 "strategy": chunking_output.strategy.value,
@@ -133,18 +149,36 @@ class ExtractionPipeline:
             filename
         )
 
+        if progress_tracker:
+            progress_tracker.update_progress(
+                progress_percent=30,
+                message=f"Created {chunking_output.total_chunks} chunks",
+                details={"chunks": chunking_output.total_chunks},
+                chunking_completed=True
+            )
+            await asyncio.sleep(0)
+            progress_tracker.save_intermediate_result("chunking", chunks_path)
+
         # Step 2: Summarize narrative chunks with cheap LLM
         narrative_chunks = chunking_output.get_narrative_chunks()
         narrative_summaries = []
 
         if narrative_chunks:
+            if progress_tracker:
+                progress_tracker.update_progress(
+                    status="summarizing",
+                    current_stage="summarizing",
+                    progress_percent=40,
+                    message=f"Summarizing {len(narrative_chunks)} sections with AI..."
+                )
+                await asyncio.sleep(0)
             narrative_summaries = await self._summarize_narrative_chunks(
                 narrative_chunks,
                 request_id
             )
 
             # Save summaries for quality verification
-            save_summaries(
+            summaries_path = save_summaries(
                 request_id,
                 {
                     "model": settings.cheap_llm_model,
@@ -162,7 +196,24 @@ class ExtractionPipeline:
                 filename
             )
 
+            if progress_tracker:
+                progress_tracker.update_progress(
+                    progress_percent=60,
+                    message=f"Summarized {len(narrative_summaries)} sections",
+                    summarizing_completed=True
+                )
+                await asyncio.sleep(0)
+                progress_tracker.save_intermediate_result("summarizing", summaries_path)
+
         # Step 3: Combine summaries and tables
+        if progress_tracker:
+            progress_tracker.update_progress(
+                current_stage="combining",
+                progress_percent=65,
+                message="Preparing data for extraction..."
+            )
+            await asyncio.sleep(0)
+
         combined_context, context_metadata = self._build_combined_context(
             narrative_chunks,
             narrative_summaries,
@@ -180,11 +231,32 @@ class ExtractionPipeline:
         )
 
         # Save combined context
-        save_combined_context(request_id, combined_context, context_metadata, filename)
+        combined_context_path = save_combined_context(request_id, combined_context, context_metadata, filename)
+
+        if progress_tracker:
+            progress_tracker.save_intermediate_result("combining", combined_context_path)
 
         # Step 4: Extract with expensive LLM
+        if progress_tracker:
+            progress_tracker.update_progress(
+                status="extracting",
+                current_stage="extracting",
+                progress_percent=70,
+                message="Extracting structured data (this may take 5 to 10 minutes)..."
+            )
+            await asyncio.sleep(0)
+
         logger.info("Calling expensive LLM (Sonnet) with chunked context", extra={"request_id": request_id})
-        extracted_data = self.llm_client.extract_structured_data(combined_context)
+        # Offload blocking LLM call to thread
+        extracted_data = await asyncio.to_thread(self.llm_client.extract_structured_data, combined_context)
+
+        if progress_tracker:
+            progress_tracker.update_progress(
+                progress_percent=95,
+                message="Finalizing extraction results...",
+                extracting_completed=True
+            )
+            await asyncio.sleep(0)
 
         return PipelineResult(
             extracted_data=extracted_data,
@@ -204,7 +276,8 @@ class ExtractionPipeline:
         self,
         parser_output: ParserOutput,
         request_id: str,
-        filename: str
+        filename: str,
+        progress_tracker: Optional["JobProgressTracker"] = None
     ) -> PipelineResult:
         """Process without chunking - direct LLM extraction.
 
@@ -217,12 +290,30 @@ class ExtractionPipeline:
             parser_output: Parsed document
             request_id: Request ID for logging
             filename: Original filename
+            progress_tracker: Optional job progress tracker for real-time updates
 
         Returns:
             PipelineResult with extracted data
         """
+        if progress_tracker:
+            progress_tracker.update_progress(
+                status="extracting",
+                current_stage="extracting",
+                progress_percent=50,
+                message="Extracting structured data (this may take 30-60 seconds)..."
+            )
+            await asyncio.sleep(0)
+
         logger.info("Calling LLM for direct extraction", extra={"request_id": request_id})
-        extracted_data = self.llm_client.extract_structured_data(parser_output.text)
+        extracted_data = await asyncio.to_thread(self.llm_client.extract_structured_data, parser_output.text)
+
+        if progress_tracker:
+            progress_tracker.update_progress(
+                progress_percent=95,
+                message="Finalizing extraction results...",
+                extracting_completed=True
+            )
+            await asyncio.sleep(0)
 
         return PipelineResult(
             extracted_data=extracted_data,
