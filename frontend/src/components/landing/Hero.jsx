@@ -83,7 +83,7 @@ export default function Hero({ onGetStarted, onTryDemo }) {
 
           {/* Trust badge */}
           <p className="text-sm text-gray-500 dark:text-gray-400 mt-8">
-            No credit card required • 2 free extractions • Cancel anytime
+            No credit card required • up to 100 pages • Cancel anytime
           </p>
         </div>
 

@@ -1,15 +1,15 @@
 # backend/app/database.py
 """Database configuration and session management"""
-import os
 from sqlalchemy import create_engine
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from app.utils.logging import logger
+from app.config import settings
 
-# Get database URL from environment
-DATABASE_URL = os.getenv("DATABASE_URL")
+# Get database URL from settings (which loads from .env)
+DATABASE_URL = settings.database_url
 
-# For local development, use SQLite
+# For local development, use SQLite if no DATABASE_URL is set
 if not DATABASE_URL or DATABASE_URL == "":
     DATABASE_URL = "sqlite:///./sandcloud_dev.db"
     logger.info("Using SQLite database for local development")

@@ -116,7 +116,7 @@ class ExtractionPipeline:
                 status="chunking",
                 current_stage="chunking",
                 progress_percent=20,
-                message="Chunking document into sections..."
+                message="Indexing documents..."
             )
             await asyncio.sleep(0)
 
@@ -169,7 +169,7 @@ class ExtractionPipeline:
                     status="summarizing",
                     current_stage="summarizing",
                     progress_percent=40,
-                    message=f"Summarizing {len(narrative_chunks)} sections with AI..."
+                    message=f"Summarizing sections..."
                 )
                 await asyncio.sleep(0)
             narrative_summaries = await self._summarize_narrative_chunks(
@@ -241,14 +241,14 @@ class ExtractionPipeline:
             progress_tracker.update_progress(
                 status="extracting",
                 current_stage="extracting",
-                progress_percent=70,
-                message="Extracting structured data (this may take 5 to 10 minutes)..."
+                progress_percent=60,
+                message="Extracting structured data (this may take 5 to 8 minutes)..."
             )
             await asyncio.sleep(0)
 
         logger.info("Calling expensive LLM (Sonnet) with chunked context", extra={"request_id": request_id})
-        # Offload blocking LLM call to thread
-        extracted_data = await asyncio.to_thread(self.llm_client.extract_structured_data, combined_context)
+        # LLM client is now async and handles threading internally
+        extracted_data = await self.llm_client.extract_structured_data(combined_context)
 
         if progress_tracker:
             progress_tracker.update_progress(
@@ -300,12 +300,13 @@ class ExtractionPipeline:
                 status="extracting",
                 current_stage="extracting",
                 progress_percent=50,
-                message="Extracting structured data (this may take 30-60 seconds)..."
+                message="Extracting structured data (this may take 5 to 8 minutes)..."
             )
             await asyncio.sleep(0)
 
         logger.info("Calling LLM for direct extraction", extra={"request_id": request_id})
-        extracted_data = await asyncio.to_thread(self.llm_client.extract_structured_data, parser_output.text)
+        # LLM client is now async and handles threading internally
+        extracted_data = await self.llm_client.extract_structured_data(parser_output.text)
 
         if progress_tracker:
             progress_tracker.update_progress(

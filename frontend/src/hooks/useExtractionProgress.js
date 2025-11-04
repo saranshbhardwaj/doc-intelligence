@@ -5,7 +5,10 @@
  *
  * Usage:
  * ```jsx
- * const { upload, progress, result, error, retry, isProcessing } = useExtractionProgress();
+ * import { useAuth } from '@clerk/clerk-react';
+ *
+ * const { getToken } = useAuth();
+ * const { upload, progress, result, error, retry, isProcessing } = useExtractionProgress(getToken);
  *
  * const handleUpload = async (file) => {
  *   await upload(file);
@@ -16,11 +19,13 @@
 /**
  * useExtractionProgress Hook
  * Manages document extraction with real-time progress tracking via SSE.
+ *
+ * @param {Function} getToken - Clerk's getToken function from useAuth hook
  */
 import { useState, useRef, useCallback } from 'react';
 import { uploadDocument, streamProgress, fetchExtractionResult, retryJob } from '../services/extractionService';
 
-export default function useExtractionProgress() {
+export default function useExtractionProgress(getToken) {
     // State
     const [progress, setProgress] = useState(null);
     const [result, setResult] = useState(null);
@@ -84,7 +89,7 @@ export default function useExtractionProgress() {
     const handleEnd = useCallback(async (data) => {
         if (data?.reason === 'completed') {
             try {
-                const extractionResult = await fetchExtractionResult(extractionIdRef.current);
+                const extractionResult = await fetchExtractionResult(extractionIdRef.current, getToken);
                 setResult(extractionResult);
             } catch (err) {
                 console.error('Failed to fetch extraction result:', err);
@@ -96,7 +101,7 @@ export default function useExtractionProgress() {
             }
         }
         setIsProcessing(false);
-    }, []);
+    }, [getToken]);
 
     // Error handler
     const handleError = useCallback((data) => {
@@ -114,7 +119,7 @@ export default function useExtractionProgress() {
         reset();
         setIsProcessing(true);
         try {
-            const response = await uploadDocument(file);
+            const response = await uploadDocument(file, getToken);
             console.log('📤 Upload response:', response);
             if (response.from_cache) {
                 setResult(response);
@@ -130,12 +135,17 @@ export default function useExtractionProgress() {
             }
             jobIdRef.current = response.job_id;
             extractionIdRef.current = response.extraction_id;
-            cleanupRef.current = streamProgress(response.job_id, {
+
+            // Start SSE stream (async to get token first)
+            streamProgress(response.job_id, getToken, {
                 onProgress: handleProgress,
                 onComplete: handleComplete,
                 onError: handleError,
                 onEnd: handleEnd
+            }).then(cleanup => {
+                cleanupRef.current = cleanup;
             });
+
             return response;
         } catch (err) {
             console.error('Upload failed:', err);
@@ -144,6 +154,12 @@ export default function useExtractionProgress() {
             if (err.response?.status === 429) {
                 errorMessage = err.response.data.detail?.message || 'Rate limit exceeded';
                 errorType = 'rate_limit_error';
+            } else if (err.response?.status === 401) {
+                errorMessage = 'Authentication required. Please sign in.';
+                errorType = 'auth_error';
+            } else if (err.response?.status === 403) {
+                errorMessage = err.response.data.detail?.message || 'Page limit exceeded';
+                errorType = 'limit_error';
             } else if (err.response?.data?.detail) {
                 errorMessage = err.response.data.detail;
             }
@@ -151,7 +167,7 @@ export default function useExtractionProgress() {
             setIsProcessing(false);
             throw err;
         }
-    }, [reset, handleProgress, handleComplete, handleError, handleEnd]);
+    }, [reset, handleProgress, handleComplete, handleError, handleEnd, getToken]);
 
     // Retry failed job
     const retry = useCallback(async () => {
@@ -159,14 +175,19 @@ export default function useExtractionProgress() {
         setError(null);
         setIsProcessing(true);
         try {
-            const response = await retryJob(jobIdRef.current);
+            const response = await retryJob(jobIdRef.current, getToken);
             jobIdRef.current = response.job_id;
-            cleanupRef.current = streamProgress(response.job_id, {
+
+            // Start SSE stream (async to get token first)
+            streamProgress(response.job_id, getToken, {
                 onProgress: handleProgress,
                 onComplete: handleComplete,
                 onError: handleError,
                 onEnd: handleEnd
+            }).then(cleanup => {
+                cleanupRef.current = cleanup;
             });
+
             return response;
         } catch (err) {
             console.error('Retry failed:', err);
@@ -174,7 +195,7 @@ export default function useExtractionProgress() {
             setIsProcessing(false);
             throw err;
         }
-    }, [handleProgress, handleComplete, handleError, handleEnd]);
+    }, [handleProgress, handleComplete, handleError, handleEnd, getToken]);
 
     // Cancel ongoing extraction
     const cancel = useCallback(() => {

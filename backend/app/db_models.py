@@ -11,8 +11,8 @@ class Extraction(Base):
     __tablename__ = "extractions"
 
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    user_id = Column(String(100), nullable=False)  # IP address or authenticated user ID
-    user_tier = Column(String(20), default="free")  # free, pro, enterprise
+    user_id = Column(String(100), nullable=True, index=True)  # Clerk user ID (nullable for migration from IP-based)
+    user_tier = Column(String(20), default="free")  # free, standard, pro, admin
 
     filename = Column(String(255), nullable=False)
     file_size_bytes = Column(Integer, nullable=False)

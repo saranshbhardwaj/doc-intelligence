@@ -1,5 +1,6 @@
 // src/pages/LandingPage.jsx
 import { useNavigate } from "react-router-dom";
+import { SignedIn, SignedOut, SignInButton, UserButton } from "@clerk/clerk-react";
 import Hero from "../components/landing/Hero";
 import Features from "../components/landing/Features";
 import Pricing from "../components/landing/Pricing";
@@ -12,9 +13,8 @@ export default function LandingPage() {
   const { isDark, toggle } = useDarkMode();
 
   const handleGetStarted = () => {
-    // TODO: Later, this will open signup modal
-    // For now, navigate directly to app
-    navigate("/app");
+    // Navigate to sign-up page
+    navigate("/sign-up");
   };
 
   const handleTryDemo = () => {
@@ -78,12 +78,30 @@ export default function LandingPage() {
                 toggle={toggle}
                 variant="inline"
               />
-              <button
-                onClick={handleGetStarted}
-                className="px-6 py-2 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white font-semibold rounded-lg transition-all duration-200"
-              >
-                Get Started
-              </button>
+
+              {/* Authentication buttons */}
+              <SignedOut>
+                <SignInButton mode="modal">
+                  <button className="px-4 py-2 text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white font-medium transition-colors">
+                    Sign In
+                  </button>
+                </SignInButton>
+                <button
+                  onClick={handleGetStarted}
+                  className="px-6 py-2 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white font-semibold rounded-lg transition-all duration-200"
+                >
+                  Get Started Free
+                </button>
+              </SignedOut>
+              <SignedIn>
+                <button
+                  onClick={() => navigate("/app")}
+                  className="px-6 py-2 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white font-semibold rounded-lg transition-all duration-200"
+                >
+                  Go to App
+                </button>
+                <UserButton />
+              </SignedIn>
             </div>
 
             {/* Mobile menu button + dark mode */}
@@ -138,15 +156,25 @@ export default function LandingPage() {
           <p className="text-xl text-blue-100 mb-8">
             Join PE analysts who are saving hours on every deal.
           </p>
-          <button
-            onClick={handleGetStarted}
-            className="px-10 py-4 bg-white hover:bg-gray-100 text-blue-600 font-bold rounded-xl shadow-xl hover:shadow-2xl transform hover:scale-105 transition-all duration-200"
-          >
-            Start Free Today
-          </button>
-          <p className="text-sm text-blue-100 mt-4">
-            No credit card required • 2 free extractions
-          </p>
+          <SignedOut>
+            <button
+              onClick={handleGetStarted}
+              className="px-10 py-4 bg-white hover:bg-gray-100 text-blue-600 font-bold rounded-xl shadow-xl hover:shadow-2xl transform hover:scale-105 transition-all duration-200"
+            >
+              Get Started Free
+            </button>
+            <p className="text-sm text-blue-100 mt-4">
+              No credit card required • 100 pages per month free
+            </p>
+          </SignedOut>
+          <SignedIn>
+            <button
+              onClick={() => navigate("/app")}
+              className="px-10 py-4 bg-white hover:bg-gray-100 text-blue-600 font-bold rounded-xl shadow-xl hover:shadow-2xl transform hover:scale-105 transition-all duration-200"
+            >
+              Go to App
+            </button>
+          </SignedIn>
         </div>
       </div>
 

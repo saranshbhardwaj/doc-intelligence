@@ -3,17 +3,26 @@
 import asyncio
 import json
 from datetime import datetime
-from typing import AsyncGenerator
+from typing import AsyncGenerator, Optional
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query, Depends
 from sqlalchemy.orm import Session
 from sse_starlette.sse import EventSourceResponse, ServerSentEvent
+import httpx
 
 from app.database import get_db
 from app.db_models import JobState, Extraction
+from app.db_models_users import User
 from app.utils.logging import logger
+from app.auth import get_current_user
+from clerk_backend_api import Clerk
+from clerk_backend_api.security.types import AuthenticateRequestOptions
+from app.config import settings
 
 router = APIRouter()
+
+# Initialize Clerk client for token verification
+clerk = Clerk(bearer_auth=settings.clerk_secret_key)
 
 
 class JobProgressTracker:
@@ -136,15 +145,80 @@ class JobProgressTracker:
 
 
 @router.get("/api/jobs/{job_id}/stream")
-async def stream_job_progress(job_id: str):
+async def stream_job_progress(job_id: str, token: Optional[str] = Query(None)):
     """
     Server-Sent Events endpoint for real-time job progress updates
+
+    NOTE: EventSource doesn't support custom headers, so auth token must be passed as query parameter.
 
     Returns SSE stream with events:
     - progress: { status, stage, percent, message, details }
     - error: { stage, message, type, retryable }
     - complete: { message }
     """
+
+    # Verify authentication via token query parameter
+    if not token:
+        raise HTTPException(status_code=401, detail="Missing authentication token")
+
+    try:
+        # Convert token to httpx request for Clerk SDK authentication
+        # EventSource doesn't support custom headers, so we receive token as query param
+        # but Clerk expects it in the Authorization header
+        logger.info(f"[SSE] Verifying token for job {job_id}...", extra={"job_id": job_id})
+
+        httpx_request = httpx.Request(
+            method="GET",
+            url=f"http://localhost/api/jobs/{job_id}/stream",  # URL doesn't matter for token verification
+            headers={"Authorization": f"Bearer {token}"}
+        )
+
+        # Authenticate the request with Clerk
+        # Empty options accepts session tokens by default (not OAuth tokens)
+        request_state = clerk.authenticate_request(
+            httpx_request,
+            AuthenticateRequestOptions()
+        )
+
+        if not request_state.is_signed_in:
+            logger.error(f"[SSE] User is not signed in for job {job_id}", extra={"job_id": job_id})
+            raise HTTPException(status_code=401, detail="Not signed in")
+
+        # Extract user_id from the token payload ('sub' field in JWT)
+        user_id = request_state.payload.get('sub') if request_state.payload else None
+
+        if not user_id:
+            logger.error(f"[SSE] Could not extract user_id from token for job {job_id}", extra={"job_id": job_id})
+            raise HTTPException(status_code=401, detail="Could not extract user_id from token")
+
+        logger.info(f"[SSE] Authenticated user {user_id} for job {job_id}", extra={"job_id": job_id, "user_id": user_id})
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[SSE] Invalid token for job {job_id}: {e}", extra={"job_id": job_id})
+        raise HTTPException(status_code=401, detail=f"Invalid authentication token: {str(e)}")
+
+    # Verify user owns this job
+    db = next(get_db())
+    try:
+        job = db.query(JobState).filter(JobState.id == job_id).first()
+        if not job:
+            raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+
+        # Get the extraction to check user ownership
+        extraction = db.query(Extraction).filter(Extraction.id == job.extraction_id).first()
+        if not extraction:
+            raise HTTPException(status_code=404, detail=f"Extraction not found for job {job_id}")
+
+        # Verify user owns this extraction
+        if extraction.user_id != user_id:
+            logger.warning(f"[SSE] User {user_id} attempted to access job {job_id} owned by {extraction.user_id}",
+                         extra={"job_id": job_id, "user_id": user_id, "owner_id": extraction.user_id})
+            raise HTTPException(status_code=403, detail="You don't have permission to access this job")
+
+        logger.info(f"[SSE] User {user_id} authorized to stream job {job_id}", extra={"job_id": job_id})
+    finally:
+        db.close()
 
     async def event_generator():
         """Generate SSE events by polling database.
@@ -309,14 +383,19 @@ async def stream_job_progress(job_id: str):
 
 
 @router.get("/api/jobs/{job_id}/status")
-async def get_job_status(job_id: str):
-    """Get current job status (polling alternative to SSE)"""
+async def get_job_status(job_id: str, user: User = Depends(get_current_user)):
+    """Get current job status (polling alternative to SSE) - REQUIRES AUTHENTICATION"""
     db = next(get_db())
 
     try:
         job = db.query(JobState).filter(JobState.id == job_id).first()
         if not job:
             raise HTTPException(status_code=404, detail="Job not found")
+
+        # Verify user owns this job
+        extraction = db.query(Extraction).filter(Extraction.id == job.extraction_id).first()
+        if not extraction or extraction.user_id != user.id:
+            raise HTTPException(status_code=403, detail="You don't have permission to access this job")
 
         return {
             "job_id": job.id,
@@ -342,9 +421,9 @@ async def get_job_status(job_id: str):
 
 
 @router.post("/api/jobs/{job_id}/retry")
-async def retry_job(job_id: str):
+async def retry_job(job_id: str, user: User = Depends(get_current_user)):
     """
-    Retry a failed job from the last successful stage
+    Retry a failed job from the last successful stage - REQUIRES AUTHENTICATION
 
     Uses cached intermediate results to avoid re-running expensive operations
     """
@@ -352,6 +431,12 @@ async def retry_job(job_id: str):
 
     try:
         job = db.query(JobState).filter(JobState.id == job_id).first()
+
+        # Verify user owns this job
+        if job:
+            extraction = db.query(Extraction).filter(Extraction.id == job.extraction_id).first()
+            if not extraction or extraction.user_id != user.id:
+                raise HTTPException(status_code=403, detail="You don't have permission to retry this job")
         if not job:
             raise HTTPException(status_code=404, detail="Job not found")
 

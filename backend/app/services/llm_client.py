@@ -2,6 +2,7 @@
 from datetime import datetime
 import json
 import uuid
+import asyncio
 from anthropic import Anthropic
 from httpx import Timeout
 from typing import Dict
@@ -33,7 +34,7 @@ class LLMClient:
         self.cheap_max_tokens = settings.cheap_llm_max_tokens
         self.cheap_timeout_seconds = settings.cheap_llm_timeout_seconds
     
-    def extract_structured_data(self, text: str) -> Dict:
+    async def extract_structured_data(self, text: str) -> Dict:
         """
         Send text to Claude and get structured JSON back.
         Raises HTTPException if API call fails.
@@ -76,7 +77,9 @@ class LLMClient:
 
         for attempt in range(max_retries):
             try:
-                message = self.client.messages.create(
+                # Run blocking API call in thread pool to avoid blocking event loop
+                message = await asyncio.to_thread(
+                    self.client.messages.create,
                     model=self.model,
                     max_tokens=self.max_tokens,
                     temperature=0.0,
@@ -94,8 +97,7 @@ class LLMClient:
                     wait_time = retry_delay * (2 ** attempt)  # Exponential backoff: 2s, 4s, 8s
                     logger.warning(f"API overloaded, retrying in {wait_time}s (attempt {attempt + 1}/{max_retries})")
                     print(f"⚠️  API overloaded, retrying in {wait_time}s...")
-                    import time
-                    time.sleep(wait_time)
+                    await asyncio.sleep(wait_time)  # ✅ Non-blocking sleep!
                 else:
                     # Not retryable or out of retries
                     raise
@@ -221,7 +223,6 @@ class LLMClient:
 
     async def summarize_chunk(self, chunk_text: str) -> str:
         """Async wrapper to summarize a single chunk using thread offload."""
-        import asyncio
         return await asyncio.to_thread(self._summarize_chunk_sync, chunk_text)
 
     def _summarize_chunk_sync(self, chunk_text: str) -> str:
@@ -248,7 +249,6 @@ class LLMClient:
 
     async def summarize_chunks_batch(self, chunks: list[dict]) -> list[str]:
         """Async wrapper for batch summarization using thread offload."""
-        import asyncio
         return await asyncio.to_thread(self._summarize_chunks_batch_sync, chunks)
 
     def _summarize_chunks_batch_sync(self, chunks: list[dict]) -> list[str]:

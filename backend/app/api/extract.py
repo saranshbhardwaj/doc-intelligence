@@ -13,7 +13,7 @@ import uuid
 import json
 import asyncio
 
-from fastapi import APIRouter, Request, UploadFile, File, HTTPException
+from fastapi import APIRouter, Request, UploadFile, File, HTTPException, Depends
 from fastapi.responses import JSONResponse
 
 from app.api.dependencies import (
@@ -21,6 +21,8 @@ from app.api.dependencies import (
     analytics, extraction_pipeline, extraction_repository
 )
 from app.api.jobs import JobProgressTracker
+from app.auth import get_current_user
+from app.db_models_users import User, UsageLog
 from app.models import ExtractedData
 from app.utils.file_utils import save_raw_text, save_parsed_result, save_raw_llm_response, make_file_label
 from app.utils.normalization import _normalize_llm_output
@@ -43,7 +45,8 @@ async def process_document_async(
     extraction_id: str,
     file_content: bytes,
     filename: str,
-    client_ip: str
+    client_ip: str,
+    user_id: str
 ):
     """Background task to process document and update job state"""
     # CRITICAL: Small delay to allow SSE connection to establish
@@ -198,6 +201,39 @@ async def process_document_async(
         # Mark job as completed
         progress_tracker.mark_completed()
 
+        # ============================================
+        # Update user usage tracking
+        # ============================================
+        try:
+            from app.db_models_users import User
+            user = db.query(User).filter(User.id == user_id).first()
+
+            if user:
+                # Update user page counts
+                user.pages_this_month += page_count
+                user.total_pages_processed += page_count
+
+                # Create usage log entry
+                usage_log = UsageLog(
+                    id=str(uuid.uuid4()),
+                    user_id=user_id,
+                    extraction_id=extraction_id,
+                    pages_processed=page_count,
+                    operation_type="extraction",
+                    cost_usd=pipeline_result.total_cost_usd if hasattr(pipeline_result, 'total_cost_usd') else 0.0
+                )
+                db.add(usage_log)
+                db.commit()
+
+                logger.info(f"Updated user usage: {user.pages_this_month}/{user.pages_limit} pages", extra={
+                    "job_id": job_id,
+                    "user_id": user_id,
+                    "pages_added": page_count
+                })
+        except Exception as e:
+            logger.warning(f"Failed to update user usage: {e}", extra={"job_id": job_id})
+            # Don't fail the extraction if usage tracking fails
+
         # Cache result
         response_data = {
             **normalized_payload,
@@ -246,14 +282,19 @@ async def process_document_async(
 @router.post("/api/extract")
 async def extract_document(
     file: UploadFile = File(...),
-    request: Request = None
+    request: Request = None,
+    user: User = Depends(get_current_user)
 ):
     """
     Unified extraction endpoint with smart cache-aware routing.
 
+    **Requires authentication** - User must provide valid Clerk session token.
+
     Returns:
         - 200 OK: Cache hit, result included immediately
         - 202 Accepted: Cache miss, returns job_id for async processing
+        - 401 Unauthorized: Missing or invalid authentication
+        - 403 Forbidden: Page limit exceeded
         - 429 Rate Limited: Rate limit exceeded
         - 500 Error: Unexpected error
 
@@ -295,7 +336,9 @@ async def extract_document(
     logger.info("Extraction request received", extra={
         "request_id": request_id,
         "file_name": file_label,
-        "client_ip": client_ip
+        "client_ip": client_ip,
+        "user_id": user.id,
+        "user_tier": user.tier
     })
 
     try:
@@ -303,7 +346,27 @@ async def extract_document(
         content = await file.read()
 
         # ============================================
-        # STEP 1: Check cache FIRST (highest priority)
+        # STEP 1: Check page limit (admin users have unlimited)
+        # ============================================
+        if user.tier != "admin" and user.pages_limit > 0:
+            if user.pages_this_month >= user.pages_limit:
+                raise HTTPException(
+                    status_code=403,
+                    detail={
+                        "error": "page_limit_exceeded",
+                        "message": f"Monthly page limit reached ({user.pages_limit} pages). Please upgrade your plan.",
+                        "pages_used": user.pages_this_month,
+                        "pages_limit": user.pages_limit
+                    }
+                )
+
+        logger.info(f"User page usage: {user.pages_this_month}/{user.pages_limit}", extra={
+            "request_id": request_id,
+            "user_id": user.id
+        })
+
+        # ============================================
+        # STEP 2: Check cache FIRST (highest priority)
         # ============================================
         cached_result = cache.get(content)
 
@@ -384,12 +447,10 @@ async def extract_document(
         # ============================================
         db = next(get_db())
         try:
-            user_tier = settings.force_user_tier if settings.force_user_tier else "free"
-
             extraction = Extraction(
                 id=request_id,
-                user_id=client_ip,
-                user_tier=user_tier,
+                user_id=user.id,
+                user_tier=user.tier,
                 filename=file.filename,
                 file_size_bytes=len(content),
                 page_count=0,  # Will be updated after parsing
@@ -429,7 +490,8 @@ async def extract_document(
                 request_id,
                 content,
                 file.filename,
-                client_ip
+                client_ip,
+                user.id
             )
         )
 

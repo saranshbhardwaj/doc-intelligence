@@ -11,6 +11,10 @@ class Settings(BaseSettings):
     admin_api_key: str = "change-this-in-production"  # For analytics endpoint access
     llmwhisperer_api_key: str = ""  # Optional - for OCR support (Pro tier)
 
+    # Authentication (Clerk)
+    clerk_secret_key: str = ""  # Get from https://dashboard.clerk.com
+    clerk_publishable_key: str = ""  # Used by frontend
+
     # Database
     database_url: str = ""  # Leave empty for SQLite in development
 

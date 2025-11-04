@@ -2,6 +2,7 @@
 // Main upload and results page (moved from App.jsx)
 import { useState, useEffect } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
+import { SignedIn, SignedOut, SignInButton, UserButton } from "@clerk/clerk-react";
 import FileUploader from "../components/upload/FileUploader";
 import ResultsView from "../components/results/ResultViews";
 import DarkModeToggle from "../components/common/DarkModeToggle";
@@ -116,6 +117,18 @@ export default function UploadPage() {
               >
                 Back to Home
               </button>
+
+              {/* Authentication UI */}
+              <SignedOut>
+                <SignInButton mode="modal">
+                  <button className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium">
+                    Sign In
+                  </button>
+                </SignInButton>
+              </SignedOut>
+              <SignedIn>
+                <UserButton />
+              </SignedIn>
             </div>
           </div>
         </div>
@@ -132,24 +145,24 @@ export default function UploadPage() {
               Stop reading CIMs manually. Extract data in minutes.
             </p>
             <p className="text-sm text-gray-500 dark:text-gray-500">
-              Free demo: 2 uploads per day • Max 60 pages per upload • 5MB limit
+              Free demo: one time up to 100 pages • 5MB limit
             </p>
           </div>
 
         {/* Demo Banner */}
         {isDemo && (
           <div className="bg-gradient-to-r from-blue-50 to-purple-50 dark:from-blue-900/20 dark:to-purple-900/20 border-2 border-blue-500 dark:border-blue-400 rounded-2xl p-6 mb-8">
-            <div className="flex items-center gap-3 mb-2">
-              <span className="text-2xl">🎯</span>
-              <h3 className="text-lg font-bold text-gray-900 dark:text-white">
+            <div className="flex items-center gap-3 mb-4">
+              <span className="text-3xl">🎯</span>
+              <h3 className="text-2xl font-bold text-gray-900 dark:text-white">
                 Sample CIM Analysis
               </h3>
             </div>
-            <p className="text-gray-700 dark:text-gray-300 mb-3">
+            <p className="text-lg text-gray-700 dark:text-gray-300 mb-4">
               You're viewing a sample extraction from Alcatel-Lucent's CIM. This demonstrates the full capability of our AI-powered analysis.
             </p>
-            <p className="text-sm text-gray-600 dark:text-gray-400">
-              Want to analyze your own CIM? <button onClick={() => window.location.href = '/app'} className="text-blue-600 dark:text-blue-400 underline font-semibold">Upload your document here</button>
+            <p className="text-base text-gray-600 dark:text-gray-400">
+              Explore the sample output below to see what Sand Cloud can extract from your documents.
             </p>
           </div>
         )}
@@ -202,14 +215,14 @@ export default function UploadPage() {
         {/* Results */}
         {result && (
           <div className="mb-8">
-            <div className="flex justify-end mb-3">
+            {/* <div className="flex justify-end mb-3">
               <button
                 onClick={clearResults}
                 className="text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200 transition-colors"
               >
                 Clear results / analyze another file
               </button>
-            </div>
+            </div> */}
 
             <ResultsView result={result} />
           </div>

@@ -2,6 +2,7 @@
 // src/components/upload/FileUploader.jsx
 import { useRef, useState, useEffect } from "react";
 import classNames from "classnames";
+import { useAuth } from "@clerk/clerk-react";
 import useExtractionProgress from "../../hooks/useExtractionProgress";
 import ProgressTracker from "./ProgressTracker";
 
@@ -16,6 +17,9 @@ export default function FileUploader({
   const [localError, setLocalError] = useState(null);
   const inputRef = useRef(null);
 
+  // Get Clerk authentication token
+  const { getToken } = useAuth();
+
   const {
     upload: uploadDocument,
     retry: retryExtraction,
@@ -23,7 +27,7 @@ export default function FileUploader({
     result,
     error: extractionError,
     isProcessing
-  } = useExtractionProgress();
+  } = useExtractionProgress(getToken);
 
   // Handle successful extraction result
   useEffect(() => {
