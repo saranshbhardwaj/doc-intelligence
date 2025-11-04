@@ -152,7 +152,7 @@ class ExtractionPipeline:
         if progress_tracker:
             progress_tracker.update_progress(
                 progress_percent=30,
-                message=f"Created {chunking_output.total_chunks} chunks",
+                message=f"Created indexes for the document",
                 details={"chunks": chunking_output.total_chunks},
                 chunking_completed=True
             )

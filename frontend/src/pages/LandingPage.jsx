@@ -140,9 +140,9 @@ export default function LandingPage() {
       </div>
 
       {/* Pricing Section */}
-      {/* <div id="pricing">
+      <div id="pricing">
         <Pricing onSelectPlan={handleSelectPlan} />
-      </div> */}
+      </div>
 
       {/* FAQ Section */}
       <FAQ />
@@ -164,7 +164,7 @@ export default function LandingPage() {
               Get Started Free
             </button>
             <p className="text-sm text-blue-100 mt-4">
-              No credit card required • 100 pages per month free
+              No credit card required • 100 pages free
             </p>
           </SignedOut>
           <SignedIn>

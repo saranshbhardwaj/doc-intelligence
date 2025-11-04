@@ -13,15 +13,28 @@ router = APIRouter()
 @router.get("/api/users/me")
 def get_current_user_info(user: User = Depends(get_current_user)):
     """Get current user's profile and usage stats"""
+    # For free tier, use total pages (one-time limit)
+    # For paid tiers, use monthly pages (recurring limit)
+    if user.tier == "free":
+        pages_used = user.total_pages_processed
+        pages_remaining = max(0, user.pages_limit - user.total_pages_processed)
+    else:
+        pages_used = user.pages_this_month
+        pages_remaining = max(0, user.pages_limit - user.pages_this_month)
+
+    percentage_used = (pages_used / user.pages_limit * 100) if user.pages_limit > 0 else 0
+
     return {
         "id": user.id,
         "email": user.email,
         "tier": user.tier,
         "usage": {
-            "pages_this_month": user.pages_this_month,
+            "pages_used": pages_used,
+            "pages_remaining": pages_remaining,
             "pages_limit": user.pages_limit,
-            "total_pages": user.total_pages_processed,
-            "percentage_used": (user.pages_this_month / user.pages_limit * 100) if user.pages_limit > 0 else 0
+            "total_pages_processed": user.total_pages_processed,
+            "pages_this_month": user.pages_this_month,
+            "percentage_used": round(percentage_used, 1)
         },
         "subscription": {
             "status": user.subscription_status,

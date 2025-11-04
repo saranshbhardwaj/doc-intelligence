@@ -58,4 +58,11 @@ export function createAuthenticatedApi(getToken) {
   return authenticatedApi;
 }
 
+// User API
+export const getUserInfo = async (getToken) => {
+  const authenticatedApi = createAuthenticatedApi(getToken);
+  const response = await authenticatedApi.get('/api/users/me');
+  return response.data;
+};
+
 export default api;

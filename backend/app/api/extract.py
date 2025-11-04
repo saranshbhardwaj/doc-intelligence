@@ -349,21 +349,46 @@ async def extract_document(
         # STEP 1: Check page limit (admin users have unlimited)
         # ============================================
         if user.tier != "admin" and user.pages_limit > 0:
-            if user.pages_this_month >= user.pages_limit:
-                raise HTTPException(
-                    status_code=403,
-                    detail={
-                        "error": "page_limit_exceeded",
-                        "message": f"Monthly page limit reached ({user.pages_limit} pages). Please upgrade your plan.",
-                        "pages_used": user.pages_this_month,
-                        "pages_limit": user.pages_limit
-                    }
-                )
+            # For free tier: Check total pages processed (one-time limit)
+            # For paid tiers: Check monthly pages (recurring limit)
+            if user.tier == "free":
+                # Free tier gets 100 pages ONE TIME total
+                if user.total_pages_processed >= user.pages_limit:
+                    raise HTTPException(
+                        status_code=403,
+                        detail={
+                            "error": "page_limit_exceeded",
+                            "message": f"Free tier limit reached ({user.pages_limit} pages total). Please upgrade to continue.",
+                            "pages_used": user.total_pages_processed,
+                            "pages_limit": user.pages_limit,
+                            "tier": user.tier
+                        }
+                    )
+            else:
+                # Paid tiers have monthly limits
+                if user.pages_this_month >= user.pages_limit:
+                    raise HTTPException(
+                        status_code=403,
+                        detail={
+                            "error": "page_limit_exceeded",
+                            "message": f"Monthly page limit reached ({user.pages_limit} pages). Your limit resets next month.",
+                            "pages_used": user.pages_this_month,
+                            "pages_limit": user.pages_limit,
+                            "tier": user.tier
+                        }
+                    )
 
-        logger.info(f"User page usage: {user.pages_this_month}/{user.pages_limit}", extra={
-            "request_id": request_id,
-            "user_id": user.id
-        })
+        # Log usage
+        if user.tier == "free":
+            logger.info(f"User page usage (total): {user.total_pages_processed}/{user.pages_limit}", extra={
+                "request_id": request_id,
+                "user_id": user.id
+            })
+        else:
+            logger.info(f"User page usage (monthly): {user.pages_this_month}/{user.pages_limit}", extra={
+                "request_id": request_id,
+                "user_id": user.id
+            })
 
         # ============================================
         # STEP 2: Check cache FIRST (highest priority)

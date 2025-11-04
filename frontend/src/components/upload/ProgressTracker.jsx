@@ -47,25 +47,32 @@ export default function ProgressTracker({ progress, error, onRetry }) {
 
     // Page limit error - show upgrade prompt
     if (error.type === 'limit_error') {
+      // Determine if it's a free tier one-time limit or paid tier monthly limit
+      const isFreeLimit = error.message?.includes('Free tier');
+
       return (
         <div className="mt-4 p-6 bg-gradient-to-br from-orange-400 via-orange-500 to-red-500 dark:from-orange-500 dark:via-orange-600 dark:to-red-600 rounded-xl text-white shadow-lg">
           <div className="flex items-center gap-3 mb-4">
-            <span className="text-3xl">📊</span>
-            <h3 className="text-xl font-semibold">Page Limit Reached</h3>
+            <span className="text-3xl">{isFreeLimit ? '🎁' : '📊'}</span>
+            <h3 className="text-xl font-semibold">
+              {isFreeLimit ? 'Free Trial Complete' : 'Page Limit Reached'}
+            </h3>
           </div>
 
           <div className="bg-white/20 rounded-lg p-4 mb-4">
             <p className="text-base font-medium mb-2">{error.message}</p>
             <p className="text-sm opacity-90">
-              Upgrade your plan to process more documents this month.
+              {isFreeLimit
+                ? "You've used all 100 free pages! Upgrade to continue analyzing documents."
+                : "Upgrade your plan to process more documents this month."}
             </p>
           </div>
 
           <button
-            onClick={() => window.location.href = '/pricing'}
+            onClick={() => window.location.href = '/#pricing'}
             className="w-full py-3 px-4 bg-white text-orange-600 rounded-lg font-semibold hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200 active:translate-y-0"
           >
-            🚀 Upgrade Plan
+            🚀 {isFreeLimit ? 'View Pricing Plans' : 'Upgrade Plan'}
           </button>
         </div>
       );

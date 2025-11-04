@@ -2,21 +2,40 @@
 // Main upload and results page (moved from App.jsx)
 import { useState, useEffect } from "react";
 import { useSearchParams, useNavigate } from "react-router-dom";
-import { SignedIn, SignedOut, SignInButton, UserButton } from "@clerk/clerk-react";
+import { SignedIn, SignedOut, SignInButton, UserButton, useAuth } from "@clerk/clerk-react";
 import FileUploader from "../components/upload/FileUploader";
 import ResultsView from "../components/results/ResultViews";
 import DarkModeToggle from "../components/common/DarkModeToggle";
 import { useDarkMode } from "../hooks/useDarkMode";
+import { getUserInfo } from "../api";
 
 export default function UploadPage() {
   const { isDark, toggle } = useDarkMode();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
+  const { getToken, isSignedIn } = useAuth();
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
   const [rateLimit, setRateLimit] = useState(null);
   const [phase, setPhase] = useState("idle"); // idle | uploading | processing | done
   const [isDemo, setIsDemo] = useState(false);
+  const [userInfo, setUserInfo] = useState(null);
+
+  // Fetch user info when signed in
+  useEffect(() => {
+    if (isSignedIn && getToken) {
+      fetchUserInfo();
+    }
+  }, [isSignedIn, getToken]);
+
+  const fetchUserInfo = async () => {
+    try {
+      const info = await getUserInfo(getToken);
+      setUserInfo(info);
+    } catch (err) {
+      console.error('Failed to fetch user info:', err);
+    }
+  };
 
   // Load demo data if demo=true in URL
   useEffect(() => {
@@ -70,6 +89,8 @@ export default function UploadPage() {
     setResult(data);
     setPhase("done");
     setError(null);
+    // Refresh user info after successful extraction to update page count
+    fetchUserInfo();
   };
 
   const handleError = (msg) => {
@@ -144,9 +165,35 @@ export default function UploadPage() {
             <p className="text-lg text-gray-700 dark:text-gray-300 mb-2">
               Stop reading CIMs manually. Extract data in minutes.
             </p>
-            <p className="text-sm text-gray-500 dark:text-gray-500">
-              Free demo: one time up to 100 pages • 5MB limit
-            </p>
+
+            {/* Usage indicator for signed-in users */}
+            <SignedIn>
+              {userInfo && userInfo.usage ? (
+                <div className="inline-flex items-center gap-3 mt-4">
+                  <div className="text-sm text-gray-600 dark:text-gray-400">
+                    <span className="font-semibold text-gray-900 dark:text-white">
+                      {userInfo.usage.pages_remaining}
+                    </span>
+                    {' '}pages remaining
+                    {userInfo.tier === 'free' && ' (one-time limit)'}
+                  </div>
+                  <div className="text-xs text-gray-500 dark:text-gray-500">
+                    {userInfo.usage.pages_used} / {userInfo.usage.pages_limit} used • Max 5MB per document limit
+                  </div>
+                </div>
+              ) : (
+                <p className="text-sm text-gray-500 dark:text-gray-500 mt-4">
+                  Loading usage info...
+                </p>
+              )}
+            </SignedIn>
+
+            {/* Static text for non-signed in users */}
+            <SignedOut>
+              <p className="text-sm text-gray-500 dark:text-gray-500">
+                Free: 100 pages one-time • Max 5MB per document limit
+              </p>
+            </SignedOut>
           </div>
 
         {/* Demo Banner */}
