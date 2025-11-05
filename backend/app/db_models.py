@@ -18,6 +18,7 @@ class Extraction(Base):
     file_size_bytes = Column(Integer, nullable=False)
     page_count = Column(Integer, nullable=False)
     pdf_type = Column(String(20))  # 'digital' or 'scanned'
+    context = Column(Text, nullable=True)  # Optional user-provided context to guide extraction
 
     parser_used = Column(String(50))  # 'pymupdf', 'llmwhisperer', etc.
     processing_time_ms = Column(Integer)

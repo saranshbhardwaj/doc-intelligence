@@ -60,7 +60,8 @@ class ExtractionPipeline:
         parser_output: ParserOutput,
         request_id: str,
         filename: str,
-        progress_tracker: Optional["JobProgressTracker"] = None
+        progress_tracker: Optional["JobProgressTracker"] = None,
+        context: str = None
     ) -> PipelineResult:
         """Run the extraction pipeline on parser output.
 
@@ -68,6 +69,8 @@ class ExtractionPipeline:
             parser_output: Output from document parser (Azure, Google, etc.)
             request_id: Unique request ID for logging/tracking
             filename: Original filename for logging
+            progress_tracker: Optional job progress tracker for real-time updates
+            context: Optional user-provided context to guide extraction
 
         Returns:
             PipelineResult with extracted data and metadata
@@ -78,20 +81,21 @@ class ExtractionPipeline:
         # Check if chunking is supported and enabled
         if settings.enable_chunking and ChunkerFactory.supports_chunking(parser_output.parser_name):
             logger.info("Using chunked extraction pipeline", extra={"request_id": request_id})
-            return await self._process_with_chunking(parser_output, request_id, filename, progress_tracker)
+            return await self._process_with_chunking(parser_output, request_id, filename, progress_tracker, context)
         else:
             logger.info(
                 f"Using direct extraction pipeline (chunking {'disabled' if not settings.enable_chunking else 'not supported'})",
                 extra={"request_id": request_id, "parser": parser_output.parser_name}
             )
-            return await self._process_direct(parser_output, request_id, filename, progress_tracker)
+            return await self._process_direct(parser_output, request_id, filename, progress_tracker, context)
 
     async def _process_with_chunking(
         self,
         parser_output: ParserOutput,
         request_id: str,
         filename: str,
-        progress_tracker: Optional["JobProgressTracker"] = None
+        progress_tracker: Optional["JobProgressTracker"] = None,
+        context: str = None
     ) -> PipelineResult:
         """Process using multi-stage chunking pipeline.
 
@@ -106,6 +110,7 @@ class ExtractionPipeline:
             request_id: Request ID for logging
             filename: Original filename
             progress_tracker: Optional job progress tracker for real-time updates
+            context: Optional user-provided context to guide extraction
 
         Returns:
             PipelineResult with extracted data and metadata
@@ -248,7 +253,7 @@ class ExtractionPipeline:
 
         logger.info("Calling expensive LLM (Sonnet) with chunked context", extra={"request_id": request_id})
         # LLM client is now async and handles threading internally
-        extracted_data = await self.llm_client.extract_structured_data(combined_context)
+        extracted_data = await self.llm_client.extract_structured_data(combined_context, context)
 
         if progress_tracker:
             progress_tracker.update_progress(
@@ -277,7 +282,8 @@ class ExtractionPipeline:
         parser_output: ParserOutput,
         request_id: str,
         filename: str,
-        progress_tracker: Optional["JobProgressTracker"] = None
+        progress_tracker: Optional["JobProgressTracker"] = None,
+        context: str = None
     ) -> PipelineResult:
         """Process without chunking - direct LLM extraction.
 
@@ -291,6 +297,7 @@ class ExtractionPipeline:
             request_id: Request ID for logging
             filename: Original filename
             progress_tracker: Optional job progress tracker for real-time updates
+            context: Optional user-provided context to guide extraction
 
         Returns:
             PipelineResult with extracted data
@@ -306,7 +313,7 @@ class ExtractionPipeline:
 
         logger.info("Calling LLM for direct extraction", extra={"request_id": request_id})
         # LLM client is now async and handles threading internally
-        extracted_data = await self.llm_client.extract_structured_data(parser_output.text)
+        extracted_data = await self.llm_client.extract_structured_data(parser_output.text, context)
 
         if progress_tracker:
             progress_tracker.update_progress(

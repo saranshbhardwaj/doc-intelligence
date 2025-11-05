@@ -34,9 +34,14 @@ class LLMClient:
         self.cheap_max_tokens = settings.cheap_llm_max_tokens
         self.cheap_timeout_seconds = settings.cheap_llm_timeout_seconds
     
-    async def extract_structured_data(self, text: str) -> Dict:
+    async def extract_structured_data(self, text: str, context: str = None) -> Dict:
         """
         Send text to Claude and get structured JSON back.
+
+        Args:
+            text: Document text to extract from
+            context: Optional user-provided context to guide extraction
+
         Raises HTTPException if API call fails.
         """
         # Smart truncate text if too long
@@ -64,11 +69,11 @@ class LLMClient:
                 }
             )
         
-        prompt = self._create_prompt(text)
+        prompt = self._create_prompt(text, context)
 
         logger.info(
             f"Calling Claude API with {len(prompt)} char prompt (timeout: {self.timeout_seconds}s)",
-            extra={"prompt_length": len(prompt), "timeout": self.timeout_seconds}
+            extra={"prompt_length": len(prompt), "timeout": self.timeout_seconds, "has_context": bool(context)}
         )
 
         # Retry logic for API overloads and rate limits
@@ -217,9 +222,9 @@ class LLMClient:
 
         return text
     
-    def _create_prompt(self, text: str) -> str:
-      """Create extraction prompt using the new comprehensive format"""
-      return create_extraction_prompt(text)
+    def _create_prompt(self, text: str, context: str = None) -> str:
+        """Create extraction prompt using the new comprehensive format"""
+        return create_extraction_prompt(text, context)
 
     async def summarize_chunk(self, chunk_text: str) -> str:
         """Async wrapper to summarize a single chunk using thread offload."""

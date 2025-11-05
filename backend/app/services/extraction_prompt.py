@@ -19,7 +19,7 @@ CRITICAL RULES:
 
 USER_PROMPT_TEMPLATE = """
 Extract ALL relevant information from this CIM document into the structured JSON format below.
-
+{context_section}
 DOCUMENT TEXT:
 {document_text}
 
@@ -283,6 +283,26 @@ CRITICAL OUTPUT FORMAT REQUIREMENTS:
 Return the JSON now:
 """
 
-def create_extraction_prompt(document_text: str) -> str:
-    """Generate the full extraction prompt"""
-    return USER_PROMPT_TEMPLATE.format(document_text=document_text)
+def create_extraction_prompt(document_text: str, context: str = None) -> str:
+    """Generate the full extraction prompt
+
+    Args:
+        document_text: The document content to extract from
+        context: Optional user-provided context to guide extraction
+
+    Returns:
+        Formatted prompt string
+    """
+    context_section = ""
+    if context and context.strip():
+        context_section = f"""
+USER CONTEXT & EXTRACTION FOCUS:
+{context.strip()}
+
+While extracting all required fields below, pay special attention to these areas for maximum accuracy.
+"""
+
+    return USER_PROMPT_TEMPLATE.format(
+        document_text=document_text,
+        context_section=context_section
+    )

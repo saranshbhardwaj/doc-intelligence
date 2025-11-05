@@ -15,6 +15,7 @@ import api, { createAuthenticatedApi } from '../api';
  *
  * @param {File} file - The PDF file to extract
  * @param {Function} getToken - Clerk's getToken function from useAuth hook
+ * @param {string} context - Optional context to guide extraction (max 500 chars)
  * @returns {Promise<Object>} Response with either immediate result (cache hit) or job details
  *
  * Response types:
@@ -24,14 +25,17 @@ import api, { createAuthenticatedApi } from '../api';
  * Usage:
  * ```jsx
  * const { getToken } = useAuth();
- * const result = await uploadDocument(file, getToken);
+ * const result = await uploadDocument(file, getToken, "Focus on SaaS metrics");
  * ```
  */
-export async function uploadDocument(file, getToken) {
+export async function uploadDocument(file, getToken, context = "") {
     const authenticatedApi = createAuthenticatedApi(getToken);
 
     const formData = new FormData();
     formData.append('file', file);
+    if (context && context.trim()) {
+        formData.append('context', context.trim());
+    }
 
     const response = await authenticatedApi.post('/api/extract', formData, {
         headers: { 'Content-Type': 'multipart/form-data' }

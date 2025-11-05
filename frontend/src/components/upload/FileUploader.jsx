@@ -14,6 +14,7 @@ export default function FileUploader({
   setRateLimit,
 }) {
   const [file, setFile] = useState(null);
+  const [context, setContext] = useState("");
   const [localError, setLocalError] = useState(null);
   const inputRef = useRef(null);
 
@@ -79,7 +80,7 @@ export default function FileUploader({
     onUploadStart?.();
 
     try {
-      await uploadDocument(file);
+      await uploadDocument(file, context);
     } catch (err) {
       // Error handling is done in the hook and useEffect above
       console.error("Upload failed:", err);
@@ -149,33 +150,65 @@ export default function FileUploader({
         )}
 
         {file && !isProcessing && (
-          <div className="mt-4 p-3 bg-gray-100 dark:bg-[#1a1a1a] rounded flex items-center justify-between border border-gray-200 dark:border-[#3f3f3f] transition-colors duration-200">
-            <div>
-              <div className="font-medium text-gray-900 dark:text-[#ececec]">
-                {file.name}
+          <div className="mt-4 space-y-4">
+            {/* File info */}
+            <div className="p-3 bg-gray-100 dark:bg-[#1a1a1a] rounded flex items-center justify-between border border-gray-200 dark:border-[#3f3f3f] transition-colors duration-200">
+              <div>
+                <div className="font-medium text-gray-900 dark:text-[#ececec]">
+                  {file.name}
+                </div>
+                <div className="text-xs text-gray-600 dark:text-[#a8a8a8]">
+                  {(file.size / 1024).toFixed(0)} KB
+                </div>
               </div>
-              <div className="text-xs text-gray-600 dark:text-[#a8a8a8]">
-                {(file.size / 1024).toFixed(0)} KB
-              </div>
-            </div>
 
-            <div className="flex items-center gap-3">
               <button
                 onClick={() => {
                   setFile(null);
+                  setContext("");
                   setLocalError(null);
                 }}
                 className="text-gray-600 dark:text-[#a8a8a8] hover:text-gray-900 dark:hover:text-[#ececec] transition-colors"
               >
                 Remove
               </button>
-              <button
-                onClick={handleUpload}
-                className="bg-blue-600 dark:bg-blue-600 text-white px-4 py-2 rounded hover:bg-blue-700 dark:hover:bg-blue-500 transition-colors"
-              >
-                Upload
-              </button>
             </div>
+
+            {/* Context input */}
+            <div className="p-4 bg-gradient-to-br from-purple-50 via-blue-50 to-indigo-50 dark:from-[#1a1a2e] dark:via-[#1a2332] dark:to-[#1e1a2e] rounded-lg border border-purple-200 dark:border-[#3a3a5a]">
+              <label className="block mb-2">
+                <div className="flex items-center gap-2 mb-1">
+                  <span className="text-sm font-medium text-gray-900 dark:text-[#ececec]">
+                    💡 Add Context (Optional)
+                  </span>
+                </div>
+                <div className="text-xs text-gray-600 dark:text-[#a8a8a8] mb-3">
+                  Guide the extraction by providing specific instructions or focus areas
+                </div>
+              </label>
+              <textarea
+                value={context}
+                onChange={(e) => {
+                  if (e.target.value.length <= 500) {
+                    setContext(e.target.value);
+                  }
+                }}
+                placeholder='e.g., "Focus on SaaS metrics, ARR growth, and customer acquisition costs"'
+                rows={3}
+                className="w-full px-3 py-2 rounded border border-gray-300 dark:border-[#4a4a4a] bg-white dark:bg-[#2f2f2f] text-gray-900 dark:text-[#ececec] placeholder-gray-400 dark:placeholder-[#8e8e8e] focus:ring-2 focus:ring-blue-500 dark:focus:ring-blue-400 focus:border-transparent resize-none text-sm"
+              />
+              <div className="text-xs text-gray-500 dark:text-[#a8a8a8] mt-1 text-right">
+                {context.length} / 500 characters
+              </div>
+            </div>
+
+            {/* Upload button */}
+            <button
+              onClick={handleUpload}
+              className="w-full bg-blue-600 dark:bg-blue-600 text-white px-4 py-3 rounded-lg hover:bg-blue-700 dark:hover:bg-blue-500 transition-colors font-medium"
+            >
+              Upload & Extract
+            </button>
           </div>
         )}
       </div>
