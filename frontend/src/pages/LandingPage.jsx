@@ -1,6 +1,7 @@
 // src/pages/LandingPage.jsx
 import { useNavigate } from "react-router-dom";
-import { SignedIn, SignedOut, SignInButton, UserButton } from "@clerk/clerk-react";
+import { SignedIn, SignedOut, SignInButton, UserButton, useAuth } from "@clerk/clerk-react";
+import { useEffect } from "react";
 import Hero from "../components/landing/Hero";
 import Features from "../components/landing/Features";
 import Pricing from "../components/landing/Pricing";
@@ -11,6 +12,14 @@ import { useDarkMode } from "../hooks/useDarkMode";
 export default function LandingPage() {
   const navigate = useNavigate();
   const { isDark, toggle } = useDarkMode();
+  const { isSignedIn, isLoaded } = useAuth();
+
+  // Redirect signed-in users to dashboard (only after Clerk finishes loading)
+  useEffect(() => {
+    if (isLoaded && isSignedIn) {
+      navigate("/app/dashboard");
+    }
+  }, [isLoaded, isSignedIn, navigate]);
 
   const handleGetStarted = () => {
     // Navigate to sign-up page
@@ -95,10 +104,10 @@ export default function LandingPage() {
               </SignedOut>
               <SignedIn>
                 <button
-                  onClick={() => navigate("/app")}
+                  onClick={() => navigate("/app/dashboard")}
                   className="px-6 py-2 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white font-semibold rounded-lg transition-all duration-200"
                 >
-                  Go to App
+                  Go to Dashboard
                 </button>
                 <UserButton />
               </SignedIn>
@@ -169,10 +178,10 @@ export default function LandingPage() {
           </SignedOut>
           <SignedIn>
             <button
-              onClick={() => navigate("/app")}
+              onClick={() => navigate("/app/dashboard")}
               className="px-10 py-4 bg-white hover:bg-gray-100 text-blue-600 font-bold rounded-xl shadow-xl hover:shadow-2xl transform hover:scale-105 transition-all duration-200"
             >
-              Go to App
+              Go to Dashboard
             </button>
           </SignedIn>
         </div>

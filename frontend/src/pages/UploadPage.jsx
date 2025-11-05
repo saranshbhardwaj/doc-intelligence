@@ -1,13 +1,14 @@
 // src/pages/UploadPage.jsx
 // Main upload and results page (moved from App.jsx)
 import { useState, useEffect } from "react";
-import { useSearchParams, useNavigate } from "react-router-dom";
+import { useSearchParams, useNavigate, Link } from "react-router-dom";
 import { SignedIn, SignedOut, SignInButton, UserButton, useAuth } from "@clerk/clerk-react";
 import FileUploader from "../components/upload/FileUploader";
 import ResultsView from "../components/results/ResultViews";
 import DarkModeToggle from "../components/common/DarkModeToggle";
 import { useDarkMode } from "../hooks/useDarkMode";
 import { getUserInfo } from "../api";
+import { fetchExtractionResult } from "../services/extractionService";
 
 export default function UploadPage() {
   const { isDark, toggle } = useDarkMode();
@@ -76,6 +77,39 @@ export default function UploadPage() {
     }
   }, [searchParams]);
 
+  // Check for active extraction on mount (for reconnection after navigation)
+  useEffect(() => {
+    const activeJobId = sessionStorage.getItem('active_job_id');
+    if (activeJobId) {
+      console.log('📍 Active extraction detected, setting phase to processing');
+      setPhase("processing");
+    }
+  }, []);
+
+  // Load past extraction if extraction ID is in URL
+  useEffect(() => {
+    const extractionId = searchParams.get("extraction");
+
+    if (extractionId && isSignedIn && getToken) {
+      setPhase("processing");
+      setError(null);
+
+      // Fetch the extraction result
+      fetchExtractionResult(extractionId, getToken)
+        .then(extractionData => {
+          console.log("Loaded past extraction:", extractionData);
+          setResult(extractionData);
+          setPhase("done");
+        })
+        .catch(err => {
+          console.error("Failed to load extraction:", err);
+          const errorMessage = err.response?.data?.detail || "Failed to load extraction";
+          setError(errorMessage);
+          setPhase("idle");
+        });
+    }
+  }, [searchParams, isSignedIn, getToken]);
+
   const handleUploadStart = () => {
     setPhase("uploading");
     setError(null);
@@ -96,6 +130,9 @@ export default function UploadPage() {
   const handleError = (msg) => {
     setError(msg);
     setPhase("idle");
+    // Clear sessionStorage on error
+    sessionStorage.removeItem('active_job_id');
+    sessionStorage.removeItem('active_extraction_id');
   };
 
   const clearResults = () => {
@@ -110,20 +147,40 @@ export default function UploadPage() {
       <nav className="sticky top-0 z-50 bg-white/80 dark:bg-gray-900/80 backdrop-blur-lg border-b border-gray-200 dark:border-gray-800">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center h-16">
-            {/* Logo - clickable to go home */}
-            <button
-              onClick={() => navigate("/")}
-              className="flex items-center gap-3 hover:opacity-80 transition-opacity"
-            >
-              <img
-                src="/Sand_cloud_logo_dark-gray.svg"
-                alt="Sand Cloud"
-                className="h-8 w-auto"
-              />
-              <span className="text-xl font-bold text-gray-900 dark:text-white">
-                Sand Cloud
-              </span>
-            </button>
+            {/* Logo and Navigation */}
+            <div className="flex items-center gap-8">
+              <button
+                onClick={() => navigate(isSignedIn ? "/app/dashboard" : "/")}
+                className="flex items-center gap-3 hover:opacity-80 transition-opacity"
+              >
+                <img
+                  src="/Sand_cloud_logo_dark-gray.svg"
+                  alt="Sand Cloud"
+                  className="h-8 w-auto"
+                />
+                <span className="text-xl font-bold text-gray-900 dark:text-white">
+                  Sand Cloud
+                </span>
+              </button>
+
+              {/* Navigation Links - Only show when signed in */}
+              <SignedIn>
+                <nav className="hidden md:flex gap-6">
+                  <Link
+                    to="/app"
+                    className="text-sm font-medium text-gray-900 dark:text-white transition-colors"
+                  >
+                    Upload
+                  </Link>
+                  <Link
+                    to="/app/dashboard"
+                    className="text-sm font-medium text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors"
+                  >
+                    Dashboard
+                  </Link>
+                </nav>
+              </SignedIn>
+            </div>
 
             {/* Right side actions */}
             <div className="flex items-center gap-4">

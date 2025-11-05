@@ -24,11 +24,17 @@ export default function FileUploader({
   const {
     upload: uploadDocument,
     retry: retryExtraction,
+    reconnect,
     progress,
     result,
     error: extractionError,
     isProcessing
   } = useExtractionProgress(getToken);
+
+  // Reconnect to active extraction on mount
+  useEffect(() => {
+    reconnect();
+  }, [reconnect]);
 
   // Handle successful extraction result
   useEffect(() => {

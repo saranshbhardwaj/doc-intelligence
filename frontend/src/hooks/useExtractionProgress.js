@@ -100,6 +100,9 @@ export default function useExtractionProgress(getToken) {
                 });
             }
         }
+        // Clear sessionStorage when extraction finishes
+        sessionStorage.removeItem('active_job_id');
+        sessionStorage.removeItem('active_extraction_id');
         setIsProcessing(false);
     }, [getToken]);
 
@@ -135,6 +138,10 @@ export default function useExtractionProgress(getToken) {
             }
             jobIdRef.current = response.job_id;
             extractionIdRef.current = response.extraction_id;
+
+            // Store in sessionStorage so we can reconnect after navigation
+            sessionStorage.setItem('active_job_id', response.job_id);
+            sessionStorage.setItem('active_extraction_id', response.extraction_id);
 
             // Start SSE stream (async to get token first)
             streamProgress(response.job_id, getToken, {
@@ -207,11 +214,35 @@ export default function useExtractionProgress(getToken) {
         setProgress(null);
     }, []);
 
+    // Reconnect to an active extraction after navigation
+    const reconnect = useCallback(() => {
+        const storedJobId = sessionStorage.getItem('active_job_id');
+        const storedExtractionId = sessionStorage.getItem('active_extraction_id');
+
+        if (storedJobId && storedExtractionId) {
+            console.log('🔄 Reconnecting to active extraction:', storedJobId);
+            jobIdRef.current = storedJobId;
+            extractionIdRef.current = storedExtractionId;
+            setIsProcessing(true);
+
+            // Start SSE stream
+            streamProgress(storedJobId, getToken, {
+                onProgress: handleProgress,
+                onComplete: handleComplete,
+                onError: handleError,
+                onEnd: handleEnd
+            }).then(cleanup => {
+                cleanupRef.current = cleanup;
+            });
+        }
+    }, [getToken, handleProgress, handleComplete, handleError, handleEnd]);
+
     return {
         upload,
         retry,
         cancel,
         reset,
+        reconnect,
         progress,
         result,
         error,
