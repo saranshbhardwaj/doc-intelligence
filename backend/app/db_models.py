@@ -19,6 +19,7 @@ class Extraction(Base):
     page_count = Column(Integer, nullable=False)
     pdf_type = Column(String(20))  # 'digital' or 'scanned'
     context = Column(Text, nullable=True)  # Optional user-provided context to guide extraction
+    content_hash = Column(String(64), nullable=True, index=True)  # SHA256 hash of file content for duplicate detection
 
     parser_used = Column(String(50))  # 'pymupdf', 'llmwhisperer', etc.
     processing_time_ms = Column(Integer)
@@ -112,32 +113,3 @@ class JobState(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     completed_at = Column(DateTime(timezone=True), nullable=True)
-
-
-class RateLimit(Base):
-    """Rate limiting per user/IP with customizable limits"""
-    __tablename__ = "rate_limits"
-
-    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    identifier = Column(String(100), nullable=False, unique=True, index=True)  # IP or user_id
-    identifier_type = Column(String(20), default="ip")  # 'ip' or 'user'
-
-    tier = Column(String(20), default="free")  # free, pro, enterprise
-
-    # Limits
-    daily_limit = Column(Integer, default=2)
-    monthly_limit = Column(Integer, default=60)
-
-    # Current counts
-    current_daily_count = Column(Integer, default=0)
-    current_monthly_count = Column(Integer, default=0)
-
-    # Reset tracking
-    last_daily_reset = Column(Date, default=func.current_date())
-    last_monthly_reset = Column(Date, default=func.current_date())
-
-    # Custom notes (e.g., "Beta tester - unlimited")
-    notes = Column(Text, nullable=True)
-
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

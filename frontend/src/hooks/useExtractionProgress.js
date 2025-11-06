@@ -124,35 +124,50 @@ export default function useExtractionProgress(getToken) {
         try {
             const response = await uploadDocument(file, getToken);
             console.log('📤 Upload response:', response);
-            if (response.from_cache) {
+            // Treat from_cache or from_history as instant result
+            if (response.from_cache || response.from_history) {
+                setProgress({
+                    status: 'parsing',
+                    percent: 20,
+                    message: response.from_cache ? 'Checking cache...' : 'Checking history...',
+                    stage: 'parsing',
+                    stages: { parsing: false, chunking: false, summarizing: false, extracting: false }
+                });
+                await new Promise((resolve) => setTimeout(resolve, 600));
+                setProgress({
+                    status: 'extracting',
+                    percent: 60,
+                    message: response.from_cache ? 'Retrieving cached result...' : 'Retrieving previous result...',
+                    stage: 'extracting',
+                    stages: { parsing: true, chunking: true, summarizing: true, extracting: false }
+                });
+                await new Promise((resolve) => setTimeout(resolve, 900));
                 setResult(response);
                 setProgress({
                     status: 'completed',
                     percent: 100,
-                    message: 'Retrieved from cache',
+                    message: response.from_cache ? 'Retrieved from cache' : 'Retrieved from history',
                     stage: 'completed',
                     stages: { parsing: true, chunking: true, summarizing: true, extracting: true }
                 });
                 setIsProcessing(false);
                 return response;
             }
-            jobIdRef.current = response.job_id;
-            extractionIdRef.current = response.extraction_id;
-
-            // Store in sessionStorage so we can reconnect after navigation
-            sessionStorage.setItem('active_job_id', response.job_id);
-            sessionStorage.setItem('active_extraction_id', response.extraction_id);
-
-            // Start SSE stream (async to get token first)
-            streamProgress(response.job_id, getToken, {
-                onProgress: handleProgress,
-                onComplete: handleComplete,
-                onError: handleError,
-                onEnd: handleEnd
-            }).then(cleanup => {
-                cleanupRef.current = cleanup;
-            });
-
+            // Only run SSE/session logic if job_id is present
+            if (response.job_id) {
+                jobIdRef.current = response.job_id;
+                extractionIdRef.current = response.extraction_id;
+                sessionStorage.setItem('active_job_id', response.job_id);
+                sessionStorage.setItem('active_extraction_id', response.extraction_id);
+                streamProgress(response.job_id, getToken, {
+                    onProgress: handleProgress,
+                    onComplete: handleComplete,
+                    onError: handleError,
+                    onEnd: handleEnd
+                }).then(cleanup => {
+                    cleanupRef.current = cleanup;
+                });
+            }
             return response;
         } catch (err) {
             console.error('Upload failed:', err);

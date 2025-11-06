@@ -1,7 +1,6 @@
 # backend/migrate_create_tables.py
 """Create all database tables"""
 from app.database import engine, Base
-from app.db_models import Extraction, ParserOutput, CacheEntry, JobState, RateLimit
 from app.db_models_users import User, UsageLog
 
 print("Creating all database tables...")

@@ -29,11 +29,6 @@ class ExtractionMetadata(BaseModel):
     is_scanned_pdf: Optional[bool] = False
     ocr_used: Optional[bool] = False
 
-class RateLimitInfo(BaseModel):
-    remaining_uploads: int
-    reset_in_hours: int
-    limit_per_window: int
-
 class CompanyInfo(BaseModel):
     company_name: Optional[str] = None
     company_id: Optional[str] = None
@@ -229,11 +224,12 @@ class ExtractedData(BaseModel):
     # notes, free-text explanation of extraction choices
     extraction_notes: Optional[str] = None
 
+
+# Removed RateLimitInfo and rate_limit field from ExtractionResponse
 class ExtractionResponse(BaseModel):
     success: bool
     data: ExtractedData
     metadata: ExtractionMetadata
-    rate_limit: Optional[RateLimitInfo] = None
     from_cache: bool = False
 
 class ErrorResponse(BaseModel):

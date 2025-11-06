@@ -7,7 +7,6 @@ from app.db_models_users import User
 from app.db_models import Extraction
 from app.database import get_db
 from app.utils.logging import logger
-import os
 from pathlib import Path
 from app.config import settings
 
@@ -147,7 +146,7 @@ def delete_extraction(
         file_patterns = [
             settings.raw_dir / f"*_{extraction_id[:8]}.txt",
             settings.parsed_dir / f"*_{extraction_id[:8]}.json",
-            settings.llm_output_dir / f"*_{extraction_id[:8]}.json",
+            settings.raw_llm_dir / f"*_{extraction_id[:8]}.json",
         ]
 
         files_deleted = 0
@@ -174,7 +173,7 @@ def delete_extraction(
         logger.error(f"Error deleting files: {e}", extra={
             "extraction_id": extraction_id,
             "user_id": user.id
-        })
+        }, exc_info=True)  # Include full stack trace
         # Continue with DB deletion even if file deletion fails
 
     # Delete from database
@@ -184,7 +183,7 @@ def delete_extraction(
     logger.info(f"Extraction deleted successfully", extra={
         "extraction_id": extraction_id,
         "user_id": user.id,
-        "filename": extraction.filename
+        "extraction_filename": extraction.filename
     })
 
     return {

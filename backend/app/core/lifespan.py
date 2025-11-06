@@ -3,7 +3,7 @@ import asyncio
 from contextlib import asynccontextmanager
 from app.config import settings
 from app.utils.logging import logger
-from app.api.dependencies import rate_limiter
+from app.api.dependencies import cache
 
 
 @asynccontextmanager
@@ -25,8 +25,9 @@ async def lifespan(app):
         logger.warning("Set MOCK_MODE=false in .env to use real API")
         logger.warning("=" * 60)
 
-    # cache.clear_expired()
-    rate_limiter.clear_expired()
+    # Clean up cache on startup
+    removed = cache.clear_expired()
+    logger.info(f"Cache cleanup on startup: removed {removed} expired entries")
 
     # Start background cleanup task
     # cleanup_task = asyncio.create_task(periodic_cleanup())
@@ -49,18 +50,10 @@ async def periodic_cleanup():
     while True:
         try:
             await asyncio.sleep(3600)  # 1 hour = 3600 seconds
-            
             logger.info("Running periodic cleanup...")
-            
             # Clean cache
-
-            # cache_removed = cache.clear_expired()
-            # logger.info(f"Cache cleanup: removed {cache_removed} expired entries")
-            
-            # Clean rate limiter
-            rate_limiter.clear_expired()
-            logger.info("Rate limiter cleanup completed")
-            
+            removed = cache.clear_expired()
+            logger.info(f"Cache cleanup: removed {removed} expired entries")
         except asyncio.CancelledError:
             logger.info("Cleanup task cancelled")
             break

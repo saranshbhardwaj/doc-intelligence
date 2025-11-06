@@ -28,17 +28,16 @@ export default function ActionButtons({ onFeedbackClick, data, metadata }) {
         <div className="relative group">
           <button
             onClick={handleExportExcel}
-            disabled
-            className="flex items-center gap-2 px-4 py-2 bg-gray-400 dark:bg-gray-600 text-gray-200 dark:text-gray-400 rounded-lg cursor-not-allowed font-semibold shadow-sm opacity-60"
+            className="flex items-center gap-2 px-4 py-2 bg-gray-400 dark:bg-gray-600 text-gray-200 dark:text-gray-400 rounded-lg font-semibold shadow-sm opacity-60"
           >
             <Download className="w-4 h-4" />
             Export to Excel
           </button>
           {/* Tooltip */}
-          <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-2 bg-gray-900 dark:bg-gray-700 text-white text-sm rounded-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-10">
+          {/* <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 px-3 py-2 bg-gray-900 dark:bg-gray-700 text-white text-sm rounded-lg opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none whitespace-nowrap z-10">
             🚧 Work in Progress
             <div className="absolute top-full left-1/2 transform -translate-x-1/2 border-4 border-transparent border-t-gray-900 dark:border-t-gray-700"></div>
-          </div>
+          </div> */}
         </div>
 
         <button

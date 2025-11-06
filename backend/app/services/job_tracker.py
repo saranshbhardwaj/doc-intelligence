@@ -19,6 +19,13 @@ class JobProgressTracker:
         self.db = db
         self.job_id = job_id
         self._listeners = []
+        # Commit throttling state to avoid hammering the DB and blocking event loop
+        self._last_progress_percent: int | None = None
+        self._last_status: str | None = None
+        self._last_stage: str | None = None
+        self._last_commit_monotonic: float = 0.0
+        self._throttle_seconds: float = 0.75  # minimum interval between lightweight progress commits
+        self._min_progress_delta: int = 3     # commit only if progress advanced this much
 
     def get_job_state(self) -> JobState:
         """Get current job state from database"""
@@ -55,15 +62,53 @@ class JobProgressTracker:
             if hasattr(job, flag_name):
                 setattr(job, flag_name, flag_value)
 
-        job.updated_at = datetime.now()
-        self.db.commit()
-        self.db.refresh(job)
+        # Decide whether to commit (throttle simple progress updates)
+        import time as _time
+        now = _time.monotonic()
 
-        logger.info(f"Job {self.job_id} updated: {status or 'progress'} - {message}", extra={
-            "job_id": self.job_id,
-            "status": job.status,
-            "progress": job.progress_percent
-        })
+        stage_changed = (current_stage and current_stage != self._last_stage)
+        status_changed = (status and status != self._last_status)
+        progress_changed = (
+            progress_percent is not None and
+            (self._last_progress_percent is None or abs(progress_percent - self._last_progress_percent) >= self._min_progress_delta)
+        )
+
+        # Force commit if stage/status changed or we have flags marking stage completion
+        flags_set = any(stage_flags.values())
+        time_elapsed = (now - self._last_commit_monotonic) >= self._throttle_seconds
+
+        should_commit = stage_changed or status_changed or flags_set or progress_changed or time_elapsed
+
+        if should_commit:
+            job.updated_at = datetime.now()
+            self.db.commit()
+            # refresh only on substantive change to reduce DB round-trips
+            if stage_changed or status_changed or flags_set:
+                self.db.refresh(job)
+
+            # Update last commit state trackers
+            if progress_percent is not None:
+                self._last_progress_percent = progress_percent
+            if status:
+                self._last_status = status
+            if current_stage:
+                self._last_stage = current_stage
+            self._last_commit_monotonic = now
+
+        if should_commit:
+            logger.info(f"Job {self.job_id} updated: {status or 'progress'} - {message}", extra={
+                "job_id": self.job_id,
+                "status": job.status,
+                "progress": job.progress_percent,
+                "throttled": False
+            })
+        else:
+            logger.debug(f"Job {self.job_id} progress throttled (no commit)", extra={
+                "job_id": self.job_id,
+                "status": job.status,
+                "progress": job.progress_percent,
+                "throttled": True
+            })
 
     def mark_error(
         self,

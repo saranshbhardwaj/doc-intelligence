@@ -10,12 +10,13 @@ import time
 import uuid
 import json
 import asyncio
+import hashlib
 
 from fastapi import APIRouter, Request, UploadFile, File, Form, HTTPException, Depends
 from fastapi.responses import JSONResponse
 
 from app.api.dependencies import (
-    rate_limiter, get_client_ip, document_processor, cache, analytics
+    get_client_ip, document_processor, cache, analytics
 )
 from app.auth import get_current_user
 from app.db_models_users import User
@@ -108,8 +109,61 @@ async def extract_document(
         # Read file content
         content = await file.read()
 
+        # Calculate content hash for duplicate detection
+        content_hash = hashlib.sha256(content).hexdigest()
+
         # ============================================
-        # STEP 1: Check page limit (admin users have unlimited)
+        # STEP 1: Check if user already has this exact document (by content hash)
+        # ============================================
+        db = next(get_db())
+        try:
+            existing_extraction = db.query(Extraction).filter(
+                Extraction.user_id == user.id,
+                Extraction.content_hash == content_hash,
+                Extraction.status == "completed"
+            ).first()
+
+            if existing_extraction:
+                logger.info("Duplicate document detected - returning existing extraction", extra={
+                    "request_id": request_id,
+                    "existing_extraction_id": existing_extraction.id,
+                    "user_id": user.id
+                })
+
+                # Load existing result from parsed_dir
+                result_files = list(settings.parsed_dir.glob(f"*_{existing_extraction.id[:8]}.json"))
+
+                if result_files:
+                    with open(result_files[0], 'r', encoding='utf-8') as f:
+                        result_data = json.load(f)
+
+                    return {
+                        "success": True,
+                        "data": result_data.get("data", {}),
+                        "metadata": {
+                            "extraction_id": existing_extraction.id,
+                            "request_id": request_id,
+                            "filename": existing_extraction.filename,
+                            "pages": existing_extraction.page_count,
+                            "characters_extracted": result_data.get("metadata", {}).get("characters_extracted", 0),
+                            "processing_time_seconds": time.time() - start_time,
+                            "timestamp": datetime.now().isoformat(),
+                            "original_created_at": existing_extraction.created_at.isoformat() if existing_extraction.created_at else None
+                        },
+                        "from_cache": False,
+                        "from_history": True,
+                        "message": "This document was already processed"
+                    }
+                else:
+                    # Extraction record exists but file is missing - treat as cache miss
+                    logger.warning("Extraction exists but result file missing", extra={
+                        "extraction_id": existing_extraction.id
+                    })
+        finally:
+            db.close()
+
+        # ============================================
+        # STEP 2: Check page limit (admin users have unlimited)
         # ============================================
         if user.tier != "admin" and user.pages_limit > 0:
             # For free tier: Check total pages processed (one-time limit)
@@ -154,14 +208,15 @@ async def extract_document(
             })
 
         # ============================================
-        # STEP 2: Check cache FIRST (highest priority)
+        # STEP 3: Check cache (global cache across all users)
         # ============================================
         cached_result = cache.get(content)
 
         if cached_result:
-            logger.info("Cache HIT - returning immediately", extra={"request_id": request_id})
-
-            _, remaining = rate_limiter.check_limit(client_ip)
+            logger.info("Cache HIT - creating extraction record and returning result", extra={
+                "request_id": request_id,
+                "user_id": user.id
+            })
 
             analytics.track_event(
                 "cache_hit",
@@ -185,11 +240,52 @@ async def extract_document(
                     normalized_cached["data"] = {}
                 normalized_cached["data"]["red_flags"] = []
 
+            # Create extraction record in database so it appears in user's history
+            db = next(get_db())
+            try:
+                # Validate and truncate context if provided
+                if context:
+                    context = context.strip()[:500]
+
+                extraction = Extraction(
+                    id=request_id,
+                    user_id=user.id,
+                    user_tier=user.tier,
+                    filename=file.filename,
+                    file_size_bytes=len(content),
+                    page_count=cached_result["metadata"]["pages"],
+                    status="completed",
+                    from_cache=True,
+                    content_hash=content_hash,
+                    context=context,
+                    completed_at=datetime.now()
+                )
+                db.add(extraction)
+                db.commit()
+
+                # Save parsed result to disk so dashboard can load it
+                from app.utils.file_utils import save_parsed_result
+                save_parsed_result(request_id, normalized_cached, file.filename)
+
+                logger.info("Cache hit extraction saved to database and disk", extra={
+                    "request_id": request_id,
+                    "user_id": user.id
+                })
+            except Exception as e:
+                logger.error(f"Failed to save cache hit extraction: {e}", extra={
+                    "request_id": request_id,
+                    "user_id": user.id
+                }, exc_info=True)
+                # Continue - don't fail the request if DB save fails
+            finally:
+                db.close()
+
             # Return 200 OK with full result (sync behavior)
             return {
                 "success": True,
                 "data": normalized_cached.get("data", cached_result["data"]),
                 "metadata": {
+                    "extraction_id": request_id,
                     "request_id": request_id,
                     "filename": file.filename,
                     "pages": cached_result["metadata"]["pages"],
@@ -201,24 +297,9 @@ async def extract_document(
             }
 
         # ============================================
-        # STEP 2: Cache MISS - Check rate limit
+        # STEP 4: Cache MISS - Check rate limit
         # ============================================
         logger.info("Cache MISS - creating async job", extra={"request_id": request_id})
-
-        is_allowed, remaining = rate_limiter.check_limit(client_ip)
-
-        if not is_allowed:
-            reset_time = rate_limiter.get_reset_time(client_ip)
-            hours_until_reset = (reset_time - datetime.now()).total_seconds() / 3600
-
-            raise HTTPException(
-                status_code=429,
-                detail={
-                    "error": "rate_limit_exceeded",
-                    "message": f"Rate limit exceeded. Resets in {hours_until_reset:.1f} hours.",
-                    "reset_in_hours": round(hours_until_reset, 1)
-                }
-            )
 
         # Validate file
         document_processor.validate_file(file.filename, content)
@@ -231,7 +312,7 @@ async def extract_document(
         )
 
         # ============================================
-        # STEP 3: Create extraction + job records
+        # STEP 5: Create extraction + job records
         # ============================================
         db = next(get_db())
         try:
@@ -247,7 +328,8 @@ async def extract_document(
                 file_size_bytes=len(content),
                 page_count=0,  # Will be updated after parsing
                 status="processing",
-                context=context
+                context=context,
+                content_hash=content_hash
             )
             db.add(extraction)
             db.commit()
@@ -270,11 +352,8 @@ async def extract_document(
         finally:
             db.close()
 
-        # Record upload for rate limiting
-        rate_limiter.record_upload(client_ip)
-
         # ============================================
-        # STEP 4: Start background processing with asyncio
+        # STEP 6: Start background processing with asyncio
         # ============================================
         # Use asyncio.create_task() for true fire-and-forget background execution
         asyncio.create_task(
@@ -290,7 +369,7 @@ async def extract_document(
         )
 
         # ============================================
-        # STEP 5: Return 202 Accepted with job_id (async behavior)
+        # STEP 7: Return 202 Accepted with job_id (async behavior)
         # ============================================
         return JSONResponse(
             status_code=202,  # Accepted - processing asynchronously

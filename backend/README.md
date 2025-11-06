@@ -137,11 +137,6 @@ uvicorn main:app --reload --port 8000
 - Persistent disk cache (`logs/cache/`)
 - Prevents duplicate processing
 
-#### 5. **Rate Limiter** (`app/services/db_rate_limiter.py`)
-- Database-backed (persistent across restarts)
-- Per-user/per-tier limits
-- Customizable via database
-
 ---
 
 ## ⚙️ Configuration

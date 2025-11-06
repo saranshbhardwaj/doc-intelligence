@@ -3,7 +3,6 @@ from fastapi import Request
 from app.services.llm_client import LLMClient
 from app.services.document_processor import DocumentProcessor
 from app.services.cache import DocumentCache
-from app.services.rate_limiter import RateLimiter
 from app.services.analytics import SimpleAnalytics
 from app.services.extraction_pipeline import ExtractionPipeline
 from app.repositories import ExtractionRepository
@@ -13,11 +12,6 @@ from app.config import settings
 cache = DocumentCache(
     cache_dir=settings.cache_dir,
     cache_ttl_hours=settings.cache_ttl
-)
-
-rate_limiter = RateLimiter(
-    max_uploads=settings.rate_limit_uploads,
-    window_hours=settings.rate_limit_window_hours
 )
 
 document_processor = DocumentProcessor(

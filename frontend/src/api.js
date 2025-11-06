@@ -56,8 +56,8 @@ export function createAuthenticatedApi(getToken) {
 }
 
 // User API
-export const getUserInfo = async (getToken) => {
-  const authenticatedApi = createAuthenticatedApi(getToken);
+export const getUserInfo = async (token) => {
+  const authenticatedApi = createAuthenticatedApi(() => token);
   const response = await authenticatedApi.get('/api/users/me');
   return response.data;
 };
@@ -72,9 +72,9 @@ export const getUserInfo = async (getToken) => {
  * @param {string} params.status - Filter by status (completed, processing, failed)
  * @returns {Promise<Object>} Extraction history with pagination info
  */
-export const getUserExtractions = async (getToken, params = {}) => {
-  const authenticatedApi = createAuthenticatedApi(getToken);
-  const response = await authenticatedApi.get('/api/users/me/extractions', { params });
+export const getUserExtractions = async (token, { limit, offset } = {}) => {
+  const authenticatedApi = createAuthenticatedApi(() => token);
+  const response = await authenticatedApi.get(`/api/users/me/extractions?limit=${limit}&offset=${offset}`);
   return response.data;
 };
 

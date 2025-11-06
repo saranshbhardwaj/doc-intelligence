@@ -33,20 +33,22 @@ export default function DashboardPage() {
 
   // Fetch user info and extractions
   useEffect(() => {
-    if (isSignedIn && getToken) {
+    if (isSignedIn) {
       fetchDashboardData();
     }
-  }, [isSignedIn, getToken]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isSignedIn]);
 
   const fetchDashboardData = async () => {
     setLoading(true);
     setError(null);
 
     try {
+      const token = await getToken();
       // Fetch user info and extractions in parallel
       const [userInfoData, extractionsData] = await Promise.all([
-        getUserInfo(getToken),
-        getUserExtractions(getToken, { limit: pagination.limit, offset: pagination.offset })
+        getUserInfo(token),
+        getUserExtractions(token, { limit: pagination.limit, offset: pagination.offset })
       ]);
 
       setUserInfo(userInfoData);
@@ -67,8 +69,9 @@ export default function DashboardPage() {
 
   const handleLoadMore = async () => {
     try {
+      const token = await getToken();
       const newOffset = pagination.offset + pagination.limit;
-      const extractionsData = await getUserExtractions(getToken, {
+      const extractionsData = await getUserExtractions(token, {
         limit: pagination.limit,
         offset: newOffset
       });

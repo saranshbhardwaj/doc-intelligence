@@ -11,7 +11,6 @@ export default function FileUploader({
   onError,
   onUploadStart,
   onUploadComplete,
-  setRateLimit,
 }) {
   const [file, setFile] = useState(null);
   const [context, setContext] = useState("");
@@ -36,11 +35,16 @@ export default function FileUploader({
     reconnect();
   }, [reconnect]);
 
-  // Handle successful extraction result
+  // Handle successful extraction result (prevent infinite loop)
+  const lastResultRef = useRef();
   useEffect(() => {
-    if (result) {
+    if (result && result !== lastResultRef.current) {
       onResult?.(result);
       onUploadComplete?.();
+      lastResultRef.current = result;
+      // Reset file and context after successful upload
+      setFile(null);
+      setContext("");
     }
   }, [result, onResult, onUploadComplete]);
 
@@ -107,7 +111,7 @@ export default function FileUploader({
         onDrop={onDrop}
         onDragOver={(e) => e.preventDefault()}
         className={classNames(
-          "border-2 border-dashed rounded-lg p-6 text-center relative transition-colors duration-200",
+          "border-2 border-dashed rounded-lg p-6 text-center relative transition-colors duration-200 cursor-pointer",
           "bg-white dark:bg-[#2f2f2f]",
           "border-gray-300 dark:border-[#4a4a4a]",
           {

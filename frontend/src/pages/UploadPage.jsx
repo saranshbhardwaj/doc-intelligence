@@ -17,21 +17,22 @@ export default function UploadPage() {
   const { getToken, isSignedIn } = useAuth();
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
-  const [rateLimit, setRateLimit] = useState(null);
+
   const [phase, setPhase] = useState("idle"); // idle | uploading | processing | done
   const [isDemo, setIsDemo] = useState(false);
   const [userInfo, setUserInfo] = useState(null);
 
   // Fetch user info when signed in
   useEffect(() => {
-    if (isSignedIn && getToken) {
+    if (isSignedIn) {
       fetchUserInfo();
     }
-  }, [isSignedIn, getToken]);
+  }, [isSignedIn]);
 
   const fetchUserInfo = async () => {
     try {
-      const info = await getUserInfo(getToken);
+      const token = await getToken();
+      const info = await getUserInfo(token);
       setUserInfo(info);
     } catch (err) {
       console.error('Failed to fetch user info:', err);
@@ -279,15 +280,7 @@ export default function UploadPage() {
             onUploadComplete={handleUploadComplete}
             onResult={handleResult}
             onError={handleError}
-            setRateLimit={setRateLimit}
           />
-
-          {rateLimit && rateLimit.remaining_uploads !== undefined && (
-            <p className="mt-4 text-center text-sm text-gray-600 dark:text-gray-400">
-              {rateLimit.remaining_uploads} upload
-              {rateLimit.remaining_uploads !== 1 ? "s" : ""} remaining today
-            </p>
-          )}
           </div>
         )}
 
