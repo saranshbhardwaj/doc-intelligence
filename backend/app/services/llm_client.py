@@ -3,6 +3,7 @@ from datetime import datetime
 import json
 import uuid
 import asyncio
+import re
 from anthropic import Anthropic
 from httpx import Timeout
 from typing import Dict
@@ -192,7 +193,6 @@ class LLMClient:
     
     def _fix_common_json_errors(self, text: str) -> str:
         """Attempt to fix common JSON formatting issues"""
-        import re
 
         # Fix page number ranges like [11, 54-70] -> [11, 54, 70]
         # Claude sometimes uses shorthand notation for page ranges in provenance
@@ -290,7 +290,6 @@ class LLMClient:
         Page 2: [summary]
         Key Numbers: [numbers]
         """
-        import re
 
         summaries = []
         # Split by "Page N:" pattern
