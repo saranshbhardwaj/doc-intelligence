@@ -11,6 +11,7 @@ pydantic-settings>=2.6.0
 python-json-logger==2.0.7
 httpx==0.28.1
 aiohttp==3.9.1
+celery[redis]==5.3.6
 
 # Database
 sqlalchemy==2.0.23

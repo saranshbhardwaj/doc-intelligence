@@ -1,0 +1,42 @@
+version: "3.9"
+services:
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: docint-api
+    env_file:
+      - .env
+    environment:
+      USE_CELERY: "true"
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+    ports:
+      - "8000:8000"
+    depends_on:
+      - redis
+    volumes:
+      - ./.env:/app/.env:ro
+    restart: unless-stopped
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    container_name: docint-worker
+    env_file:
+      - .env
+    environment:
+      USE_CELERY: "true"
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+    depends_on:
+      - redis
+    volumes:
+      - ./.env:/worker/.env:ro
+    restart: unless-stopped
+  redis:
+    image: redis:7-alpine
+    container_name: docint-redis
+    ports:
+      - "6379:6379"
+    restart: unless-stopped

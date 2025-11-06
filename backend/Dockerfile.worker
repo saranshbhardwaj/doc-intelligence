@@ -1,0 +1,29 @@
+# backend/Dockerfile.worker
+# Celery worker image (can reuse base API image logic)
+FROM python:3.11-slim
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1
+
+# Create non-root user for security
+RUN addgroup --system app && adduser --system --ingroup app appuser
+
+WORKDIR /worker
+
+COPY requirements.txt ./requirements.txt
+RUN pip install --upgrade pip && pip install -r requirements.txt
+
+COPY . .
+
+# Ensure ownership for runtime writable paths (logs etc.)
+RUN chown -R appuser:app /worker
+
+ENV USE_CELERY=true \
+    CELERY_BROKER_URL=${CELERY_BROKER_URL} \
+    CELERY_RESULT_BACKEND=${CELERY_RESULT_BACKEND}
+
+# Switch to non-root user
+USER appuser
+
+# Command to start celery worker; --pool=solo (single process). Remove --pool to enable multiprocessing.
+# Example for multi-process: celery -A app.celery_app.celery_app worker --loglevel=info --concurrency=4
+CMD ["celery", "-A", "app.celery_app.celery_app", "worker", "--loglevel=info", "--pool=solo"]

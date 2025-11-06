@@ -105,6 +105,11 @@ class Settings(BaseSettings):
     cheap_llm_max_tokens: int = 4000  # Summaries are shorter
     cheap_llm_timeout_seconds: int = 60  # Summaries are faster
 
+    # Celery / Task Queue
+    use_celery: bool = False  # Toggle to enable Celery task pipeline
+    celery_broker_url: str = "redis://localhost:6379/0"
+    celery_result_backend: str = "redis://localhost:6379/0"
+
     # Chunking Settings
     enable_chunking: bool = True  # Enable multi-stage LLM processing with chunking
     chunk_batch_size: int = 10  # Number of narrative chunks to process per cheap LLM call
@@ -156,6 +161,14 @@ class Settings(BaseSettings):
             self.summaries_dir, self.combined_dir, self.analytics_dir
         ]:
             directory.mkdir(parents=True, exist_ok=True)
+
+        if self.use_celery:
+            # Basic sanity log (logger imported lazily to avoid circular import here)
+            try:
+                from app.utils.logging import logger
+                logger.info("Celery enabled", extra={"broker": self.celery_broker_url})
+            except Exception:
+                pass
 
 # Global settings instance
 settings = Settings()

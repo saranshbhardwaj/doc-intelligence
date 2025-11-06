@@ -11,6 +11,7 @@ import uuid
 import json
 import asyncio
 import hashlib
+import os
 
 from fastapi import APIRouter, Request, UploadFile, File, Form, HTTPException, Depends
 from fastapi.responses import JSONResponse
@@ -32,6 +33,7 @@ from app.db_models import JobState, Extraction
 
 # Orchestration service
 from app.services.extraction_orchestrator import process_document_async
+from app.services.celery_tasks import start_extraction_chain
 
 router = APIRouter()
 
@@ -353,20 +355,27 @@ async def extract_document(
             db.close()
 
         # ============================================
-        # STEP 6: Start background processing with asyncio
-        # ============================================
-        # Use asyncio.create_task() for true fire-and-forget background execution
-        asyncio.create_task(
-            process_document_async(
-                job_id,
-                request_id,
-                content,
-                file.filename,
-                client_ip,
-                user.id,
-                context
+        # STEP 6: Start background processing (Celery or asyncio)
+        if settings.use_celery:
+            # Persist uploaded file to temp path for Celery tasks to read
+            import tempfile
+            tmp_dir = tempfile.gettempdir()
+            temp_path = os.path.join(tmp_dir, f"{request_id}_{file.filename}")
+            with open(temp_path, "wb") as f_out:
+                f_out.write(content)
+            start_extraction_chain(temp_path, file.filename, job_id, request_id, user.id, context)
+        else:
+            asyncio.create_task(
+                process_document_async(
+                    job_id,
+                    request_id,
+                    content,
+                    file.filename,
+                    client_ip,
+                    user.id,
+                    context
+                )
             )
-        )
 
         # ============================================
         # STEP 7: Return 202 Accepted with job_id (async behavior)
