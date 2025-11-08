@@ -3,14 +3,12 @@
 import { useRef, useState, useEffect } from "react";
 import classNames from "classnames";
 import { useAuth } from "@clerk/clerk-react";
-import useExtractionProgress from "../../hooks/useExtractionProgress";
+import { useExtraction, useExtractionActions } from "../../store";
 import ProgressTracker from "./ProgressTracker";
 
 export default function FileUploader({
   onResult,
   onError,
-  onUploadStart,
-  onUploadComplete,
 }) {
   const [file, setFile] = useState(null);
   const [context, setContext] = useState("");
@@ -20,38 +18,33 @@ export default function FileUploader({
   // Get Clerk authentication token
   const { getToken } = useAuth();
 
-  const {
-    upload,
-    retry: retryExtraction,
-    reconnect,
-    progress,
-    result,
-    error: extractionError,
-    isProcessing
-  } = useExtractionProgress(getToken);
+  // Get extraction state and actions from Zustand store
+  const { progress, result, error: extractionError, isProcessing, extractionId } = useExtraction();
+  const { uploadDocument, retryExtraction, reconnectExtraction } = useExtractionActions();
 
   // Reconnect to active extraction on mount
   useEffect(() => {
-    reconnect();
-  }, [reconnect]);
+    if (isProcessing) {
+      reconnectExtraction(getToken);
+    }
+  }, []); // Run once on mount
 
   // Handle successful extraction result (prevent infinite loop)
   const lastResultRef = useRef();
   useEffect(() => {
     if (result && result !== lastResultRef.current) {
-      onResult?.(result);
-      onUploadComplete?.();
+      onResult?.();
       lastResultRef.current = result;
       // Reset file and context after successful upload
       setFile(null);
       setContext("");
     }
-  }, [result, onResult, onUploadComplete]);
+  }, [result, onResult]);
 
   // Handle extraction errors
   useEffect(() => {
     if (extractionError) {
-      onError?.(extractionError.message);
+      onError?.();
     }
   }, [extractionError, onError]);
 
@@ -87,19 +80,18 @@ export default function FileUploader({
     if (!file) return;
 
     setLocalError(null);
-    onUploadStart?.();
 
     try {
-      await upload(file, context);
+      await uploadDocument(file, getToken, context);
     } catch (err) {
-      // Error handling is done in the hook and useEffect above
+      // Error handling is done in the store and useEffect above
       console.error("Upload failed:", err);
     }
   };
 
   const handleRetry = async () => {
     try {
-      await retryExtraction();
+      await retryExtraction(extractionId, getToken);
     } catch (err) {
       console.error("Retry failed:", err);
     }

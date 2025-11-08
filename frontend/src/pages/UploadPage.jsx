@@ -1,54 +1,40 @@
 // src/pages/UploadPage.jsx
 // Main upload and results page (moved from App.jsx)
-import { useState, useEffect, useRef } from "react";
-import useExtractionProgress from '../hooks/useExtractionProgress';
+import { useState, useEffect } from "react";
 import { useSearchParams, useNavigate, Link } from "react-router-dom";
 import { SignedIn, SignedOut, SignInButton, UserButton, useAuth } from "@clerk/clerk-react";
+import { useExtraction, useExtractionActions, useUser, useUserActions } from "../store";
+import { fetchExtractionResult } from "../api";
 import FileUploader from "../components/upload/FileUploader";
 import ResultsView from "../components/results/ResultViews";
 import DarkModeToggle from "../components/common/DarkModeToggle";
 import { useDarkMode } from "../hooks/useDarkMode";
-import { getUserInfo } from "../api";
-import { fetchExtractionResult } from "../services/extractionService";
 
 export default function UploadPage() {
   const { isDark, toggle } = useDarkMode();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
   const { getToken, isSignedIn } = useAuth();
-  const [result, setResult] = useState(null);
-  const [error, setError] = useState(null);
 
-  const [phase, setPhase] = useState("idle"); // idle | uploading | processing | done
   const [isDemo, setIsDemo] = useState(false);
-  const [userInfo, setUserInfo] = useState(null);
 
-  // Extraction progress hook
-  const extractionProgress = useExtractionProgress(getToken);
-  const hasActiveExtraction = useRef(false);
+  // Get state from Zustand store
+  const { result, error, isProcessing } = useExtraction();
+  const { reconnectExtraction, setResult, setError } = useExtractionActions();
+  const { info: userInfo } = useUser();
+  const { fetchUserInfo: loadUserInfo } = useUserActions();
 
   // Fetch user info when signed in
   useEffect(() => {
-    if (isSignedIn) {
-      fetchUserInfo();
+    if (isSignedIn && getToken) {
+      loadUserInfo(getToken);
     }
-  }, [isSignedIn]);
-
-  const fetchUserInfo = async () => {
-    try {
-      const token = await getToken();
-      const info = await getUserInfo(token);
-      setUserInfo(info);
-    } catch (err) {
-      console.error('Failed to fetch user info:', err);
-    }
-  };
+  }, [isSignedIn, getToken, loadUserInfo]);
 
   // Load demo data if demo=true in URL
   useEffect(() => {
     if (searchParams.get("demo") === "true") {
       setIsDemo(true);
-      setPhase("processing");
 
       // Load demo data
       fetch("/demo-data.json")
@@ -73,42 +59,27 @@ export default function UploadPage() {
             from_cache: false
           };
           setResult(demoResult);
-          setPhase("done");
         })
         .catch(err => {
           console.error("Failed to load demo data:", err);
           setError("Failed to load demo data. Please try refreshing the page.");
-          setPhase("idle");
         });
     }
-  }, [searchParams]);
+  }, [searchParams, setResult, setError]);
 
-  // Check for active extraction and reconnect SSE on mount or when phase changes to 'processing'
+  // Reconnect to active extraction on mount (Zustand persistence handles this)
   useEffect(() => {
-    const activeJobId = sessionStorage.getItem('active_job_id');
-    const activeExtractionId = sessionStorage.getItem('active_extraction_id');
-    // Only reconnect if there is an active job
-    if (activeJobId && activeExtractionId) {
-      if (!hasActiveExtraction.current) {
-        console.log('🔄 Reconnecting to active extraction SSE:', activeJobId);
-        // Set processing phase BEFORE reconnecting
-        setPhase("processing");
-        setError(null);
-
-        extractionProgress.reconnect();
-        hasActiveExtraction.current = true;
-      }
-    } else {
-      hasActiveExtraction.current = false;
+    if (isProcessing && getToken) {
+      console.log('🔄 Reconnecting to active extraction from persisted state');
+      reconnectExtraction(getToken);
     }
-  }, [extractionProgress]);
+  }, []); // Run once on mount
 
   // Load past extraction if extraction ID is in URL
   useEffect(() => {
     const extractionId = searchParams.get("extraction");
 
     if (extractionId && isSignedIn && getToken) {
-      setPhase("processing");
       setError(null);
 
       // Fetch the extraction result
@@ -116,46 +87,40 @@ export default function UploadPage() {
         .then(extractionData => {
           console.log("Loaded past extraction:", extractionData);
           setResult(extractionData);
-          setPhase("done");
         })
         .catch(err => {
           console.error("Failed to load extraction:", err);
           const errorMessage = err.response?.data?.detail || "Failed to load extraction";
           setError(errorMessage);
-          setPhase("idle");
         });
     }
-  }, [searchParams, isSignedIn, getToken]);
+  }, [searchParams, isSignedIn, getToken, setResult, setError]);
 
-  const handleUploadStart = () => {
-    setPhase("uploading");
-    setError(null);
-  };
+  // Clear results when navigating to blank upload page (no extraction or demo)
+  useEffect(() => {
+    const hasExtraction = searchParams.get("extraction");
+    const hasDemo = searchParams.get("demo") === "true";
 
-  const handleUploadComplete = () => {
-    setPhase("processing");
-  };
+    // If no extraction or demo in URL, and not actively processing, clear results
+    if (!hasExtraction && !hasDemo && !isProcessing) {
+      setResult(null);
+      setError(null);
+    }
+  }, [searchParams, isProcessing, setResult, setError]);
 
-  const handleResult = (data) => {
-    setResult(data);
-    setPhase("done");
-    setError(null);
+  const handleResult = () => {
     // Refresh user info after successful extraction to update page count
-    fetchUserInfo();
+    if (getToken) {
+      loadUserInfo(getToken);
+    }
   };
 
-  const handleError = (msg) => {
-    setError(msg);
-    setPhase("idle");
-    // Clear sessionStorage on error
-    sessionStorage.removeItem('active_job_id');
-    sessionStorage.removeItem('active_extraction_id');
-  };
-
-  const clearResults = () => {
-    setResult(null);
-    setPhase("idle");
-    setError(null);
+  const handleError = () => {
+    // Error is already set in Zustand store
+    // Just refresh user info to show updated usage
+    if (getToken) {
+      loadUserInfo(getToken);
+    }
   };
 
   return (
@@ -292,8 +257,6 @@ export default function UploadPage() {
         {!isDemo && (
           <div className="bg-white dark:bg-[#2f2f2f] rounded-2xl shadow-2xl p-8 mb-8 relative transition-colors duration-200 border border-gray-200 dark:border-gray-700/50">
           <FileUploader
-            onUploadStart={handleUploadStart}
-            onUploadComplete={handleUploadComplete}
             onResult={handleResult}
             onError={handleError}
           />
