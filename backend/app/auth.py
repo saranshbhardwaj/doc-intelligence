@@ -3,6 +3,7 @@
 from fastapi import HTTPException, Depends, Request
 from clerk_backend_api import Clerk
 from clerk_backend_api.security.types import AuthenticateRequestOptions
+from psycopg import IntegrityError
 from app.config import settings
 from app.database import get_db
 from app.db_models_users import User
@@ -22,7 +23,6 @@ def get_current_user_id(request: Request) -> str:
     """
     # Get authorization header
     auth_header = request.headers.get("authorization")
-    print(f"🔐 [Auth Backend] Authorization header: {auth_header[:50] if auth_header else 'None'}...")
 
     if not auth_header or not auth_header.startswith("Bearer "):
         print("❌ [Auth Backend] Missing or invalid authorization header")
@@ -30,7 +30,6 @@ def get_current_user_id(request: Request) -> str:
 
     try:
         # Convert FastAPI request to httpx request for Clerk SDK
-        print("🔐 [Auth Backend] Verifying request with Clerk...")
         httpx_request = httpx.Request(
             method=request.method,
             url=str(request.url),
@@ -56,8 +55,6 @@ def get_current_user_id(request: Request) -> str:
         if not user_id:
             print(f"❌ [Auth Backend] Could not extract user_id from token payload: {request_state.payload}")
             raise HTTPException(status_code=401, detail="Could not extract user_id from token")
-
-        print(f"✅ [Auth Backend] Token verified! User ID: {user_id}")
         return user_id
 
     except HTTPException:
@@ -74,14 +71,22 @@ def get_current_user(
     """
     Get or create user from database.
     If user doesn't exist (first login), create them.
+    Handles race conditions gracefully.
     """
     # First authenticate the user
     user_id = get_current_user_id(request)
 
     user = db.query(User).filter(User.id == user_id).first()
 
-    if not user:
-        # First time login - fetch user details from Clerk and create in our DB
+    if user:
+        # User exists - just update last login
+        user.last_login = datetime.now()
+        db.commit()
+        return user
+
+    # User doesn't exist - create new user
+    try:
+        # Fetch user details from Clerk
         clerk_user = clerk.users.get(user_id=user_id)
 
         user = User(
@@ -95,12 +100,25 @@ def get_current_user(
         db.add(user)
         db.commit()
         db.refresh(user)
-    else:
-        # Update last login
+        print(f"✅ [Auth Backend] Created new user: {user_id}")
+        return user
+        
+    except IntegrityError:
+        # Race condition: another request created the user between our check and insert
+        # Rollback and fetch the user that was created
+        db.rollback()
+        print(f"⚠️ [Auth Backend] User {user_id} was created by concurrent request, fetching...")
+        user = db.query(User).filter(User.id == user_id).first()
+        
+        if not user:
+            # This shouldn't happen, but handle it just in case
+            print(f"❌ [Auth Backend] Failed to fetch user after IntegrityError")
+            raise HTTPException(status_code=500, detail="Failed to create or fetch user")
+        
+        # Update last login for the fetched user
         user.last_login = datetime.now()
         db.commit()
-
-    return user
+        return user
 
 
 def require_admin(user: User = Depends(get_current_user)) -> User:

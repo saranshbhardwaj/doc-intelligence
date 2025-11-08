@@ -15,8 +15,8 @@ celery[redis]==5.3.6
 
 # Database
 sqlalchemy==2.0.23
-psycopg==3.1.18  # PostgreSQL driver (psycopg3 - better Python 3.13 support)
-alembic==1.12.1  # Database migrations (optional, for future)
+psycopg[binary]==3.1.18  # PostgreSQL driver bundled with libpq to avoid 'libpq library not found'
+alembic>=1.12.1  # Database migrations (optional, for future)
 
 # Document parsing
 PyMuPDF==1.23.8  # fitz - for PDF text extraction

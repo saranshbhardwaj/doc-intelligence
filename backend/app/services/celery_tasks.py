@@ -68,11 +68,43 @@ def parse_document_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
     user_id = payload["user_id"]
     context = payload.get("context")
 
+
     db = _get_db_session()
     tracker = JobProgressTracker(db, job_id)
-    repo = ExtractionRepository(db)
+    repo = ExtractionRepository()
+
+    from app.db_models_users import User
+    from PyPDF2 import PdfReader
 
     try:
+        # --- ENFORCE USER PAGE LIMITS AT PIPELINE START ---
+        user = db.query(User).filter(User.id == user_id).first()
+        if not user:
+            tracker.mark_error(error_stage="parsing", error_message="User not found", error_type="user_error", is_retryable=False)
+            repo.mark_failed(extraction_id, "User not found")
+            return {"status": "failed", "error": "User not found", "extraction_id": extraction_id}
+
+        # Use PyPDF2 to get page count before parsing
+        try:
+            reader = PdfReader(file_path)
+            pre_parse_page_count = len(reader.pages)
+        except Exception as pdf_err:
+            tracker.mark_error(error_stage="parsing", error_message=f"PDF page count error: {pdf_err}", error_type="pdf_error", is_retryable=False)
+            repo.mark_failed(extraction_id, f"PDF page count error: {pdf_err}")
+            return {"status": "failed", "error": f"PDF page count error: {pdf_err}", "extraction_id": extraction_id}
+
+        default_limit = getattr(settings, "default_pages_limit", 100)
+        pages_limit = user.pages_limit if user.pages_limit is not None else default_limit
+        if user.tier == "free" and user.total_pages_processed + pre_parse_page_count > pages_limit:
+            tracker.update_progress(status="blocked", current_stage="parsing", progress_percent=0, message="Free tier page limit exceeded", details={"limit": pages_limit, "requested": pre_parse_page_count})
+            # Do NOT mark extraction failed or create/update extraction record
+            return {"status": "failed", "error": "Free tier page limit exceeded", "extraction_id": extraction_id}
+        elif user.tier != "free" and user.pages_this_month + pre_parse_page_count > pages_limit:
+            tracker.update_progress(status="blocked", current_stage="parsing", progress_percent=0, message="Monthly page limit exceeded", details={"limit": pages_limit, "requested": pre_parse_page_count})
+            # Do NOT mark extraction failed or create/update extraction record
+            return {"status": "failed", "error": "Monthly page limit exceeded", "extraction_id": extraction_id}
+
+        # --- CONTINUE WITH PARSING ---
         tracker.update_progress(status="parsing", current_stage="parsing", progress_percent=5, message="Parsing document...")
         pdf_type = detect_pdf_type(file_path)
         tracker.update_progress(progress_percent=8, message=f"Detected {pdf_type} PDF")
@@ -110,6 +142,7 @@ def parse_document_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                 "parser_version": parser_output.parser_version,
                 "processing_time_ms": parser_output.processing_time_ms,
                 "cost_usd": parser_output.cost_usd,
+                "metadata": parser_output.metadata,
             },
         }
     except Exception as e:
@@ -128,6 +161,7 @@ def chunk_document_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
 
     db = _get_db_session()
     tracker = JobProgressTracker(db, job_id)
+    repo = ExtractionRepository()
 
     try:
         tracker.update_progress(status="chunking", current_stage="chunking", progress_percent=20, message="Chunking document...")
@@ -143,7 +177,7 @@ def chunk_document_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
             processing_time_ms=po["processing_time_ms"],
             cost_usd=po["cost_usd"],
             pdf_type=payload.get("pdf_type"),
-            metadata=None,
+            metadata=po["metadata"],
         )
 
         chunker = ChunkerFactory.get_chunker(parser_output.parser_name)
@@ -191,6 +225,11 @@ def chunk_document_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         }
     except Exception as e:
         tracker.mark_error(error_stage="chunking", error_message=str(e), error_type="chunking_error", is_retryable=True)
+        # Mark extraction failed so SSE loop won't hang indefinitely
+        try:
+            repo.mark_failed(extraction_id, str(e)[:500])
+        except Exception:
+            pass
         raise
     finally:
         db.close()
@@ -204,6 +243,7 @@ def summarize_context_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
 
     db = _get_db_session()
     tracker = JobProgressTracker(db, job_id)
+    repo = ExtractionRepository()
     llm_client = _DEF_LLMC()
 
     try:
@@ -269,6 +309,10 @@ def summarize_context_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         return {**payload, "combined_context_path": combined_path, "combined_context": combined_text}
     except Exception as e:
         tracker.mark_error(error_stage="summarizing", error_message=str(e), error_type="summarizing_error", is_retryable=True)
+        try:
+            repo.mark_failed(extraction_id, str(e)[:500])
+        except Exception:
+            pass
         raise
     finally:
         db.close()
@@ -282,12 +326,43 @@ def extract_structured_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
     context = payload.get("context")
     user_id = payload.get("user_id")
 
+
     db = _get_db_session()
     tracker = JobProgressTracker(db, job_id)
-    repo = ExtractionRepository(db)
+    repo = ExtractionRepository()
     llm_client = _DEF_LLMC()
 
+    from app.db_models_users import User, UsageLog
+    from sqlalchemy.orm import Session
+    from sqlalchemy.exc import SQLAlchemyError
+    import uuid
+
     try:
+        # --- ENFORCE USER PAGE LIMITS ---
+        user = db.query(User).filter(User.id == user_id).first()
+        if not user:
+            tracker.mark_error(error_stage="extracting", error_message="User not found", error_type="user_error", is_retryable=False)
+            repo.mark_failed(extraction_id, "User not found")
+            return {"status": "failed", "error": "User not found", "extraction_id": extraction_id}
+
+        # Determine page count for this extraction
+        extraction = repo.get_extraction(extraction_id)
+        page_count = extraction.page_count if extraction and extraction.page_count else 0
+        # Determine limit
+        pages_limit = user.pages_limit if user.pages_limit is not None else 100
+        # For paid tiers, enforce monthly limit; for free, enforce one-time limit
+        if user.tier == "free":
+            if user.total_pages_processed + page_count > pages_limit:
+                tracker.mark_error(error_stage="extracting", error_message="Free tier page limit exceeded", error_type="limit_error", is_retryable=False)
+                repo.mark_failed(extraction_id, "Free tier page limit exceeded")
+                return {"status": "failed", "error": "Free tier page limit exceeded", "extraction_id": extraction_id}
+        else:
+            if user.pages_this_month + page_count > pages_limit:
+                tracker.mark_error(error_stage="extracting", error_message="Monthly page limit exceeded", error_type="limit_error", is_retryable=False)
+                repo.mark_failed(extraction_id, "Monthly page limit exceeded")
+                return {"status": "failed", "error": "Monthly page limit exceeded", "extraction_id": extraction_id}
+
+        # --- EXTRACTION LOGIC ---
         tracker.update_progress(status="extracting", current_stage="extracting", progress_percent=70, message="Extracting structured data...")
         combined_text = payload["combined_context"]
         extracted_data = asyncio.run(llm_client.extract_structured_data(combined_text, context))
@@ -315,6 +390,30 @@ def extract_structured_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         save_parsed_result(extraction_id, normalized_payload, filename)
         repo.mark_completed(extraction_id)
         tracker.mark_completed()
+
+        # --- UPDATE USAGE AND LOG ---
+        try:
+            # Update user usage fields
+            if user.tier == "free":
+                user.total_pages_processed += page_count
+            else:
+                user.pages_this_month += page_count
+            db.commit()
+
+            # Log usage
+            usage_log = UsageLog(
+                id=str(uuid.uuid4()),
+                user_id=user.id,
+                extraction_id=extraction_id,
+                pages_processed=page_count,
+                operation_type="extraction",
+                cost_usd=extraction.cost_usd if extraction and extraction.cost_usd else 0.0,
+            )
+            db.add(usage_log)
+            db.commit()
+        except SQLAlchemyError as e:
+            logger.error(f"Failed to update usage or log: {e}", extra={"user_id": user_id, "extraction_id": extraction_id})
+            db.rollback()
 
         # Cache result (simple in-memory cache service if enabled)
         try:

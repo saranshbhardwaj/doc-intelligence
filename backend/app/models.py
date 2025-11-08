@@ -224,8 +224,6 @@ class ExtractedData(BaseModel):
     # notes, free-text explanation of extraction choices
     extraction_notes: Optional[str] = None
 
-
-# Removed RateLimitInfo and rate_limit field from ExtractionResponse
 class ExtractionResponse(BaseModel):
     success: bool
     data: ExtractedData

@@ -60,6 +60,7 @@ export default function useExtractionProgress(getToken) {
             percent,
             message: data.message,
             stage,
+            details: data.details || {},
             stages: {
                 parsing: data.parsing_completed,
                 chunking: data.chunking_completed,

@@ -1,9 +1,17 @@
 # app/core/lifespan.py
 import asyncio
+import os
+import time
+from datetime import datetime, timedelta
 from contextlib import asynccontextmanager
 from app.config import settings
 from app.utils.logging import logger
 from app.api.dependencies import cache
+
+# Retention settings (could later move to settings)
+UPLOAD_RETENTION_HOURS = 6  # Delete uploaded source PDFs older than this
+UPLOAD_SCAN_INTERVAL_SECONDS = 1800  # 30 minutes
+SHARED_UPLOAD_ROOT = os.getenv("SHARED_UPLOAD_ROOT", "/shared_uploads")
 
 
 @asynccontextmanager
@@ -13,7 +21,6 @@ async def lifespan(app):
     # ---------- Startup ----------
     logger.info("Application starting", extra={
         "environment": settings.environment,
-        "rate_limit": f"{settings.rate_limit_uploads} uploads per {settings.rate_limit_window_hours}h",
         "max_pages": settings.max_pages,
         "max_file_size_mb": settings.max_file_size_mb
     })
@@ -29,34 +36,61 @@ async def lifespan(app):
     removed = cache.clear_expired()
     logger.info(f"Cache cleanup on startup: removed {removed} expired entries")
 
-    # Start background cleanup task
-    # cleanup_task = asyncio.create_task(periodic_cleanup())
+    # Start background cleanup task (cache + uploaded file pruning)
+    cleanup_task = asyncio.create_task(periodic_cleanup())
 
     # yield control to the running app
     yield
 
     # ---------- Shutdown ----------
 
-    # cleanup_task.cancel()  # Stop background task
-    # try:
-    #     await cleanup_task
-    # except asyncio.CancelledError:
-    #     pass
-    # logger.info("Application shutting down")
+    cleanup_task.cancel()  # Stop background task
+    try:
+        await cleanup_task
+    except asyncio.CancelledError:
+        pass
+    logger.info("Application shutting down")
 
 
 async def periodic_cleanup():
-    """Run cleanup every hour"""
+    """Run periodic cleanup of cache + stale uploaded files"""
     while True:
         try:
-            await asyncio.sleep(3600)  # 1 hour = 3600 seconds
-            logger.info("Running periodic cleanup...")
-            # Clean cache
+            await asyncio.sleep(UPLOAD_SCAN_INTERVAL_SECONDS)
+            logger.info("Running periodic maintenance cleanup...")
+
+            # Cache cleanup
             removed = cache.clear_expired()
             logger.info(f"Cache cleanup: removed {removed} expired entries")
+
+            # Uploaded file pruning
+            if os.path.isdir(SHARED_UPLOAD_ROOT):
+                cutoff = time.time() - (UPLOAD_RETENTION_HOURS * 3600)
+                deleted = 0
+                scanned = 0
+                for name in os.listdir(SHARED_UPLOAD_ROOT):
+                    path = os.path.join(SHARED_UPLOAD_ROOT, name)
+                    if not os.path.isfile(path):
+                        continue
+                    scanned += 1
+                    try:
+                        st = os.stat(path)
+                        if st.st_mtime < cutoff:
+                            os.remove(path)
+                            deleted += 1
+                    except FileNotFoundError:
+                        continue
+                    except Exception as e:  # log and continue
+                        logger.warning("Failed to evaluate uploaded file for cleanup", extra={"file": path, "error": str(e)})
+                logger.info(
+                    "Upload cleanup complete",
+                    extra={"scanned": scanned, "deleted": deleted, "retention_hours": UPLOAD_RETENTION_HOURS}
+                )
+            else:
+                logger.debug("Shared upload root does not exist yet", extra={"path": SHARED_UPLOAD_ROOT})
         except asyncio.CancelledError:
             logger.info("Cleanup task cancelled")
             break
         except Exception as e:
             logger.error(f"Error in periodic cleanup: {e}", exc_info=True)
-            # Continue running even if cleanup fails
+            # Continue loop after logging

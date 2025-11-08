@@ -16,6 +16,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
+# Ensure Python can always import project packages when running CLI tools like Alembic
+ENV PYTHONPATH=/app
+ENV SHARED_UPLOAD_ROOT=/shared_uploads
+
 # Install Python deps separately to leverage layer cache
 COPY requirements.txt ./requirements.txt
 RUN pip install --upgrade pip && pip install -r requirements.txt
@@ -24,7 +28,7 @@ RUN pip install --upgrade pip && pip install -r requirements.txt
 COPY . .
 
 # Adjust ownership for writable directories (logs, temp files)
-RUN chown -R appuser:app /app
+RUN mkdir -p /shared_uploads /app/logs && chown -R appuser:app /shared_uploads /app/logs /app
 
 # Default envs (override via compose / Railway)
 ENV USE_CELERY=${USE_CELERY} \

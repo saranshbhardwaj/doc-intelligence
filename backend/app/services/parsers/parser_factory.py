@@ -3,7 +3,6 @@
 from typing import Optional, Dict
 from .base import DocumentParser
 from .pymupdf_parser import PyMuPDFParser
-from .llmwhisperer_parser import LLMWhispererParser
 from .google_documentai_parser import GoogleDocumentAIParser
 from .azure_document_intelligence_parser import AzureDocumentIntelligenceParser
 from app.config import settings
@@ -112,14 +111,6 @@ class ParserFactory:
         """
         if parser_name == "pymupdf":
             return PyMuPDFParser()
-
-        elif parser_name == "llmwhisperer":
-            return LLMWhispererParser(
-                api_key=settings.llmwhisperer_api_key,
-                mode=settings.llmwhisperer_mode,
-                output_mode=settings.llmwhisperer_output_mode,
-                timeout_seconds=settings.llmwhisperer_timeout_seconds
-            )
 
         elif parser_name == "google_documentai" or parser_name == "documentai":
             return GoogleDocumentAIParser(
