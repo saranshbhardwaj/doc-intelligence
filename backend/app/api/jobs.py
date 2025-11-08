@@ -260,6 +260,10 @@ async def get_job_status(job_id: str, user: User = Depends(get_current_user)):
             "progress": job.progress_percent,
             "message": job.message,
             "details": job.details,
+            "parsing_completed": job.parsing_completed,
+            "chunking_completed": job.chunking_completed,
+            "summarizing_completed": job.summarizing_completed,
+            "extracting_completed": job.extracting_completed,
             "error": {
                 "stage": job.error_stage,
                 "message": job.error_message,

@@ -21,7 +21,7 @@ export default function FileUploader({
   const { getToken } = useAuth();
 
   const {
-    upload: uploadDocument,
+    upload,
     retry: retryExtraction,
     reconnect,
     progress,
@@ -90,7 +90,7 @@ export default function FileUploader({
     onUploadStart?.();
 
     try {
-      await uploadDocument(file, context);
+      await upload(file, context);
     } catch (err) {
       // Error handling is done in the hook and useEffect above
       console.error("Upload failed:", err);

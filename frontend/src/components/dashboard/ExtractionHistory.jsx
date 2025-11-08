@@ -1,4 +1,5 @@
 // src/components/dashboard/ExtractionHistory.jsx
+import { Tooltip, TooltipTrigger, TooltipContent } from "@/components/ui/tooltip";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
@@ -171,6 +172,24 @@ export default function ExtractionHistory({
                       </Badge>
                     ) : (
                       "-"
+                    )}
+                  </TableCell>
+                  <TableCell className="max-w-xs truncate text-sm text-muted-foreground">
+                    {extraction.context ? (
+                      <Tooltip>
+                        <TooltipTrigger asChild>
+                          <span>
+                            {extraction.context.length > 40
+                              ? extraction.context.slice(0, 40) + "…"
+                              : extraction.context}
+                          </span>
+                        </TooltipTrigger>
+                        <TooltipContent>
+                          <span className="whitespace-pre-line">{extraction.context}</span>
+                        </TooltipContent>
+                      </Tooltip>
+                    ) : (
+                      <span className="italic text-xs text-muted-foreground">No context</span>
                     )}
                   </TableCell>
                   <TableCell className="text-sm text-muted-foreground">

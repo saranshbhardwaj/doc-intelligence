@@ -79,7 +79,7 @@ export async function uploadDocument(file, getToken, context = "") {
 // Track active streams to prevent duplicate EventSource instances per job
 const _activeStreams = new Map(); // jobId -> { eventSource, callbacks }
 
-export async function streamProgress(jobId, getToken, { onProgress, onComplete, onError, onEnd, autoReconnect = true }) {
+export async function streamProgress(jobId, getToken, { onProgress, onComplete, onError, onEnd, autoReconnect = true, fetchInitialState = false }) {
     const baseURL = api.defaults.baseURL || '';
 
     // Get auth token and pass as query parameter (EventSource doesn't support headers)
@@ -94,6 +94,49 @@ export async function streamProgress(jobId, getToken, { onProgress, onComplete, 
             try { existing.eventSource.close(); } catch (_) {}
             _activeStreams.delete(jobId);
         };
+    }
+
+    // Fetch initial state before starting SSE if requested (for reconnection)
+    if (fetchInitialState) {
+        try {
+            const initialState = await getJobStatus(jobId, getToken);
+            console.log('[SSE Frontend] Fetched initial job state:', initialState);
+            
+            // Emit initial progress to populate UI
+            if (initialState.status === 'completed') {
+                onComplete?.({ 
+                    message: initialState.message || 'Extraction completed',
+                    extraction_id: initialState.extraction_id 
+                });
+                onEnd?.({ reason: 'completed', job_id: jobId });
+                return () => {}; // No cleanup needed, job already done
+            } else if (initialState.status === 'failed') {
+                onError?.({
+                    message: initialState.error_message || 'Job failed',
+                    stage: initialState.error_stage,
+                    type: initialState.error_type,
+                    isRetryable: initialState.is_retryable
+                });
+                onEnd?.({ reason: 'failed', job_id: jobId });
+                return () => {};
+            } else {
+                // In progress - send initial progress event
+                onProgress?.({
+                    status: initialState.status,
+                    stage: initialState.current_stage,
+                    progress: initialState.progress_percent,
+                    message: initialState.message,
+                    details: initialState.details || {},
+                    parsing_completed: initialState.parsing_completed,
+                    chunking_completed: initialState.chunking_completed,
+                    summarizing_completed: initialState.summarizing_completed,
+                    extracting_completed: initialState.extracting_completed
+                });
+            }
+        } catch (err) {
+            console.error('[SSE Frontend] Failed to fetch initial state:', err);
+            // Continue to SSE connection anyway
+        }
     }
 
     const eventSource = new EventSource(url);

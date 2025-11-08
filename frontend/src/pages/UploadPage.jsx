@@ -86,17 +86,22 @@ export default function UploadPage() {
   // Check for active extraction and reconnect SSE on mount or when phase changes to 'processing'
   useEffect(() => {
     const activeJobId = sessionStorage.getItem('active_job_id');
+    const activeExtractionId = sessionStorage.getItem('active_extraction_id');
     // Only reconnect if there is an active job
-    if (activeJobId) {
+    if (activeJobId && activeExtractionId) {
       if (!hasActiveExtraction.current) {
         console.log('🔄 Reconnecting to active extraction SSE:', activeJobId);
+        // Set processing phase BEFORE reconnecting
+        setPhase("processing");
+        setError(null);
+
         extractionProgress.reconnect();
         hasActiveExtraction.current = true;
       }
     } else {
       hasActiveExtraction.current = false;
     }
-  }, [phase, extractionProgress]);
+  }, [extractionProgress]);
 
   // Load past extraction if extraction ID is in URL
   useEffect(() => {

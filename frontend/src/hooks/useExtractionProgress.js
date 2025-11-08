@@ -119,11 +119,11 @@ export default function useExtractionProgress(getToken) {
     }, []);
 
     // Upload and start streaming
-    const upload = useCallback(async (file) => {
+    const upload = useCallback(async (file, context = "") => {
         reset();
         setIsProcessing(true);
         try {
-            const response = await uploadDocument(file, getToken);
+            const response = await uploadDocument(file, getToken, context);
             console.log('📤 Upload response:', response);
             // Treat from_cache or from_history as instant result
             if (response.from_cache || response.from_history) {
@@ -231,7 +231,7 @@ export default function useExtractionProgress(getToken) {
     }, []);
 
     // Reconnect to an active extraction after navigation
-    const reconnect = useCallback(() => {
+    const reconnect = useCallback(async () => {
         const storedJobId = sessionStorage.getItem('active_job_id');
         const storedExtractionId = sessionStorage.getItem('active_extraction_id');
 
@@ -241,15 +241,25 @@ export default function useExtractionProgress(getToken) {
             extractionIdRef.current = storedExtractionId;
             setIsProcessing(true);
 
-            // Start SSE stream
-            streamProgress(storedJobId, getToken, {
-                onProgress: handleProgress,
-                onComplete: handleComplete,
-                onError: handleError,
-                onEnd: handleEnd
-            }).then(cleanup => {
+            // Start SSE stream with initial state fetch
+            try {
+                const cleanup = await streamProgress(storedJobId, getToken, {
+                    onProgress: handleProgress,
+                    onComplete: handleComplete,
+                    onError: handleError,
+                    onEnd: handleEnd,
+                    fetchInitialState: true  // NEW: Fetch current job state first
+                });
                 cleanupRef.current = cleanup;
-            });
+            } catch (err) {
+                console.error('Failed to reconnect:', err);
+                setError({
+                    message: 'Failed to reconnect to extraction',
+                    type: 'reconnect_error',
+                    isRetryable: true
+                });
+                setIsProcessing(false);
+            }
         }
     }, [getToken, handleProgress, handleComplete, handleError, handleEnd]);
 
