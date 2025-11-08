@@ -272,7 +272,18 @@ export default function UploadPage() {
             <h3 className="text-sm font-medium text-red-800 dark:text-red-300 mb-2">
               ⚠️ Processing Error
             </h3>
-            <p className="text-sm text-red-700 dark:text-red-200 mb-3">{error}</p>
+            <p className="text-sm text-red-700 dark:text-red-200 mb-3">
+              {typeof error === 'string' ? error : error.message}
+            </p>
+
+            {/* Show error details if available */}
+            {typeof error === 'object' && (error.stage || error.type) && (
+              <div className="text-xs text-red-600 dark:text-red-300 mb-3 font-mono">
+                {error.stage && <span>Stage: {error.stage}</span>}
+                {error.stage && error.type && <span className="mx-2">•</span>}
+                {error.type && <span>Type: {error.type}</span>}
+              </div>
+            )}
 
             <div className="mt-4 pt-4 border-t border-red-200 dark:border-red-800">
               <p className="text-sm font-semibold text-red-800 dark:text-red-300 mb-2">

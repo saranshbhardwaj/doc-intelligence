@@ -37,6 +37,9 @@ class Settings(BaseSettings):
     parser_free_digital: str = "pymupdf"
     parser_free_scanned: str = "none"  # "none" means not supported - will reject
     parser_pro_digital: str = "pymupdf"
+    parser_pro_scanned: str = "none"  # Pro tier scanned PDF parser (e.g., "azure", "docai")
+    parser_enterprise_digital: str = "pymupdf"
+    parser_enterprise_scanned: str = "none"  # Enterprise tier scanned PDF parser
 
     # ===== PARSER TIMEOUTS =====
     parser_timeout_seconds: int = 300  # Generic parser timeout

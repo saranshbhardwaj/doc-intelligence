@@ -15,16 +15,21 @@ export default function ProgressTracker({ progress, error, onRetry }) {
 
   // Error state simplified
   if (error) {
+    // Handle both string errors and object errors
+    const errorMessage = typeof error === 'string' ? error : error.message;
+    const errorStage = typeof error === 'object' ? error.stage : null;
+    const isRetryable = typeof error === 'object' ? error.isRetryable : false;
+
     return (
       <Card className="mt-4 p-4 border border-red-300 dark:border-red-600 bg-red-50 dark:bg-red-950/40">
         <div className="flex items-start gap-3">
           <span className="text-xl">⚠️</span>
           <div className="space-y-1 flex-1">
-            <p className="font-medium text-red-800 dark:text-red-300">{error.message}</p>
-            {error.stage && (
-              <p className="text-xs text-red-700 dark:text-red-400">Stage: {error.stage}</p>
+            <p className="font-medium text-red-800 dark:text-red-300">{errorMessage}</p>
+            {errorStage && (
+              <p className="text-xs text-red-700 dark:text-red-400">Stage: {errorStage}</p>
             )}
-            {error.isRetryable && onRetry && (
+            {isRetryable && onRetry && (
               <button
                 onClick={onRetry}
                 className="text-xs px-2 py-1 rounded bg-red-600 text-white hover:bg-red-500"

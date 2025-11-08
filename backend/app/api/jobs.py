@@ -149,8 +149,8 @@ async def stream_job_progress(job_id: str, token: Optional[str] = Query(None)):
             # In-progress initial event
             yield ServerSentEvent(data=json.dumps({
                 'status': job.status,
-                'stage': job.current_stage,
-                'progress': job.progress_percent,
+                'current_stage': job.current_stage,
+                'progress_percent': job.progress_percent,
                 'message': job.message,
                 'details': job.details or {}
             }), event="progress")
@@ -256,8 +256,8 @@ async def get_job_status(job_id: str, user: User = Depends(get_current_user)):
             "job_id": job.id,
             "extraction_id": job.extraction_id,
             "status": job.status,
-            "stage": job.current_stage,
-            "progress": job.progress_percent,
+            "current_stage": job.current_stage,
+            "progress_percent": job.progress_percent,
             "message": job.message,
             "details": job.details,
             "parsing_completed": job.parsing_completed,
