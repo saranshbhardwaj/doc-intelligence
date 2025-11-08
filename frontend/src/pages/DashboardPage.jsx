@@ -4,7 +4,7 @@ import { useNavigate, Link } from "react-router-dom";
 import { SignedIn, SignedOut, SignInButton, UserButton, useAuth } from "@clerk/clerk-react";
 import DarkModeToggle from "../components/common/DarkModeToggle";
 import { useDarkMode } from "../hooks/useDarkMode";
-import { getUserInfo, getUserExtractions } from "../api";
+import { useUser, useUserActions } from "../store";
 import ExtractionHistory from "../components/dashboard/ExtractionHistory";
 import UsageStats from "../components/dashboard/UsageStats";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -13,16 +13,13 @@ export default function DashboardPage() {
   const { isDark, toggle } = useDarkMode();
   const navigate = useNavigate();
   const { getToken, isSignedIn, isLoaded } = useAuth();
-  const [userInfo, setUserInfo] = useState(null);
-  const [extractions, setExtractions] = useState([]);
-  const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [pagination, setPagination] = useState({
-    total: 0,
-    limit: 50,
-    offset: 0,
-    has_more: false
-  });
+
+  // Get state from Zustand store
+  const { info: userInfo, extractions, pagination, isLoadingInfo, isLoadingExtractions } = useUser();
+  const { refreshDashboard, loadMoreExtractions } = useUserActions();
+
+  const loading = isLoadingInfo || isLoadingExtractions;
 
   // Redirect to sign-in if not authenticated (only after Clerk finishes loading)
   useEffect(() => {
@@ -33,56 +30,26 @@ export default function DashboardPage() {
 
   // Fetch user info and extractions
   useEffect(() => {
-    if (isSignedIn) {
+    if (isSignedIn && getToken) {
       fetchDashboardData();
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isSignedIn]);
 
   const fetchDashboardData = async () => {
-    setLoading(true);
     setError(null);
 
     try {
-      const token = await getToken();
-      // Fetch user info and extractions in parallel
-      const [userInfoData, extractionsData] = await Promise.all([
-        getUserInfo(token),
-        getUserExtractions(token, { limit: pagination.limit, offset: pagination.offset })
-      ]);
-
-      setUserInfo(userInfoData);
-      setExtractions(extractionsData.extractions);
-      setPagination({
-        total: extractionsData.total,
-        limit: extractionsData.limit,
-        offset: extractionsData.offset,
-        has_more: extractionsData.has_more
-      });
+      await refreshDashboard(getToken);
     } catch (err) {
       console.error("Failed to fetch dashboard data:", err);
       setError(err.response?.data?.detail || "Failed to load dashboard data");
-    } finally {
-      setLoading(false);
     }
   };
 
   const handleLoadMore = async () => {
     try {
-      const token = await getToken();
-      const newOffset = pagination.offset + pagination.limit;
-      const extractionsData = await getUserExtractions(token, {
-        limit: pagination.limit,
-        offset: newOffset
-      });
-
-      setExtractions([...extractions, ...extractionsData.extractions]);
-      setPagination({
-        total: extractionsData.total,
-        limit: extractionsData.limit,
-        offset: extractionsData.offset,
-        has_more: extractionsData.has_more
-      });
+      await loadMoreExtractions(getToken);
     } catch (err) {
       console.error("Failed to load more extractions:", err);
     }

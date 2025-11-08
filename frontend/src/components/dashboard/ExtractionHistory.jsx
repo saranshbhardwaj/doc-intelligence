@@ -1,4 +1,5 @@
 // src/components/dashboard/ExtractionHistory.jsx
+import { Tooltip, TooltipTrigger, TooltipContent, TooltipProvider } from "@/components/ui/tooltip";
 import { useState } from "react";
 import { useNavigate } from "react-router-dom";
 import {
@@ -143,6 +144,7 @@ export default function ExtractionHistory({
                 <TableHead>Status</TableHead>
                 <TableHead>Pages</TableHead>
                 <TableHead>Type</TableHead>
+                <TableHead>Context</TableHead>
                 <TableHead>Date</TableHead>
                 <TableHead className="text-right">Actions</TableHead>
               </TableRow>
@@ -171,6 +173,28 @@ export default function ExtractionHistory({
                       </Badge>
                     ) : (
                       "-"
+                    )}
+                  </TableCell>
+                  <TableCell className="max-w-xs text-sm text-muted-foreground">
+                    {extraction.context ? (
+                      extraction.context.length > 20 ? (
+                        <TooltipProvider>
+                          <Tooltip>
+                            <TooltipTrigger asChild>
+                              <span className="cursor-help">
+                                {extraction.context.slice(0, 20)}…
+                              </span>
+                            </TooltipTrigger>
+                            <TooltipContent className="max-w-md">
+                              <p className="whitespace-pre-wrap">{extraction.context}</p>
+                            </TooltipContent>
+                          </Tooltip>
+                        </TooltipProvider>
+                      ) : (
+                        <span>{extraction.context}</span>
+                      )
+                    ) : (
+                      <span className="italic text-xs text-muted-foreground">No context</span>
                     )}
                   </TableCell>
                   <TableCell className="text-sm text-muted-foreground">

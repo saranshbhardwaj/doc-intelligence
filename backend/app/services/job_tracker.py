@@ -111,8 +111,8 @@ class JobProgressTracker:
             try:
                 publish_event(self.job_id, "progress", {
                     "status": job.status,
-                    "stage": job.current_stage,
-                    "progress": job.progress_percent,
+                    "current_stage": job.current_stage,
+                    "progress_percent": job.progress_percent,
                     "message": job.message,
                     "details": job.details or {}
                 })
@@ -215,8 +215,8 @@ class JobProgressTracker:
             try:
                 publish_event(self.job_id, "progress", {
                     "status": job.status,
-                    "stage": stage,
-                    "progress": job.progress_percent,
+                    "current_stage": stage,
+                    "progress_percent": job.progress_percent,
                     "message": f"Saved {stage} result",
                     "details": {"artifact_path": file_path}
                 })
