@@ -11,6 +11,7 @@ import uuid
 import json
 import asyncio
 import hashlib
+import os
 
 from fastapi import APIRouter, Request, UploadFile, File, Form, HTTPException, Depends
 from fastapi.responses import JSONResponse
@@ -32,6 +33,7 @@ from app.db_models import JobState, Extraction
 
 # Orchestration service
 from app.services.extraction_orchestrator import process_document_async
+from app.services.celery_tasks import start_extraction_chain
 
 router = APIRouter()
 
@@ -353,20 +355,36 @@ async def extract_document(
             db.close()
 
         # ============================================
-        # STEP 6: Start background processing with asyncio
-        # ============================================
-        # Use asyncio.create_task() for true fire-and-forget background execution
-        asyncio.create_task(
-            process_document_async(
-                job_id,
-                request_id,
-                content,
-                file.filename,
-                client_ip,
-                user.id,
-                context
+        # STEP 6: Start background processing (Celery or asyncio)
+        if settings.use_celery:
+            # Persist uploaded file to a shared volume path so worker container can access
+            # Use /shared_uploads (ensure this directory is a bind/volume mount in docker-compose)
+            shared_root = os.getenv("SHARED_UPLOAD_ROOT", "/shared_uploads")
+            try:
+                os.makedirs(shared_root, exist_ok=True)
+            except Exception:
+                # Fallback to system temp if shared dir cannot be created
+                import tempfile
+                shared_root = tempfile.gettempdir()
+
+            safe_filename = file.filename.replace("/", "_").replace("\\", "_")
+            temp_path = os.path.join(shared_root, f"{request_id}_{safe_filename}")
+            with open(temp_path, "wb") as f_out:
+                f_out.write(content)
+            logger.info("Saved uploaded file for Celery processing", extra={"job_id": job_id, "path": temp_path})
+            start_extraction_chain(temp_path, file.filename, job_id, request_id, user.id, context)
+        else:
+            asyncio.create_task(
+                process_document_async(
+                    job_id,
+                    request_id,
+                    content,
+                    file.filename,
+                    client_ip,
+                    user.id,
+                    context
+                )
             )
-        )
 
         # ============================================
         # STEP 7: Return 202 Accepted with job_id (async behavior)

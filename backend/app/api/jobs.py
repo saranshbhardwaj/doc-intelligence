@@ -20,6 +20,7 @@ from app.config import settings
 
 # Import job progress tracker (separate module to avoid circular imports)
 from app.services.job_tracker import JobProgressTracker
+from app.services.pubsub import safe_subscribe
 
 # Import retry function from orchestrator service
 from app.services.extraction_orchestrator import retry_document_async
@@ -107,156 +108,124 @@ async def stream_job_progress(job_id: str, token: Optional[str] = Query(None)):
         db.close()
 
     async def event_generator():
-        """Generate SSE events by polling database.
+        """Async generator bridging Redis pub/sub to SSE.
 
-        Improvements:
-        - Include both legacy and new field names (progress + progress_percent, stage + current_stage)
-        - Emit a progress heartbeat every N polls even if no DB change so frontend UI stays lively
-        - Use small non-blocking sleep and offload blocking DB refresh to thread to reduce loop starvation
+        Defensive behaviors:
+          - Sends initial snapshot from DB (atomic ownership check already done)
+          - Falls back to lightweight periodic keepalive comments
+          - Auto-terminates on complete/error/end events
+          - Timeout guard
         """
-        logger.info(f"[SSE] ★★★ Generator function STARTED for job {job_id} ★★★", extra={"job_id": job_id})
+        logger.info(f"[SSE] ★★★ PubSub stream STARTED for job {job_id} ★★★", extra={"job_id": job_id})
 
+        end_sent = False  # Track if we've sent end event
+
+        # Initial DB snapshot (single query) for immediate feedback
         db = next(get_db())
-
         try:
-            # Verify job exists
-            logger.info(f"[SSE] Checking if job exists in database...", extra={"job_id": job_id})
             job = db.query(JobState).filter(JobState.id == job_id).first()
-
             if not job:
-                logger.error(f"[SSE] Job NOT FOUND in database!", extra={"job_id": job_id})
                 yield ServerSentEvent(data=json.dumps({'message': 'Job not found'}), event="error")
+                yield ServerSentEvent(data=json.dumps({'reason': 'not_found', 'job_id': job_id}), event="end")
                 return
 
-            logger.info(f"[SSE] Job found! Starting polling loop. Initial status={job.status}, progress={job.progress_percent}%", extra={"job_id": job_id})
-
-            # Yield initial state immediately to force stream to start
-            # Check if job is already completed or failed
             if job.status == "completed":
-                complete_data = {
-                    "message": job.message or "Extraction completed successfully",
-                    "extraction_id": job.extraction_id
-                }
-                yield ServerSentEvent(data=json.dumps(complete_data), event="complete")
-                # Explicit end event so frontend can distinguish graceful close
+                yield ServerSentEvent(data=json.dumps({
+                    'message': job.message or 'Extraction completed successfully',
+                    'extraction_id': job.extraction_id
+                }), event="complete")
                 yield ServerSentEvent(data=json.dumps({'reason': 'completed', 'job_id': job_id}), event="end")
-                logger.info(f"[SSE] Job already completed, sent complete + end events and exiting", extra={"job_id": job_id})
                 return
-            elif job.status == "failed":
-                error_data = {
-                    "stage": job.error_stage,
-                    "message": job.error_message,
-                    "type": job.error_type,
-                    "retryable": job.is_retryable
-                }
-                yield ServerSentEvent(data=json.dumps(error_data), event="error")
+            if job.status == "failed":
+                yield ServerSentEvent(data=json.dumps({
+                    'stage': job.error_stage,
+                    'message': job.error_message,
+                    'type': job.error_type,
+                    'retryable': job.is_retryable
+                }), event="error")
                 yield ServerSentEvent(data=json.dumps({'reason': 'failed', 'job_id': job_id}), event="end")
-                logger.info(f"[SSE] Job already failed, sent error + end events and exiting", extra={"job_id": job_id})
                 return
 
-            # Job is in progress - send initial progress event
-            initial_event = {
-                "status": job.status,
-                "stage": job.current_stage,
-                "progress": job.progress_percent,
-                "message": job.message,
-                "details": job.details or {},
-            }
-            yield ServerSentEvent(data=json.dumps(initial_event), event="progress")
-            logger.info(f"[SSE] Sent initial progress event", extra={"job_id": job_id})
-
-            last_update = job.updated_at
-            poll_interval = 2  # Poll every 2 seconds
-            max_duration = 800  # Timeout after 800 seconds
-            elapsed = 0
-            heartbeat_counter = 0  # send forced progress event every few keepalives
-
-            while elapsed < max_duration:
-                # Expire the current object and reload from database
-                # This ensures we get the latest data from other sessions
-                # Offload potentially blocking refresh calls
-                try:
-                    db.expire(job)
-                    db.refresh(job)
-                except Exception as refresh_err:
-                    logger.warning("[SSE] DB refresh warning", extra={"job_id": job_id, "error": str(refresh_err)})
-
-                # Log every poll to see what's happening
-                poll_count = elapsed // poll_interval
-                logger.info(f"[SSE Poll #{poll_count}] status={job.status}, progress={job.progress_percent}%, updated_at={job.updated_at}, last_update={last_update}", extra={"job_id": job_id})
-
-                # Only send update if something changed
-                if job.updated_at != last_update:
-                    logger.info(f"[SSE] CHANGE DETECTED! Sending event: {job.status} at {job.progress_percent}%", extra={"job_id": job_id})
-                    last_update = job.updated_at
-
-                    # Prepare event data
-                    event_data = {
-                        "status": job.status,
-                        "stage": job.current_stage,
-                        "progress": job.progress_percent,
-                        "message": job.message,
-                        "details": job.details or {}
-                    }
-
-                    # Send appropriate event type
-                    if job.status == "failed":
-                        error_data = {
-                            "stage": job.error_stage,
-                            "message": job.error_message,
-                            "type": job.error_type,
-                            "retryable": job.is_retryable
-                        }
-                        yield ServerSentEvent(data=json.dumps(error_data), event="error")
-                        yield ServerSentEvent(data=json.dumps({'reason': 'failed', 'job_id': job_id}), event="end")
-                        break
-
-                    elif job.status == "completed":
-                        complete_data = {
-                            "message": job.message or "Extraction completed successfully",
-                            "extraction_id": job.extraction_id
-                        }
-                        yield ServerSentEvent(data=json.dumps(complete_data), event="complete")
-                        yield ServerSentEvent(data=json.dumps({'reason': 'completed', 'job_id': job_id}), event="end")
-                        break
-
-                    else:
-                        # Progress update
-                        yield ServerSentEvent(data=json.dumps(event_data), event="progress")
-                else:
-                    logger.info(f"[SSE] No change detected", extra={"job_id": job_id})
-                    # Yield keepalive comment
-                    yield ": keepalive\n\n"
-
-                    # Force send duplicate progress every 5 heartbeats (approx every 10s) so frontend can show spinner
-                    heartbeat_counter += 1
-                    if heartbeat_counter >= 5 and job.status not in ("failed", "completed"):
-                        heartbeat_counter = 0
-                        forced_event = {
-                            "status": job.status,
-                            "stage": job.current_stage,
-                            "progress": job.progress_percent,
-                            "message": job.message,
-                            "details": job.details or {}
-                        }
-                        yield ServerSentEvent(data=json.dumps(forced_event), event="progress")
-
-                # Wait before next poll
-                await asyncio.sleep(poll_interval)
-                elapsed += poll_interval
-
-            # Timeout
-            if elapsed >= max_duration:
-                yield ServerSentEvent(data=json.dumps({'message': 'Job timeout', 'type': 'timeout'}), event="error")
-                yield ServerSentEvent(data=json.dumps({'reason': 'timeout', 'job_id': job_id}), event="end")
-
-        except Exception as e:
-            logger.exception(f"SSE stream error for job {job_id}", extra={"error": str(e)})
-            yield ServerSentEvent(data=json.dumps({'message': 'Stream error', 'type': 'stream_error'}), event="error")
-            yield ServerSentEvent(data=json.dumps({'reason': 'stream_error', 'job_id': job_id}), event="end")
-
+            # In-progress initial event
+            yield ServerSentEvent(data=json.dumps({
+                'status': job.status,
+                'stage': job.current_stage,
+                'progress': job.progress_percent,
+                'message': job.message,
+                'details': job.details or {}
+            }), event="progress")
         finally:
             db.close()
+
+        pubsub = safe_subscribe(job_id)
+        max_duration = 800  # seconds
+        elapsed = 0
+        keepalive_interval = 8  # seconds for keepalive comment
+        last_keepalive = 0
+        loop = asyncio.get_event_loop()
+
+        try:
+            while elapsed < max_duration:
+                # Non-blocking attempt to get message every second
+                message = pubsub.get_message(timeout=1.0)
+                if message and message.get('type') == 'message':
+                    try:
+                        data = json.loads(message['data'])
+                        event_type = data.get('event')
+                        payload = data.get('payload', {})
+                        if event_type:
+                            yield ServerSentEvent(data=json.dumps(payload), event=event_type)
+                            if event_type in ("complete", "error"):
+                                # Send end event after complete/error
+                                yield ServerSentEvent(
+                                    data=json.dumps({'reason': event_type, 'job_id': job_id}), 
+                                    event="end"
+                                )
+                                end_sent = True
+                                break
+                            elif event_type == "end":
+                                end_sent = True
+                                break
+                    except Exception as e:
+                        logger.warning("[SSE] Malformed pubsub message", extra={"job_id": job_id, "error": str(e)})
+                else:
+                    # Keepalive comment throttled
+                    if (elapsed - last_keepalive) >= keepalive_interval:
+                        yield ": keepalive\n\n"
+                        last_keepalive = elapsed
+
+                await asyncio.sleep(1)
+                elapsed += 1
+            
+            # Ensure we always send end event
+            if not end_sent:
+                if elapsed >= max_duration:
+                    yield ServerSentEvent(
+                        data=json.dumps({'message': 'Job timeout', 'type': 'timeout'}), 
+                        event="error"
+                    )
+                yield ServerSentEvent(
+                    data=json.dumps({'reason': 'timeout' if elapsed >= max_duration else 'normal', 'job_id': job_id}), 
+                    event="end"
+                )
+
+        except Exception as e:
+            logger.exception(f"PubSub SSE stream error for job {job_id}", extra={"error": str(e)})
+            if not end_sent:
+                yield ServerSentEvent(
+                    data=json.dumps({'message': 'Stream error', 'type': 'stream_error'}), 
+                    event="error"
+                )
+                yield ServerSentEvent(
+                    data=json.dumps({'reason': 'stream_error', 'job_id': job_id}), 
+                    event="end"
+                )
+        finally:
+            logger.info(f"[SSE] ★★★ PubSub stream ENDED for job {job_id} ★★★", extra={"job_id": job_id})
+            try:
+                pubsub.close()
+            except Exception:
+                pass
 
     return EventSourceResponse(
         event_generator(),

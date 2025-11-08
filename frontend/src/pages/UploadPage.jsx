@@ -1,6 +1,7 @@
 // src/pages/UploadPage.jsx
 // Main upload and results page (moved from App.jsx)
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
+import useExtractionProgress from '../hooks/useExtractionProgress';
 import { useSearchParams, useNavigate, Link } from "react-router-dom";
 import { SignedIn, SignedOut, SignInButton, UserButton, useAuth } from "@clerk/clerk-react";
 import FileUploader from "../components/upload/FileUploader";
@@ -21,6 +22,10 @@ export default function UploadPage() {
   const [phase, setPhase] = useState("idle"); // idle | uploading | processing | done
   const [isDemo, setIsDemo] = useState(false);
   const [userInfo, setUserInfo] = useState(null);
+
+  // Extraction progress hook
+  const extractionProgress = useExtractionProgress(getToken);
+  const hasActiveExtraction = useRef(false);
 
   // Fetch user info when signed in
   useEffect(() => {
@@ -78,14 +83,20 @@ export default function UploadPage() {
     }
   }, [searchParams]);
 
-  // Check for active extraction on mount (for reconnection after navigation)
+  // Check for active extraction and reconnect SSE on mount or when phase changes to 'processing'
   useEffect(() => {
     const activeJobId = sessionStorage.getItem('active_job_id');
+    // Only reconnect if there is an active job
     if (activeJobId) {
-      console.log('📍 Active extraction detected, setting phase to processing');
-      setPhase("processing");
+      if (!hasActiveExtraction.current) {
+        console.log('🔄 Reconnecting to active extraction SSE:', activeJobId);
+        extractionProgress.reconnect();
+        hasActiveExtraction.current = true;
+      }
+    } else {
+      hasActiveExtraction.current = false;
     }
-  }, []);
+  }, [phase, extractionProgress]);
 
   // Load past extraction if extraction ID is in URL
   useEffect(() => {

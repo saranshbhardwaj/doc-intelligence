@@ -1,0 +1,69 @@
+version: "3.9"
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: docint-postgres
+    environment:
+      POSTGRES_USER: docint
+      POSTGRES_PASSWORD: docint
+      POSTGRES_DB: docint
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    restart: unless-stopped
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: docint-api
+    env_file:
+      - .env
+    environment:
+      USE_CELERY: "true"
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      DATABASE_URL: postgresql+psycopg://docint:docint@db:5432/docint
+    ports:
+      - "8000:8000"
+    depends_on:
+      - redis
+      - db
+    volumes:
+      - ./.env:/app/.env:ro
+      - ./:/app  # Bind mount source for live code & generated migrations
+      - uploads_data:/shared_uploads  # Shared uploaded PDFs for Celery parsing
+      - logs_data:/app/logs  # Shared logs directory (optional aggregation)
+    restart: unless-stopped
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    container_name: docint-worker
+    env_file:
+      - .env
+    environment:
+      USE_CELERY: "true"
+      CELERY_BROKER_URL: redis://redis:6379/0
+      CELERY_RESULT_BACKEND: redis://redis:6379/0
+      DATABASE_URL: postgresql+psycopg://docint:docint@db:5432/docint
+    depends_on:
+      - redis
+      - db
+    volumes:
+      - ./.env:/worker/.env:ro
+      - ./:/worker  # Bind mount for consistency (tasks, migrations if needed)
+      - uploads_data:/shared_uploads  # Access same uploaded PDF files as api
+      - logs_data:/worker/logs  # Write logs to shared volume
+    restart: unless-stopped
+  redis:
+    image: redis:7-alpine
+    container_name: docint-redis
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  uploads_data:
+  logs_data:

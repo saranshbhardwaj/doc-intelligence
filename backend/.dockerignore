@@ -1,0 +1,17 @@
+# Ignore secrets and unnecessary files
+.env
+logs/
+credentials/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.git/
+.tests/
+*.log
+raw_llm_response/
+parsed/
+chunks/
+combined/
+.ssh/
+.vscode/

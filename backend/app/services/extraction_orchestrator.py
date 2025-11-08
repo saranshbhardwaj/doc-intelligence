@@ -250,29 +250,38 @@ async def process_document_async(
     except Exception as e:
         logger.exception("Document processing failed", extra={"job_id": job_id, "error": str(e)})
 
-        # Determine error type
+        # Determine error classification
+        error_msg = str(e)
+        lower_msg = error_msg.lower()
         error_type = "unknown_error"
         error_stage = "unknown"
+        # Default retryable unless it's a parser failure or explicit upgrade requirement
         is_retryable = True
 
-        if "API" in str(e) or "Anthropic" in str(e):
+        if "api" in lower_msg or "anthropic" in lower_msg:
             error_type = "llm_error"
             error_stage = "extracting"
-        elif "parse" in str(e).lower():
+        elif "parse_error" in lower_msg or "parsing_error" in lower_msg or "parse" in lower_msg:
             error_type = "parsing_error"
             error_stage = "parsing"
-        elif "chunk" in str(e).lower():
+            # Parsing failures generally require re-upload; don't auto-retry
+            is_retryable = False
+        elif "chunk" in lower_msg:
             error_type = "chunking_error"
             error_stage = "chunking"
+        elif "upgrade_required" in lower_msg:
+            error_type = "upgrade_required"
+            error_stage = "parsing"
+            is_retryable = False
 
         progress_tracker.mark_error(
             error_stage=error_stage,
-            error_message=str(e)[:1000],
+            error_message=error_msg[:1000],
             error_type=error_type,
             is_retryable=is_retryable
         )
 
-        extraction_repository.mark_failed(extraction_id, str(e)[:500])
+        extraction_repository.mark_failed(extraction_id, error_msg[:500])
 
     finally:
         db.close()

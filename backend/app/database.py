@@ -9,12 +9,12 @@ from app.config import settings
 # Get database URL from settings (which loads from .env)
 DATABASE_URL = settings.database_url
 
-# For local development, use SQLite if no DATABASE_URL is set
-if not DATABASE_URL or DATABASE_URL == "":
-    DATABASE_URL = "sqlite:///./sandcloud_dev.db"
-    logger.info("Using SQLite database for local development")
+if not DATABASE_URL:
+    # Fail fast – explicit URL required now that we use Postgres in containers
+    raise RuntimeError("DATABASE_URL is not set. Define it in .env or docker-compose environment.")
 else:
-    logger.info(f"Using PostgreSQL database: {DATABASE_URL.split('@')[1] if '@' in DATABASE_URL else 'configured'}")
+    backend_kind = "sqlite" if DATABASE_URL.startswith("sqlite") else "postgres"
+    logger.info("Database configuration loaded", extra={"backend": backend_kind})
 
 # Create engine
 # For SQLite, we need check_same_thread=False

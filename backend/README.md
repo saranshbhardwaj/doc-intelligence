@@ -10,6 +10,7 @@
 cd backend
 python3 -m venv venv
 source venv/bin/activate
+```
 pip install -r requirements.txt
 ```
 
@@ -596,6 +597,62 @@ sqlite3 sandcloud_dev.db .dump > backup.sql
 # Import to PostgreSQL
 psql $DATABASE_URL < backup.sql
 ```
+
+### Celery Task Queue Integration
+
+Enable multi-process, stage-by-stage document processing for better throughput and isolation.
+
+#### Environment Variables
+```bash
+USE_CELERY=true                                 # Toggle Celery mode (false = in-process asyncio)
+CELERY_BROKER_URL=redis://localhost:6379/0      # Redis broker
+CELERY_RESULT_BACKEND=redis://localhost:6379/0  # Redis result backend
+```
+
+You can reuse the same Redis instance for both broker & backend initially. For large results or long retention consider PostgreSQL or an object store.
+
+#### What is `CELERY_RESULT_BACKEND`?
+The broker (Redis) holds queued tasks until workers pull them. The result backend stores task state (PENDING, STARTED, SUCCESS, FAILURE) and return values so you can query later, power monitoring dashboards, or compose chords/groups. Without a backend you lose persistent status.
+
+#### Celery Extraction Flow
+1. `POST /api/extract` saves PDF temp file + creates DB job row.
+2. Dispatch chain: `parse_document_task → chunk_document_task → summarize_context_task → extract_structured_task`.
+3. Each task updates progress (shared `job_id`).
+4. Frontend SSE reads DB job state (no direct Celery polling needed).
+5. Final structured JSON + artifacts stored under `logs/`.
+
+Approximate progress ranges:
+- Parse: 5–15%
+- Chunk: 20–30%
+- Summarize: 40–65%
+- Extract: 70–100%
+
+#### Local Docker Compose (API + Worker + Redis)
+```bash
+docker compose up --build
+```
+Services: `api` (FastAPI), `worker` (Celery), `redis` (broker/backend). Stop with `docker compose down`.
+
+#### Railway Deployment
+Create three services:
+1. API (`Dockerfile`) with Celery env vars
+2. Worker (`Dockerfile.worker`) same env vars
+3. Redis resource (copy URL into both services)
+
+#### Manual Worker (No Docker)
+```bash
+celery -A app.celery_app.celery_app worker --loglevel=info --pool=solo
+```
+Increase concurrency (later):
+```bash
+celery -A app.celery_app.celery_app worker --loglevel=info --concurrency=4
+```
+
+#### Future Extensions
+- Add `embed_chunks_task` for embeddings/RAG
+- Implement autoretry for transient network/LLM errors
+- Switch result backend to PostgreSQL for auditability
+- Add Celery Beat for scheduled cleanup & metrics aggregation
 
 ---
 

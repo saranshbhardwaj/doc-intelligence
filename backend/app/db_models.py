@@ -81,7 +81,7 @@ class JobState(Base):
     __tablename__ = "job_states"
 
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    extraction_id = Column(String(36), ForeignKey("extractions.id"), nullable=False, index=True)
+    extraction_id = Column(String(36), ForeignKey("extractions.id", ondelete="CASCADE"), nullable=False, index=True)
 
     # Current status
     status = Column(String(20), default="queued")  # queued, parsing, chunking, summarizing, extracting, completed, failed

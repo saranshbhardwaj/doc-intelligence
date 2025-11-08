@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import List, Optional, Dict
 
 from azure.ai.documentintelligence import DocumentIntelligenceClient
 from azure.ai.documentintelligence.models import AnalyzeResult
@@ -107,12 +107,29 @@ class AzureDocumentIntelligenceParser(DocumentParser):
         try:
             with open(file_path, "rb") as f:
                 pdf_bytes = f.read()
-                # New SDK requires AnalyzeDocumentRequest with bytes_source
+                # Attempt calling SDK using new AnalyzeDocumentRequest signature.
+                # Some releases of azure-ai-documentintelligence (including 1.0.0) expect a positional 'body'
+                # and can mis-handle keyword usage, producing a TypeError about missing positional 'body'.
                 analyze_request = AnalyzeDocumentRequest(bytes_source=pdf_bytes)
-                poller = self.client.begin_analyze_document(
-                    model_id=self.model_name,
-                    body=analyze_request
-                )
+                poller = None
+                try:
+                    # Prefer positional invocation to avoid signature mismatch issues.
+                    poller = self.client.begin_analyze_document(self.model_name, body=analyze_request)
+                except TypeError as te:
+                    # Retry using raw bytes (older/alternate signature accepting the document directly)
+                    logger.warning(
+                        "Azure begin_analyze_document signature mismatch; retrying with raw bytes",
+                        extra={"error": str(te)}
+                    )
+                    try:
+                        poller = self.client.begin_analyze_document(self.model_name, pdf_bytes)
+                    except Exception as e:
+                        raise RuntimeError(f"parse_error: Azure begin_analyze_document failed after fallback: {e}") from e
+                except AzureError as ae:
+                    raise RuntimeError(f"parse_error: Azure analyze call failed: {ae}") from ae
+                except Exception as e:
+                    # Any unexpected failure during invocation – classify as parse_error
+                    raise RuntimeError(f"parse_error: Unexpected Azure analyze invocation failure: {e}") from e
                 try:
                     # Apply explicit timeout; Azure SDK raises TimeoutError on wait expiry
                     result: AnalyzeResult = poller.result(timeout=self.timeout_seconds)
@@ -216,7 +233,8 @@ class AzureDocumentIntelligenceParser(DocumentParser):
             logger.exception(
                 f"Unexpected Azure parser failure after {processing_time_ms}ms: {e}",
             )
-            raise RuntimeError(f"Unexpected failure in Azure parser: {e}") from e
+            # Prefix with parse_error so orchestrator can classify stage correctly & mark non-retryable.
+            raise RuntimeError(f"parse_error: Unexpected failure in Azure parser: {e}") from e
 
     # --- Helpers ---
     def _extract_pages(self, result) -> List[_PageData]:

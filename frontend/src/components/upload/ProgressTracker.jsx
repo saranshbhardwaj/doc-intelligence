@@ -1,170 +1,70 @@
-/**
- * ProgressTracker Component
- *
- * Displays real-time extraction progress with stage indicators and messages.
- * Uses Tailwind CSS for all styling.
- */
+import { Card } from '../ui/card';
+import { Badge } from '../ui/badge';
+import { Progress } from '../ui/progress';
 
+// Minimal neutral stage descriptors
 const STAGES = [
-  { key: 'parsing', label: 'Parsing PDF', icon: '📄' },
-  { key: 'chunking', label: 'Indexing Document', icon: '✂️' },
-  { key: 'summarizing', label: 'Summarizing Sections', icon: '📝' },
-  { key: 'extracting', label: 'Extracting Data', icon: '🤖' }
+  { key: 'parsing', label: 'Parsing' },
+  { key: 'chunking', label: 'Indexing' },
+  { key: 'summarizing', label: 'Summarizing' },
+  { key: 'extracting', label: 'Extracting' }
 ];
 
 export default function ProgressTracker({ progress, error, onRetry }) {
-  if (!progress && !error) {
-    return null;
-  }
+  if (!progress && !error) return null;
 
-  // Error state
+  // Error state simplified
   if (error) {
-    // Authentication error - show login prompt
-    if (error.type === 'auth_error') {
-      return (
-        <div className="mt-4 p-6 bg-gradient-to-br from-blue-400 via-blue-500 to-indigo-500 dark:from-blue-500 dark:via-blue-600 dark:to-indigo-600 rounded-xl text-white shadow-lg">
-          <div className="flex items-center gap-3 mb-4">
-            <span className="text-3xl">🔒</span>
-            <h3 className="text-xl font-semibold">Authentication Required</h3>
-          </div>
-
-          <div className="bg-white/20 rounded-lg p-4 mb-4">
-            <p className="text-base font-medium mb-2">Please sign in to upload documents</p>
-            <p className="text-sm opacity-90">
-              You need to be logged in to use the document extraction service.
-            </p>
-          </div>
-
-          <button
-            onClick={() => window.location.href = '/sign-in'}
-            className="w-full py-3 px-4 bg-white text-blue-600 rounded-lg font-semibold hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200 active:translate-y-0"
-          >
-            🔑 Sign In / Sign Up
-          </button>
-        </div>
-      );
-    }
-
-    // Page limit error - show upgrade prompt
-    if (error.type === 'limit_error') {
-      // Determine if it's a free tier one-time limit or paid tier monthly limit
-      const isFreeLimit = error.message?.includes('Free tier');
-
-      return (
-        <div className="mt-4 p-6 bg-gradient-to-br from-orange-400 via-orange-500 to-red-500 dark:from-orange-500 dark:via-orange-600 dark:to-red-600 rounded-xl text-white shadow-lg">
-          <div className="flex items-center gap-3 mb-4">
-            <span className="text-3xl">{isFreeLimit ? '🎁' : '📊'}</span>
-            <h3 className="text-xl font-semibold">
-              {isFreeLimit ? 'Free Trial Complete' : 'Page Limit Reached'}
-            </h3>
-          </div>
-
-          <div className="bg-white/20 rounded-lg p-4 mb-4">
-            <p className="text-base font-medium mb-2">{error.message}</p>
-            <p className="text-sm opacity-90">
-              {isFreeLimit
-                ? "You've used all 100 free pages! Upgrade to continue analyzing documents."
-                : "Upgrade your plan to process more documents this month."}
-            </p>
-          </div>
-
-          <button
-            onClick={() => window.location.href = '/#pricing'}
-            className="w-full py-3 px-4 bg-white text-orange-600 rounded-lg font-semibold hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200 active:translate-y-0"
-          >
-            🚀 {isFreeLimit ? 'View Pricing Plans' : 'Upgrade Plan'}
-          </button>
-        </div>
-      );
-    }
-
-    // Generic error
     return (
-      <div className="mt-4 p-6 bg-gradient-to-br from-pink-400 via-red-400 to-red-500 dark:from-pink-500 dark:via-red-500 dark:to-red-600 rounded-xl text-white shadow-lg">
-        <div className="flex items-center gap-3 mb-4">
-          <span className="text-3xl">⚠️</span>
-          <h3 className="text-xl font-semibold">Extraction Failed</h3>
+      <Card className="mt-4 p-4 border border-red-300 dark:border-red-600 bg-red-50 dark:bg-red-950/40">
+        <div className="flex items-start gap-3">
+          <span className="text-xl">⚠️</span>
+          <div className="space-y-1 flex-1">
+            <p className="font-medium text-red-800 dark:text-red-300">{error.message}</p>
+            {error.stage && (
+              <p className="text-xs text-red-700 dark:text-red-400">Stage: {error.stage}</p>
+            )}
+            {error.isRetryable && onRetry && (
+              <button
+                onClick={onRetry}
+                className="text-xs px-2 py-1 rounded bg-red-600 text-white hover:bg-red-500"
+              >Retry</button>
+            )}
+          </div>
         </div>
-
-        <div className="bg-white/20 rounded-lg p-4 mb-4">
-          <p className="text-base font-medium mb-2">{error.message}</p>
-          {error.stage && (
-            <p className="text-sm opacity-90">
-              Failed at stage: <strong className="font-semibold">{error.stage}</strong>
-            </p>
-          )}
-        </div>
-
-        {error.isRetryable && onRetry && (
-          <button
-            onClick={onRetry}
-            className="w-full py-3 px-4 bg-white text-red-500 rounded-lg font-semibold hover:shadow-lg hover:-translate-y-0.5 transition-all duration-200 active:translate-y-0"
-          >
-            🔄 Retry from Last Stage
-          </button>
-        )}
-      </div>
+      </Card>
     );
   }
 
   // Progress state
-  const { percent, message, stages, stage } = progress;
+  const { percent, message, stages, stage, details } = progress;
+  const compression = details?.compression_ratio;
 
   return (
-    <div className="mt-4 p-6 bg-gradient-to-br from-purple-500 via-purple-600 to-indigo-600 dark:from-purple-600 dark:via-purple-700 dark:to-indigo-700 rounded-xl text-white shadow-lg">
-      {/* Header */}
-      <div className="flex justify-between items-center mb-4">
-        <h3 className="text-xl font-semibold">Processing Document</h3>
-        <span className="text-2xl font-bold">{percent}%</span>
+    <Card className="mt-4 p-4 space-y-4">
+      <div className="flex items-center justify-between">
+        <h3 className="font-medium text-sm">Processing Document</h3>
+        <span className="text-xs text-muted-foreground">{percent}%</span>
       </div>
-
-      {/* Progress bar */}
-      <div className="h-2 bg-white/30 rounded-full overflow-hidden mb-4">
-        <div
-          className="h-full bg-white rounded-full transition-all duration-300 ease-out"
-          style={{ width: `${percent}%` }}
-        />
-      </div>
-
-      {/* Current message */}
-      <p className="text-base mb-6 opacity-95">{message}</p>
-
-      {/* Stage indicators */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
-        {STAGES.map((stage) => {
-          const isCompleted = stages?.[stage.key];
-          const isCurrent = stage === stage.key;
-          const isUpcoming = !isCompleted && !isCurrent;
-
+      <Progress value={percent} />
+      <p className="text-sm text-muted-foreground min-h-[1.25rem]">{message}</p>
+      <ol className="flex flex-wrap gap-2 text-xs">
+        {STAGES.map(s => {
+          const done = stages?.[s.key];
+          const current = stage === s.key;
           return (
-            <div
-              key={stage.key}
-              className={`
-                flex flex-col items-center text-center p-3 rounded-lg transition-all duration-300
-                ${isCompleted ? 'bg-white/25' : ''}
-                ${isCurrent ? 'bg-white/35 scale-105 shadow-lg' : ''}
-                ${isUpcoming ? 'bg-white/10 opacity-60' : ''}
-              `}
-            >
-              <div className="text-3xl mb-2">
-                {isCompleted ? '✅' : stage.icon}
-              </div>
-              <div className="text-sm font-medium">{stage.label}</div>
-              {isCurrent && (
-                <div className="mt-1 text-xl animate-spin">⏳</div>
-              )}
-            </div>
+            <li key={s.key} className="flex items-center gap-1">
+              <Badge variant={done ? 'default' : current ? 'secondary' : 'outline'}>{done ? '✔' : current ? '•' : ''} {s.label}</Badge>
+            </li>
           );
         })}
-      </div>
-
-      {/* Completion state */}
-      {percent === 100 && (
-        <div className="mt-6 p-4 bg-white/20 rounded-lg text-center">
-          <span className="text-2xl mr-2">🎉</span>
-          <span className="text-lg font-semibold">Extraction complete!</span>
-        </div>
+      </ol>
+      {compression && (
+        <div className="text-xs text-muted-foreground">Compression: {compression}</div>
       )}
-    </div>
+      {percent === 100 && (
+        <div className="text-xs text-green-600 dark:text-green-400 font-medium">Completed</div>
+      )}
+    </Card>
   );
 }

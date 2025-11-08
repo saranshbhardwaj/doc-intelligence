@@ -10,6 +10,7 @@ from fastapi import HTTPException
 
 from app.db_models import JobState
 from app.utils.logging import logger
+from app.services.pubsub import publish_event  # lightweight fire-and-forget
 
 
 class JobProgressTracker:
@@ -96,17 +97,34 @@ class JobProgressTracker:
             self._last_commit_monotonic = now
 
         if should_commit:
-            logger.info(f"Job {self.job_id} updated: {status or 'progress'} - {message}", extra={
-                "job_id": self.job_id,
-                "status": job.status,
-                "progress": job.progress_percent,
-                "throttled": False
-            })
+            logger.info(
+                f"Job {self.job_id} updated: {status or 'progress'} - {message}",
+                extra={
+                    "job_id": self.job_id,
+                    "status": job.status,
+                    "progress": job.progress_percent,
+                    "details": job.details if job.details else {},
+                    "throttled": False
+                }
+            )
+            # Publish progress event (only on commit)
+            try:
+                publish_event(self.job_id, "progress", {
+                    "status": job.status,
+                    "stage": job.current_stage,
+                    "progress": job.progress_percent,
+                    "message": job.message,
+                    "details": job.details or {}
+                })
+            except Exception:
+                # Already logged inside publish_event; no re-raise
+                pass
         else:
             logger.debug(f"Job {self.job_id} progress throttled (no commit)", extra={
                 "job_id": self.job_id,
                 "status": job.status,
                 "progress": job.progress_percent,
+                "details": job.details or {},
                 "throttled": True
             })
 
@@ -131,8 +149,19 @@ class JobProgressTracker:
         logger.error(f"Job {self.job_id} failed at {error_stage}: {error_message}", extra={
             "job_id": self.job_id,
             "error_stage": error_stage,
-            "error_type": error_type
+            "error_type": error_type,
+            "details": job.details or {}
         })
+        try:
+            publish_event(self.job_id, "error", {
+                "stage": job.error_stage,
+                "message": job.error_message,
+                "type": job.error_type,
+                "retryable": job.is_retryable
+            })
+            publish_event(self.job_id, "end", {"reason": "failed", "job_id": self.job_id})
+        except Exception:
+            pass
 
     def mark_completed(self):
         """Mark job as successfully completed"""
@@ -149,6 +178,14 @@ class JobProgressTracker:
         logger.info(f"Job {self.job_id} completed successfully", extra={
             "job_id": self.job_id
         })
+        try:
+            publish_event(self.job_id, "complete", {
+                "message": job.message or "Extraction completed successfully",
+                "extraction_id": job.extraction_id
+            })
+            publish_event(self.job_id, "end", {"reason": "completed", "job_id": self.job_id})
+        except Exception:
+            pass
 
     def save_intermediate_result(
         self,
@@ -174,3 +211,14 @@ class JobProgressTracker:
                 "job_id": self.job_id,
                 "stage": stage
             })
+            # Optional: publish intermediate artifact path for frontend debugging (not consumed yet)
+            try:
+                publish_event(self.job_id, "progress", {
+                    "status": job.status,
+                    "stage": stage,
+                    "progress": job.progress_percent,
+                    "message": f"Saved {stage} result",
+                    "details": {"artifact_path": file_path}
+                })
+            except Exception:
+                pass
