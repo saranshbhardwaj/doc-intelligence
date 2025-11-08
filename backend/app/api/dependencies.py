@@ -4,7 +4,7 @@ from app.services.llm_client import LLMClient
 from app.services.document_processor import DocumentProcessor
 from app.services.cache import DocumentCache
 from app.services.analytics import SimpleAnalytics
-from app.services.extraction_pipeline import ExtractionPipeline
+from app.services.async_pipeline.extraction_pipeline import ExtractionPipeline
 from app.repositories import ExtractionRepository
 from app.config import settings
 

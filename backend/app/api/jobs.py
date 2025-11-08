@@ -23,7 +23,7 @@ from app.services.job_tracker import JobProgressTracker
 from app.services.pubsub import safe_subscribe
 
 # Import retry function from orchestrator service
-from app.services.extraction_orchestrator import retry_document_async
+from app.services.async_pipeline.extraction_orchestrator import retry_document_async
 
 router = APIRouter()
 

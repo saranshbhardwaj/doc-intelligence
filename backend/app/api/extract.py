@@ -32,7 +32,7 @@ from app.database import get_db
 from app.db_models import JobState, Extraction
 
 # Orchestration service
-from app.services.extraction_orchestrator import process_document_async
+from app.services.async_pipeline.extraction_orchestrator import process_document_async
 from app.services.celery_tasks import start_extraction_chain
 
 router = APIRouter()
