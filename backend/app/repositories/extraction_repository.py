@@ -327,6 +327,102 @@ class ExtractionRepository:
                 )
                 return None
 
+    def check_duplicate_extraction(
+        self,
+        user_id: str,
+        content_hash: str
+    ) -> Optional[Extraction]:
+        """Check if user already has completed extraction for this document.
+
+        Args:
+            user_id: User ID
+            content_hash: SHA256 hash of document content
+
+        Returns:
+            Existing completed extraction if found, None otherwise
+        """
+        with self._get_session() as db:
+            try:
+                return db.query(Extraction).filter(
+                    Extraction.user_id == user_id,
+                    Extraction.content_hash == content_hash,
+                    Extraction.status == "completed"
+                ).first()
+            except SQLAlchemyError as e:
+                logger.error(
+                    f"Failed to check duplicate extraction: {e}",
+                    extra={"user_id": user_id, "error": str(e)}
+                )
+                return None
+
+    def create_extraction_record(
+        self,
+        extraction_id: str,
+        user_id: str,
+        user_tier: str,
+        filename: str,
+        file_size_bytes: int,
+        content_hash: str,
+        status: str = "processing",
+        page_count: int = 0,
+        from_cache: bool = False,
+        context: Optional[str] = None
+    ) -> Optional[Extraction]:
+        """Create basic extraction record (for initial creation or cache hits).
+
+        Args:
+            extraction_id: Unique extraction ID
+            user_id: User ID
+            user_tier: User tier
+            filename: Original filename
+            file_size_bytes: File size in bytes
+            content_hash: SHA256 hash of content
+            status: Status (processing or completed)
+            page_count: Number of pages (default: 0)
+            from_cache: Whether from cache (default: False)
+            context: Optional user context
+
+        Returns:
+            Extraction object if successful, None on error
+        """
+        with self._get_session() as db:
+            try:
+                extraction = Extraction(
+                    id=extraction_id,
+                    user_id=user_id,
+                    user_tier=user_tier,
+                    filename=filename,
+                    file_size_bytes=file_size_bytes,
+                    page_count=page_count,
+                    content_hash=content_hash,
+                    status=status,
+                    from_cache=from_cache,
+                    context=context
+                )
+
+                # Set completed_at if status is completed
+                if status == "completed":
+                    extraction.completed_at = datetime.now()
+
+                db.add(extraction)
+                db.commit()
+                db.refresh(extraction)
+
+                logger.debug(
+                    f"Created extraction record: {extraction_id}",
+                    extra={"extraction_id": extraction_id, "status": status}
+                )
+
+                return extraction
+
+            except SQLAlchemyError as e:
+                logger.error(
+                    f"Failed to create extraction record: {e}",
+                    extra={"extraction_id": extraction_id, "error": str(e)}
+                )
+                db.rollback()
+                return None
+
     def get_user_extractions(
         self,
         user_id: str,
@@ -354,6 +450,102 @@ class ExtractionRepository:
                     extra={"user_id": user_id, "error": str(e)}
                 )
                 return []
+
+    def list_user_extractions(
+        self,
+        user_id: str,
+        limit: int = 50,
+        offset: int = 0,
+        status: Optional[str] = None
+    ) -> tuple[List[Extraction], int]:
+        """List user extractions with pagination and filtering.
+
+        Args:
+            user_id: User identifier
+            limit: Maximum number of results (default: 50)
+            offset: Pagination offset (default: 0)
+            status: Optional status filter (completed, processing, failed)
+
+        Returns:
+            Tuple of (extractions list, total count)
+        """
+        with self._get_session() as db:
+            try:
+                query = db.query(Extraction).filter(
+                    Extraction.user_id == user_id
+                )
+
+                # Apply status filter if provided
+                if status:
+                    query = query.filter(Extraction.status == status)
+
+                total = query.count()
+
+                extractions = query.order_by(
+                    Extraction.created_at.desc()
+                ).limit(limit).offset(offset).all()
+
+                return extractions, total
+
+            except SQLAlchemyError as e:
+                logger.error(
+                    f"Failed to list user extractions: {e}",
+                    extra={"user_id": user_id, "error": str(e)}
+                )
+                return [], 0
+
+    def delete_extraction(
+        self,
+        extraction_id: str,
+        user_id: str
+    ) -> bool:
+        """Delete an extraction (with ownership verification).
+
+        Args:
+            extraction_id: Extraction ID
+            user_id: User ID (for ownership verification)
+
+        Returns:
+            True if successful, False otherwise
+        """
+        with self._get_session() as db:
+            try:
+                extraction = db.query(Extraction).filter(
+                    Extraction.id == extraction_id
+                ).first()
+
+                if not extraction:
+                    logger.warning(
+                        f"Extraction not found for deletion: {extraction_id}",
+                        extra={"extraction_id": extraction_id, "user_id": user_id}
+                    )
+                    return False
+
+                # Verify ownership
+                if extraction.user_id != user_id:
+                    logger.warning(
+                        f"User {user_id} attempted to delete extraction owned by {extraction.user_id}",
+                        extra={"extraction_id": extraction_id, "user_id": user_id}
+                    )
+                    return False
+
+                db.delete(extraction)
+                db.commit()
+
+                logger.info(
+                    f"Deleted extraction: {extraction.filename}",
+                    extra={"extraction_id": extraction_id, "user_id": user_id}
+                )
+
+                return True
+
+            except SQLAlchemyError as e:
+                logger.error(
+                    f"Failed to delete extraction: {e}",
+                    extra={"extraction_id": extraction_id, "error": str(e)}
+                )
+                db.rollback()
+                return False
 
     def get_extraction_stats(self, user_id: str) -> dict:
         """Get extraction statistics for a user.

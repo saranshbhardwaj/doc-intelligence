@@ -104,46 +104,71 @@ class AzureDocumentIntelligenceParser(DocumentParser):
             f"AzureDocumentIntelligenceParser: parsing file={file_path} pdf_type={pdf_type} model={self.model_name}"
         )
 
+        # Edge case: Validate file_path
+        if not file_path or not isinstance(file_path, str):
+            raise ValueError(f"Invalid file_path: {file_path} (expected non-empty string)")
+
+        # Edge case: Handle file open failures
         try:
             with open(file_path, "rb") as f:
                 pdf_bytes = f.read()
-                # Attempt calling SDK using new AnalyzeDocumentRequest signature.
-                # Some releases of azure-ai-documentintelligence (including 1.0.0) expect a positional 'body'
-                # and can mis-handle keyword usage, producing a TypeError about missing positional 'body'.
-                analyze_request = AnalyzeDocumentRequest(bytes_source=pdf_bytes)
-                poller = None
+        except FileNotFoundError as e:
+            raise RuntimeError(f"parse_error: PDF file not found at {file_path}") from e
+        except PermissionError as e:
+            raise RuntimeError(f"parse_error: Permission denied reading PDF file at {file_path}") from e
+        except Exception as e:
+            raise RuntimeError(f"parse_error: Failed to read PDF file at {file_path}: {e}") from e
+
+        # Edge case: Validate PDF file is not empty
+        if not pdf_bytes:
+            raise ValueError(f"parse_error: PDF file at {file_path} is empty (0 bytes)")
+
+        try:
+            # Attempt calling SDK using new AnalyzeDocumentRequest signature.
+            # Some releases of azure-ai-documentintelligence (including 1.0.0) expect a positional 'body'
+            # and can mis-handle keyword usage, producing a TypeError about missing positional 'body'.
+            analyze_request = AnalyzeDocumentRequest(bytes_source=pdf_bytes)
+            poller = None
+            try:
+                # Prefer positional invocation to avoid signature mismatch issues.
+                poller = self.client.begin_analyze_document(self.model_name, body=analyze_request)
+            except TypeError as te:
+                # Retry using raw bytes (older/alternate signature accepting the document directly)
+                logger.warning(
+                    "Azure begin_analyze_document signature mismatch; retrying with raw bytes",
+                    extra={"error": str(te)}
+                )
                 try:
-                    # Prefer positional invocation to avoid signature mismatch issues.
-                    poller = self.client.begin_analyze_document(self.model_name, body=analyze_request)
-                except TypeError as te:
-                    # Retry using raw bytes (older/alternate signature accepting the document directly)
-                    logger.warning(
-                        "Azure begin_analyze_document signature mismatch; retrying with raw bytes",
-                        extra={"error": str(te)}
-                    )
-                    try:
-                        poller = self.client.begin_analyze_document(self.model_name, pdf_bytes)
-                    except Exception as e:
-                        raise RuntimeError(f"parse_error: Azure begin_analyze_document failed after fallback: {e}") from e
-                except AzureError as ae:
-                    raise RuntimeError(f"parse_error: Azure analyze call failed: {ae}") from ae
+                    poller = self.client.begin_analyze_document(self.model_name, pdf_bytes)
                 except Exception as e:
-                    # Any unexpected failure during invocation – classify as parse_error
-                    raise RuntimeError(f"parse_error: Unexpected Azure analyze invocation failure: {e}") from e
-                try:
-                    # Apply explicit timeout; Azure SDK raises TimeoutError on wait expiry
-                    result: AnalyzeResult = poller.result(timeout=self.timeout_seconds)
-                except TimeoutError as te:
-                    processing_time_ms = int((time.time() - start_time) * 1000)
-                    logger.error(
-                        f"Azure Document Intelligence timeout after {self.timeout_seconds}s (elapsed {processing_time_ms}ms)",
-                        extra={"timeout_seconds": self.timeout_seconds},
-                    )
-                    raise RuntimeError(
-                        f"Azure Document Intelligence processing exceeded timeout of {self.timeout_seconds}s"
-                    ) from te
+                    raise RuntimeError(f"parse_error: Azure begin_analyze_document failed after fallback: {e}") from e
+            except AzureError as ae:
+                raise RuntimeError(f"parse_error: Azure analyze call failed: {ae}") from ae
+            except Exception as e:
+                # Any unexpected failure during invocation – classify as parse_error
+                raise RuntimeError(f"parse_error: Unexpected Azure analyze invocation failure: {e}") from e
+            try:
+                # Apply explicit timeout; Azure SDK raises TimeoutError on wait expiry
+                result: AnalyzeResult = poller.result(timeout=self.timeout_seconds)
+            except TimeoutError as te:
+                processing_time_ms = int((time.time() - start_time) * 1000)
+                logger.error(
+                    f"Azure Document Intelligence timeout after {self.timeout_seconds}s (elapsed {processing_time_ms}ms)",
+                    extra={"timeout_seconds": self.timeout_seconds},
+                )
+                raise RuntimeError(
+                    f"Azure Document Intelligence processing exceeded timeout of {self.timeout_seconds}s"
+                ) from te
+
+            # Edge case: Validate result is not None
+            if result is None:
+                raise RuntimeError("parse_error: Azure API returned None result")
 
             pages_data = self._extract_pages(result)
+
+            # Edge case: Validate pages_data is not empty
+            if not pages_data:
+                raise ValueError("parse_error: Azure parser extracted no pages from PDF")
 
             # Combine page texts
             full_text = "\n\n".join(p.text for p in pages_data)
@@ -159,6 +184,11 @@ class AzureDocumentIntelligenceParser(DocumentParser):
 
             processing_time_ms = int((time.time() - start_time) * 1000)
             page_count = len(pages_data)
+
+            # Edge case: Validate page_count is positive
+            if page_count <= 0:
+                raise ValueError("parse_error: No pages extracted from PDF")
+
             cost = page_count * self.cost_per_page
 
             logger.info(
@@ -242,27 +272,98 @@ class AzureDocumentIntelligenceParser(DocumentParser):
 
         Now also separates narrative text from tables for chunking strategies.
         """
+        # Edge case: Validate result object
+        if result is None:
+            raise ValueError("result object is None")
+
+        # Edge case: Validate result has pages
+        if not hasattr(result, 'pages') or not result.pages:
+            raise ValueError("Azure result has no pages")
+
         # Build initial page map with narrative text
         pages_narrative: dict[int, str] = {}
         for page in result.pages:
-            lines = [line.content for line in getattr(page, "lines", []) or []]
-            pages_narrative[page.page_number] = "\n".join(lines)
+            # Edge case: Validate page object
+            if page is None:
+                logger.warning("Skipping None page in result.pages")
+                continue
+
+            # Edge case: Validate page_number exists
+            if not hasattr(page, 'page_number'):
+                logger.warning("Skipping page without page_number attribute")
+                continue
+
+            page_num = page.page_number
+
+            # Edge case: Validate page_number is positive integer
+            if not isinstance(page_num, int) or page_num <= 0:
+                logger.warning(f"Skipping page with invalid page_number: {page_num}")
+                continue
+
+            lines = [line.content for line in getattr(page, "lines", []) or [] if line and hasattr(line, 'content')]
+            pages_narrative[page_num] = "\n".join(lines)
+
+        # Edge case: Validate pages_narrative is not empty after processing
+        if not pages_narrative:
+            raise ValueError("No valid pages found in Azure result")
 
         # Build table data by page
         tables_by_page: dict[int, List[Dict]] = {}
         for table in result.tables or []:
-            if not table.bounding_regions:
+            # Edge case: Validate table object
+            if table is None:
+                logger.warning("Skipping None table in result.tables")
                 continue
+
+            if not table.bounding_regions:
+                logger.warning("Skipping table without bounding_regions")
+                continue
+
+            # Edge case: Validate bounding_regions has at least one element
+            if len(table.bounding_regions) == 0:
+                logger.warning("Skipping table with empty bounding_regions")
+                continue
+
             page_num = table.bounding_regions[0].page_number
+
+            # Edge case: Validate page_num is valid
+            if not isinstance(page_num, int) or page_num <= 0:
+                logger.warning(f"Skipping table with invalid page_number: {page_num}")
+                continue
 
             # Create matrix by iterating cells
             # Handle column_span for merged cells (common in financial table headers)
             cells_by_row: dict[int, dict[int, str]] = {}
+
+            # Edge case: Validate table has cells
+            if not hasattr(table, 'cells') or not table.cells:
+                logger.warning(f"Skipping table on page {page_num} with no cells")
+                continue
+
             for cell in table.cells:
+                # Edge case: Validate cell object
+                if cell is None:
+                    continue
+
+                # Edge case: Validate cell has required attributes
+                if not hasattr(cell, 'row_index') or not hasattr(cell, 'column_index'):
+                    logger.warning(f"Skipping cell without row_index or column_index on page {page_num}")
+                    continue
+
                 row_idx = cell.row_index
                 col_idx = cell.column_index
-                content = cell.content
+
+                # Edge case: Validate indices are non-negative
+                if row_idx < 0 or col_idx < 0:
+                    logger.warning(f"Skipping cell with negative indices: row={row_idx}, col={col_idx}")
+                    continue
+
+                content = cell.content if hasattr(cell, 'content') else ""
                 col_span = getattr(cell, "column_span", 1) or 1  # Default to 1 if not present
+
+                # Edge case: Validate col_span is positive
+                if not isinstance(col_span, int) or col_span <= 0:
+                    col_span = 1
 
                 # Place cell content at its starting column
                 cells_by_row.setdefault(row_idx, {})[col_idx] = content
@@ -270,22 +371,40 @@ class AzureDocumentIntelligenceParser(DocumentParser):
                 # Fill subsequent columns for spanned cells (preserves alignment)
                 # Example: "Amount %" with columnSpan=2 at column 1
                 # → cells_by_row[0][1] = "Amount %", cells_by_row[0][2] = ""
+                table_col_count = getattr(table, 'column_count', 0) or 0
                 for span_offset in range(1, col_span):
-                    if col_idx + span_offset < table.column_count:
+                    if col_idx + span_offset < table_col_count:
                         cells_by_row[row_idx][col_idx + span_offset] = ""
+
+            # Edge case: Skip table if no cells were processed
+            if not cells_by_row:
+                logger.warning(f"Skipping table on page {page_num} - no valid cells processed")
+                continue
 
             # Reconstruct table as text (tab-separated format)
             table_text_lines = []
+            table_col_count = getattr(table, 'column_count', 0) or 0
+
+            # Edge case: Validate column_count is positive
+            if table_col_count <= 0:
+                # Infer from cells
+                table_col_count = max((max(row.keys()) + 1 for row in cells_by_row.values() if row), default=0)
+                if table_col_count <= 0:
+                    logger.warning(f"Skipping table on page {page_num} - cannot determine column count")
+                    continue
+
             for row_index in sorted(cells_by_row.keys()):
                 row_cells = cells_by_row[row_index]
-                columns = [row_cells.get(ci, "") for ci in range(table.column_count)]
+                columns = [row_cells.get(ci, "") for ci in range(table_col_count)]
                 table_text_lines.append("\t".join(columns))
+
+            table_row_count = getattr(table, 'row_count', 0) or len(cells_by_row)
 
             table_data = {
                 "table_id": len(tables_by_page.get(page_num, [])),
                 "text": "\n".join(table_text_lines),
-                "row_count": table.row_count,
-                "column_count": table.column_count,
+                "row_count": table_row_count,
+                "column_count": table_col_count,
             }
 
             tables_by_page.setdefault(page_num, []).append(table_data)
@@ -296,10 +415,27 @@ class AzureDocumentIntelligenceParser(DocumentParser):
             narrative = pages_narrative[page_num]
             page_tables = tables_by_page.get(page_num, [])
 
+            # Edge case: Validate narrative is string
+            if not isinstance(narrative, str):
+                logger.warning(f"Skipping page {page_num} - narrative is not a string: {type(narrative).__name__}")
+                continue
+
             # Build full text with tables embedded
             full_text = narrative
             for table_data in page_tables:
-                full_text += f"\n\n[Table]\n{table_data['text']}\n"
+                # Edge case: Validate table_data structure
+                if not isinstance(table_data, dict):
+                    logger.warning(f"Skipping invalid table_data on page {page_num}")
+                    continue
+
+                table_text = table_data.get('text', '')
+                if table_text:
+                    full_text += f"\n\n[Table]\n{table_text}\n"
+
+            # Edge case: Validate char_count is non-negative
+            char_count = len(full_text.strip()) if full_text else 0
+            if char_count < 0:
+                char_count = 0
 
             pages_data.append(
                 _PageData(
@@ -308,7 +444,12 @@ class AzureDocumentIntelligenceParser(DocumentParser):
                     narrative_text=narrative.strip(),
                     table_data=page_tables,
                     table_count=len(page_tables),
-                    char_count=len(full_text.strip()),
+                    char_count=char_count,
                 )
             )
+
+        # Edge case: Validate we have at least one valid page
+        if not pages_data:
+            raise ValueError("Failed to build any valid pages from Azure result")
+
         return pages_data

@@ -1,6 +1,6 @@
 # backend/app/database.py
 """Database configuration and session management"""
-from sqlalchemy import create_engine
+from sqlalchemy import create_engine, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from app.utils.logging import logger
@@ -43,5 +43,22 @@ def get_db():
 def init_db():
     """Initialize database - create all tables"""
     logger.info("Initializing database...")
+
+    # Enable pgvector extension (PostgreSQL only)
+    if not DATABASE_URL.startswith("sqlite"):
+        try:
+            with engine.connect() as conn:
+                conn.execute(text("CREATE EXTENSION IF NOT EXISTS vector"))
+                conn.commit()
+                logger.info("pgvector extension enabled")
+        except Exception as e:
+            logger.warning(f"Could not enable pgvector extension: {e}")
+
+    # Import all models to register them with Base (imports needed for side effects)
+    import app.db_models  # noqa: F401 - Extraction, ParserOutput, CacheEntry, JobState
+    import app.db_models_users  # noqa: F401 - User
+    import app.db_models_chat  # noqa: F401 - Collection, CollectionDocument, DocumentChunk, ChatSession, ChatMessage
+
+    # Create all tables
     Base.metadata.create_all(bind=engine)
     logger.info("Database initialized successfully")

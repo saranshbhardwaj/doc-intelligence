@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from fastapi import HTTPException
 
 from app.db_models import JobState
+from app.repositories.job_repository import JobRepository
 from app.utils.logging import logger
 from app.services.pubsub import publish_event  # lightweight fire-and-forget
 
@@ -30,7 +31,8 @@ class JobProgressTracker:
 
     def get_job_state(self) -> JobState:
         """Get current job state from database"""
-        job = self.db.query(JobState).filter(JobState.id == self.job_id).first()
+        job_repo = JobRepository()
+        job = job_repo.get_job(self.job_id)
         if not job:
             raise HTTPException(status_code=404, detail=f"Job {self.job_id} not found")
         return job

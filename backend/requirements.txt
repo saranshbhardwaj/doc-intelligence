@@ -17,6 +17,7 @@ celery[redis]==5.3.6
 sqlalchemy==2.0.23
 psycopg[binary]==3.1.18  # PostgreSQL driver bundled with libpq to avoid 'libpq library not found'
 alembic>=1.12.1  # Database migrations (optional, for future)
+pgvector==0.3.6  # PostgreSQL vector extension for embeddings
 
 # Document parsing
 PyMuPDF==1.23.8  # fitz - for PDF text extraction
@@ -24,3 +25,7 @@ google-cloud-documentai==3.7.0  # Google Document AI client
 google-cloud-storage==3.4.1
 
 azure-ai-documentintelligence==1.0.0
+
+# Embeddings & Vector Search
+sentence-transformers==3.3.1  # For local embeddings (all-MiniLM-L6-v2)
+openai==1.59.5  # For OpenAI embeddings (optional, if enabled in config)

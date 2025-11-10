@@ -308,3 +308,51 @@ class LLMClient:
                 summaries.append("")
 
         return summaries
+
+    async def stream_chat(self, prompt: str):
+        """
+        Stream chat response from Claude (for real-time RAG chat).
+
+        Args:
+            prompt: Full prompt with context and question
+
+        Yields:
+            Response chunks as they arrive from Claude
+        """
+        logger.info(
+            f"Streaming chat response (prompt: {len(prompt)} chars)",
+            extra={"prompt_length": len(prompt), "model": self.model}
+        )
+
+        try:
+            # Use Claude streaming API
+            async def stream_helper():
+                # Run streaming API call in thread pool
+                with self.client.messages.stream(
+                    model=self.model,
+                    max_tokens=self.max_tokens,
+                    temperature=0.0,
+                    messages=[{"role": "user", "content": prompt}]
+                ) as stream:
+                    for text in stream.text_stream:
+                        yield text
+
+            # Yield chunks from stream
+            async for chunk in stream_helper():
+                yield chunk
+
+        except Exception as e:
+            error_msg = str(e)
+            logger.error(f"Streaming chat error: {error_msg}")
+
+            # Check for timeout
+            if "timeout" in error_msg.lower():
+                raise HTTPException(
+                    status_code=503,
+                    detail=f"Chat response took too long (>{self.timeout_seconds}s). Please try again."
+                )
+
+            raise HTTPException(
+                status_code=503,
+                detail="Chat service temporarily unavailable. Please try again."
+            )

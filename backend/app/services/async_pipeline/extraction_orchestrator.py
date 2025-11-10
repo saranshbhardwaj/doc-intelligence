@@ -16,7 +16,8 @@ from app.api.dependencies import (
     extraction_pipeline, extraction_repository, cache
 )
 from app.services.job_tracker import JobProgressTracker
-from app.db_models_users import User, UsageLog
+from app.repositories.user_repository import UserRepository
+from app.db_models_users import UsageLog
 from app.models import ExtractedData
 from app.utils.file_utils import save_raw_text, save_parsed_result, save_raw_llm_response
 from app.utils.normalization import _normalize_llm_output
@@ -205,13 +206,10 @@ async def process_document_async(
         # Update user usage tracking
         # ============================================
         try:
-            user = db.query(User).filter(User.id == user_id).first()
+            user_repo = UserRepository()
+            success = user_repo.update_page_usage(user_id, page_count, update_monthly=True)
 
-            if user:
-                # Update user page counts
-                user.pages_this_month += page_count
-                user.total_pages_processed += page_count
-
+            if success:
                 # Create usage log entry
                 usage_log = UsageLog(
                     id=str(uuid.uuid4()),
@@ -224,11 +222,13 @@ async def process_document_async(
                 db.add(usage_log)
                 db.commit()
 
-                logger.info(f"Updated user usage: {user.pages_this_month}/{user.pages_limit} pages", extra={
-                    "job_id": job_id,
-                    "user_id": user_id,
-                    "pages_added": page_count
-                })
+                user = user_repo.get_user(user_id)
+                if user:
+                    logger.info(f"Updated user usage: {user.pages_this_month}/{user.pages_limit} pages", extra={
+                        "job_id": job_id,
+                        "user_id": user_id,
+                        "pages_added": page_count
+                    })
         except Exception as e:
             logger.warning(f"Failed to update user usage: {e}", extra={"job_id": job_id})
             # Don't fail the extraction if usage tracking fails
