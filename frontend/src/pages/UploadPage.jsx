@@ -152,7 +152,13 @@ export default function UploadPage() {
                     to="/app"
                     className="text-sm font-medium text-gray-900 dark:text-white transition-colors"
                   >
-                    Upload
+                    Extract
+                  </Link>
+                  <Link
+                    to="/app/chat"
+                    className="text-sm font-medium text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors"
+                  >
+                    Chat
                   </Link>
                   <Link
                     to="/app/dashboard"

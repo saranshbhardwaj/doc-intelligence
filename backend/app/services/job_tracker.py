@@ -30,9 +30,8 @@ class JobProgressTracker:
         self._min_progress_delta: int = 3     # commit only if progress advanced this much
 
     def get_job_state(self) -> JobState:
-        """Get current job state from database"""
-        job_repo = JobRepository()
-        job = job_repo.get_job(self.job_id)
+        """Get current job state from database using the tracker's session"""
+        job = self.db.query(JobState).filter(JobState.id == self.job_id).first()
         if not job:
             raise HTTPException(status_code=404, detail=f"Job {self.job_id} not found")
         return job

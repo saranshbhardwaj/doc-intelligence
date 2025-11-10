@@ -40,12 +40,13 @@ class RAGService:
         """
         self.db = db
         self.embedder = get_embedding_provider()
+        # Using cheap model for testing - switch back to llm_model for production
         self.llm_client = LLMClient(
             api_key=settings.anthropic_api_key,
-            model=settings.llm_model,
-            max_tokens=settings.llm_max_tokens,
+            model=settings.cheap_llm_model,  # Using Haiku for cost-effective testing
+            max_tokens=settings.cheap_llm_max_tokens,
             max_input_chars=settings.llm_max_input_chars,
-            timeout_seconds=settings.llm_timeout_seconds,
+            timeout_seconds=settings.cheap_llm_timeout_seconds,
         )
 
     async def chat(
@@ -382,7 +383,7 @@ ANSWER:"""
                 message_index=message_count + 1,
                 source_chunks=json.dumps(source_chunks),
                 num_chunks_retrieved=len(source_chunks),
-                model_used=settings.llm_model,
+                model_used=settings.cheap_llm_model,  # Using Haiku for testing
                 # TODO: Calculate actual tokens and cost
                 tokens_used=None,
                 cost_usd=None

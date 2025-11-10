@@ -52,7 +52,8 @@ class JobRepository:
 
     def create_job(
         self,
-        extraction_id: str,
+        extraction_id: Optional[str] = None,
+        collection_document_id: Optional[str] = None,
         status: str = "queued",
         current_stage: str = "queued",
         progress_percent: int = 0,
@@ -61,8 +62,13 @@ class JobRepository:
     ) -> Optional[JobState]:
         """Create a new job state record.
 
+        Supports both Extract Mode and Chat Mode:
+        - Extract Mode: Pass extraction_id
+        - Chat Mode: Pass collection_document_id
+
         Args:
-            extraction_id: ID of extraction/document being processed
+            extraction_id: ID of extraction (for Extract Mode)
+            collection_document_id: ID of collection document (for Chat Mode)
             status: Job status (default: "queued")
             current_stage: Current processing stage (default: "queued")
             progress_percent: Progress percentage 0-100 (default: 0)
@@ -72,11 +78,16 @@ class JobRepository:
         Returns:
             JobState object if successful, None on error
         """
+        if not extraction_id and not collection_document_id:
+            logger.error("Must provide either extraction_id or collection_document_id")
+            return None
+
         with self._get_session() as db:
             try:
                 job = JobState(
                     id=job_id,  # Will be auto-generated if None
                     extraction_id=extraction_id,
+                    collection_document_id=collection_document_id,
                     status=status,
                     current_stage=current_stage,
                     progress_percent=progress_percent,
@@ -91,6 +102,7 @@ class JobRepository:
                     extra={
                         "job_id": job.id,
                         "extraction_id": extraction_id,
+                        "collection_document_id": collection_document_id,
                         "status": status
                     }
                 )
@@ -100,7 +112,11 @@ class JobRepository:
             except SQLAlchemyError as e:
                 logger.error(
                     f"Failed to create job state: {e}",
-                    extra={"extraction_id": extraction_id, "error": str(e)}
+                    extra={
+                        "extraction_id": extraction_id,
+                        "collection_document_id": collection_document_id,
+                        "error": str(e)
+                    }
                 )
                 db.rollback()
                 return None

@@ -7,6 +7,7 @@ Endpoints:
 - Documents: Upload PDFs to collections (triggers async indexing)
 - Chat: Send messages with SSE streaming responses
 - Sessions: Manage chat sessions and history
+- Export: Export chat sessions with full metadata for download
 """
 import uuid
 import os
@@ -253,90 +254,156 @@ async def upload_document(
     os.makedirs(upload_dir, exist_ok=True)
 
     file_path = os.path.join(upload_dir, f"{uuid.uuid4()}_{file.filename}")
-    with open(file_path, "wb") as f:
-        f.write(file_bytes)
-
-    # Create CollectionDocument record
-    document = collection_repo.create_document(
-        collection_id=collection_id,
-        filename=file.filename,
-        file_size_bytes=len(file_bytes),
-        page_count=0,  # Will be updated during parsing
-        content_hash=content_hash
-    )
-
-    if not document:
-        raise HTTPException(status_code=500, detail="Failed to create document record")
-
-    # Create JobState for progress tracking
+    document = None
     job_repo = JobRepository()
-    job = job_repo.create_job(
-        extraction_id=document.id,
-        status="queued",
-        current_stage="queued",
-        progress_percent=0,
-        message="Queued for processing..."
-    )
 
-    if not job:
-        raise HTTPException(status_code=500, detail="Failed to create job tracking record")
+    try:
+        # Save file
+        with open(file_path, "wb") as f:
+            f.write(file_bytes)
 
-    # Update collection document count
-    documents = collection_repo.list_documents(collection_id)
-    collection_repo.update_collection_stats(
-        collection_id=collection_id,
-        document_count=len(documents)
-    )
+        # Create CollectionDocument record
+        document = collection_repo.create_document(
+            collection_id=collection_id,
+            filename=file.filename,
+            file_size_bytes=len(file_bytes),
+            page_count=0,  # Will be updated during parsing
+            content_hash=content_hash
+        )
 
-    # Start Celery indexing chain
-    task_id = start_chat_indexing_chain(
-        file_path=file_path,
-        filename=file.filename,
-        job_id=job.id,
-        document_id=document.id,
-        collection_id=collection_id,
-        user_id=user.id
-    )
+        if not document:
+            raise HTTPException(status_code=500, detail="Failed to create document record")
 
-    logger.info(
-        f"Started document indexing",
-        extra={
+        # Create JobState for progress tracking (Chat Mode)
+        job = job_repo.create_job(
+            collection_document_id=document.id,  # Chat Mode uses collection_document_id
+            status="queued",
+            current_stage="queued",
+            progress_percent=0,
+            message="Queued for processing..."
+        )
+
+        if not job:
+            raise HTTPException(status_code=500, detail="Failed to create job tracking record")
+
+        # Update collection document count
+        documents = collection_repo.list_documents(collection_id)
+        collection_repo.update_collection_stats(
+            collection_id=collection_id,
+            document_count=len(documents)
+        )
+
+        # Start Celery indexing chain
+        task_id = start_chat_indexing_chain(
+            file_path=file_path,
+            filename=file.filename,
+            job_id=job.id,
+            document_id=document.id,
+            collection_id=collection_id,
+            user_id=user.id
+        )
+
+        logger.info(
+            f"Started document indexing",
+            extra={
+                "document_id": document.id,
+                "collection_id": collection_id,
+                "job_id": job.id,
+                "task_id": task_id,
+                "file_name": file.filename
+            }
+        )
+
+        return {
             "document_id": document.id,
-            "collection_id": collection_id,
             "job_id": job.id,
             "task_id": task_id,
-            "filename": file.filename
+            "filename": file.filename,
+            "status": "processing",
+            "message": "Document indexing started. Use job_id to track progress via SSE."
         }
-    )
 
-    return {
-        "document_id": document.id,
-        "job_id": job.id,
-        "task_id": task_id,
-        "filename": file.filename,
-        "status": "processing",
-        "message": "Document indexing started. Use job_id to track progress via SSE."
-    }
+    except Exception as e:
+        # Cleanup on failure: delete document (cascades to job_state), delete file
+        logger.error(
+            f"Upload failed, cleaning up",
+            extra={
+                "collection_id": collection_id,
+                "file_name": file.filename,
+                "error": str(e)
+            }
+        )
+
+        # Delete document record (cascades to job_state due to ON DELETE CASCADE)
+        if document:
+            collection_repo.delete_document(document.id)
+
+        # Delete uploaded file
+        if os.path.exists(file_path):
+            os.remove(file_path)
+
+        # Re-raise the exception
+        raise
 
 
 @router.get("/jobs/{job_id}/progress")
 async def get_indexing_progress(
     job_id: str,
-    user: User = Depends(get_current_user)
+    token: Optional[str] = Query(None)
 ):
     """
     Get document indexing progress (SSE streaming).
 
-    This is the same SSE endpoint pattern used for extraction mode.
-    Frontend connects to stream progress updates.
+    NOTE: EventSource doesn't support custom headers, so auth token must be passed as query parameter.
 
     Args:
         job_id: JobState ID
-        user: Current user
+        token: Authentication token (query parameter)
 
     Yields:
         SSE events with progress updates
     """
+
+    # Verify authentication via token query parameter
+    if not token:
+        raise HTTPException(status_code=401, detail="Missing authentication token")
+
+    try:
+        # Convert token to httpx request for Clerk SDK authentication
+        import httpx
+        from clerk_backend_api import Clerk
+        from clerk_backend_api.security.types import AuthenticateRequestOptions
+        from app.config import settings
+
+        clerk = Clerk(bearer_auth=settings.clerk_secret_key)
+
+        httpx_request = httpx.Request(
+            method="GET",
+            url=f"http://localhost/api/chat/jobs/{job_id}/progress",
+            headers={"Authorization": f"Bearer {token}"}
+        )
+
+        request_state = clerk.authenticate_request(
+            httpx_request,
+            AuthenticateRequestOptions()
+        )
+
+        if not request_state.is_signed_in:
+            logger.error(f"[Chat SSE] User not signed in for job {job_id}", extra={"job_id": job_id})
+            raise HTTPException(status_code=401, detail="Not signed in")
+
+        user_id = request_state.payload.get('sub') if request_state.payload else None
+
+        if not user_id:
+            logger.error(f"[Chat SSE] Could not extract user_id from token", extra={"job_id": job_id})
+            raise HTTPException(status_code=401, detail="Could not extract user_id from token")
+
+        logger.info(f"[Chat SSE] Authenticated user {user_id} for job {job_id}", extra={"job_id": job_id, "user_id": user_id})
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"[Chat SSE] Auth error: {e}", extra={"job_id": job_id})
+        raise HTTPException(status_code=401, detail=f"Authentication failed: {str(e)}")
     async def event_generator():
         """Stream progress events until job completes or fails"""
         import json
@@ -605,3 +672,76 @@ async def delete_session(
         raise HTTPException(status_code=404, detail="Session not found")
 
     return {"success": True, "message": "Session deleted"}
+
+
+@router.get("/sessions/{session_id}/export")
+async def export_session(
+    session_id: str,
+    user: User = Depends(get_current_user)
+):
+    """
+    Export a chat session with full metadata for download.
+
+    Returns comprehensive session data including collection info,
+    all messages, source citations, and timestamps. Frontend can
+    convert this to markdown, Word, JSON, or other formats.
+
+    Args:
+        session_id: Session ID
+        user: Current user
+
+    Returns:
+        Complete session data formatted for export
+    """
+    # Use repositories
+    collection_repo = CollectionRepository()
+    chat_repo = ChatRepository()
+
+    # Verify session access
+    session = chat_repo.get_session(session_id, user.id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    # Get collection details
+    collection = collection_repo.get_collection(session.collection_id, user.id)
+    if not collection:
+        raise HTTPException(status_code=404, detail="Collection not found")
+
+    # Get all messages
+    messages = chat_repo.get_messages(session_id, limit=None)
+
+    # Format export data
+    export_data = {
+        "session": {
+            "id": session.id,
+            "title": session.title,
+            "description": session.description,
+            "created_at": session.created_at.isoformat() if session.created_at else None,
+            "updated_at": session.updated_at.isoformat() if session.updated_at else None,
+            "message_count": session.message_count
+        },
+        "collection": {
+            "id": collection.id,
+            "name": collection.name,
+            "description": collection.description,
+            "document_count": collection.document_count
+        },
+        "messages": [
+            {
+                "role": msg.role,
+                "content": msg.content,
+                "message_index": msg.message_index,
+                "created_at": msg.created_at.isoformat() if msg.created_at else None,
+                "source_chunks": msg.source_chunks,
+                "num_chunks_retrieved": msg.num_chunks_retrieved
+            }
+            for msg in messages
+        ],
+        "export_metadata": {
+            "exported_at": datetime.utcnow().isoformat(),
+            "exported_by": user.id,
+            "total_messages": len(messages)
+        }
+    }
+
+    return export_data

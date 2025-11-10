@@ -51,5 +51,17 @@ export function createAuthenticatedApi(getToken) {
     return config;
   });
 
+  // Handle errors with better messages
+  authenticatedApi.interceptors.response.use(
+    (response) => response,
+    (error) => {
+      if (error.response?.data?.detail) {
+        // Extract detail message from FastAPI error response
+        error.message = error.response.data.detail;
+      }
+      return Promise.reject(error);
+    }
+  );
+
   return authenticatedApi;
 }

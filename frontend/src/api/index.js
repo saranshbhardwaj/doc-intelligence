@@ -31,3 +31,18 @@ export {
 
 // Feedback API
 export { submitFeedback } from './feedback';
+
+// Chat APIs
+export {
+  createCollection,
+  listCollections,
+  getCollection,
+  deleteCollection,
+  uploadDocument as uploadDocumentToCollection,
+  connectToIndexingProgress,
+  sendChatMessage,
+  listSessions,
+  getChatHistory,
+  deleteSession,
+  exportSession,
+} from './chat';

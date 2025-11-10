@@ -1,6 +1,6 @@
 # backend/app/db_models.py
 """SQLAlchemy database models"""
-from sqlalchemy import Column, String, Integer, Float, DateTime, Boolean, Text, ForeignKey, Date, JSON
+from sqlalchemy import Column, String, Integer, Float, DateTime, Boolean, Text, ForeignKey, Date, JSON, CheckConstraint
 from sqlalchemy.sql import func
 from app.database import Base
 import uuid
@@ -77,11 +77,28 @@ class CacheEntry(Base):
 
 
 class JobState(Base):
-    """Track real-time job progress through extraction pipeline"""
+    """
+    Track real-time job progress through extraction pipeline.
+
+    Supports both Extract Mode and Chat Mode:
+    - Extract Mode: extraction_id is set, collection_document_id is NULL
+    - Chat Mode: collection_document_id is set, extraction_id is NULL
+
+    A CHECK constraint ensures exactly one foreign key is set (XOR logic).
+    """
     __tablename__ = "job_states"
+    __table_args__ = (
+        # Ensure exactly one of extraction_id or collection_document_id is set
+        CheckConstraint(
+            '(extraction_id IS NOT NULL AND collection_document_id IS NULL) OR '
+            '(extraction_id IS NULL AND collection_document_id IS NOT NULL)',
+            name='job_states_entity_xor_check'
+        ),
+    )
 
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    extraction_id = Column(String(36), ForeignKey("extractions.id", ondelete="CASCADE"), nullable=False, index=True)
+    extraction_id = Column(String(36), ForeignKey("extractions.id", ondelete="CASCADE"), nullable=True, index=True)
+    collection_document_id = Column(String(36), ForeignKey("collection_documents.id", ondelete="CASCADE"), nullable=True, index=True)
 
     # Current status
     status = Column(String(20), default="queued")  # queued, parsing, chunking, summarizing, extracting, completed, failed

@@ -90,7 +90,7 @@ class CollectionRepository:
             except SQLAlchemyError as e:
                 logger.error(
                     f"Failed to create collection: {e}",
-                    extra={"user_id": user_id, "name": name, "error": str(e)}
+                    extra={"user_id": user_id, "collection_name": name, "error": str(e)}
                 )
                 db.rollback()
                 return None
@@ -340,7 +340,7 @@ class CollectionRepository:
                     extra={
                         "document_id": document.id,
                         "collection_id": collection_id,
-                        "filename": filename
+                        "file_name": filename
                     }
                 )
 
