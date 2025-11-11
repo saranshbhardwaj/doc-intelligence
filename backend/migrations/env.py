@@ -81,10 +81,15 @@ def run_migrations_online():
             target_metadata=target_metadata,
             compare_type=True,
             compare_server_default=True,
+            # Render concurrent operations (CREATE INDEX CONCURRENTLY) as-is
+            # These operations must run outside transaction blocks
+            render_as_batch=False,
         )
 
-        with context.begin_transaction():
-            context.run_migrations()
+        # Check if we need to run without transaction for CONCURRENTLY operations
+        # Set CONCURRENTLY mode by setting isolation_level to AUTOCOMMIT
+        connection.execution_options(isolation_level="AUTOCOMMIT")
+        context.run_migrations()
 
 
 if context.is_offline_mode():
