@@ -3,6 +3,8 @@
 Factory for creating embedding providers based on configuration.
 Allows easy switching between embedding models via config.
 """
+import threading
+
 from app.services.embeddings.base import EmbeddingProvider
 from app.services.embeddings.sentence_transformer import SentenceTransformerEmbedding
 from app.services.embeddings.openai_provider import OpenAIEmbedding
@@ -100,13 +102,15 @@ def create_embedding_provider(settings: Settings) -> EmbeddingProvider:
 
 # Global singleton instance (initialized lazily on first use)
 _embedding_provider: EmbeddingProvider | None = None
+_embedding_provider_lock = threading.Lock()  # Thread-safe initialization
 
 
 def get_embedding_provider(settings: Settings | None = None) -> EmbeddingProvider:
     """
-    Get or create the global embedding provider singleton.
+    Get or create the global embedding provider singleton (thread-safe).
 
     This ensures we only load the embedding model once (expensive operation).
+    Uses double-checked locking to prevent race conditions in concurrent environments.
 
     Args:
         settings: Application settings (required on first call)
@@ -117,37 +121,47 @@ def get_embedding_provider(settings: Settings | None = None) -> EmbeddingProvide
     Raises:
         ValueError: If settings are invalid
         RuntimeError: If provider initialization fails
+
+    Thread Safety:
+        Safe for concurrent calls. Only one thread will perform initialization,
+        even when multiple threads call this function simultaneously.
     """
     global _embedding_provider
 
+    # First check (fast path - no lock needed if already initialized)
     if _embedding_provider is None:
-        # Edge case: Get default settings if none provided
-        if settings is None:
-            try:
-                from app.config import settings as default_settings
-                settings = default_settings
-            except Exception as e:
-                logger.error(f"Failed to load default settings: {e}", exc_info=True)
-                raise RuntimeError(f"Failed to load default settings for embedding provider: {e}") from e
+        # Acquire lock for thread-safe initialization
+        with _embedding_provider_lock:
+            # Second check (with lock - prevents race condition)
+            # Another thread may have initialized while we were waiting for the lock
+            if _embedding_provider is None:
+                # Edge case: Get default settings if none provided
+                if settings is None:
+                    try:
+                        from app.config import settings as default_settings
+                        settings = default_settings
+                    except Exception as e:
+                        logger.error(f"Failed to load default settings: {e}", exc_info=True)
+                        raise RuntimeError(f"Failed to load default settings for embedding provider: {e}") from e
 
-        # Edge case: Validate settings loaded successfully
-        if settings is None:
-            raise ValueError("Failed to load settings - settings object is None")
+                # Edge case: Validate settings loaded successfully
+                if settings is None:
+                    raise ValueError("Failed to load settings - settings object is None")
 
-        # Edge case: Handle provider creation failures
-        try:
-            _embedding_provider = create_embedding_provider(settings)
-        except Exception as e:
-            logger.error(f"Failed to create embedding provider: {e}", exc_info=True)
-            raise RuntimeError(f"Failed to initialize embedding provider: {e}") from e
+                # Edge case: Handle provider creation failures
+                try:
+                    _embedding_provider = create_embedding_provider(settings)
+                except Exception as e:
+                    logger.error(f"Failed to create embedding provider: {e}", exc_info=True)
+                    raise RuntimeError(f"Failed to initialize embedding provider: {e}") from e
 
-        # Edge case: Validate provider was created successfully
-        if _embedding_provider is None:
-            raise RuntimeError("Embedding provider creation returned None")
+                # Edge case: Validate provider was created successfully
+                if _embedding_provider is None:
+                    raise RuntimeError("Embedding provider creation returned None")
 
-        logger.info(
-            f"Embedding provider initialized: {_embedding_provider.provider_name} "
-            f"({_embedding_provider.model_name}, {_embedding_provider.get_dimension()}d)"
-        )
+                logger.info(
+                    f"Embedding provider initialized: {_embedding_provider.provider_name} "
+                    f"({_embedding_provider.model_name}, {_embedding_provider.get_dimension()}d)"
+                )
 
     return _embedding_provider

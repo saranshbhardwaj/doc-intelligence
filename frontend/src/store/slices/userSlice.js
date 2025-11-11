@@ -9,6 +9,14 @@
 
 import { getUserInfo, getUserExtractions } from '../../api';
 
+/**
+ * Get safe error message from error object
+ * (Normalized errors from apiErrorHandler have .message)
+ */
+const getErrorMessage = (error) => {
+  return error?.message || "An unexpected error occurred";
+};
+
 export const createUserSlice = (set, get) => ({
   // ========== State ==========
   user: {

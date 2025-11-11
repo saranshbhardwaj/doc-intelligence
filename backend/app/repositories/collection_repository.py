@@ -16,7 +16,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy import func
 
 from app.database import SessionLocal
-from app.db_models_chat import Collection, CollectionDocument
+from app.db_models_chat import Collection, CollectionDocument, DocumentChunk
 from app.utils.logging import logger
 
 
@@ -242,10 +242,17 @@ class CollectionRepository:
     ) -> bool:
         """Update collection statistics.
 
+        **DEPRECATED for count updates**: Use `recompute_collection_stats()` instead
+        to update document_count and total_chunks. This method uses manual counts
+        that can drift out of sync and has race conditions.
+
+        This method is still appropriate for setting embedding_model and
+        embedding_dimension metadata.
+
         Args:
             collection_id: Collection ID
-            document_count: Updated document count
-            total_chunks: Updated chunk count
+            document_count: Updated document count (DEPRECATED - use recompute_collection_stats)
+            total_chunks: Updated chunk count (DEPRECATED - use recompute_collection_stats)
             embedding_model: Embedding model used
             embedding_dimension: Embedding vector dimension
 
@@ -286,6 +293,90 @@ class CollectionRepository:
             except SQLAlchemyError as e:
                 logger.error(
                     f"Failed to update collection stats: {e}",
+                    extra={"collection_id": collection_id, "error": str(e)}
+                )
+                db.rollback()
+                return False
+
+    def recompute_collection_stats(
+        self,
+        collection_id: str,
+        embedding_model: Optional[str] = None,
+        embedding_dimension: Optional[int] = None
+    ) -> bool:
+        """Recompute collection statistics from database using aggregate functions.
+
+        This is the CORRECT way to update collection stats - it computes the values
+        directly from the database rather than maintaining a cached counter that can
+        drift out of sync.
+
+        Benefits:
+        - Always accurate (single source of truth)
+        - No race conditions (atomic query)
+        - Simpler logic (no manual increment/decrement)
+        - Self-healing (fixes any previous drift)
+
+        Args:
+            collection_id: Collection ID
+            embedding_model: Optional embedding model to set
+            embedding_dimension: Optional embedding dimension to set
+
+        Returns:
+            True if successful, False otherwise
+        """
+        with self._get_session() as db:
+            try:
+                collection = db.query(Collection).filter(
+                    Collection.id == collection_id
+                ).first()
+
+                if not collection:
+                    logger.warning(
+                        f"Collection not found for stats recompute: {collection_id}",
+                        extra={"collection_id": collection_id}
+                    )
+                    return False
+
+                # Compute document_count from collection_documents table
+                document_count = db.query(func.count(CollectionDocument.id)).filter(
+                    CollectionDocument.collection_id == collection_id
+                ).scalar() or 0
+
+                # Compute total_chunks from document_chunks table
+                # Join through collection_documents to ensure we only count chunks
+                # from documents in this collection
+                total_chunks = db.query(func.count(DocumentChunk.id)).join(
+                    CollectionDocument,
+                    DocumentChunk.document_id == CollectionDocument.id
+                ).filter(
+                    CollectionDocument.collection_id == collection_id
+                ).scalar() or 0
+
+                # Update collection with computed values
+                collection.document_count = document_count
+                collection.total_chunks = total_chunks
+
+                if embedding_model is not None:
+                    collection.embedding_model = embedding_model
+                if embedding_dimension is not None:
+                    collection.embedding_dimension = embedding_dimension
+
+                db.commit()
+
+                logger.info(
+                    f"Recomputed collection stats",
+                    extra={
+                        "collection_id": collection_id,
+                        "document_count": document_count,
+                        "total_chunks": total_chunks
+                    }
+                )
+
+                return True
+
+            except SQLAlchemyError as e:
+                logger.error(
+                    f"Failed to recompute collection stats: {e}",
                     extra={"collection_id": collection_id, "error": str(e)}
                 )
                 db.rollback()
@@ -482,7 +573,7 @@ class CollectionRepository:
                     document.error_message = error_message[:500]
 
                 if status == "completed":
-                    document.completed_at = func.now()
+                    document.completed_at = datetime.now()
 
                 db.commit()
 

@@ -10,6 +10,14 @@
 
 import { uploadDocument, retryExtraction, streamProgress, fetchExtractionResult } from '../../api';
 
+/**
+ * Get safe error message from error object
+ * (Normalized errors from apiErrorHandler have .message)
+ */
+const getErrorMessage = (error) => {
+  return error?.message || "An unexpected error occurred";
+};
+
 export const createExtractionSlice = (set, get) => ({
   // ========== State ==========
   extraction: {
@@ -115,9 +123,12 @@ export const createExtractionSlice = (set, get) => ({
             stages: { parsing: true, chunking: true, summarizing: true, extracting: true },
           });
         },
-        onError: (msg) => {
-          console.error('❌ Extraction error:', msg);
-          setError(msg);
+        onError: (errorData) => {
+          console.error('❌ Extraction error:', errorData);
+          const errorMsg = typeof errorData === 'string'
+            ? errorData
+            : (errorData?.message || 'Extraction failed');
+          setError(errorMsg);
           setProcessing(false);
         },
         onEnd: async (data) => {
@@ -141,8 +152,7 @@ export const createExtractionSlice = (set, get) => ({
       return response;
     } catch (err) {
       console.error('Upload failed:', err);
-      const errorMsg = err.response?.data?.detail || 'Upload failed. Please try again.';
-      setError(errorMsg);
+      setError(getErrorMessage(err));
       setProcessing(false);
       throw err;
     }
@@ -196,8 +206,11 @@ export const createExtractionSlice = (set, get) => ({
             stages: { parsing: true, chunking: true, summarizing: true, extracting: true },
           });
         },
-        onError: (msg) => {
-          setError(msg);
+        onError: (errorData) => {
+          const errorMsg = typeof errorData === 'string'
+            ? errorData
+            : (errorData?.message || 'Extraction failed');
+          setError(errorMsg);
           setProcessing(false);
         },
         onEnd: async (data) => {
@@ -218,8 +231,8 @@ export const createExtractionSlice = (set, get) => ({
 
       return response;
     } catch (err) {
-      const errorMsg = err.response?.data?.detail || 'Retry failed. Please try again.';
-      setError(errorMsg);
+      console.error('Retry failed:', err);
+      setError(getErrorMessage(err));
       setProcessing(false);
       throw err;
     }
@@ -265,8 +278,11 @@ export const createExtractionSlice = (set, get) => ({
             stages: { parsing: true, chunking: true, summarizing: true, extracting: true },
           });
         },
-        onError: (msg) => {
-          setError(msg);
+        onError: (errorData) => {
+          const errorMsg = typeof errorData === 'string'
+            ? errorData
+            : (errorData?.message || 'Extraction failed');
+          setError(errorMsg);
           setProcessing(false);
         },
         onEnd: async (data) => {
@@ -286,7 +302,7 @@ export const createExtractionSlice = (set, get) => ({
       }));
     } catch (err) {
       console.error('Reconnection failed:', err);
-      setError('Failed to reconnect to extraction');
+      setError(getErrorMessage(err));
       setProcessing(false);
     }
   },

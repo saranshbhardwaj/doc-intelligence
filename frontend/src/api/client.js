@@ -5,6 +5,7 @@
  */
 
 import axios from "axios";
+import { createErrorInterceptor } from "../utils/apiErrorHandler";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
@@ -51,16 +52,10 @@ export function createAuthenticatedApi(getToken) {
     return config;
   });
 
-  // Handle errors with better messages
+  // Handle errors with centralized error handler
   authenticatedApi.interceptors.response.use(
     (response) => response,
-    (error) => {
-      if (error.response?.data?.detail) {
-        // Extract detail message from FastAPI error response
-        error.message = error.response.data.detail;
-      }
-      return Promise.reject(error);
-    }
+    createErrorInterceptor()
   );
 
   return authenticatedApi;

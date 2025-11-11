@@ -235,27 +235,19 @@ def store_vectors_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                 extra={"document_id": document_id, "collection_id": collection_id}
             )
 
-        # Update Collection stats using repository
-        # Use get_collection_by_id for background tasks (no user context available)
-        collection = collection_repo.get_collection_by_id(collection_id)
-        if collection:
-            new_total_chunks = (collection.total_chunks or 0) + len(db_chunks)
-            stats_updated = collection_repo.update_collection_stats(
-                collection_id=collection_id,
-                total_chunks=new_total_chunks,
-                embedding_model=payload.get("embedding_model"),
-                embedding_dimension=payload.get("embedding_dimension")
-            )
+        # Update Collection stats using database aggregate functions
+        # This recomputes document_count and total_chunks from the database,
+        # ensuring accuracy and preventing race conditions from concurrent operations
+        stats_updated = collection_repo.recompute_collection_stats(
+            collection_id=collection_id,
+            embedding_model=payload.get("embedding_model"),
+            embedding_dimension=payload.get("embedding_dimension")
+        )
 
-            if not stats_updated:
-                logger.warning(
-                    f"Failed to update collection stats for {collection_id}",
-                    extra={"collection_id": collection_id, "document_id": document_id}
-                )
-        else:
-            # Edge case: Collection was deleted during indexing
+        if not stats_updated:
+            # Collection might have been deleted during indexing (edge case)
             logger.warning(
-                f"Collection {collection_id} not found during stats update - may have been deleted",
+                f"Failed to recompute collection stats - collection may have been deleted",
                 extra={"collection_id": collection_id, "document_id": document_id}
             )
 

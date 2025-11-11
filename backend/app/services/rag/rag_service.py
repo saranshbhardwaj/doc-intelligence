@@ -234,6 +234,11 @@ class RAGService:
         chunks = []
         for row in results:
             # Convert cosine distance to similarity score (0-1, higher is better)
+            # pgvector's cosine_distance returns values in range [0, 2]:
+            # - 0 = identical vectors (cosine similarity = 1)
+            # - 1 = orthogonal vectors (cosine similarity = 0)
+            # - 2 = opposite vectors (cosine similarity = -1)
+            # Formula: similarity = 1 - (distance / 2) maps [0, 2] → [1, 0]
             distance = row.distance
             similarity = 1 - (distance / 2)
 

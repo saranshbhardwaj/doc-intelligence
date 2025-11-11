@@ -170,12 +170,9 @@ async def upload_document(
         if not job:
             raise HTTPException(status_code=500, detail="Failed to create job tracking record")
 
-        # Update collection document count
-        documents = collection_repo.list_documents(collection_id)
-        collection_repo.update_collection_stats(
-            collection_id=collection_id,
-            document_count=len(documents)
-        )
+        # Update collection stats using database aggregate functions
+        # This recomputes document_count accurately from the database
+        collection_repo.recompute_collection_stats(collection_id=collection_id)
 
         # Start Celery indexing chain
         task_id = start_chat_indexing_chain(
@@ -313,15 +310,13 @@ async def delete_document(
                 extra={"document_id": document_id, "file_path": file_path, "error": str(e)}
             )
 
-    # Update collection stats
+    # Update collection stats using database aggregate functions
+    # This recomputes document_count and total_chunks accurately after deletion
     try:
-        collection_repo.update_collection_stats(
-            collection_id=collection_id,
-            total_chunks=max(0, (collection.total_chunks or 0) - chunk_count)
-        )
+        collection_repo.recompute_collection_stats(collection_id=collection_id)
     except Exception as e:
         # Log but don't fail - document is already deleted
-        logger.warning(f"Failed to update collection stats after document deletion: {e}")
+        logger.warning(f"Failed to recompute collection stats after document deletion: {e}")
 
     logger.info(
         f"Document deleted",

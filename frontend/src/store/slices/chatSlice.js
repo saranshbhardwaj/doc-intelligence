@@ -10,6 +10,14 @@
 
 import * as chatApi from "../../api/chat";
 
+/**
+ * Get safe error message from error object
+ * (Normalized errors from apiErrorHandler have .message)
+ */
+const getErrorMessage = (error) => {
+  return error?.message || "An unexpected error occurred";
+};
+
 export const createChatSlice = (set, get) => ({
   chat: {
     // Collections
@@ -63,11 +71,12 @@ export const createChatSlice = (set, get) => ({
         },
       }));
     } catch (error) {
+      console.error("Failed to fetch collections:", error);
       set((state) => ({
         chat: {
           ...state.chat,
           collectionsLoading: false,
-          collectionsError: error.message,
+          collectionsError: getErrorMessage(error),
         },
       }));
     }
@@ -117,11 +126,12 @@ export const createChatSlice = (set, get) => ({
       // Also fetch sessions for this collection
       get().fetchSessions(getToken, collectionId);
     } catch (error) {
+      console.error("Failed to select collection:", error);
       set((state) => ({
         chat: {
           ...state.chat,
           collectionLoading: false,
-          collectionError: error.message,
+          collectionError: getErrorMessage(error),
         },
       }));
     }
@@ -215,22 +225,24 @@ export const createChatSlice = (set, get) => ({
           }
         },
         (error) => {
+          console.error("Indexing progress error:", error);
           set((state) => ({
             chat: {
               ...state.chat,
               uploadStatus: "failed",
-              uploadError: error.message,
+              uploadError: getErrorMessage(error),
               currentJobId: null,
             },
           }));
         }
       );
     } catch (error) {
+      console.error("Failed to upload document:", error);
       set((state) => ({
         chat: {
           ...state.chat,
           uploadStatus: "failed",
-          uploadError: error.message,
+          uploadError: getErrorMessage(error),
         },
       }));
     }
@@ -250,7 +262,7 @@ export const createChatSlice = (set, get) => ({
       set((state) => ({
         chat: {
           ...state.chat,
-          uploadError: error.message || "Failed to delete document",
+          uploadError: getErrorMessage(error),
         },
       }));
     }
@@ -342,12 +354,13 @@ export const createChatSlice = (set, get) => ({
           get().fetchSessions(getToken, collectionId);
         },
         onError: (error) => {
+          console.error("Chat streaming error:", error);
           set((state) => ({
             chat: {
               ...state.chat,
               isStreaming: false,
               streamingMessage: "",
-              chatError: error.message,
+              chatError: getErrorMessage(error),
             },
           }));
         },
@@ -373,7 +386,7 @@ export const createChatSlice = (set, get) => ({
       set((state) => ({
         chat: {
           ...state.chat,
-          chatError: error.message,
+          chatError: getErrorMessage(error),
         },
       }));
     }
