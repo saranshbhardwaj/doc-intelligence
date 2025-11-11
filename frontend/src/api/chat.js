@@ -86,27 +86,50 @@ export function connectToIndexingProgress(getToken, jobId, onProgress, onComplet
       `${import.meta.env.VITE_API_URL}/api/chat/jobs/${jobId}/progress?token=${encodeURIComponent(token)}`
     );
 
+    let endEventReceived = false; // Track if we received the end event
+
     eventSource.addEventListener("progress", (event) => {
       try {
         const data = JSON.parse(event.data);
         onProgress(data);
-
-        if (data.status === "completed") {
-          eventSource.close();
-          onComplete(data);
-        } else if (data.status === "failed") {
-          eventSource.close();
-          onError(new Error(data.error_message || "Indexing failed"));
-        }
       } catch (err) {
         console.error("Failed to parse progress event:", err);
       }
     });
 
-    eventSource.onerror = (error) => {
-      console.error("SSE connection error:", error);
+    eventSource.addEventListener("complete", (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        onComplete(data);
+      } catch (err) {
+        console.error("Failed to parse complete event:", err);
+      }
+    });
+
+    eventSource.addEventListener("error", (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        eventSource.close();
+        endEventReceived = true;
+        onError(new Error(data.message || "Indexing failed"));
+      } catch (err) {
+        console.error("Failed to parse error event:", err);
+      }
+    });
+
+    eventSource.addEventListener("end", (event) => {
+      console.log("Received end event, closing SSE connection");
+      endEventReceived = true;
       eventSource.close();
-      onError(new Error("Connection lost"));
+    });
+
+    eventSource.onerror = (error) => {
+      // Only treat as error if we didn't receive the end event
+      if (!endEventReceived) {
+        console.error("SSE connection error:", error);
+        eventSource.close();
+        onError(new Error("Connection lost"));
+      }
     };
 
     return () => eventSource.close();
@@ -225,6 +248,16 @@ export async function getChatHistory(getToken, sessionId, limit) {
 export async function deleteSession(getToken, sessionId) {
   const api = createAuthenticatedApi(getToken);
   const response = await api.delete(`/api/chat/sessions/${sessionId}`);
+  return response.data;
+}
+
+/**
+ * Document API
+ */
+
+export async function deleteDocument(getToken, documentId) {
+  const api = createAuthenticatedApi(getToken);
+  const response = await api.delete(`/api/chat/documents/${documentId}`);
   return response.data;
 }
 

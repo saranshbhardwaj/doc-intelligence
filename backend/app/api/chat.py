@@ -18,7 +18,7 @@ from datetime import datetime
 from fastapi import APIRouter, UploadFile, File, Form, HTTPException, Depends, Query
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
-from sse_starlette.sse import ServerSentEvent
+from sse_starlette.sse import EventSourceResponse
 
 from app.auth import get_current_user
 from app.db_models_users import User
@@ -266,6 +266,7 @@ async def upload_document(
         document = collection_repo.create_document(
             collection_id=collection_id,
             filename=file.filename,
+            file_path=file_path,
             file_size_bytes=len(file_bytes),
             page_count=0,  # Will be updated during parsing
             content_hash=content_hash
@@ -346,6 +347,94 @@ async def upload_document(
         raise
 
 
+@router.delete("/documents/{document_id}")
+async def delete_document(
+    document_id: str,
+    user: User = Depends(get_current_user)
+):
+    """
+    Delete a document from a collection.
+
+    Removes document record, associated chunks, job states, and physical file.
+    Requires user to own the collection.
+
+    Args:
+        document_id: Document ID to delete
+        user: Authenticated user
+
+    Returns:
+        Success message with deleted document details
+    """
+    collection_repo = CollectionRepository()
+
+    # Get document (with collection ownership check via repository)
+    from app.database import SessionLocal
+    from app.db_models_chat import CollectionDocument
+
+    db = SessionLocal()
+    try:
+        document = db.query(CollectionDocument).filter(
+            CollectionDocument.id == document_id
+        ).first()
+
+        if not document:
+            raise HTTPException(status_code=404, detail="Document not found")
+
+        # Verify user owns the collection
+        collection = collection_repo.get_collection(document.collection_id, user.id)
+        if not collection:
+            raise HTTPException(status_code=403, detail="You don't have permission to delete this document")
+
+        # Store info for response before deletion
+        filename = document.filename
+        collection_id = document.collection_id
+        file_path = document.file_path
+
+    finally:
+        db.close()
+
+    # Delete document from database (cascades to chunks and job_states)
+    success = collection_repo.delete_document(document_id)
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to delete document")
+
+    # Delete physical file if it exists
+    if file_path and os.path.exists(file_path):
+        try:
+            os.remove(file_path)
+            logger.info(
+                f"Deleted physical file",
+                extra={"document_id": document_id, "file_path": file_path}
+            )
+        except Exception as e:
+            logger.warning(
+                f"Failed to delete physical file: {e}",
+                extra={"document_id": document_id, "file_path": file_path, "error": str(e)}
+            )
+
+    # Update collection document count
+    collection_repo.update_collection_stats(
+        collection_id=collection_id,
+        total_chunks=max(0, (collection.total_chunks or 0) - (document.chunk_count or 0))
+    )
+
+    logger.info(
+        f"Document deleted",
+        extra={
+            "document_id": document_id,
+            "collection_id": collection_id,
+            "file_name": filename
+        }
+    )
+
+    return {
+        "success": True,
+        "document_id": document_id,
+        "filename": filename,
+        "message": f"Document '{filename}' deleted successfully"
+    }
+
+
 @router.get("/jobs/{job_id}/progress")
 async def get_indexing_progress(
     job_id: str,
@@ -404,33 +493,177 @@ async def get_indexing_progress(
     except Exception as e:
         logger.error(f"[Chat SSE] Auth error: {e}", extra={"job_id": job_id})
         raise HTTPException(status_code=401, detail=f"Authentication failed: {str(e)}")
+
+    # Verify user owns this job
+    job_repo = JobRepository()
+    collection_repo = CollectionRepository()
+
+    job = job_repo.get_job(job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+
+    # Get the collection document to check user ownership
+    if not job.collection_document_id:
+        raise HTTPException(status_code=400, detail="Job is not associated with a collection document")
+
+    # Get collection to verify ownership
+    # Note: collection_repo.get_document returns CollectionDocument which has collection_id
+    from app.database import SessionLocal
+    db = SessionLocal()
+    try:
+        from app.db_models_chat import CollectionDocument
+        doc = db.query(CollectionDocument).filter(CollectionDocument.id == job.collection_document_id).first()
+        if not doc:
+            raise HTTPException(status_code=404, detail=f"Document not found for job {job_id}")
+
+        collection = collection_repo.get_collection(doc.collection_id, user_id)
+        if not collection:
+            logger.warning(
+                f"[Chat SSE] User {user_id} attempted to access job {job_id} for collection {doc.collection_id}",
+                extra={"job_id": job_id, "user_id": user_id, "collection_id": doc.collection_id}
+            )
+            raise HTTPException(status_code=403, detail="You don't have permission to access this job")
+    finally:
+        db.close()
+
+    logger.info(f"[Chat SSE] User {user_id} authorized to stream job {job_id}", extra={"job_id": job_id})
+
     async def event_generator():
-        """Stream progress events until job completes or fails"""
+        """Async generator bridging Redis pub/sub to SSE.
+
+        Pattern matches Extract Mode implementation in jobs.py
+        """
         import json
         import asyncio
-        from app.services.pubsub import subscribe_to_job
+        from app.services.pubsub import safe_subscribe
+        from sse_starlette.sse import ServerSentEvent
 
-        # Subscribe to Redis pub/sub for this job
-        async for event in subscribe_to_job(job_id):
-            if event["type"] == "progress":
+        logger.info(f"[Chat SSE] ★★★ PubSub stream STARTED for job {job_id} ★★★", extra={"job_id": job_id})
+
+        end_sent = False  # Track if we've sent end event
+
+        # Initial DB snapshot for immediate feedback
+        job_repo = JobRepository()
+        job = job_repo.get_job(job_id)
+
+        if not job:
+            yield ServerSentEvent(data=json.dumps({'message': 'Job not found'}), event="error")
+            yield ServerSentEvent(data=json.dumps({'reason': 'not_found', 'job_id': job_id}), event="end")
+            return
+
+        if job.status == "completed":
+            yield ServerSentEvent(data=json.dumps({
+                'message': job.message or 'Document indexing completed successfully',
+                'document_id': job.collection_document_id
+            }), event="complete")
+            yield ServerSentEvent(data=json.dumps({'reason': 'completed', 'job_id': job_id}), event="end")
+            return
+
+        if job.status == "failed":
+            yield ServerSentEvent(data=json.dumps({
+                'stage': job.error_stage,
+                'message': job.error_message,
+                'type': job.error_type,
+                'retryable': job.is_retryable
+            }), event="error")
+            yield ServerSentEvent(data=json.dumps({'reason': 'failed', 'job_id': job_id}), event="end")
+            return
+
+        # In-progress initial event
+        yield ServerSentEvent(data=json.dumps({
+            'status': job.status,
+            'current_stage': job.current_stage,
+            'progress_percent': job.progress_percent,
+            'message': job.message,
+            'details': job.details or {}
+        }), event="progress")
+
+        pubsub = safe_subscribe(job_id)
+        channel_name = f"job:progress:{job_id}"
+        logger.info(f"[Chat SSE] Subscribed to Redis channel: {channel_name}", extra={"job_id": job_id})
+
+        max_duration = 800  # seconds
+        elapsed = 0
+        keepalive_interval = 8  # seconds for keepalive comment
+        last_keepalive = 0
+        messages_received = 0
+
+        try:
+            while elapsed < max_duration:
+                # Non-blocking attempt to get message every second
+                message = pubsub.get_message(timeout=1.0)
+                if message:
+                    logger.debug(f"[Chat SSE] Received message type: {message.get('type')}", extra={"job_id": job_id, "message": str(message)[:200]})
+                if message and message.get('type') == 'message':
+                    messages_received += 1
+                    logger.info(f"[Chat SSE] 📨 Received pub/sub message #{messages_received}", extra={"job_id": job_id})
+                    try:
+                        data = json.loads(message['data'])
+                        event_type = data.get('event')
+                        payload = data.get('payload', {})
+                        if event_type:
+                            yield ServerSentEvent(data=json.dumps(payload), event=event_type)
+                            if event_type in ("complete", "error"):
+                                # Send end event after complete/error
+                                yield ServerSentEvent(
+                                    data=json.dumps({'reason': event_type, 'job_id': job_id}),
+                                    event="end"
+                                )
+                                end_sent = True
+                                break
+                            elif event_type == "end":
+                                end_sent = True
+                                break
+                    except Exception as e:
+                        logger.warning("[Chat SSE] Malformed pubsub message", extra={"job_id": job_id, "error": str(e)})
+                else:
+                    # Keepalive comment throttled
+                    if (elapsed - last_keepalive) >= keepalive_interval:
+                        yield ": keepalive\n\n"
+                        last_keepalive = elapsed
+
+                await asyncio.sleep(1)
+                elapsed += 1
+
+            # Ensure we always send end event
+            if not end_sent:
+                if elapsed >= max_duration:
+                    yield ServerSentEvent(
+                        data=json.dumps({'message': 'Job timeout', 'type': 'timeout'}),
+                        event="error"
+                    )
                 yield ServerSentEvent(
-                    data=json.dumps(event["data"]),
-                    event="progress"
+                    data=json.dumps({'reason': 'timeout' if elapsed >= max_duration else 'normal', 'job_id': job_id}),
+                    event="end"
                 )
 
-                # Stop streaming if job completed or failed
-                if event["data"].get("status") in ["completed", "failed"]:
-                    break
+        except Exception as e:
+            logger.exception(f"[Chat SSE] PubSub stream error for job {job_id}", extra={"error": str(e)})
+            if not end_sent:
+                yield ServerSentEvent(
+                    data=json.dumps({'message': 'Stream error', 'type': 'stream_error'}),
+                    event="error"
+                )
+                yield ServerSentEvent(
+                    data=json.dumps({'reason': 'stream_error', 'job_id': job_id}),
+                    event="end"
+                )
+        finally:
+            logger.info(
+                f"[Chat SSE] ★★★ PubSub stream ENDED for job {job_id} ★★★ Total messages received: {messages_received}",
+                extra={"job_id": job_id, "messages_received": messages_received, "elapsed_seconds": elapsed}
+            )
+            try:
+                pubsub.close()
+            except Exception:
+                pass
 
-            await asyncio.sleep(0)  # Yield control
-
-    return StreamingResponse(
+    return EventSourceResponse(
         event_generator(),
-        media_type="text/event-stream",
         headers={
+            "X-Accel-Buffering": "no",  # Disable proxy buffering
             "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-            "X-Accel-Buffering": "no"
+            "Content-Type": "text/event-stream; charset=utf-8"
         }
     )
 
@@ -508,40 +741,37 @@ async def chat_with_collection(
 
     # Stream chat response
     async def event_generator():
-        """Stream chat response chunks"""
+        """Stream chat response chunks as SSE events"""
         import json
 
+        logger.info(f"[Chat SSE] ★★★ Starting event stream for session {session.id}", extra={"session_id": session.id})
+
         # Send session_id first (for new sessions)
-        yield ServerSentEvent(
-            data=json.dumps({"session_id": session.id}),
-            event="session"
-        )
+        logger.info(f"[Chat SSE] Sending session event", extra={"session_id": session.id})
+        yield f"event: session\ndata: {json.dumps({'session_id': session.id})}\n\n"
 
         # Stream response chunks from RAG
         try:
+            chunk_count = 0
             async for chunk in rag_service.chat(
                 session_id=session.id,
                 collection_id=collection_id,
                 user_message=message,
                 num_chunks=num_chunks
             ):
-                yield ServerSentEvent(
-                    data=json.dumps({"chunk": chunk}),
-                    event="chunk"
-                )
+                chunk_count += 1
+                logger.debug(f"[Chat SSE] Sending chunk #{chunk_count}", extra={"session_id": session.id})
+                yield f"event: chunk\ndata: {json.dumps({'chunk': chunk})}\n\n"
 
             # Send completion event
-            yield ServerSentEvent(
-                data=json.dumps({"status": "completed"}),
-                event="done"
-            )
+            logger.info(f"[Chat SSE] Sending done event (streamed {chunk_count} chunks)", extra={"session_id": session.id, "chunk_count": chunk_count})
+            yield f"event: done\ndata: {json.dumps({'status': 'completed'})}\n\n"
 
         except Exception as e:
-            logger.error(f"Chat streaming error: {e}", exc_info=True)
-            yield ServerSentEvent(
-                data=json.dumps({"error": str(e)}),
-                event="error"
-            )
+            logger.error(f"[Chat SSE] Streaming error: {e}", exc_info=True, extra={"session_id": session.id})
+            yield f"event: error\ndata: {json.dumps({'error': str(e)})}\n\n"
+
+        logger.info(f"[Chat SSE] ★★★ Event stream ended for session {session.id}", extra={"session_id": session.id})
 
     return StreamingResponse(
         event_generator(),
@@ -549,7 +779,7 @@ async def chat_with_collection(
         headers={
             "Cache-Control": "no-cache",
             "Connection": "keep-alive",
-            "X-Accel-Buffering": "no"
+            "X-Accel-Buffering": "no",
         }
     )
 

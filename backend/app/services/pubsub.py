@@ -58,9 +58,9 @@ def publish_event(job_id: str, event: str, payload: Dict[str, Any]) -> None:
     try:
         redis_client = get_redis()
         redis_client.publish(channel, json.dumps(message))
-        logger.debug("Published pubsub event", extra={"job_id": job_id, "event": event})
+        logger.info(f"✅ Published pubsub event: {event}", extra={"job_id": job_id, "event": event, "channel": channel})
     except Exception as e:
-        logger.warning("Redis publish failed", extra={"job_id": job_id, "event": event, "error": str(e)})
+        logger.warning(f"❌ Redis publish failed: {event}", extra={"job_id": job_id, "event": event, "error": str(e)})
 
 
 def safe_subscribe(job_id: str):
@@ -73,7 +73,7 @@ def safe_subscribe(job_id: str):
     channel = job_channel(job_id)
     try:
         pubsub.subscribe(channel)
-        logger.debug("Subscribed to pubsub channel", extra={"job_id": job_id, "channel": channel})
+        logger.info(f"🎧 Subscribed to Redis pub/sub channel: {channel}", extra={"job_id": job_id, "channel": channel})
     except Exception as e:
-        logger.error("Failed to subscribe to pubsub channel", extra={"job_id": job_id, "error": str(e)})
+        logger.error(f"❌ Failed to subscribe to pubsub channel: {channel}", extra={"job_id": job_id, "channel": channel, "error": str(e)})
     return pubsub

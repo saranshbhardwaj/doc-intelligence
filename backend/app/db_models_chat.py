@@ -54,6 +54,7 @@ class CollectionDocument(Base):
 
     # Document metadata
     filename = Column(String(255), nullable=False)
+    file_path = Column(String(512), nullable=True)  # Path to uploaded PDF file
     file_size_bytes = Column(Integer, nullable=False)
     page_count = Column(Integer, nullable=False)
     content_hash = Column(String(64), nullable=True, index=True)  # SHA256 for deduplication

@@ -83,6 +83,7 @@ export const useChatActions = () =>
       selectCollection: state.selectCollection,
       deleteCollection: state.deleteCollection,
       uploadDocumentToCollection: state.uploadDocumentToCollection,
+      deleteDocument: state.deleteDocument,
       resetUploadStatus: state.resetUploadStatus,
       sendMessage: state.sendMessage,
       loadChatHistory: state.loadChatHistory,

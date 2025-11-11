@@ -33,6 +33,17 @@ import { useChat, useChatActions } from "../store";
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
 import { Progress } from "../components/ui/progress";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "../components/ui/alert-dialog";
 import Spinner from "../components/common/Spinner";
 import DarkModeToggle from "../components/common/DarkModeToggle";
 import { useDarkMode } from "../hooks/useDarkMode";
@@ -40,7 +51,7 @@ import { useDarkMode } from "../hooks/useDarkMode";
 export default function ChatPage() {
   const { collectionId } = useParams();
   const navigate = useNavigate();
-  const { getToken } = useAuth();
+  const { getToken, isLoaded } = useAuth();
   const chat = useChat();
   const actions = useChatActions();
   const { isDark, toggle } = useDarkMode();
@@ -54,8 +65,10 @@ export default function ChatPage() {
   const fileInputRef = useRef(null);
 
   useEffect(() => {
+    // Wait for Clerk to initialize before making API calls
+    if (!isLoaded) return;
     actions.selectCollection(getToken, collectionId);
-  }, [collectionId]);
+  }, [collectionId, isLoaded]);
 
   useEffect(() => {
     // Scroll to bottom when new messages arrive
@@ -77,7 +90,9 @@ export default function ChatPage() {
   };
 
   const handleNewChat = () => {
+    console.log("New Chat clicked");
     actions.startNewChat();
+    setMessage(""); // Clear input field
   };
 
   const handleUploadDocument = async (e) => {
@@ -268,16 +283,49 @@ export default function ChatPage() {
                             {doc.chunk_count} chunks · {doc.page_count} pages
                           </p>
                         </div>
-                        <div>
-                          {doc.status === "completed" && (
-                            <CheckCircle className="w-4 h-4 text-green-500" />
-                          )}
-                          {doc.status === "processing" && (
-                            <Clock className="w-4 h-4 text-blue-500" />
-                          )}
-                          {doc.status === "failed" && (
-                            <XCircle className="w-4 h-4 text-red-500" />
-                          )}
+                        <div className="flex items-center gap-2">
+                          <div>
+                            {doc.status === "completed" && (
+                              <CheckCircle className="w-4 h-4 text-green-500" />
+                            )}
+                            {doc.status === "processing" && (
+                              <Clock className="w-4 h-4 text-blue-500" />
+                            )}
+                            {doc.status === "failed" && (
+                              <XCircle className="w-4 h-4 text-red-500" />
+                            )}
+                          </div>
+                          <AlertDialog>
+                            <AlertDialogTrigger asChild>
+                              <button
+                                className="text-gray-400 hover:text-red-500 transition-colors"
+                                title="Delete document"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </AlertDialogTrigger>
+                            <AlertDialogContent>
+                              <AlertDialogHeader>
+                                <AlertDialogTitle>
+                                  Delete Document?
+                                </AlertDialogTitle>
+                                <AlertDialogDescription>
+                                  This will permanently delete{" "}
+                                  <strong>{doc.filename}</strong> and all its chunks
+                                  from this collection. This action cannot be undone.
+                                </AlertDialogDescription>
+                              </AlertDialogHeader>
+                              <AlertDialogFooter>
+                                <AlertDialogCancel>Cancel</AlertDialogCancel>
+                                <AlertDialogAction
+                                  onClick={() => actions.deleteDocument(getToken, doc.id)}
+                                  className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                                >
+                                  Delete
+                                </AlertDialogAction>
+                              </AlertDialogFooter>
+                            </AlertDialogContent>
+                          </AlertDialog>
                         </div>
                       </div>
                     </div>

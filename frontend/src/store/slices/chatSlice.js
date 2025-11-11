@@ -236,6 +236,26 @@ export const createChatSlice = (set, get) => ({
     }
   },
 
+  deleteDocument: async (getToken, documentId) => {
+    try {
+      await chatApi.deleteDocument(getToken, documentId);
+
+      // Refresh current collection to update document list
+      const currentCollection = get().chat.currentCollection;
+      if (currentCollection) {
+        await get().selectCollection(getToken, currentCollection.id);
+      }
+    } catch (error) {
+      console.error("Failed to delete document:", error);
+      set((state) => ({
+        chat: {
+          ...state.chat,
+          uploadError: error.message || "Failed to delete document",
+        },
+      }));
+    }
+  },
+
   resetUploadStatus: () => {
     set((state) => ({
       chat: {
@@ -360,6 +380,7 @@ export const createChatSlice = (set, get) => ({
   },
 
   startNewChat: () => {
+    console.log("Starting new chat - clearing session and messages");
     set((state) => ({
       chat: {
         ...state.chat,

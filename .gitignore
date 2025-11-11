@@ -83,3 +83,4 @@ frontend/.env.development
 backend/resolute-clock-400618-967b7a8c060f.json
 backend/credentials/resolute-clock-400618-967b7a8c060f.json
 backend/data/
+backend/.cache

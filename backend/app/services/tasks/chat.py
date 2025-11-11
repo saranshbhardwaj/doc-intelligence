@@ -221,10 +221,12 @@ def store_vectors_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
 
         # Update CollectionDocument status and stats using repository
         collection_repo = CollectionRepository()
+        page_count = payload.get("parser_output", {}).get("page_count", 0)
         doc_updated = collection_repo.update_document_status(
             document_id=document_id,
             status="completed",
-            chunk_count=len(db_chunks)
+            chunk_count=len(db_chunks),
+            page_count=page_count
         )
 
         if not doc_updated:

@@ -302,6 +302,7 @@ class CollectionRepository:
         file_size_bytes: int,
         page_count: int,
         content_hash: str,
+        file_path: Optional[str] = None,
         extraction_id: Optional[str] = None,
         status: str = "processing"
     ) -> Optional[CollectionDocument]:
@@ -313,6 +314,7 @@ class CollectionRepository:
             file_size_bytes: File size in bytes
             page_count: Number of pages
             content_hash: SHA256 hash for duplicate detection
+            file_path: Path to uploaded PDF file
             extraction_id: Optional link to extraction record
             status: Document status (default: "processing")
 
@@ -324,6 +326,7 @@ class CollectionRepository:
                 document = CollectionDocument(
                     collection_id=collection_id,
                     filename=filename,
+                    file_path=file_path,
                     file_size_bytes=file_size_bytes,
                     page_count=page_count,
                     content_hash=content_hash,
@@ -442,6 +445,7 @@ class CollectionRepository:
         document_id: str,
         status: str,
         chunk_count: Optional[int] = None,
+        page_count: Optional[int] = None,
         error_message: Optional[str] = None
     ) -> bool:
         """Update document status and stats.
@@ -450,6 +454,7 @@ class CollectionRepository:
             document_id: Document ID
             status: New status (processing, completed, failed)
             chunk_count: Number of chunks created
+            page_count: Number of pages in document
             error_message: Error message if status is failed
 
         Returns:
@@ -471,6 +476,8 @@ class CollectionRepository:
                 document.status = status
                 if chunk_count is not None:
                     document.chunk_count = chunk_count
+                if page_count is not None:
+                    document.page_count = page_count
                 if error_message:
                     document.error_message = error_message[:500]
 
