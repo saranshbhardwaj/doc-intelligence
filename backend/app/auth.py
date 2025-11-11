@@ -3,12 +3,9 @@
 from fastapi import HTTPException, Depends, Request
 from clerk_backend_api import Clerk
 from clerk_backend_api.security.types import AuthenticateRequestOptions
-from psycopg import IntegrityError
 from app.config import settings
-from app.database import get_db
 from app.db_models_users import User
-from sqlalchemy.orm import Session
-from datetime import datetime
+from app.repositories.user_repository import UserRepository
 import httpx
 
 
@@ -64,61 +61,36 @@ def get_current_user_id(request: Request) -> str:
         raise HTTPException(status_code=401, detail=f"Invalid session token: {str(e)}")
 
 
-def get_current_user(
-    request: Request,
-    db: Session = Depends(get_db)
-) -> User:
+def get_current_user(request: Request) -> User:
     """
-    Get or create user from database.
+    Get or create user from database using repository pattern.
     If user doesn't exist (first login), create them.
     Handles race conditions gracefully.
     """
     # First authenticate the user
     user_id = get_current_user_id(request)
 
-    user = db.query(User).filter(User.id == user_id).first()
+    # Use repository for all database operations
+    user_repo = UserRepository()
 
-    if user:
-        # User exists - just update last login
-        user.last_login = datetime.now()
-        db.commit()
-        return user
+    # Fetch user details from Clerk for potential creation
+    clerk_user = clerk.users.get(user_id=user_id)
+    email = clerk_user.email_addresses[0].email_address if clerk_user.email_addresses else f"{user_id}@unknown.com"
 
-    # User doesn't exist - create new user
-    try:
-        # Fetch user details from Clerk
-        clerk_user = clerk.users.get(user_id=user_id)
+    # Get existing user or create new one
+    user = user_repo.get_or_create_user(
+        user_id=user_id,
+        email=email,
+        tier="free",
+        pages_limit=100
+    )
 
-        user = User(
-            id=user_id,
-            email=clerk_user.email_addresses[0].email_address if clerk_user.email_addresses else f"{user_id}@unknown.com",
-            tier="free",
-            pages_limit=100,
-            total_pages_processed=0,
-            pages_this_month=0
-        )
-        db.add(user)
-        db.commit()
-        db.refresh(user)
-        print(f"✅ [Auth Backend] Created new user: {user_id}")
-        return user
-        
-    except IntegrityError:
-        # Race condition: another request created the user between our check and insert
-        # Rollback and fetch the user that was created
-        db.rollback()
-        print(f"⚠️ [Auth Backend] User {user_id} was created by concurrent request, fetching...")
-        user = db.query(User).filter(User.id == user_id).first()
-        
-        if not user:
-            # This shouldn't happen, but handle it just in case
-            print(f"❌ [Auth Backend] Failed to fetch user after IntegrityError")
-            raise HTTPException(status_code=500, detail="Failed to create or fetch user")
-        
-        # Update last login for the fetched user
-        user.last_login = datetime.now()
-        db.commit()
-        return user
+    if not user:
+        # This shouldn't happen - log and raise error
+        print(f"❌ [Auth Backend] Failed to get or create user: {user_id}")
+        raise HTTPException(status_code=500, detail="Failed to authenticate user")
+
+    return user
 
 
 def require_admin(user: User = Depends(get_current_user)) -> User:

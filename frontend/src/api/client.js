@@ -5,6 +5,7 @@
  */
 
 import axios from "axios";
+import { createErrorInterceptor } from "../utils/apiErrorHandler";
 
 const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
@@ -50,6 +51,12 @@ export function createAuthenticatedApi(getToken) {
     }
     return config;
   });
+
+  // Handle errors with centralized error handler
+  authenticatedApi.interceptors.response.use(
+    (response) => response,
+    createErrorInterceptor()
+  );
 
   return authenticatedApi;
 }

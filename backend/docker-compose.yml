@@ -1,7 +1,7 @@
 version: "3.9"
 services:
   db:
-    image: postgres:16-alpine
+    image: pgvector/pgvector:pg16
     container_name: docint-postgres
     environment:
       POSTGRES_USER:  ${POSTGRES_USER}
@@ -9,6 +9,7 @@ services:
       POSTGRES_DB: ${POSTGRES_DB}
     volumes:
       - postgres_data:/var/lib/postgresql/data
+      - ./db/init/init-pgvector.sql:/docker-entrypoint-initdb.d/init-pgvector.sql  # Enable pgvector on first start
     ports:
       - "5432:5432"
     healthcheck:
@@ -29,6 +30,9 @@ services:
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/0
       DATABASE_URL: postgresql+psycopg://docint:docint@db:5432/docint
+      HOME: /app
+      HF_HOME: /app/.cache/huggingface
+      TRANSFORMERS_CACHE: /app/.cache/huggingface/transformers
     ports:
       - "8000:8000"
     depends_on:

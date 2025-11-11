@@ -27,8 +27,8 @@ RUN pip install --upgrade pip && pip install -r requirements.txt
 # Copy application (exclude via .dockerignore)
 COPY . .
 
-# Adjust ownership for writable directories (logs, temp files)
-RUN mkdir -p /shared_uploads /app/logs && chown -R appuser:app /shared_uploads /app/logs /app
+# Adjust ownership for writable directories (logs, temp files, HuggingFace cache)
+RUN mkdir -p /shared_uploads /app/logs /app/.cache && chown -R appuser:app /shared_uploads /app/logs /app /app/.cache
 
 # Default envs (override via compose / Railway)
 ENV USE_CELERY=${USE_CELERY} \

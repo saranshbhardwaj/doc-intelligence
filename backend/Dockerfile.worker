@@ -14,13 +14,16 @@ RUN pip install --upgrade pip && pip install -r requirements.txt
 
 COPY . .
 
-# Ensure ownership for runtime writable paths (logs etc.)
-RUN mkdir -p /shared_uploads /worker/logs && chown -R appuser:app /shared_uploads /worker/logs /worker
+# Ensure ownership for runtime writable paths (logs, HuggingFace cache, etc.)
+RUN mkdir -p /shared_uploads /worker/logs /worker/.cache && chown -R appuser:app /shared_uploads /worker/logs /worker /worker/.cache
 
 ENV USE_CELERY=true \
     CELERY_BROKER_URL=${CELERY_BROKER_URL} \
     CELERY_RESULT_BACKEND=${CELERY_RESULT_BACKEND} \
-    SHARED_UPLOAD_ROOT=/shared_uploads
+    SHARED_UPLOAD_ROOT=/shared_uploads \
+    HOME=/worker \
+    HF_HOME=/worker/.cache/huggingface \
+    TRANSFORMERS_CACHE=/worker/.cache/huggingface/transformers
 
 # Switch to non-root user
 USER appuser

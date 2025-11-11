@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from fastapi import HTTPException
 
 from app.db_models import JobState
+from app.repositories.job_repository import JobRepository
 from app.utils.logging import logger
 from app.services.pubsub import publish_event  # lightweight fire-and-forget
 
@@ -29,7 +30,7 @@ class JobProgressTracker:
         self._min_progress_delta: int = 3     # commit only if progress advanced this much
 
     def get_job_state(self) -> JobState:
-        """Get current job state from database"""
+        """Get current job state from database using the tracker's session"""
         job = self.db.query(JobState).filter(JobState.id == self.job_id).first()
         if not job:
             raise HTTPException(status_code=404, detail=f"Job {self.job_id} not found")

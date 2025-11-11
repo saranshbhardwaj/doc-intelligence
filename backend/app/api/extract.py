@@ -28,12 +28,12 @@ from app.services.mock_responses import get_mock_cim_response
 from app.services.risk_detector import detect_red_flags
 from app.config import settings
 from app.utils.logging import logger
-from app.database import get_db
-from app.db_models import JobState, Extraction
+from app.repositories.job_repository import JobRepository
+from app.repositories.extraction_repository import ExtractionRepository
 
 # Orchestration service
 from app.services.async_pipeline.extraction_orchestrator import process_document_async
-from app.services.celery_tasks import start_extraction_chain
+from app.services.tasks import start_extraction_chain
 
 router = APIRouter()
 
@@ -117,52 +117,48 @@ async def extract_document(
         # ============================================
         # STEP 1: Check if user already has this exact document (by content hash)
         # ============================================
-        db = next(get_db())
-        try:
-            existing_extraction = db.query(Extraction).filter(
-                Extraction.user_id == user.id,
-                Extraction.content_hash == content_hash,
-                Extraction.status == "completed"
-            ).first()
+        extraction_repo = ExtractionRepository()
+        existing_extraction = extraction_repo.check_duplicate_extraction(
+            user_id=user.id,
+            content_hash=content_hash
+        )
 
-            if existing_extraction:
-                logger.info("Duplicate document detected - returning existing extraction", extra={
-                    "request_id": request_id,
-                    "existing_extraction_id": existing_extraction.id,
-                    "user_id": user.id
+        if existing_extraction:
+            logger.info("Duplicate document detected - returning existing extraction", extra={
+                "request_id": request_id,
+                "existing_extraction_id": existing_extraction.id,
+                "user_id": user.id
+            })
+
+            # Load existing result from parsed_dir
+            result_files = list(settings.parsed_dir.glob(f"*_{existing_extraction.id[:8]}.json"))
+
+            if result_files:
+                with open(result_files[0], 'r', encoding='utf-8') as f:
+                    result_data = json.load(f)
+
+                return {
+                    "success": True,
+                    "data": result_data.get("data", {}),
+                    "metadata": {
+                        "extraction_id": existing_extraction.id,
+                        "request_id": request_id,
+                        "filename": existing_extraction.filename,
+                        "pages": existing_extraction.page_count,
+                        "characters_extracted": result_data.get("metadata", {}).get("characters_extracted", 0),
+                        "processing_time_seconds": time.time() - start_time,
+                        "timestamp": datetime.now().isoformat(),
+                        "original_created_at": existing_extraction.created_at.isoformat() if existing_extraction.created_at else None
+                    },
+                    "from_cache": False,
+                    "from_history": True,
+                    "message": "This document was already processed"
+                }
+            else:
+                # Extraction record exists but file is missing - treat as cache miss
+                logger.warning("Extraction exists but result file missing", extra={
+                    "extraction_id": existing_extraction.id
                 })
-
-                # Load existing result from parsed_dir
-                result_files = list(settings.parsed_dir.glob(f"*_{existing_extraction.id[:8]}.json"))
-
-                if result_files:
-                    with open(result_files[0], 'r', encoding='utf-8') as f:
-                        result_data = json.load(f)
-
-                    return {
-                        "success": True,
-                        "data": result_data.get("data", {}),
-                        "metadata": {
-                            "extraction_id": existing_extraction.id,
-                            "request_id": request_id,
-                            "filename": existing_extraction.filename,
-                            "pages": existing_extraction.page_count,
-                            "characters_extracted": result_data.get("metadata", {}).get("characters_extracted", 0),
-                            "processing_time_seconds": time.time() - start_time,
-                            "timestamp": datetime.now().isoformat(),
-                            "original_created_at": existing_extraction.created_at.isoformat() if existing_extraction.created_at else None
-                        },
-                        "from_cache": False,
-                        "from_history": True,
-                        "message": "This document was already processed"
-                    }
-                else:
-                    # Extraction record exists but file is missing - treat as cache miss
-                    logger.warning("Extraction exists but result file missing", extra={
-                        "extraction_id": existing_extraction.id
-                    })
-        finally:
-            db.close()
 
         # ============================================
         # STEP 2: Check page limit (admin users have unlimited)
@@ -243,44 +239,42 @@ async def extract_document(
                 normalized_cached["data"]["red_flags"] = []
 
             # Create extraction record in database so it appears in user's history
-            db = next(get_db())
-            try:
-                # Validate and truncate context if provided
-                if context:
-                    context = context.strip()[:500]
+            # Validate and truncate context if provided
+            if context:
+                context = context.strip()[:500]
 
-                extraction = Extraction(
-                    id=request_id,
-                    user_id=user.id,
-                    user_tier=user.tier,
-                    filename=file.filename,
-                    file_size_bytes=len(content),
-                    page_count=cached_result["metadata"]["pages"],
-                    status="completed",
-                    from_cache=True,
-                    content_hash=content_hash,
-                    context=context,
-                    completed_at=datetime.now()
-                )
-                db.add(extraction)
-                db.commit()
+            extraction = extraction_repo.create_extraction_record(
+                extraction_id=request_id,
+                user_id=user.id,
+                user_tier=user.tier,
+                filename=file.filename,
+                file_size_bytes=len(content),
+                content_hash=content_hash,
+                status="completed",
+                page_count=cached_result["metadata"]["pages"],
+                from_cache=True,
+                context=context
+            )
 
+            if extraction:
                 # Save parsed result to disk so dashboard can load it
-                from app.utils.file_utils import save_parsed_result
-                save_parsed_result(request_id, normalized_cached, file.filename)
+                try:
+                    from app.utils.file_utils import save_parsed_result
+                    save_parsed_result(request_id, normalized_cached, file.filename)
 
-                logger.info("Cache hit extraction saved to database and disk", extra={
+                    logger.info("Cache hit extraction saved to database and disk", extra={
+                        "request_id": request_id,
+                        "user_id": user.id
+                    })
+                except Exception as e:
+                    logger.error(f"Failed to save cache hit result to disk: {e}", extra={
+                        "request_id": request_id
+                    }, exc_info=True)
+            else:
+                logger.error("Failed to save cache hit extraction to database", extra={
                     "request_id": request_id,
                     "user_id": user.id
                 })
-            except Exception as e:
-                logger.error(f"Failed to save cache hit extraction: {e}", extra={
-                    "request_id": request_id,
-                    "user_id": user.id
-                }, exc_info=True)
-                # Continue - don't fail the request if DB save fails
-            finally:
-                db.close()
 
             # Return 200 OK with full result (sync behavior)
             return {
@@ -316,43 +310,42 @@ async def extract_document(
         # ============================================
         # STEP 5: Create extraction + job records
         # ============================================
-        db = next(get_db())
-        try:
-            # Validate and truncate context if provided
-            if context:
-                context = context.strip()[:500]  # Max 500 chars
+        # Validate and truncate context if provided
+        if context:
+            context = context.strip()[:500]  # Max 500 chars
 
-            extraction = Extraction(
-                id=request_id,
-                user_id=user.id,
-                user_tier=user.tier,
-                filename=file.filename,
-                file_size_bytes=len(content),
-                page_count=0,  # Will be updated after parsing
-                status="processing",
-                context=context,
-                content_hash=content_hash
-            )
-            db.add(extraction)
-            db.commit()
+        extraction = extraction_repo.create_extraction_record(
+            extraction_id=request_id,
+            user_id=user.id,
+            user_tier=user.tier,
+            filename=file.filename,
+            file_size_bytes=len(content),
+            content_hash=content_hash,
+            status="processing",
+            page_count=0,  # Will be updated after parsing
+            from_cache=False,
+            context=context
+        )
 
-            # Create job state
-            job_id = str(uuid.uuid4())
-            job_state = JobState(
-                id=job_id,
-                extraction_id=request_id,
-                status="queued",
-                current_stage="queued",
-                progress_percent=0,
-                message="Queued for processing..."
-            )
-            db.add(job_state)
-            db.commit()
+        if not extraction:
+            raise HTTPException(status_code=500, detail="Failed to create extraction record")
 
-            logger.info(f"Created job {job_id} for extraction {request_id}", extra={"job_id": job_id})
+        # Create job state
+        job_id = str(uuid.uuid4())
+        job_repo = JobRepository()
+        job_state = job_repo.create_job(
+            extraction_id=request_id,
+            status="queued",
+            current_stage="queued",
+            progress_percent=0,
+            message="Queued for processing...",
+            job_id=job_id
+        )
 
-        finally:
-            db.close()
+        if not job_state:
+            raise HTTPException(status_code=500, detail="Failed to create job tracking record")
+
+        logger.info(f"Created job {job_id} for extraction {request_id}", extra={"job_id": job_id})
 
         # ============================================
         # STEP 6: Start background processing (Celery or asyncio)
@@ -422,80 +415,77 @@ async def get_extraction_result(extraction_id: str):
 
     Returns the full extracted data with metadata.
     """
-    db = next(get_db())
+    extraction_repo = ExtractionRepository()
+    job_repo = JobRepository()
 
-    try:
-        # Check if extraction exists
-        extraction = db.query(Extraction).filter(Extraction.id == extraction_id).first()
+    # Check if extraction exists
+    extraction = extraction_repo.get_extraction(extraction_id)
 
-        if not extraction:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Extraction {extraction_id} not found"
-            )
+    if not extraction:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Extraction {extraction_id} not found"
+        )
 
-        # Check status
-        if extraction.status == "processing":
-            # Still processing - check job state for details
-            job = db.query(JobState).filter(JobState.extraction_id == extraction_id).first()
+    # Check status
+    if extraction.status == "processing":
+        # Still processing - check job state for details
+        job = job_repo.get_job_by_extraction_id(extraction_id)
 
-            return JSONResponse(
-                status_code=202,  # Accepted (still processing)
-                content={
-                    "success": False,
-                    "status": "processing",
-                    "message": job.message if job else "Extraction still in progress",
-                    "progress": job.progress_percent if job else 0,
-                    "job_id": job.id if job else None
-                }
-            )
+        return JSONResponse(
+            status_code=202,  # Accepted (still processing)
+            content={
+                "success": False,
+                "status": "processing",
+                "message": job.message if job else "Extraction still in progress",
+                "progress": job.progress_percent if job else 0,
+                "job_id": job.id if job else None
+            }
+        )
 
-        if extraction.status == "failed":
-            raise HTTPException(
-                status_code=500,
-                detail={
-                    "error": "extraction_failed",
-                    "message": extraction.error_message or "Extraction failed",
-                    "extraction_id": extraction_id
-                }
-            )
+    if extraction.status == "failed":
+        raise HTTPException(
+            status_code=500,
+            detail={
+                "error": "extraction_failed",
+                "message": extraction.error_message or "Extraction failed",
+                "extraction_id": extraction_id
+            }
+        )
 
-        # Status is "completed" - load result from saved file
-        parsed_dir = settings.parsed_dir
+    # Status is "completed" - load result from saved file
+    parsed_dir = settings.parsed_dir
 
-        # Find the result file (search by extraction_id prefix)
-        result_files = list(parsed_dir.glob(f"*_{extraction_id[:8]}.json"))
+    # Find the result file (search by extraction_id prefix)
+    result_files = list(parsed_dir.glob(f"*_{extraction_id[:8]}.json"))
 
-        if not result_files:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Extraction result file not found for {extraction_id}"
-            )
+    if not result_files:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Extraction result file not found for {extraction_id}"
+        )
 
-        # Load the result
-        result_file = result_files[0]
-        with open(result_file, 'r', encoding='utf-8') as f:
-            result_data = json.load(f)
+    # Load the result
+    result_file = result_files[0]
+    with open(result_file, 'r', encoding='utf-8') as f:
+        result_data = json.load(f)
 
-        logger.info(f"Retrieved extraction result for {extraction_id}", extra={
-            "extraction_id": extraction_id
-        })
+    logger.info(f"Retrieved extraction result for {extraction_id}", extra={
+        "extraction_id": extraction_id
+    })
 
-        return {
-            "success": True,
-            "data": result_data.get("data", {}),
-            "metadata": {
-                "extraction_id": extraction_id,
-                "filename": extraction.filename,
-                "pages": extraction.page_count,
-                "processing_time_ms": extraction.processing_time_ms,
-                "cost_usd": extraction.cost_usd,
-                "parser_used": extraction.parser_used,
-                "created_at": extraction.created_at.isoformat() if extraction.created_at else None,
-                "completed_at": extraction.completed_at.isoformat() if extraction.completed_at else None
-            },
-            "from_cache": extraction.from_cache or False
-        }
-
-    finally:
-        db.close()
+    return {
+        "success": True,
+        "data": result_data.get("data", {}),
+        "metadata": {
+            "extraction_id": extraction_id,
+            "filename": extraction.filename,
+            "pages": extraction.page_count,
+            "processing_time_ms": extraction.processing_time_ms,
+            "cost_usd": extraction.cost_usd,
+            "parser_used": extraction.parser_used,
+            "created_at": extraction.created_at.isoformat() if extraction.created_at else None,
+            "completed_at": extraction.completed_at.isoformat() if extraction.completed_at else None
+        },
+        "from_cache": extraction.from_cache or False
+    }

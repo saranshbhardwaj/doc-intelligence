@@ -4,8 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from app.auth import get_current_user
 from app.db_models_users import User
-from app.db_models import Extraction
-from app.database import get_db
+from app.repositories.extraction_repository import ExtractionRepository
 from app.utils.logging import logger
 from pathlib import Path
 from app.config import settings
@@ -49,7 +48,6 @@ def get_current_user_info(user: User = Depends(get_current_user)):
 @router.get("/api/users/me/extractions")
 def get_user_extractions(
     user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
     limit: int = Query(50, ge=1, le=100, description="Number of extractions to return"),
     offset: int = Query(0, ge=0, description="Number of extractions to skip"),
     status: str = Query(None, description="Filter by status (completed, processing, failed)")
@@ -67,20 +65,13 @@ def get_user_extractions(
         limit: Applied limit
         offset: Applied offset
     """
-    # Base query
-    query = db.query(Extraction).filter(Extraction.user_id == user.id)
-
-    # Apply status filter if provided
-    if status:
-        query = query.filter(Extraction.status == status)
-
-    # Get total count before pagination
-    total = query.count()
-
-    # Apply pagination and ordering
-    extractions = query.order_by(
-        Extraction.created_at.desc()
-    ).limit(limit).offset(offset).all()
+    extraction_repo = ExtractionRepository()
+    extractions, total = extraction_repo.list_user_extractions(
+        user_id=user.id,
+        limit=limit,
+        offset=offset,
+        status=status
+    )
 
     return {
         "extractions": [
@@ -111,8 +102,7 @@ def get_user_extractions(
 @router.delete("/api/extractions/{extraction_id}")
 def delete_extraction(
     extraction_id: str,
-    user: User = Depends(get_current_user),
-    db: Session = Depends(get_db)
+    user: User = Depends(get_current_user)
 ):
     """Delete an extraction and its associated files
 
@@ -125,10 +115,10 @@ def delete_extraction(
         success: Boolean indicating success
         message: Confirmation message
     """
-    # Get extraction
-    extraction = db.query(Extraction).filter(
-        Extraction.id == extraction_id
-    ).first()
+    extraction_repo = ExtractionRepository()
+
+    # Get extraction (for filename and verification)
+    extraction = extraction_repo.get_extraction(extraction_id)
 
     if not extraction:
         raise HTTPException(status_code=404, detail="Extraction not found")
@@ -139,6 +129,8 @@ def delete_extraction(
             status_code=403,
             detail="You don't have permission to delete this extraction"
         )
+
+    filename = extraction.filename  # Save before deletion
 
     # Delete associated files (raw text, parsed result, etc.)
     try:
@@ -176,17 +168,19 @@ def delete_extraction(
         }, exc_info=True)  # Include full stack trace
         # Continue with DB deletion even if file deletion fails
 
-    # Delete from database
-    db.delete(extraction)
-    db.commit()
+    # Delete from database using repository
+    success = extraction_repo.delete_extraction(extraction_id, user.id)
+
+    if not success:
+        raise HTTPException(status_code=500, detail="Failed to delete extraction from database")
 
     logger.info(f"Extraction deleted successfully", extra={
         "extraction_id": extraction_id,
         "user_id": user.id,
-        "extraction_filename": extraction.filename
+        "extraction_filename": filename
     })
 
     return {
         "success": True,
-        "message": f"Extraction '{extraction.filename}' deleted successfully"
+        "message": f"Extraction '{filename}' deleted successfully"
     }

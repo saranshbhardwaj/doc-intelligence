@@ -25,9 +25,10 @@ celery_app.conf.update(
 )
 
 # Explicitly import task modules so worker registers them.
-# (Autodiscover could be used instead if package layout expands)
+# Tasks are organized in app/services/tasks/
 try:
-    import app.services.celery_tasks  # noqa: F401
+    import app.services.tasks.extraction  # noqa: F401 - Extraction pipeline tasks
+    import app.services.tasks.chat  # noqa: F401 - Chat indexing pipeline tasks
 except Exception as e:
     # Avoid hard failure if tasks module temporarily missing; log later after logging init.
     pass

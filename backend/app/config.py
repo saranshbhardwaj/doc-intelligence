@@ -86,6 +86,23 @@ class Settings(BaseSettings):
     # Chunking Settings
     enable_chunking: bool = True  # Enable multi-stage LLM processing with chunking
     chunk_batch_size: int = 10  # Number of narrative chunks to process per cheap LLM call
+
+    # ===== EMBEDDINGS CONFIGURATION =====
+    # Which embedding provider to use: "sentence-transformer" (free, local) or "openai" (paid, API)
+    embedding_provider: str = "sentence-transformer"
+
+    # Sentence Transformer settings (used if embedding_provider="sentence-transformer")
+    sentence_transformer_model: str = "all-MiniLM-L6-v2"  # Fast, good quality, 384 dimensions
+    # Other options: "all-mpnet-base-v2" (768d, slower but better), "multi-qa-MiniLM-L6-cos-v1" (384d, optimized for Q&A)
+
+    # OpenAI settings (used if embedding_provider="openai")
+    openai_api_key: str = ""  # Required if using OpenAI embeddings
+    openai_embedding_model: str = "text-embedding-3-small"  # 1536 dimensions, $0.02 per 1M tokens
+    # Other options: "text-embedding-3-large" (3072d, better quality, 2x price)
+
+    # Vector dimension (auto-set based on model, but can override)
+    # all-MiniLM-L6-v2: 384, all-mpnet-base-v2: 768, text-embedding-3-small: 1536
+    embedding_dimension: int = 384
     
     # Paths
     log_dir: Path = Path("logs")
