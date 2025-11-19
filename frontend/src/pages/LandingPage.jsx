@@ -53,7 +53,7 @@ export default function LandingPage() {
   return (
     <div className="min-h-screen bg-background  transition-colors duration-200">
       {/* Navigation */}
-      <nav className="sticky top-0 z-50 bg-background/80 /80 backdrop-blur-lg border-b border-border dark:border-gray-800">
+      <nav className="sticky top-0 z-50 bg-background/80 backdrop-blur-lg border-b border-border dark:border-gray-800">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center h-16">
             {/* Logo */}
