@@ -1,78 +1,91 @@
 // frontend/src/components/FeedbackForm.jsx
-import { useState } from 'react'
+import { useState } from "react";
 
 export default function FeedbackForm({ requestId, onClose }) {
-  const [rating, setRating] = useState(0)
-  const [accuracyRating, setAccuracyRating] = useState(0)
-  const [wouldPay, setWouldPay] = useState(null)
-  const [comment, setComment] = useState('')
-  const [email, setEmail] = useState('')
-  const [submitting, setSubmitting] = useState(false)
-  const [submitted, setSubmitted] = useState(false)
+  const [rating, setRating] = useState(0);
+  const [accuracyRating, setAccuracyRating] = useState(0);
+  const [wouldPay, setWouldPay] = useState(null);
+  const [comment, setComment] = useState("");
+  const [email, setEmail] = useState("");
+  const [submitting, setSubmitting] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
 
-  const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000'
+  const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
   const handleSubmit = async (e) => {
     if (submitting) return;
-    e.preventDefault()
-    
+    e.preventDefault();
+
     if (rating === 0) {
-      alert('Please provide a rating')
-      return
+      alert("Please provide a rating");
+      return;
     }
 
-    setSubmitting(true)
+    setSubmitting(true);
 
     try {
       const response = await fetch(`${API_URL}/api/feedback`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           request_id: requestId,
           rating,
           accuracy_rating: accuracyRating || null,
           would_pay: wouldPay,
           comment: comment.trim() || null,
-          email: email.trim() || null
-        })
-      })
+          email: email.trim() || null,
+        }),
+      });
 
       if (!response.ok) {
-        throw new Error('Failed to submit feedback')
+        throw new Error("Failed to submit feedback");
       }
 
-      setSubmitted(true)
+      setSubmitted(true);
       setTimeout(() => {
-        onClose()
-      }, 2000)
-
+        onClose();
+      }, 2000);
     } catch (error) {
-      alert('Failed to submit feedback. Please try again.')
-      console.error(error)
+      alert("Failed to submit feedback. Please try again.");
+      console.error(error);
     } finally {
-      setSubmitting(false)
+      setSubmitting(false);
     }
-  }
+  };
 
   if (submitted) {
     return (
       <div className="text-center py-8">
         <div className="mb-4">
-          <svg className="w-16 h-16 text-green-500 mx-auto" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
+          <svg
+            className="w-16 h-16 text-green-500 mx-auto"
+            fill="none"
+            stroke="currentColor"
+            viewBox="0 0 24 24"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              strokeWidth={2}
+              d="M5 13l4 4L19 7"
+            />
           </svg>
         </div>
-        <h3 className="text-xl font-semibold text-gray-900 dark:text-gray-100 mb-2">Thank you!</h3>
-        <p className="text-gray-600 dark:text-gray-400">Your feedback helps us improve.</p>
+        <h3 className="text-xl font-semibold text-foreground dark:text-gray-100 mb-2">
+          Thank you!
+        </h3>
+        <p className="text-muted-foreground dark:text-muted-foreground">
+          Your feedback helps us improve.
+        </p>
       </div>
-    )
+    );
   }
 
   return (
     <form onSubmit={handleSubmit} className="space-y-6">
       {/* Overall Rating */}
       <div>
-        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+        <label className="block text-sm font-medium text-muted-foreground dark:text-gray-300 mb-2">
           Overall Experience *
         </label>
         <div className="flex gap-2">
@@ -85,7 +98,9 @@ export default function FeedbackForm({ requestId, onClose }) {
             >
               <svg
                 className={`w-10 h-10 ${
-                  star <= rating ? 'text-yellow-400 fill-current' : 'text-gray-300'
+                  star <= rating
+                    ? "text-yellow-400 fill-current"
+                    : "text-gray-300"
                 } hover:text-yellow-400 transition-colors`}
                 fill="none"
                 stroke="currentColor"
@@ -102,19 +117,19 @@ export default function FeedbackForm({ requestId, onClose }) {
           ))}
         </div>
         {rating > 0 && (
-          <p className="text-sm text-gray-500 mt-1">
-            {rating === 5 && '⭐ Excellent!'}
-            {rating === 4 && '👍 Good'}
-            {rating === 3 && '😐 Okay'}
-            {rating === 2 && '👎 Poor'}
-            {rating === 1 && '😞 Very Poor'}
+          <p className="text-sm text-muted-foreground mt-1">
+            {rating === 5 && "⭐ Excellent!"}
+            {rating === 4 && "👍 Good"}
+            {rating === 3 && "😐 Okay"}
+            {rating === 2 && "👎 Poor"}
+            {rating === 1 && "😞 Very Poor"}
           </p>
         )}
       </div>
 
       {/* Accuracy Rating */}
       <div>
-        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+        <label className="block text-sm font-medium text-muted-foreground dark:text-gray-300 mb-2">
           How accurate was the extraction?
         </label>
         <div className="flex gap-2">
@@ -127,7 +142,9 @@ export default function FeedbackForm({ requestId, onClose }) {
             >
               <svg
                 className={`w-8 h-8 ${
-                  star <= accuracyRating ? 'text-blue-400 fill-current' : 'text-gray-300'
+                  star <= accuracyRating
+                    ? "text-blue-400 fill-current"
+                    : "text-gray-300"
                 } hover:text-blue-400 transition-colors`}
                 fill="none"
                 stroke="currentColor"
@@ -147,7 +164,7 @@ export default function FeedbackForm({ requestId, onClose }) {
 
       {/* Would Pay */}
       <div>
-        <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+        <label className="block text-sm font-medium text-muted-foreground dark:text-gray-300 mb-2">
           Would you pay for unlimited access?
         </label>
         <div className="flex gap-4">
@@ -156,8 +173,8 @@ export default function FeedbackForm({ requestId, onClose }) {
             onClick={() => setWouldPay(true)}
             className={`flex-1 py-2 px-4 rounded-lg border-2 transition-colors ${
               wouldPay === true
-                ? 'border-green-500 bg-green-50 dark:bg-green-900/30 text-green-700 dark:text-green-400'
-                : 'border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:border-green-300 dark:hover:border-green-600'
+                ? "border-green-500 bg-green-50 dark:bg-green-900/30 text-green-700 dark:text-green-400"
+                : "border-border dark:border-gray-600 text-muted-foreground dark:text-gray-300 hover:border-green-300 dark:hover:border-green-600"
             }`}
           >
             👍 Yes
@@ -167,8 +184,8 @@ export default function FeedbackForm({ requestId, onClose }) {
             onClick={() => setWouldPay(false)}
             className={`flex-1 py-2 px-4 rounded-lg border-2 transition-colors ${
               wouldPay === false
-                ? 'border-red-500 bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-400'
-                : 'border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 hover:border-red-300 dark:hover:border-red-600'
+                ? "border-red-500 bg-red-50 dark:bg-red-900/30 text-red-700 dark:text-red-400"
+                : "border-border dark:border-gray-600 text-muted-foreground dark:text-gray-300 hover:border-red-300 dark:hover:border-red-600"
             }`}
           >
             👎 No
@@ -178,7 +195,10 @@ export default function FeedbackForm({ requestId, onClose }) {
 
       {/* Comment */}
       <div>
-        <label htmlFor="comment" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+        <label
+          htmlFor="comment"
+          className="block text-sm font-medium text-muted-foreground dark:text-gray-300 mb-2"
+        >
           Comments or suggestions
         </label>
         <textarea
@@ -188,14 +208,19 @@ export default function FeedbackForm({ requestId, onClose }) {
           rows={4}
           maxLength={1000}
           placeholder="What worked well? What could be improved?"
-          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+          className="w-full px-3 py-2 border border-border dark:border-gray-600 bg-card text-foreground dark:text-gray-100 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent"
         />
-        <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">{comment.length}/1000 characters</p>
+        <p className="text-xs text-muted-foreground dark:text-muted-foreground mt-1">
+          {comment.length}/1000 characters
+        </p>
       </div>
 
       {/* Email (optional) */}
       <div>
-        <label htmlFor="email" className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+        <label
+          htmlFor="email"
+          className="block text-sm font-medium text-muted-foreground dark:text-gray-300 mb-2"
+        >
           Email (optional - for follow-up)
         </label>
         <input
@@ -204,7 +229,7 @@ export default function FeedbackForm({ requestId, onClose }) {
           value={email}
           onChange={(e) => setEmail(e.target.value)}
           placeholder="your@email.com"
-          className="w-full px-3 py-2 border border-gray-300 dark:border-gray-600 bg-white dark:bg-gray-800 text-gray-900 dark:text-gray-100 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent placeholder:text-gray-400 dark:placeholder:text-gray-500"
+          className="w-full px-3 py-2 border border-border dark:border-gray-600 bg-card text-foreground dark:text-gray-100 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent placeholder:text-muted-foreground dark:placeholder:text-muted-foreground"
         />
       </div>
 
@@ -213,21 +238,33 @@ export default function FeedbackForm({ requestId, onClose }) {
         <button
           type="submit"
           disabled={submitting || rating === 0}
-          className="flex-1 bg-blue-600 text-white py-3 px-6 rounded-lg font-semibold
-            hover:bg-blue-700 disabled:bg-gray-400 dark:disabled:bg-gray-600 disabled:cursor-not-allowed
-            transition-colors"
+          className="
+            flex-1 
+            bg-primary text-primary-foreground
+            py-3 px-6 rounded-lg font-semibold
+            hover:bg-primary/90
+            disabled:bg-muted disabled:text-muted-foreground
+            disabled:cursor-not-allowed
+            transition-colors
+          "
         >
-          {submitting ? 'Submitting...' : 'Submit Feedback'}
+          {submitting ? "Submitting..." : "Submit Feedback"}
         </button>
         <button
           type="button"
           onClick={onClose}
-          className="px-6 py-3 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-700 dark:text-gray-300
-            hover:bg-gray-50 dark:hover:bg-gray-800 transition-colors"
+          className="
+            px-6 py-3
+            border border-border
+            rounded-lg
+            text-muted-foreground
+            hover:bg-card
+            transition-colors
+          "
         >
           Cancel
         </button>
       </div>
     </form>
-  )
+  );
 }

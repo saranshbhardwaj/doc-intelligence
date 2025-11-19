@@ -8,7 +8,7 @@
  * - Connection persistence across navigation
  */
 
-import { uploadDocument, retryExtraction, streamProgress, fetchExtractionResult } from '../../api';
+import { uploadDocumentForExtraction as uploadDocument, retryExtraction, streamProgress, fetchExtractionResult } from '../../api';
 
 /**
  * Get safe error message from error object

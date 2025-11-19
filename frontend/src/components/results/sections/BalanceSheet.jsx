@@ -5,7 +5,7 @@ import DataField from "../DataField";
 
 export default function BalanceSheet({ data }) {
   const balance = data.balance_sheet || {};
-  const currency = data.financials?.currency || 'USD';
+  const currency = data.financials?.currency || "USD";
 
   if (!balance || Object.keys(balance).length === 0) {
     return null;
@@ -14,10 +14,10 @@ export default function BalanceSheet({ data }) {
   return (
     <Section title="Balance Sheet" icon={BarChart3}>
       {balance.most_recent_year && (
-        <div className="mb-4 pb-4 border-b border-gray-200 dark:border-gray-700">
-          <span className="text-sm font-semibold text-gray-600 dark:text-gray-400">
+        <div className="mb-4 pb-4 border-b border-border dark:border-gray-700">
+          <span className="text-sm font-semibold text-muted-foreground dark:text-muted-foreground">
             Most Recent Year:{" "}
-            <span className="text-gray-900 dark:text-gray-100 text-lg">
+            <span className="text-foreground dark:text-gray-100 text-lg">
               {balance.most_recent_year}
             </span>
           </span>

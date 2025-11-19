@@ -23,6 +23,7 @@ from app.services.embeddings import get_embedding_provider
 from app.repositories.collection_repository import CollectionRepository
 from app.db_models_chat import DocumentChunk
 from app.utils.logging import logger
+from app.repositories.document_repository import DocumentRepository
 
 
 def _get_db_session():
@@ -37,7 +38,7 @@ def embed_chunks_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
     Input payload:
         - chunks: List of chunks from chunk_document_task
         - job_id: JobState ID for progress tracking
-        - document_id: CollectionDocument ID
+        - document_id: Canonical Document ID (from documents table)
 
     Output payload:
         - All input fields
@@ -118,12 +119,11 @@ def embed_chunks_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
             error_type="embedding_error",
             is_retryable=True
         )
-        # Mark document as failed
+        # Mark canonical document as failed
         try:
-            collection_repo = CollectionRepository()
-            collection_repo.update_document_status(
+            doc_repo = DocumentRepository()
+            doc_repo.mark_failed(
                 document_id=document_id,
-                status="failed",
                 error_message=str(e)[:500]
             )
         except Exception:
@@ -144,7 +144,7 @@ def store_vectors_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         - chunks: List of chunks
         - embeddings: List of embedding vectors
         - job_id: JobState ID
-        - document_id: CollectionDocument ID
+        - document_id: Canonical Document ID (from documents table)
         - collection_id: Collection ID
 
     Output:
@@ -188,6 +188,7 @@ def store_vectors_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                 )
 
         # Create DocumentChunk records with embeddings
+        embedding_model = payload.get("embedding_model")
         db_chunks = []
         for i, (chunk, embedding) in enumerate(zip(chunks, embeddings)):
             db_chunk = DocumentChunk(
@@ -195,6 +196,8 @@ def store_vectors_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                 text=chunk["text"],
                 chunk_index=i,
                 embedding=embedding,
+                embedding_model=embedding_model,
+                embedding_version="1.0",  # Version for future migration tracking
                 page_number=chunk.get("metadata", {}).get("page_number"),
                 section_type=chunk.get("metadata", {}).get("section_type"),
                 section_heading=chunk.get("metadata", {}).get("section_heading"),
@@ -219,14 +222,19 @@ def store_vectors_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
             )
             raise ValueError(f"Failed to bulk insert chunks: {str(bulk_error)}")
 
-        # Update CollectionDocument status and stats using repository
-        collection_repo = CollectionRepository()
-        page_count = payload.get("parser_output", {}).get("page_count", 0)
-        doc_updated = collection_repo.update_document_status(
+        # Update canonical Document status and stats
+        doc_repo = DocumentRepository()
+        parser_info = payload.get("parser_output", {})
+        page_count = parser_info.get("page_count", 0)
+        processing_time_ms = parser_info.get("processing_time_ms", 0)
+        parser_used = parser_info.get("parser_name", "unknown")
+
+        doc_updated = doc_repo.mark_completed(
             document_id=document_id,
-            status="completed",
             chunk_count=len(db_chunks),
-            page_count=page_count
+            page_count=page_count,
+            processing_time_ms=processing_time_ms,
+            parser_used=parser_used
         )
 
         if not doc_updated:
@@ -238,6 +246,7 @@ def store_vectors_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         # Update Collection stats using database aggregate functions
         # This recomputes document_count and total_chunks from the database,
         # ensuring accuracy and preventing race conditions from concurrent operations
+        collection_repo = CollectionRepository()
         stats_updated = collection_repo.recompute_collection_stats(
             collection_id=collection_id,
             embedding_model=payload.get("embedding_model"),
@@ -277,12 +286,11 @@ def store_vectors_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
             error_type="storage_error",
             is_retryable=True
         )
-        # Mark document as failed
+        # Mark canonical document as failed
         try:
-            collection_repo = CollectionRepository()
-            collection_repo.update_document_status(
+            doc_repo = DocumentRepository()
+            doc_repo.mark_failed(
                 document_id=document_id,
-                status="failed",
                 error_message=str(e)[:500]
             )
         except Exception:
@@ -301,9 +309,11 @@ def start_chat_indexing_chain(
     file_path: str,
     filename: str,
     job_id: str,
-    document_id: str,  # CollectionDocument ID
+    document_id: str,  # Canonical Document ID (from documents table)
     collection_id: str,
-    user_id: str
+    user_id: str,
+    canonical_document_id: str | None = None,  # DEPRECATED: document_id is already canonical
+    content_hash: str | None = None
 ):
     """
     Start the chat indexing pipeline chain.
@@ -314,9 +324,11 @@ def start_chat_indexing_chain(
         file_path: Path to uploaded PDF file
         filename: Original filename
         job_id: JobState ID for progress tracking
-        document_id: CollectionDocument ID
+        document_id: Canonical Document ID (from documents table)
         collection_id: Collection ID
         user_id: User ID
+        canonical_document_id: DEPRECATED - document_id is already the canonical ID
+        content_hash: SHA256 hash of file content (for deduplication tracking)
 
     Returns:
         Task ID of the chain
@@ -333,6 +345,8 @@ def start_chat_indexing_chain(
         "user_id": user_id,
         "extraction_id": document_id,  # For compatibility with shared parse/chunk tasks
         "mode": "chat",  # Mark as chat mode
+        "canonical_document_id": canonical_document_id,
+        "content_hash": content_hash,
     }
 
     # Chain: Parse → Chunk → Embed → Store
@@ -348,6 +362,7 @@ def start_chat_indexing_chain(
     logger.info(
         "Chat indexing pipeline started",
         extra={
+            "user_id": user_id,
             "job_id": job_id,
             "task_id": result.id,
             "collection_id": collection_id,

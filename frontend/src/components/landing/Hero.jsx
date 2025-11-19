@@ -20,7 +20,7 @@ export default function Hero({ onGetStarted, onTryDemo }) {
           </div>
 
           {/* Main heading */}
-          <h1 className="text-5xl sm:text-6xl lg:text-7xl font-extrabold text-gray-900 dark:text-white mb-6 leading-tight">
+          <h1 className="text-5xl sm:text-6xl lg:text-7xl font-extrabold text-foreground mb-6 leading-tight">
             Extract Deal Data from
             <span className="bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
               {" "}
@@ -29,7 +29,7 @@ export default function Hero({ onGetStarted, onTryDemo }) {
           </h1>
 
           {/* Subheading */}
-          <p className="text-xl sm:text-2xl text-gray-600 dark:text-gray-300 mb-10 max-w-3xl mx-auto leading-relaxed">
+          <p className="text-xl sm:text-2xl text-muted-foreground dark:text-gray-300 mb-10 max-w-3xl mx-auto leading-relaxed">
             Stop spending hours extracting financials from documents. Our AI
             reads CIMs and delivers structured data in Excel ready for your
             model.
@@ -41,7 +41,7 @@ export default function Hero({ onGetStarted, onTryDemo }) {
               <div className="text-4xl font-bold text-blue-600 dark:text-blue-400">
                 4 min
               </div>
-              <div className="text-sm text-gray-600 dark:text-gray-400">
+              <div className="text-sm text-muted-foreground dark:text-muted-foreground">
                 Average processing time
               </div>
             </div>
@@ -49,7 +49,7 @@ export default function Hero({ onGetStarted, onTryDemo }) {
               <div className="text-4xl font-bold text-purple-600 dark:text-purple-400">
                 95%+
               </div>
-              <div className="text-sm text-gray-600 dark:text-gray-400">
+              <div className="text-sm text-muted-foreground dark:text-muted-foreground">
                 Extraction accuracy
               </div>
             </div>
@@ -57,7 +57,7 @@ export default function Hero({ onGetStarted, onTryDemo }) {
               <div className="text-4xl font-bold text-pink-600 dark:text-pink-400">
                 12+
               </div>
-              <div className="text-sm text-gray-600 dark:text-gray-400">
+              <div className="text-sm text-muted-foreground dark:text-muted-foreground">
                 Data categories extracted
               </div>
             </div>
@@ -67,14 +67,14 @@ export default function Hero({ onGetStarted, onTryDemo }) {
           <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
             <button
               onClick={onGetStarted}
-              className="group px-8 py-4 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white font-semibold rounded-xl shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-200 flex items-center gap-2"
+              className="group px-8 py-4 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-foreground font-semibold rounded-xl shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-200 flex items-center gap-2"
             >
               Get Started Free
               <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
             </button>
             <button
               onClick={onTryDemo}
-              className="px-8 py-4 bg-white dark:bg-gray-800 border-2 border-gray-300 dark:border-gray-600 hover:border-blue-500 dark:hover:border-blue-500 text-gray-900 dark:text-white font-semibold rounded-xl shadow hover:shadow-lg transform hover:scale-105 transition-all duration-200 flex items-center gap-2"
+              className="px-8 py-4 bg-card border-2 border-border dark:border-gray-600 hover:border-blue-500 dark:hover:border-blue-500 text-foreground font-semibold rounded-xl shadow hover:shadow-lg transform hover:scale-105 transition-all duration-200 flex items-center gap-2"
             >
               <FileText className="w-5 h-5" />
               View Sample Output
@@ -82,50 +82,50 @@ export default function Hero({ onGetStarted, onTryDemo }) {
           </div>
 
           {/* Trust badge */}
-          <p className="text-sm text-gray-500 dark:text-gray-400 mt-8">
+          <p className="text-sm text-muted-foreground dark:text-muted-foreground mt-8">
             No credit card required • up to 100 pages • Cancel anytime
           </p>
         </div>
 
         {/* Feature highlights */}
         <div className="mt-20 grid grid-cols-1 md:grid-cols-3 gap-8 max-w-5xl mx-auto">
-          <div className="flex items-start gap-4 p-6 rounded-xl bg-white/50 dark:bg-gray-800/50 backdrop-blur border border-gray-200 dark:border-gray-700">
+          <div className="flex items-start gap-4 p-6 rounded-xl bg-background/50 dark:bg-card/50 backdrop-blur border border-border dark:border-gray-700">
             <div className="flex-shrink-0 w-12 h-12 bg-blue-100 dark:bg-blue-900/30 rounded-lg flex items-center justify-center">
               <Zap className="w-6 h-6 text-blue-600 dark:text-blue-400" />
             </div>
             <div>
-              <h3 className="font-semibold text-gray-900 dark:text-white mb-1">
+              <h3 className="font-semibold text-foreground mb-1">
                 Lightning Fast
               </h3>
-              <p className="text-sm text-gray-600 dark:text-gray-400">
+              <p className="text-sm text-muted-foreground dark:text-muted-foreground">
                 Process 30+ page CIMs in under 5 minutes
               </p>
             </div>
           </div>
 
-          <div className="flex items-start gap-4 p-6 rounded-xl bg-white/50 dark:bg-gray-800/50 backdrop-blur border border-gray-200 dark:border-gray-700">
+          <div className="flex items-start gap-4 p-6 rounded-xl bg-background/50 dark:bg-card/50 backdrop-blur border border-border dark:border-gray-700">
             <div className="flex-shrink-0 w-12 h-12 bg-purple-100 dark:bg-purple-900/30 rounded-lg flex items-center justify-center">
               <TrendingUp className="w-6 h-6 text-purple-600 dark:text-purple-400" />
             </div>
             <div>
-              <h3 className="font-semibold text-gray-900 dark:text-white mb-1">
+              <h3 className="font-semibold text-foreground mb-1">
                 Excel Export
               </h3>
-              <p className="text-sm text-gray-600 dark:text-gray-400">
+              <p className="text-sm text-muted-foreground dark:text-muted-foreground">
                 Structured data ready for your financial models
               </p>
             </div>
           </div>
 
-          <div className="flex items-start gap-4 p-6 rounded-xl bg-white/50 dark:bg-gray-800/50 backdrop-blur border border-gray-200 dark:border-gray-700">
+          <div className="flex items-start gap-4 p-6 rounded-xl bg-background/50 dark:bg-card/50 backdrop-blur border border-border dark:border-gray-700">
             <div className="flex-shrink-0 w-12 h-12 bg-pink-100 dark:bg-pink-900/30 rounded-lg flex items-center justify-center">
               <FileText className="w-6 h-6 text-pink-600 dark:text-pink-400" />
             </div>
             <div>
-              <h3 className="font-semibold text-gray-900 dark:text-white mb-1">
+              <h3 className="font-semibold text-foreground mb-1">
                 Red Flag Detection
               </h3>
-              <p className="text-sm text-gray-600 dark:text-gray-400">
+              <p className="text-sm text-muted-foreground dark:text-muted-foreground">
                 Automatic risk analysis on every deal
               </p>
             </div>

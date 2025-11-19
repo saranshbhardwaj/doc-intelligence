@@ -11,26 +11,22 @@
  */
 
 // Client
-export { api, createAuthenticatedApi } from './client';
+export { api, createAuthenticatedApi } from "./client";
 
 // Extraction APIs
 export {
-  uploadDocument,
+  uploadDocument as uploadDocumentForExtraction,
   streamProgress,
   fetchExtractionResult,
   retryExtraction,
   getJobStatus,
-} from './extraction';
+} from "./extraction";
 
 // User APIs
-export {
-  getUserInfo,
-  getUserExtractions,
-  deleteExtraction,
-} from './users';
+export { getUserInfo, getUserExtractions, deleteExtraction } from "./users";
 
 // Feedback API
-export { submitFeedback } from './feedback';
+export { submitFeedback } from "./feedback";
 
 // Chat APIs
 export {
@@ -45,4 +41,14 @@ export {
   getChatHistory,
   deleteSession,
   exportSession,
-} from './chat';
+} from "./chat";
+
+// Workflows
+export {
+  getRun,
+  getRunArtifact,
+  exportRun,
+  listRuns,
+  listTemplates,
+  deleteRun,
+} from "./workflows";

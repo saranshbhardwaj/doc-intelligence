@@ -15,7 +15,7 @@ export default function FinancialRatios({ data }) {
       <div className="space-y-6">
         {/* Key PE Ratios - Highlighted */}
         <div>
-          <h4 className="text-lg font-bold text-gray-800 dark:text-gray-200 mb-3">
+          <h4 className="text-lg font-bold text-muted-foreground dark:text-gray-200 mb-3">
             Key PE Metrics
           </h4>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -55,7 +55,7 @@ export default function FinancialRatios({ data }) {
 
         {/* Liquidity Ratios */}
         <div>
-          <h4 className="text-lg font-bold text-gray-800 dark:text-gray-200 mb-3">
+          <h4 className="text-lg font-bold text-muted-foreground dark:text-gray-200 mb-3">
             Liquidity Ratios
           </h4>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -76,7 +76,7 @@ export default function FinancialRatios({ data }) {
 
         {/* Leverage Ratios */}
         <div>
-          <h4 className="text-lg font-bold text-gray-800 dark:text-gray-200 mb-3">
+          <h4 className="text-lg font-bold text-muted-foreground dark:text-gray-200 mb-3">
             Leverage & Profitability
           </h4>
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
@@ -98,7 +98,7 @@ export default function FinancialRatios({ data }) {
 
         {/* Efficiency Ratios */}
         <div>
-          <h4 className="text-lg font-bold text-gray-800 dark:text-gray-200 mb-3">
+          <h4 className="text-lg font-bold text-muted-foreground dark:text-gray-200 mb-3">
             Efficiency Ratios
           </h4>
           <div className="grid grid-cols-2 md:grid-cols-3 gap-4">

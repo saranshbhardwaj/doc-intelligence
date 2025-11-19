@@ -91,25 +91,21 @@ async def get_indexing_progress(
     if not job:
         raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
 
-    # Get the collection document to check user ownership
-    if not job.collection_document_id:
-        raise HTTPException(status_code=400, detail="Job is not associated with a collection document")
-
-    # Get collection to verify ownership
-    # Note: collection_repo.get_document returns CollectionDocument which has collection_id
+    # Verify ownership through canonical document
+    # In the new schema, jobs reference documents table which has user_id
     from app.database import SessionLocal
     db = SessionLocal()
     try:
-        from app.db_models_chat import CollectionDocument
-        doc = db.query(CollectionDocument).filter(CollectionDocument.id == job.collection_document_id).first()
+        from app.db_models_documents import Document
+        doc = db.query(Document).filter(Document.id == job.document_id).first()
         if not doc:
             raise HTTPException(status_code=404, detail=f"Document not found for job {job_id}")
 
-        collection = collection_repo.get_collection(doc.collection_id, user_id)
-        if not collection:
+        # Verify user owns the document
+        if doc.user_id != user_id:
             logger.warning(
-                f"[Chat SSE] User {user_id} attempted to access job {job_id} for collection {doc.collection_id}",
-                extra={"job_id": job_id, "user_id": user_id, "collection_id": doc.collection_id}
+                f"[Chat SSE] User {user_id} attempted to access job {job_id} for document owned by {doc.user_id}",
+                extra={"job_id": job_id, "user_id": user_id, "document_id": doc.id}
             )
             raise HTTPException(status_code=403, detail="You don't have permission to access this job")
     finally:
@@ -142,7 +138,7 @@ async def get_indexing_progress(
         if job.status == "completed":
             yield ServerSentEvent(data=json.dumps({
                 'message': job.message or 'Document indexing completed successfully',
-                'document_id': job.collection_document_id
+                'document_id': job.document_id
             }), event="complete")
             yield ServerSentEvent(data=json.dumps({'reason': 'completed', 'job_id': job_id}), event="end")
             return

@@ -8,8 +8,7 @@ Pattern:
 - Repositories handle session management and error handling
 - Makes testing easier with repository mocking
 """
-from datetime import datetime
-from typing import Optional, List
+from typing import Optional, List, Generator
 from contextlib import contextmanager
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
@@ -17,6 +16,7 @@ from sqlalchemy import func
 
 from app.database import SessionLocal
 from app.db_models_chat import Collection, CollectionDocument, DocumentChunk
+from app.db_models_documents import Document
 from app.utils.logging import logger
 
 
@@ -33,7 +33,7 @@ class CollectionRepository:
     """
 
     @contextmanager
-    def _get_session(self) -> Session:
+    def _get_session(self) -> Generator[Session, None, None]:
         """Context manager for database sessions.
 
         Ensures sessions are properly closed even on errors.
@@ -347,7 +347,7 @@ class CollectionRepository:
                 # from documents in this collection
                 total_chunks = db.query(func.count(DocumentChunk.id)).join(
                     CollectionDocument,
-                    DocumentChunk.document_id == CollectionDocument.id
+                    DocumentChunk.document_id == CollectionDocument.document_id
                 ).filter(
                     CollectionDocument.collection_id == collection_id
                 ).scalar() or 0
@@ -386,89 +386,146 @@ class CollectionRepository:
     # COLLECTION DOCUMENT OPERATIONS
     # ============================================================================
 
-    def create_document(
+    def link_document_to_collection(
         self,
         collection_id: str,
-        filename: str,
-        file_size_bytes: int,
-        page_count: int,
-        content_hash: str,
-        file_path: Optional[str] = None,
-        extraction_id: Optional[str] = None,
-        status: str = "processing"
+        document_id: str
     ) -> Optional[CollectionDocument]:
-        """Add a document to a collection.
+        """Link an existing canonical document to a collection.
+
+        Creates a CollectionDocument join record. The document must already exist
+        in the canonical documents table (created via DocumentRepository).
 
         Args:
             collection_id: Collection ID
-            filename: Original filename
-            file_size_bytes: File size in bytes
-            page_count: Number of pages
-            content_hash: SHA256 hash for duplicate detection
-            file_path: Path to uploaded PDF file
-            extraction_id: Optional link to extraction record
-            status: Document status (default: "processing")
+            document_id: Canonical document ID (from documents table)
 
         Returns:
-            CollectionDocument object if successful, None on error
+            CollectionDocument link object if successful, None on error
         """
         with self._get_session() as db:
             try:
-                document = CollectionDocument(
+                # Verify collection exists
+                coll = db.query(Collection).filter(Collection.id == collection_id).first()
+                if not coll:
+                    logger.warning(
+                        "Collection not found during document link",
+                        extra={"collection_id": collection_id}
+                    )
+                    return None
+
+                # Verify document exists
+                doc = db.query(Document).filter(Document.id == document_id).first()
+                if not doc:
+                    logger.warning(
+                        "Document not found during collection link",
+                        extra={"document_id": document_id}
+                    )
+                    return None
+
+                # Create link
+                collection_doc = CollectionDocument(
                     collection_id=collection_id,
-                    filename=filename,
-                    file_path=file_path,
-                    file_size_bytes=file_size_bytes,
-                    page_count=page_count,
-                    content_hash=content_hash,
-                    extraction_id=extraction_id,
-                    status=status,
-                    chunk_count=0
+                    document_id=document_id
                 )
-                db.add(document)
+                db.add(collection_doc)
                 db.commit()
-                db.refresh(document)
+                db.refresh(collection_doc)
 
                 logger.info(
-                    f"Created document in collection",
+                    "Linked document to collection",
                     extra={
-                        "document_id": document.id,
+                        "link_id": collection_doc.id,
                         "collection_id": collection_id,
-                        "file_name": filename
+                        "document_id": document_id,
+                        "document_name": doc.filename
                     }
                 )
 
-                return document
+                return collection_doc
 
             except SQLAlchemyError as e:
                 logger.error(
-                    f"Failed to create document: {e}",
-                    extra={"collection_id": collection_id, "filename": filename, "error": str(e)}
+                    f"Failed to link document to collection: {e}",
+                    extra={"collection_id": collection_id, "document_id": document_id, "error": str(e)}
                 )
                 db.rollback()
                 return None
 
-    def get_document(
+    def unlink_document_from_collection(
         self,
-        document_id: str
-    ) -> Optional[CollectionDocument]:
-        """Get document by ID.
+        link_id: str
+    ) -> bool:
+        """Unlink a document from a collection.
+
+        Deletes the CollectionDocument join record. The canonical document
+        remains in the documents table.
 
         Args:
-            document_id: Document ID
+            link_id: CollectionDocument link ID
 
         Returns:
-            CollectionDocument object if found, None otherwise
+            True if successful, False otherwise
+        """
+        with self._get_session() as db:
+            try:
+                link = db.query(CollectionDocument).filter(
+                    CollectionDocument.id == link_id
+                ).first()
+
+                if not link:
+                    logger.warning(
+                        f"Collection document link not found: {link_id}",
+                        extra={"link_id": link_id}
+                    )
+                    return False
+
+                collection_id = link.collection_id
+                document_id = link.document_id
+
+                db.delete(link)
+                db.commit()
+
+                logger.info(
+                    "Unlinked document from collection",
+                    extra={
+                        "link_id": link_id,
+                        "collection_id": collection_id,
+                        "document_id": document_id
+                    }
+                )
+
+                return True
+
+            except SQLAlchemyError as e:
+                logger.error(
+                    f"Failed to unlink document from collection: {e}",
+                    extra={"link_id": link_id, "error": str(e)}
+                )
+                db.rollback()
+                return False
+
+    def get_collection_document_link(
+        self,
+        link_id: str
+    ) -> Optional[CollectionDocument]:
+        """Get collection-document link by ID.
+
+        Args:
+            link_id: CollectionDocument link ID
+
+        Returns:
+            CollectionDocument link object if found, None otherwise
         """
         with self._get_session() as db:
             try:
                 return db.query(CollectionDocument).filter(
-                    CollectionDocument.id == document_id
+                    CollectionDocument.id == link_id
                 ).first()
             except SQLAlchemyError as e:
                 logger.error(
-                    f"Failed to get document: {e}",
-                    extra={"document_id": document_id, "error": str(e)}
+                    f"Failed to get collection document link: {e}",
+                    extra={"link_id": link_id, "error": str(e)}
                 )
                 return None
 
@@ -476,21 +533,26 @@ class CollectionRepository:
         self,
         collection_id: str,
         limit: Optional[int] = None
-    ) -> List[CollectionDocument]:
+    ) -> List[Document]:
         """List documents in a collection.
+
+        Joins through collection_documents to get canonical document metadata.
 
         Args:
             collection_id: Collection ID
             limit: Optional limit on results
 
         Returns:
-            List of CollectionDocument objects
+            List of Document objects (from canonical documents table)
         """
         with self._get_session() as db:
             try:
-                query = db.query(CollectionDocument).filter(
-                    CollectionDocument.collection_id == collection_id
-                ).order_by(CollectionDocument.created_at.desc())
+                query = (
+                    db.query(Document)
+                    .join(CollectionDocument, Document.id == CollectionDocument.document_id)
+                    .filter(CollectionDocument.collection_id == collection_id)
+                    .order_by(CollectionDocument.added_at.desc())
+                )
 
                 if limit:
                     query = query.limit(limit)
@@ -504,133 +566,3 @@ class CollectionRepository:
                 )
                 return []
 
-    def check_duplicate_document(
-        self,
-        collection_id: str,
-        content_hash: str
-    ) -> Optional[CollectionDocument]:
-        """Check if document already exists in collection (by content hash).
-
-        Args:
-            collection_id: Collection ID
-            content_hash: SHA256 hash of file content
-
-        Returns:
-            Existing document if found, None otherwise
-        """
-        with self._get_session() as db:
-            try:
-                return db.query(CollectionDocument).filter(
-                    CollectionDocument.collection_id == collection_id,
-                    CollectionDocument.content_hash == content_hash
-                ).first()
-            except SQLAlchemyError as e:
-                logger.error(
-                    f"Failed to check duplicate document: {e}",
-                    extra={"collection_id": collection_id, "error": str(e)}
-                )
-                return None
-
-    def update_document_status(
-        self,
-        document_id: str,
-        status: str,
-        chunk_count: Optional[int] = None,
-        page_count: Optional[int] = None,
-        error_message: Optional[str] = None
-    ) -> bool:
-        """Update document status and stats.
-
-        Args:
-            document_id: Document ID
-            status: New status (processing, completed, failed)
-            chunk_count: Number of chunks created
-            page_count: Number of pages in document
-            error_message: Error message if status is failed
-
-        Returns:
-            True if successful, False otherwise
-        """
-        with self._get_session() as db:
-            try:
-                document = db.query(CollectionDocument).filter(
-                    CollectionDocument.id == document_id
-                ).first()
-
-                if not document:
-                    logger.warning(
-                        f"Document not found for status update: {document_id}",
-                        extra={"document_id": document_id}
-                    )
-                    return False
-
-                document.status = status
-                if chunk_count is not None:
-                    document.chunk_count = chunk_count
-                if page_count is not None:
-                    document.page_count = page_count
-                if error_message:
-                    document.error_message = error_message[:500]
-
-                if status == "completed":
-                    document.completed_at = datetime.now()
-
-                db.commit()
-
-                logger.debug(
-                    f"Updated document status to '{status}'",
-                    extra={"document_id": document_id, "status": status}
-                )
-
-                return True
-
-            except SQLAlchemyError as e:
-                logger.error(
-                    f"Failed to update document status: {e}",
-                    extra={"document_id": document_id, "error": str(e)}
-                )
-                db.rollback()
-                return False
-
-    def delete_document(
-        self,
-        document_id: str
-    ) -> bool:
-        """Delete a document (cascades to chunks).
-
-        Args:
-            document_id: Document ID
-
-        Returns:
-            True if successful, False otherwise
-        """
-        with self._get_session() as db:
-            try:
-                document = db.query(CollectionDocument).filter(
-                    CollectionDocument.id == document_id
-                ).first()
-
-                if not document:
-                    logger.warning(
-                        f"Document not found for deletion: {document_id}",
-                        extra={"document_id": document_id}
-                    )
-                    return False
-
-                db.delete(document)
-                db.commit()
-
-                logger.info(
-                    f"Deleted document: {document.filename}",
-                    extra={"document_id": document_id}
-                )
-
-                return True
-
-            except SQLAlchemyError as e:
-                logger.error(
-                    f"Failed to delete document: {e}",
-                    extra={"document_id": document_id, "error": str(e)}
-                )
-                db.rollback()
-                return False

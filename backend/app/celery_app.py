@@ -25,11 +25,23 @@ celery_app.conf.update(
 )
 
 # Explicitly import task modules so worker registers them.
+# Ensure all model modules are imported first so SQLAlchemy MetaData knows about
+# every table (especially workflow_runs) before any task code performs DB writes.
+try:
+    import app.db_models  # noqa: F401 - Extraction, ParserOutput, CacheEntry, JobState
+    import app.db_models_users  # noqa: F401 - User
+    import app.db_models_chat  # noqa: F401 - Collection, CollectionDocument, DocumentChunk, ChatSession, ChatMessage
+    import app.db_models_workflows  # noqa: F401 - Workflow, WorkflowRun
+except Exception:
+    # Non-fatal here; if imports fail the worker will likely fail later when using DB.
+    pass
+
 # Tasks are organized in app/services/tasks/
 try:
     import app.services.tasks.extraction  # noqa: F401 - Extraction pipeline tasks
     import app.services.tasks.chat  # noqa: F401 - Chat indexing pipeline tasks
-except Exception as e:
+    import app.services.tasks.workflows  # noqa: F401 - Workflow execution pipeline tasks
+except Exception:
     # Avoid hard failure if tasks module temporarily missing; log later after logging init.
     pass
 

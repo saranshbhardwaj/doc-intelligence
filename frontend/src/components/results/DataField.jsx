@@ -29,17 +29,15 @@ export default function DataField({
       className={`p-3 rounded-lg transition-colors duration-200 ${
         highlight
           ? "bg-blue-50 dark:bg-blue-900/30 border border-blue-200 dark:border-blue-700"
-          : "bg-gray-50 dark:bg-gray-700/50"
+          : "bg-background dark:bg-gray-700/50"
       }`}
     >
-      <div className="text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wide mb-1">
+      <div className="text-xs font-semibold text-muted-foreground dark:text-muted-foreground uppercase tracking-wide mb-1">
         {label}
       </div>
       <div
         className={`text-lg font-bold ${
-          highlight
-            ? "text-blue-900 dark:text-blue-100"
-            : "text-gray-900 dark:text-white"
+          highlight ? "text-blue-900 dark:text-blue-100" : "text-foreground"
         }`}
       >
         {displayValue}

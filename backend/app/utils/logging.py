@@ -52,8 +52,9 @@ if LOG_TO_FILE:
     logger.addHandler(file_handler)
 
 # Reduce noisy third-party loggers if needed
-for noisy in ["uvicorn.access", "sqlalchemy.engine"]:
-    logging.getLogger(noisy).setLevel(logging.WARNING)
+# Enable uvicorn.access for debugging, keep sqlalchemy quiet
+logging.getLogger("uvicorn.access").setLevel(logging.INFO)
+logging.getLogger("sqlalchemy.engine").setLevel(logging.WARNING)
 
 # Convenience exported logger for modules still importing from here
 application_logger = logger

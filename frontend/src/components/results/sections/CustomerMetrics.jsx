@@ -55,7 +55,7 @@ export default function CustomerMetrics({ data }) {
       {customers.revenue_mix_by_segment &&
         Object.keys(customers.revenue_mix_by_segment).length > 0 && (
           <div className="mb-6">
-            <h4 className="text-md font-semibold text-gray-700 dark:text-gray-200 mb-3">
+            <h4 className="text-md font-semibold text-muted-foreground dark:text-gray-200 mb-3">
               Revenue Mix by Segment
             </h4>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
@@ -77,7 +77,7 @@ export default function CustomerMetrics({ data }) {
       {Array.isArray(customers.notable_customers) &&
         customers.notable_customers.length > 0 && (
           <div>
-            <h4 className="text-md font-semibold text-gray-700 mb-3">
+            <h4 className="text-md font-semibold text-muted-foreground mb-3">
               Notable Customers
             </h4>
             <div className="flex flex-wrap gap-2">

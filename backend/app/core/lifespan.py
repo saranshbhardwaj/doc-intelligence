@@ -7,6 +7,8 @@ from contextlib import asynccontextmanager
 from app.config import settings
 from app.utils.logging import logger
 from app.api.dependencies import cache
+from app.database import get_db
+from app.services.workflows.seeding import seed_workflows
 
 # Retention settings (could later move to settings)
 UPLOAD_RETENTION_HOURS = 6  # Delete uploaded source PDFs older than this
@@ -35,6 +37,18 @@ async def lifespan(app):
     # Clean up cache on startup
     removed = cache.clear_expired()
     logger.info(f"Cache cleanup on startup: removed {removed} expired entries")
+
+    # Seed workflow templates (idempotent)
+    try:
+        db = next(get_db())
+        created = seed_workflows(db)
+        if created:
+            logger.info("Seeded workflows", extra={"count": len(created), "names": created})
+        else:
+            logger.info("No new workflows seeded (already present)")
+        db.close()
+    except Exception as e:
+        logger.error("Workflow seeding failed", extra={"error": str(e)})
 
     # Start background cleanup task (cache + uploaded file pruning)
     cleanup_task = asyncio.create_task(periodic_cleanup())

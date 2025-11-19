@@ -533,6 +533,193 @@ def extract_structured_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
 # ============================================================================
 
 
+@shared_task(bind=True)
+def store_extraction_result_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Store extraction result to R2 (large) or inline DB (small).
+
+    Final task in extraction pipeline.Uses artifacts.py for storage.
+
+    Input payload:
+        - extraction_id: Extraction ID
+        - normalized_result: Final extraction result (after normalization)
+        - job_id: Job ID for progress tracking
+        - total_cost_usd: Total processing cost
+
+    Output: Publishes complete event via Redis
+    """
+    extraction_id = payload["extraction_id"]
+    job_id = payload["job_id"]
+    result_data = payload.get("normalized_result", payload.get("data", {}))
+    total_cost_usd = payload.get("total_cost_usd", 0.0)
+
+    db = _get_db_session()
+    tracker = JobProgressTracker(db, job_id)
+    extraction_repo = ExtractionRepository()
+
+    try:
+        # Import extraction artifact service
+        from app.services.artifacts import persist_extraction_artifact
+
+        tracker.update_progress(
+            progress_percent=95,
+            message="Storing extraction result..."
+        )
+
+        # Persist extraction artifact (R2 if large, inline if small)
+        artifact_pointer = persist_extraction_artifact(extraction_id, result_data)
+
+        # Update extraction record
+        success = extraction_repo.update_extraction_artifact(
+            extraction_id=extraction_id,
+            artifact=artifact_pointer,
+            status="completed",
+            total_cost_usd=total_cost_usd
+        )
+
+        if not success:
+            raise Exception("Failed to update extraction record with artifact")
+
+        tracker.mark_completed()
+
+        logger.info(
+            "Extraction result stored successfully",
+            extra={"extraction_id": extraction_id, "artifact_backend": artifact_pointer.get("backend", "inline")}
+        )
+
+        return {
+            **payload,
+            "artifact": artifact_pointer,
+            "status": "completed"
+        }
+
+    except Exception as e:
+        error_msg = f"Failed to store extraction result: {str(e)}"
+        logger.exception(error_msg, extra={"extraction_id": extraction_id})
+
+        extraction_repo.mark_extraction_failed(extraction_id, error_msg)
+        tracker.mark_error(
+            error_stage="storing",
+            error_message=error_msg,
+            error_type="storage_error",
+            is_retryable=True
+        )
+
+        return {
+            **payload,
+            "status": "failed",
+            "error": error_msg
+        }
+
+
+@shared_task(bind=True)
+def start_extraction_from_chunks_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Start extraction from existing DocumentChunks (for library documents).
+
+    Skips parse/chunk steps and loads chunks from DocumentChunk table.
+
+    Input payload:
+        - job_id: Job ID
+        - extraction_id: Extraction ID
+        - document_id: Document ID
+        - user_id: User ID
+        - context: Optional extraction context
+
+    Pipeline: Load Chunks → Summarize → Extract → Store
+    """
+    job_id = payload["job_id"]
+    extraction_id = payload["extraction_id"]
+    document_id = payload["document_id"]
+    user_id = payload.get("user_id")
+    context = payload.get("context")
+    filename = payload.get("filename", "document")
+
+    db = _get_db_session()
+    tracker = JobProgressTracker(db, job_id)
+
+    try:
+        tracker.update_progress(
+            status="running",
+            current_stage="loading_chunks",
+            progress_percent=10,
+            message="Loading document chunks..."
+        )
+
+        # Load chunks from DocumentChunk table
+        from app.db_models_chat import DocumentChunk
+        chunks = db.query(DocumentChunk).filter(
+            DocumentChunk.document_id == document_id
+        ).order_by(DocumentChunk.chunk_index).all()
+
+        if not chunks:
+            raise Exception("No chunks found for document - document may not be indexed yet")
+
+        tracker.update_progress(
+            progress_percent=30,
+            message=f"Loaded {len(chunks)} chunks from document"
+        )
+
+        # Convert to expected format
+        chunk_data = [
+            {
+                "text": c.text,
+                "chunk_index": c.chunk_index,
+                "page_number": c.page_number,
+                "section_type": c.section_type or "narrative",
+                "is_tabular": c.is_tabular or False
+            }
+            for c in chunks
+        ]
+
+        # Update payload with chunks and metadata
+        payload_with_chunks = {
+            **payload,
+            "chunks": chunk_data,
+            "filename": filename,
+            "mode": "extraction"
+        }
+
+        # Chain: Summarize → Extract → Store
+        task_chain = chain(
+            summarize_context_task.s(payload_with_chunks),
+            extract_structured_task.s(),
+            store_extraction_result_task.s()
+        )
+
+        result = task_chain.apply_async()
+
+        logger.info(
+            "Extraction from chunks started",
+            extra={"job_id": job_id, "document_id": document_id, "chunks_count": len(chunks)}
+        )
+
+        return {
+            **payload_with_chunks,
+            "task_id": result.id
+        }
+
+    except Exception as e:
+        error_msg = f"Failed to start extraction from chunks: {str(e)}"
+        logger.exception(error_msg, extra={"extraction_id": extraction_id, "document_id": document_id})
+
+        extraction_repo = ExtractionRepository()
+        extraction_repo.mark_extraction_failed(extraction_id, error_msg)
+
+        tracker.mark_error(
+            error_stage="loading_chunks",
+            error_message=error_msg,
+            error_type="chunk_load_error",
+            is_retryable=True
+        )
+
+        return {
+            **payload,
+            "status": "failed",
+            "error": error_msg
+        }
+
+
 def start_extraction_chain(
     file_path: str,
     filename: str,
@@ -544,7 +731,7 @@ def start_extraction_chain(
     """
     Start the extraction pipeline chain.
 
-    Pipeline: Parse → Chunk → Summarize → Extract
+    Pipeline: Parse → Chunk → Summarize → Extract → Store
     """
     payload = {
         "file_path": file_path,
@@ -560,7 +747,41 @@ def start_extraction_chain(
         chunk_document_task.s(),
         summarize_context_task.s(),
         extract_structured_task.s(),
+        store_extraction_result_task.s()  # Added final storage step
     )
     result = task_chain.apply_async()
     logger.info("Extraction pipeline started", extra={"job_id": job_id, "task_id": result.id})
+    return result.id
+
+
+def start_extraction_from_chunks_chain(
+    job_id: str,
+    extraction_id: str,
+    document_id: str,
+    user_id: str,
+    filename: str,
+    context: str | None
+):
+    """
+    Start extraction pipeline from existing chunks (library documents).
+
+    Pipeline: Load Chunks → Summarize → Extract → Store
+    """
+    payload = {
+        "job_id": job_id,
+        "extraction_id": extraction_id,
+        "document_id": document_id,
+        "user_id": user_id,
+        "filename": filename,
+        "context": context,
+        "mode": "extraction",
+    }
+
+    # This triggers the start_extraction_from_chunks_task
+    result = start_extraction_from_chunks_task.apply_async(args=[payload])
+
+    logger.info(
+        "Extraction from chunks pipeline started",
+        extra={"job_id": job_id, "document_id": document_id, "task_id": result.id}
+    )
     return result.id

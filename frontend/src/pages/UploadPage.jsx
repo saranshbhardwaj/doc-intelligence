@@ -2,8 +2,19 @@
 // Main upload and results page (moved from App.jsx)
 import { useState, useEffect } from "react";
 import { useSearchParams, useNavigate, Link } from "react-router-dom";
-import { SignedIn, SignedOut, SignInButton, UserButton, useAuth } from "@clerk/clerk-react";
-import { useExtraction, useExtractionActions, useUser, useUserActions } from "../store";
+import {
+  SignedIn,
+  SignedOut,
+  SignInButton,
+  UserButton,
+  useAuth,
+} from "@clerk/clerk-react";
+import {
+  useExtraction,
+  useExtractionActions,
+  useUser,
+  useUserActions,
+} from "../store";
 import { fetchExtractionResult } from "../api";
 import FileUploader from "../components/upload/FileUploader";
 import ResultsView from "../components/results/ResultViews";
@@ -38,8 +49,8 @@ export default function UploadPage() {
 
       // Load demo data
       fetch("/demo-data.json")
-        .then(res => res.json())
-        .then(demoData => {
+        .then((res) => res.json())
+        .then((demoData) => {
           const demoResult = {
             success: true,
             data: demoData.data,
@@ -49,18 +60,18 @@ export default function UploadPage() {
               pages: 81,
               characters_extracted: 200912,
               processing_time_seconds: 0.5,
-              timestamp: new Date().toISOString()
+              timestamp: new Date().toISOString(),
             },
             rate_limit: {
               remaining_uploads: 2,
               reset_in_hours: 24,
-              limit_per_window: 5
+              limit_per_window: 5,
             },
-            from_cache: false
+            from_cache: false,
           };
           setResult(demoResult);
         })
-        .catch(err => {
+        .catch((err) => {
           console.error("Failed to load demo data:", err);
           setError("Failed to load demo data. Please try refreshing the page.");
         });
@@ -70,7 +81,7 @@ export default function UploadPage() {
   // Reconnect to active extraction on mount (Zustand persistence handles this)
   useEffect(() => {
     if (isProcessing && getToken) {
-      console.log('🔄 Reconnecting to active extraction from persisted state');
+      console.log("🔄 Reconnecting to active extraction from persisted state");
       reconnectExtraction(getToken);
     }
   }, []); // Run once on mount
@@ -84,13 +95,14 @@ export default function UploadPage() {
 
       // Fetch the extraction result
       fetchExtractionResult(extractionId, getToken)
-        .then(extractionData => {
+        .then((extractionData) => {
           console.log("Loaded past extraction:", extractionData);
           setResult(extractionData);
         })
-        .catch(err => {
+        .catch((err) => {
           console.error("Failed to load extraction:", err);
-          const errorMessage = err.response?.data?.detail || "Failed to load extraction";
+          const errorMessage =
+            err.response?.data?.detail || "Failed to load extraction";
           setError(errorMessage);
         });
     }
@@ -124,9 +136,9 @@ export default function UploadPage() {
   };
 
   return (
-    <div className="min-h-screen bg-gray-50 dark:bg-[#1a1a1a] transition-colors duration-200">
+    <div className="min-h-screen bg-background dark:bg-[#1a1a1a] transition-colors duration-200">
       {/* Navigation Bar */}
-      <nav className="sticky top-0 z-50 bg-white/80 dark:bg-gray-900/80 backdrop-blur-lg border-b border-gray-200 dark:border-gray-800">
+      <nav className="sticky top-0 z-50 bg-background/80 /80 backdrop-blur-lg border-b border-border dark:border-gray-800">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center h-16">
             {/* Logo and Navigation */}
@@ -140,7 +152,7 @@ export default function UploadPage() {
                   alt="Sand Cloud"
                   className="h-8 w-auto"
                 />
-                <span className="text-xl font-bold text-gray-900 dark:text-white">
+                <span className="text-xl font-bold text-foreground">
                   Sand Cloud
                 </span>
               </button>
@@ -150,19 +162,19 @@ export default function UploadPage() {
                 <nav className="hidden md:flex gap-6">
                   <Link
                     to="/app"
-                    className="text-sm font-medium text-gray-900 dark:text-white transition-colors"
+                    className="text-sm font-medium text-foreground transition-colors"
                   >
                     Extract
                   </Link>
                   <Link
                     to="/app/chat"
-                    className="text-sm font-medium text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors"
+                    className="text-sm font-medium text-muted-foreground dark:text-muted-foreground hover:text-foreground dark:hover:text-foreground transition-colors"
                   >
                     Chat
                   </Link>
                   <Link
                     to="/app/dashboard"
-                    className="text-sm font-medium text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors"
+                    className="text-sm font-medium text-muted-foreground dark:text-muted-foreground hover:text-foreground dark:hover:text-foreground transition-colors"
                   >
                     Dashboard
                   </Link>
@@ -179,7 +191,7 @@ export default function UploadPage() {
               />
               <button
                 onClick={() => navigate("/")}
-                className="px-4 py-2 text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white transition-colors font-medium"
+                className="px-4 py-2 text-muted-foreground dark:text-gray-300 hover:text-foreground dark:hover:text-foreground transition-colors font-medium"
               >
                 Back to Home
               </button>
@@ -187,7 +199,7 @@ export default function UploadPage() {
               {/* Authentication UI */}
               <SignedOut>
                 <SignInButton mode="modal">
-                  <button className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-medium">
+                  <button className="px-4 py-2 bg-blue-600 text-foreground rounded-lg hover:bg-blue-700 transition-colors font-medium">
                     Sign In
                   </button>
                 </SignInButton>
@@ -204,10 +216,10 @@ export default function UploadPage() {
         <div className="max-w-4xl mx-auto">
           {/* Header */}
           <div className="text-center mb-12">
-            <h1 className="text-4xl font-bold text-gray-900 dark:text-white mb-4">
+            <h1 className="text-4xl font-bold text-foreground mb-4">
               Upload Your CIM
             </h1>
-            <p className="text-lg text-gray-700 dark:text-gray-300 mb-2">
+            <p className="text-lg text-muted-foreground dark:text-gray-300 mb-2">
               Stop reading CIMs manually. Extract data in minutes.
             </p>
 
@@ -215,19 +227,20 @@ export default function UploadPage() {
             <SignedIn>
               {userInfo && userInfo.usage ? (
                 <div className="inline-flex items-center gap-3 mt-4">
-                  <div className="text-sm text-gray-600 dark:text-gray-400">
-                    <span className="font-semibold text-gray-900 dark:text-white">
+                  <div className="text-sm text-muted-foreground dark:text-muted-foreground">
+                    <span className="font-semibold text-foreground">
                       {userInfo.usage.pages_remaining}
-                    </span>
-                    {' '}pages remaining
-                    {userInfo.tier === 'free' && ' (one-time limit)'}
+                    </span>{" "}
+                    pages remaining
+                    {userInfo.tier === "free" && " (one-time limit)"}
                   </div>
-                  <div className="text-xs text-gray-500 dark:text-gray-500">
-                    {userInfo.usage.pages_used} / {userInfo.usage.pages_limit} used • Max 5MB per document limit
+                  <div className="text-xs text-muted-foreground dark:text-muted-foreground">
+                    {userInfo.usage.pages_used} / {userInfo.usage.pages_limit}{" "}
+                    used • Max 5MB per document limit
                   </div>
                 </div>
               ) : (
-                <p className="text-sm text-gray-500 dark:text-gray-500 mt-4">
+                <p className="text-sm text-muted-foreground dark:text-muted-foreground mt-4">
                   Loading usage info...
                 </p>
               )}
@@ -235,91 +248,94 @@ export default function UploadPage() {
 
             {/* Static text for non-signed in users */}
             <SignedOut>
-              <p className="text-sm text-gray-500 dark:text-gray-500">
+              <p className="text-sm text-muted-foreground dark:text-muted-foreground">
                 Free: 100 pages one-time • Max 5MB per document limit
               </p>
             </SignedOut>
           </div>
 
-        {/* Demo Banner */}
-        {isDemo && (
-          <div className="bg-gradient-to-r from-blue-50 to-purple-50 dark:from-blue-900/20 dark:to-purple-900/20 border-2 border-blue-500 dark:border-blue-400 rounded-2xl p-6 mb-8">
-            <div className="flex items-center gap-3 mb-4">
-              <span className="text-3xl">🎯</span>
-              <h3 className="text-2xl font-bold text-gray-900 dark:text-white">
-                Sample CIM Analysis
-              </h3>
-            </div>
-            <p className="text-lg text-gray-700 dark:text-gray-300 mb-4">
-              You're viewing a sample extraction from Alcatel-Lucent's CIM. This demonstrates the full capability of our AI-powered analysis.
-            </p>
-            <p className="text-base text-gray-600 dark:text-gray-400">
-              Explore the sample output below to see what Sand Cloud can extract from your documents.
-            </p>
-          </div>
-        )}
-
-        {/* Uploader */}
-        {!isDemo && (
-          <div className="bg-white dark:bg-[#2f2f2f] rounded-2xl shadow-2xl p-8 mb-8 relative transition-colors duration-200 border border-gray-200 dark:border-gray-700/50">
-          <FileUploader
-            onResult={handleResult}
-            onError={handleError}
-          />
-          </div>
-        )}
-
-        {/* Error */}
-        {error && (
-          <div
-            className="bg-red-50 dark:bg-red-950/30 border-l-4 border-red-400 dark:border-red-500 p-6 mb-8 rounded-r-lg backdrop-blur-sm"
-            role="alert"
-          >
-            <h3 className="text-sm font-medium text-red-800 dark:text-red-300 mb-2">
-              ⚠️ Processing Error
-            </h3>
-            <p className="text-sm text-red-700 dark:text-red-200 mb-3">
-              {typeof error === 'string' ? error : error.message}
-            </p>
-
-            {/* Show error details if available */}
-            {typeof error === 'object' && (error.stage || error.type) && (
-              <div className="text-xs text-red-600 dark:text-red-300 mb-3 font-mono">
-                {error.stage && <span>Stage: {error.stage}</span>}
-                {error.stage && error.type && <span className="mx-2">•</span>}
-                {error.type && <span>Type: {error.type}</span>}
+          {/* Demo Banner */}
+          {isDemo && (
+            <div className="bg-gradient-to-r from-blue-50 to-purple-50 dark:from-blue-900/20 dark:to-purple-900/20 border-2 border-blue-500 dark:border-blue-400 rounded-2xl p-6 mb-8">
+              <div className="flex items-center gap-3 mb-4">
+                <span className="text-3xl">🎯</span>
+                <h3 className="text-2xl font-bold text-foreground">
+                  Sample CIM Analysis
+                </h3>
               </div>
-            )}
-
-            <div className="mt-4 pt-4 border-t border-red-200 dark:border-red-800">
-              <p className="text-sm font-semibold text-red-800 dark:text-red-300 mb-2">
-                💡 What to try:
+              <p className="text-lg text-muted-foreground dark:text-gray-300 mb-4">
+                You're viewing a sample extraction from Alcatel-Lucent's CIM.
+                This demonstrates the full capability of our AI-powered
+                analysis.
               </p>
-              <ul className="text-sm text-red-700 dark:text-red-200 space-y-1 list-disc list-inside">
-                <li>
-                  <strong>Try a different CIM document</strong> - Each document has unique formatting
-                </li>
-                <li>Check file size is under 5MB and has fewer than 60 pages</li>
-              </ul>
+              <p className="text-base text-muted-foreground dark:text-muted-foreground">
+                Explore the sample output below to see what Sand Cloud can
+                extract from your documents.
+              </p>
             </div>
-          </div>
-        )}
+          )}
 
-        {/* Results */}
-        {result && (
-          <div className="mb-8">
-            {/* <div className="flex justify-end mb-3">
+          {/* Uploader */}
+          {!isDemo && (
+            <div className="bg-background dark:bg-[#2f2f2f] rounded-2xl shadow-2xl p-8 mb-8 relative transition-colors duration-200 border border-border dark:border-gray-700/50">
+              <FileUploader onResult={handleResult} onError={handleError} />
+            </div>
+          )}
+
+          {/* Error */}
+          {error && (
+            <div
+              className="bg-red-50 dark:bg-red-950/30 border-l-4 border-red-400 dark:border-red-500 p-6 mb-8 rounded-r-lg backdrop-blur-sm"
+              role="alert"
+            >
+              <h3 className="text-sm font-medium text-red-800 dark:text-red-300 mb-2">
+                ⚠️ Processing Error
+              </h3>
+              <p className="text-sm text-red-700 dark:text-red-200 mb-3">
+                {typeof error === "string" ? error : error.message}
+              </p>
+
+              {/* Show error details if available */}
+              {typeof error === "object" && (error.stage || error.type) && (
+                <div className="text-xs text-red-600 dark:text-red-300 mb-3 font-mono">
+                  {error.stage && <span>Stage: {error.stage}</span>}
+                  {error.stage && error.type && <span className="mx-2">•</span>}
+                  {error.type && <span>Type: {error.type}</span>}
+                </div>
+              )}
+
+              <div className="mt-4 pt-4 border-t border-red-200 dark:border-red-800">
+                <p className="text-sm font-semibold text-red-800 dark:text-red-300 mb-2">
+                  💡 What to try:
+                </p>
+                <ul className="text-sm text-red-700 dark:text-red-200 space-y-1 list-disc list-inside">
+                  <li>
+                    <strong>Try a different CIM document</strong> - Each
+                    document has unique formatting
+                  </li>
+                  <li>
+                    Check file size is under 5MB and has fewer than 60 pages
+                  </li>
+                </ul>
+              </div>
+            </div>
+          )}
+
+          {/* Results */}
+          {result && (
+            <div className="mb-8">
+              {/* <div className="flex justify-end mb-3">
               <button
                 onClick={clearResults}
-                className="text-sm text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-gray-200 transition-colors"
+                className="text-sm text-muted-foreground dark:text-muted-foreground hover:text-foreground dark:hover:text-gray-200 transition-colors"
               >
                 Clear results / analyze another file
               </button>
             </div> */}
 
-            <ResultsView result={result} />
-          </div>
-        )}
+              <ResultsView result={result} />
+            </div>
+          )}
         </div>
       </div>
     </div>

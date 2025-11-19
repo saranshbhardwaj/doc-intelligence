@@ -29,33 +29,53 @@
     --chart-3: 197 37% 24%;
     --chart-4: 43 74% 66%;
     --chart-5: 27 87% 67%;
+
+    --success: 145 63% 49%; /* hsl(145,63%,49%) ≈ Tailwind green-500 */
+    --success-foreground: 0 0% 100%; /* white */
+    --warning: 45 100% 50%; /* yellow */
   }
 
+  /* Dark theme variables */
   .dark {
-    --background: 222.2 84% 4.9%;
-    --foreground: 210 40% 98%;
-    --card: 222.2 84% 4.9%;
-    --card-foreground: 210 40% 98%;
-    --popover: 222.2 84% 4.9%;
-    --popover-foreground: 210 40% 98%;
-    --primary: 217.2 91.2% 59.8%;
-    --primary-foreground: 222.2 47.4% 11.2%;
-    --secondary: 217.2 32.6% 17.5%;
-    --secondary-foreground: 210 40% 98%;
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
-    --accent: 217.2 32.6% 17.5%;
-    --accent-foreground: 210 40% 98%;
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 210 40% 98%;
-    --border: 217.2 32.6% 17.5%;
-    --input: 217.2 32.6% 17.5%;
-    --ring: 224.3 76.3% 48%;
-    --chart-1: 220 70% 50%;
-    --chart-2: 160 60% 45%;
-    --chart-3: 30 80% 55%;
-    --chart-4: 280 65% 60%;
-    --chart-5: 340 75% 55%;
+    --background: 220 6% 12%;        /* near-black page background (roughly #1F1F1F) */
+    --foreground: 0 0% 100%;         /* white text */
+
+    --card: 220 6% 16%;              /* panels / cards (slightly lighter than page) */
+    --card-foreground: 0 0% 100%;
+
+    --popover: 220 6% 18%;           /* dropdowns / popovers */
+    --popover-foreground: 0 0% 100%;
+
+    --primary: 200 90% 46%;          /* accent (choose blue/teal) - optional */
+    --primary-foreground: 220 6% 12%;
+
+    --secondary: 220 6% 24%;         /* slightly lighter black for secondary surfaces */
+    --secondary-foreground: 0 0% 100%;
+
+    --muted: 220 6% 28%;             /* borders / muted surfaces */
+    --muted-foreground: 210 8% 72%;
+
+    --accent: 200 90% 46%;           /* same as primary, adjust if you want green */
+    --accent-foreground: 220 6% 12%;
+
+    --destructive: 0 72% 40%;
+    --destructive-foreground: 0 0% 100%;
+
+    --border: 220 6% 26%;           /* divider color */
+    --input: 220 6% 20%;            /* input backgrounds */
+    --ring: 200 90% 60%;            /* focus ring */
+
+    --radius: 0.5rem;
+
+    /* charts (optional) */
+    --chart-1: 195 80% 50%;
+    --chart-2: 170 65% 42%;
+    --chart-3: 30 80% 52%;
+    --chart-4: 260 60% 56%;
+    --chart-5: 330 65% 56%;
+
+    --success: 140 50% 40%; /* darker green for dark mode */
+    --warning: 45 80% 45%;  /* darker yellow for dark mode */
   }
 }
 

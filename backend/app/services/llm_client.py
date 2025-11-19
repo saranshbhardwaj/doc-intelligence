@@ -16,7 +16,10 @@ from app.utils.logging import logger
 from app.utils.file_utils import save_raw_llm_response
 
 class LLMClient:
-    """Handle Claude API interactions for both expensive and cheap LLM calls"""
+    """Handle Anthropic Claude API interactions (extraction, summarization, chat).
+
+    Enhancement: expose token usage & model metadata for cost tracking.
+    """
 
     def __init__(self, api_key: str, model: str, max_tokens: int, max_input_chars: int, timeout_seconds: int = 120):
         # Create timeout object for Anthropic SDK
@@ -111,13 +114,25 @@ class LLMClient:
         # Extract text from response (after successful retry loop)
         try:
             response_text = message.content[0].text.strip()
+            usage = getattr(message, "usage", None)
+            input_tokens = getattr(usage, "input_tokens", None) if usage else None
+            output_tokens = getattr(usage, "output_tokens", None) if usage else None
+            model_name = getattr(message, "model", self.model)
 
             logger.info(f"Claude response: {len(response_text)} chars")
 
             # Parse JSON from response
             parsed_json = self._parse_json_response(response_text)
 
-            return parsed_json
+            return {
+                "data": parsed_json,
+                "raw_text": response_text,
+                "usage": {
+                    "input_tokens": input_tokens,
+                    "output_tokens": output_tokens,
+                    "model": model_name
+                }
+            }
 
         except json.JSONDecodeError as e:
             logger.error(f"Failed to parse Claude response as JSON: {e}")

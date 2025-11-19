@@ -11,12 +11,14 @@ Pattern:
 from datetime import datetime
 from typing import Optional
 from contextlib import contextmanager
+from typing import Generator
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.database import SessionLocal
 from app.db_models import JobState
 from app.utils.logging import logger
+from app.utils.id_generator import generate_id
 
 
 class JobRepository:
@@ -32,7 +34,7 @@ class JobRepository:
     """
 
     @contextmanager
-    def _get_session(self) -> Session:
+    def _get_session(self) -> Generator[Session, None, None]:
         """Context manager for database sessions.
 
         Ensures sessions are properly closed even on errors.
@@ -53,7 +55,8 @@ class JobRepository:
     def create_job(
         self,
         extraction_id: Optional[str] = None,
-        collection_document_id: Optional[str] = None,
+        document_id: Optional[str] = None,
+        workflow_run_id: Optional[str] = None,
         status: str = "queued",
         current_stage: str = "queued",
         progress_percent: int = 0,
@@ -62,13 +65,15 @@ class JobRepository:
     ) -> Optional[JobState]:
         """Create a new job state record.
 
-        Supports both Extract Mode and Chat Mode:
+        Supports Extract Mode, Chat Mode, and Workflow Mode:
         - Extract Mode: Pass extraction_id
-        - Chat Mode: Pass collection_document_id
+        - Chat Mode: Pass document_id (references canonical documents table)
+        - Workflow Mode: Pass workflow_run_id
 
         Args:
             extraction_id: ID of extraction (for Extract Mode)
-            collection_document_id: ID of collection document (for Chat Mode)
+            document_id: ID of canonical document (for Chat Mode)
+            workflow_run_id: ID of workflow run (for Workflow Mode)
             status: Job status (default: "queued")
             current_stage: Current processing stage (default: "queued")
             progress_percent: Progress percentage 0-100 (default: 0)
@@ -78,16 +83,30 @@ class JobRepository:
         Returns:
             JobState object if successful, None on error
         """
-        if not extraction_id and not collection_document_id:
-            logger.error("Must provide either extraction_id or collection_document_id")
+        if not extraction_id and not document_id and not workflow_run_id:
+            logger.error("Must provide one of extraction_id, document_id, or workflow_run_id")
+            return None
+        # Ensure caller does not set more than one (business rule; DB constraint will also enforce)
+        provided = [v for v in [extraction_id, document_id, workflow_run_id] if v]
+        if len(provided) != 1:
+            logger.error("Exactly one of extraction_id, document_id, workflow_run_id must be provided", extra={
+                "extraction_id": extraction_id,
+                "document_id": document_id,
+                "workflow_run_id": workflow_run_id
+            })
             return None
 
         with self._get_session() as db:
             try:
+                # Generate job_id if not provided
+                if not job_id:
+                    job_id = generate_id()
+
                 job = JobState(
-                    id=job_id,  # Will be auto-generated if None
+                    job_id=job_id,  # Job tracking ID (required)
                     extraction_id=extraction_id,
-                    collection_document_id=collection_document_id,
+                    document_id=document_id,
+                    workflow_run_id=workflow_run_id,
                     status=status,
                     current_stage=current_stage,
                     progress_percent=progress_percent,
@@ -100,10 +119,11 @@ class JobRepository:
                 logger.info(
                     f"Created job state record",
                     extra={
-                        "job_id": job.id,
+                        "job_id": job.job_id,  # Log tracking ID, not primary key
                         "extraction_id": extraction_id,
-                        "collection_document_id": collection_document_id,
-                        "status": status
+                        "document_id": document_id,
+                        "status": status,
+                        "workflow_run_id": workflow_run_id
                     }
                 )
 
@@ -114,7 +134,7 @@ class JobRepository:
                     f"Failed to create job state: {e}",
                     extra={
                         "extraction_id": extraction_id,
-                        "collection_document_id": collection_document_id,
+                        "document_id": document_id,
                         "error": str(e)
                     }
                 )
@@ -126,10 +146,10 @@ class JobRepository:
     # ============================================================================
 
     def get_job(self, job_id: str) -> Optional[JobState]:
-        """Get job by ID.
+        """Get job by job_id (tracking ID).
 
         Args:
-            job_id: Job ID
+            job_id: Job tracking ID
 
         Returns:
             JobState object if found, None otherwise
@@ -137,7 +157,7 @@ class JobRepository:
         with self._get_session() as db:
             try:
                 return db.query(JobState).filter(
-                    JobState.id == job_id
+                    JobState.job_id == job_id
                 ).first()
             except SQLAlchemyError as e:
                 logger.error(
@@ -147,10 +167,10 @@ class JobRepository:
                 return None
 
     def get_job_by_extraction_id(self, extraction_id: str) -> Optional[JobState]:
-        """Get job by extraction/document ID.
+        """Get job by extraction ID.
 
         Args:
-            extraction_id: Extraction or document ID
+            extraction_id: Extraction ID
 
         Returns:
             JobState object if found, None otherwise
@@ -164,6 +184,48 @@ class JobRepository:
                 logger.error(
                     f"Failed to get job by extraction_id: {e}",
                     extra={"extraction_id": extraction_id, "error": str(e)}
+                )
+                return None
+
+    def get_job_by_document_id(self, document_id: str) -> Optional[JobState]:
+        """Get job by document ID.
+
+        Args:
+            document_id: Canonical document ID
+
+        Returns:
+            JobState object if found, None otherwise
+        """
+        with self._get_session() as db:
+            try:
+                return db.query(JobState).filter(
+                    JobState.document_id == document_id
+                ).first()
+            except SQLAlchemyError as e:
+                logger.error(
+                    f"Failed to get job by document_id: {e}",
+                    extra={"document_id": document_id, "error": str(e)}
+                )
+                return None
+
+    def get_job_by_workflow_run_id(self, workflow_run_id: str) -> Optional[JobState]:
+        """Get job by workflow run ID.
+
+        Args:
+            workflow_run_id: WorkflowRun ID
+
+        Returns:
+            JobState object if found, None otherwise
+        """
+        with self._get_session() as db:
+            try:
+                return db.query(JobState).filter(
+                    JobState.workflow_run_id == workflow_run_id
+                ).first()
+            except SQLAlchemyError as e:
+                logger.error(
+                    f"Failed to get job by workflow_run_id: {e}",
+                    extra={"workflow_run_id": workflow_run_id, "error": str(e)}
                 )
                 return None
 
@@ -183,7 +245,7 @@ class JobRepository:
         """Update job state fields.
 
         Args:
-            job_id: Job ID
+            job_id: Job tracking ID
             status: Updated status (processing, completed, failed)
             current_stage: Updated processing stage
             progress_percent: Updated progress percentage (0-100)
@@ -196,7 +258,7 @@ class JobRepository:
         with self._get_session() as db:
             try:
                 job = db.query(JobState).filter(
-                    JobState.id == job_id
+                    JobState.job_id == job_id
                 ).first()
 
                 if not job:
@@ -314,7 +376,7 @@ class JobRepository:
         """Delete a job state record.
 
         Args:
-            job_id: Job ID
+            job_id: Job tracking ID
 
         Returns:
             True if successful, False otherwise
@@ -322,7 +384,7 @@ class JobRepository:
         with self._get_session() as db:
             try:
                 job = db.query(JobState).filter(
-                    JobState.id == job_id
+                    JobState.job_id == job_id
                 ).first()
 
                 if not job:

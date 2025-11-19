@@ -355,6 +355,57 @@ class ExtractionRepository:
                 )
                 return None
 
+    def create_extraction_from_document(
+        self,
+        extraction_id: str,
+        document_id: str,
+        user_id: str,
+        context: Optional[str] = None,
+        status: str = "processing"
+    ) -> Optional[Extraction]:
+        """Create extraction record linked to existing document.
+
+        Args:
+            extraction_id: Unique extraction ID
+            document_id: Document ID (FK to documents table)
+            user_id: User ID
+            context: Optional user-provided context to guide extraction
+            status: Status (processing, completed, failed)
+
+        Returns:
+            Extraction object if successful, None on error
+        """
+        with self._get_session() as db:
+            try:
+                extraction = Extraction(
+                    id=extraction_id,
+                    document_id=document_id,
+                    user_id=user_id,
+                    context=context,
+                    status=status,
+                    from_cache=False,
+                    from_history=False
+                )
+
+                db.add(extraction)
+                db.commit()
+                db.refresh(extraction)
+
+                logger.debug(
+                    f"Created extraction record: {extraction_id}",
+                    extra={"extraction_id": extraction_id, "document_id": document_id}
+                )
+
+                return extraction
+
+            except SQLAlchemyError as e:
+                logger.error(
+                    f"Failed to create extraction record: {e}",
+                    extra={"extraction_id": extraction_id, "error": str(e)}
+                )
+                db.rollback()
+                return None
+
     def create_extraction_record(
         self,
         extraction_id: str,
@@ -639,4 +690,198 @@ class ExtractionRepository:
                     extra={"content_hash": content_hash, "error": str(e)}
                 )
                 db.rollback()
+                return None
+
+    def update_extraction_artifact(
+        self,
+        extraction_id: str,
+        artifact: dict,
+        status: str = "completed",
+        total_cost_usd: float = 0.0
+    ) -> bool:
+        """Update extraction with artifact and mark as completed.
+
+        Args:
+            extraction_id: Extraction ID
+            artifact: Artifact JSON (R2 pointer or inline data)
+            status: Status (default: completed)
+            total_cost_usd: Total cost in USD
+
+        Returns:
+            True if successful, False otherwise
+        """
+        with self._get_session() as db:
+            try:
+                extraction = db.query(Extraction).filter(
+                    Extraction.id == extraction_id
+                ).first()
+
+                if not extraction:
+                    logger.warning(
+                        f"Extraction not found for artifact update: {extraction_id}",
+                        extra={"extraction_id": extraction_id}
+                    )
+                    return False
+
+                extraction.artifact = artifact
+                extraction.status = status
+                extraction.total_cost_usd = total_cost_usd
+
+                if status == "completed":
+                    extraction.completed_at = datetime.now()
+
+                db.commit()
+
+                logger.info(
+                    f"Updated extraction artifact: {extraction_id}",
+                    extra={"extraction_id": extraction_id, "status": status}
+                )
+
+                return True
+
+            except SQLAlchemyError as e:
+                logger.error(
+                    f"Failed to update extraction artifact: {e}",
+                    extra={"extraction_id": extraction_id, "error": str(e)}
+                )
+                db.rollback()
+                return False
+
+    def mark_extraction_failed(
+        self,
+        extraction_id: str,
+        error_message: str
+    ) -> bool:
+        """Mark extraction as failed with error message.
+
+        Args:
+            extraction_id: Extraction ID
+            error_message: Error description
+
+        Returns:
+            True if successful, False otherwise
+        """
+        with self._get_session() as db:
+            try:
+                extraction = db.query(Extraction).filter(
+                    Extraction.id == extraction_id
+                ).first()
+
+                if not extraction:
+                    return False
+
+                extraction.status = "failed"
+                extraction.error_message = error_message[:500]  # Limit length
+
+                db.commit()
+
+                logger.info(
+                    f"Marked extraction as failed: {extraction_id}",
+                    extra={"extraction_id": extraction_id}
+                )
+
+                return True
+
+            except SQLAlchemyError as e:
+                logger.error(
+                    f"Failed to mark extraction as failed: {e}",
+                    extra={"extraction_id": extraction_id, "error": str(e)}
+                )
+                db.rollback()
+                return False
+
+    def check_duplicate_by_content_hash(
+        self,
+        content_hash: str,
+        user_id: str,
+        context: Optional[str] = None
+    ) -> Optional[Extraction]:
+        """Check if user already extracted this file with same context.
+
+        Uses content_hash to detect duplicates across different documents.
+        Duplicate = Same file content + Same context + Same user
+
+        IMPORTANT: Scoped per user! Different users extracting the same file
+        will each get their own extraction record and R2 artifact. This allows
+        independent deletion and maintains user privacy.
+
+        Args:
+            content_hash: SHA256 hash of file content
+            user_id: User ID (scopes duplicate check to this user only)
+            context: Optional extraction context
+
+        Returns:
+            Existing completed extraction if found, None otherwise
+        """
+        with self._get_session() as db:
+            try:
+                from app.db_models_documents import Document
+
+                # Join Extraction with Document to check content_hash
+                query = db.query(Extraction).join(
+                    Document, Extraction.document_id == Document.id
+                ).filter(
+                    Document.content_hash == content_hash,
+                    Extraction.user_id == user_id,
+                    Extraction.status == "completed"
+                )
+
+                # Match context (both None or both same string)
+                if context is None:
+                    query = query.filter(Extraction.context.is_(None))
+                else:
+                    query = query.filter(Extraction.context == context)
+
+                return query.first()
+
+            except SQLAlchemyError as e:
+                logger.error(
+                    f"Failed to check duplicate extraction: {e}",
+                    extra={"content_hash": content_hash, "user_id": user_id, "error": str(e)}
+                )
+                return None
+
+    def check_duplicate_by_document_id(
+        self,
+        document_id: str,
+        user_id: str,
+        context: Optional[str] = None
+    ) -> Optional[Extraction]:
+        """Check if user already extracted this specific document with same context.
+
+        Used for EXISTING library documents (faster than content_hash join).
+        Duplicate = Same document_id + Same context + Same user
+
+        IMPORTANT: Scoped per user! Even if multiple users have the same document
+        in their libraries, each user gets their own extraction record and R2 artifact.
+
+        Args:
+            document_id: Document ID (from library)
+            user_id: User ID (scopes duplicate check to this user only)
+            context: Optional extraction context
+
+        Returns:
+            Existing completed extraction if found, None otherwise
+        """
+        with self._get_session() as db:
+            try:
+                query = db.query(Extraction).filter(
+                    Extraction.document_id == document_id,
+                    Extraction.user_id == user_id,
+                    Extraction.status == "completed"
+                )
+
+                # Match context (both None or both same string)
+                if context is None:
+                    query = query.filter(Extraction.context.is_(None))
+                else:
+                    query = query.filter(Extraction.context == context)
+
+                return query.first()
+
+            except SQLAlchemyError as e:
+                logger.error(
+                    f"Failed to check duplicate extraction: {e}",
+                    extra={"document_id": document_id, "user_id": user_id, "error": str(e)}
+                )
                 return None
