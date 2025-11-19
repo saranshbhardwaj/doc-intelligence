@@ -27,14 +27,14 @@ export default function ManagementTeam({ data }) {
           return (
             <div
               key={index}
-              className="bg-gradient-to-br from-gray-50 to-white p-5 rounded-xl border border-gray-200 hover:shadow-lg transition-shadow"
+              className="bg-gradient-to-br from-gray-50 to-white p-5 rounded-xl border border-border hover:shadow-lg transition-shadow"
             >
               <div className="flex items-start gap-3">
-                <div className="w-12 h-12 bg-blue-600 rounded-full flex items-center justify-center text-white font-bold text-xl flex-shrink-0">
+                <div className="w-12 h-12 bg-blue-600 rounded-full flex items-center justify-center text-foreground font-bold text-xl flex-shrink-0">
                   {initials}
                 </div>
                 <div className="flex-1 min-w-0">
-                  <h4 className="font-bold text-gray-900 text-lg">
+                  <h4 className="font-bold text-foreground text-lg">
                     {safeText(member.name)}
                   </h4>
                   {member.title && (
@@ -43,7 +43,7 @@ export default function ManagementTeam({ data }) {
                     </p>
                   )}
                   {member.background && (
-                    <p className="text-sm text-gray-600 mt-2">
+                    <p className="text-sm text-muted-foreground mt-2">
                       {safeText(member.background)}
                     </p>
                   )}

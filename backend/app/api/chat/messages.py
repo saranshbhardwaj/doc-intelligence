@@ -150,6 +150,7 @@ async def chat_with_collection(
                 session_id=session.id,
                 collection_id=collection_id,
                 user_message=message,
+                user_id=user.id,
                 num_chunks=num_chunks
             ):
                 chunk_count += 1

@@ -1,7 +1,13 @@
 // src/pages/DashboardPage.jsx
 import { useState, useEffect } from "react";
 import { useNavigate, Link } from "react-router-dom";
-import { SignedIn, SignedOut, SignInButton, UserButton, useAuth } from "@clerk/clerk-react";
+import {
+  SignedIn,
+  SignedOut,
+  SignInButton,
+  UserButton,
+  useAuth,
+} from "@clerk/clerk-react";
 import DarkModeToggle from "../components/common/DarkModeToggle";
 import { useDarkMode } from "../hooks/useDarkMode";
 import { useUser, useUserActions } from "../store";
@@ -16,7 +22,13 @@ export default function DashboardPage() {
   const [error, setError] = useState(null);
 
   // Get state from Zustand store
-  const { info: userInfo, extractions, pagination, isLoadingInfo, isLoadingExtractions } = useUser();
+  const {
+    info: userInfo,
+    extractions,
+    pagination,
+    isLoadingInfo,
+    isLoadingExtractions,
+  } = useUser();
   const { refreshDashboard, loadMoreExtractions } = useUserActions();
 
   const loading = isLoadingInfo || isLoadingExtractions;
@@ -61,9 +73,9 @@ export default function DashboardPage() {
   };
 
   return (
-    <div className="min-h-screen bg-white dark:bg-[#121212] text-gray-900 dark:text-[#ececec] transition-colors duration-200">
+    <div className="min-h-screen bg-background dark:bg-[#121212] text-foreground dark:text-[#ececec] transition-colors duration-200">
       {/* Header */}
-      <header className="border-b border-gray-200 dark:border-[#2a2a2a]">
+      <header className="border-b border-border dark:border-[#2a2a2a]">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center py-4">
             <div className="flex items-center gap-8">
@@ -76,26 +88,38 @@ export default function DashboardPage() {
                   alt="Sand Cloud"
                   className="h-8 w-auto"
                 />
-                <span className="text-xl font-bold text-gray-900 dark:text-white">
+                <span className="text-xl font-bold text-foreground">
                   Sand Cloud
                 </span>
               </button>
               <nav className="hidden md:flex gap-6">
                 <Link
-                  to="/app"
-                  className="text-sm font-medium text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors"
+                  to="/app/library"
+                  className="text-sm font-medium text-muted-foreground dark:text-muted-foreground hover:text-foreground dark:hover:text-foreground transition-colors"
                 >
-                  Extract
+                  Library
                 </Link>
                 <Link
                   to="/app/chat"
-                  className="text-sm font-medium text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white transition-colors"
+                  className="text-sm font-medium text-muted-foreground dark:text-muted-foreground hover:text-foreground dark:hover:text-foreground transition-colors"
                 >
                   Chat
                 </Link>
                 <Link
+                  to="/app/workflows"
+                  className="text-sm font-medium text-muted-foreground dark:text-muted-foreground hover:text-foreground dark:hover:text-foreground transition-colors"
+                >
+                  Workflows
+                </Link>
+                <Link
+                  to="/app/extract"
+                  className="text-sm font-medium text-muted-foreground dark:text-muted-foreground hover:text-foreground dark:hover:text-foreground transition-colors"
+                >
+                  Extract
+                </Link>
+                <Link
                   to="/app/dashboard"
-                  className="text-sm font-medium text-gray-900 dark:text-white transition-colors"
+                  className="text-sm font-medium text-foreground transition-colors"
                 >
                   Dashboard
                 </Link>
@@ -107,7 +131,7 @@ export default function DashboardPage() {
 
               <SignedOut>
                 <SignInButton mode="modal">
-                  <button className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium">
+                  <button className="px-4 py-2 bg-blue-600 text-foreground rounded-lg hover:bg-blue-700 transition-colors text-sm font-medium">
                     Sign In
                   </button>
                 </SignInButton>

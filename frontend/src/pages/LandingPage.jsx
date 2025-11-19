@@ -1,6 +1,12 @@
 // src/pages/LandingPage.jsx
 import { useNavigate } from "react-router-dom";
-import { SignedIn, SignedOut, SignInButton, UserButton, useAuth } from "@clerk/clerk-react";
+import {
+  SignedIn,
+  SignedOut,
+  SignInButton,
+  UserButton,
+  useAuth,
+} from "@clerk/clerk-react";
 import { useEffect } from "react";
 import Hero from "../components/landing/Hero";
 import Features from "../components/landing/Features";
@@ -14,10 +20,10 @@ export default function LandingPage() {
   const { isDark, toggle } = useDarkMode();
   const { isSignedIn, isLoaded } = useAuth();
 
-  // Redirect signed-in users to dashboard (only after Clerk finishes loading)
+  // Redirect signed-in users to library (only after Clerk finishes loading)
   useEffect(() => {
     if (isLoaded && isSignedIn) {
-      navigate("/app/dashboard");
+      navigate("/app/library");
     }
   }, [isLoaded, isSignedIn, navigate]);
 
@@ -45,9 +51,9 @@ export default function LandingPage() {
   };
 
   return (
-    <div className="min-h-screen bg-white dark:bg-gray-900 transition-colors duration-200">
+    <div className="min-h-screen bg-background  transition-colors duration-200">
       {/* Navigation */}
-      <nav className="sticky top-0 z-50 bg-white/80 dark:bg-gray-900/80 backdrop-blur-lg border-b border-gray-200 dark:border-gray-800">
+      <nav className="sticky top-0 z-50 bg-background/80 /80 backdrop-blur-lg border-b border-border dark:border-gray-800">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center h-16">
             {/* Logo */}
@@ -57,7 +63,7 @@ export default function LandingPage() {
                 alt="Sand Cloud"
                 className="h-8 w-auto"
               />
-              <span className="text-xl font-bold text-gray-900 dark:text-white">
+              <span className="text-xl font-bold text-foreground">
                 Sand Cloud
               </span>
             </div>
@@ -66,19 +72,19 @@ export default function LandingPage() {
             <div className="hidden md:flex items-center gap-8">
               <a
                 href="#features"
-                className="text-gray-600 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
+                className="text-muted-foreground dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
               >
                 Features
               </a>
               {/* <a
                 href="#pricing"
-                className="text-gray-600 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
+                className="text-muted-foreground dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
               >
                 Pricing
               </a> */}
               <a
                 href="#faq"
-                className="text-gray-600 dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
+                className="text-muted-foreground dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
               >
                 FAQ
               </a>
@@ -91,23 +97,23 @@ export default function LandingPage() {
               {/* Authentication buttons */}
               <SignedOut>
                 <SignInButton mode="modal">
-                  <button className="px-4 py-2 text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white font-medium transition-colors">
+                  <button className="px-4 py-2 text-muted-foreground dark:text-gray-300 hover:text-foreground dark:hover:text-foreground font-medium transition-colors">
                     Sign In
                   </button>
                 </SignInButton>
                 <button
                   onClick={handleGetStarted}
-                  className="px-6 py-2 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white font-semibold rounded-lg transition-all duration-200"
+                  className="px-6 py-2 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-foreground font-semibold rounded-lg transition-all duration-200"
                 >
                   Get Started Free
                 </button>
               </SignedOut>
               <SignedIn>
                 <button
-                  onClick={() => navigate("/app/dashboard")}
-                  className="px-6 py-2 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white font-semibold rounded-lg transition-all duration-200"
+                  onClick={() => navigate("/app/library")}
+                  className="px-6 py-2 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-foreground font-semibold rounded-lg transition-all duration-200"
                 >
-                  Go to Dashboard
+                  Go to App
                 </button>
                 <UserButton />
               </SignedIn>
@@ -120,7 +126,7 @@ export default function LandingPage() {
                 toggle={toggle}
                 variant="inline"
               />
-              <button className="text-gray-600 dark:text-gray-300">
+              <button className="text-muted-foreground dark:text-gray-300">
                 <svg
                   className="w-6 h-6"
                   fill="none"
@@ -159,7 +165,7 @@ export default function LandingPage() {
       {/* CTA Section */}
       <div className="py-24 bg-gradient-to-r from-blue-600 to-purple-600">
         <div className="max-w-4xl mx-auto text-center px-4">
-          <h2 className="text-4xl sm:text-5xl font-bold text-white mb-6">
+          <h2 className="text-4xl sm:text-5xl font-bold text-foreground mb-6">
             Ready to 10x Your Deal Analysis?
           </h2>
           <p className="text-xl text-blue-100 mb-8">
@@ -168,7 +174,7 @@ export default function LandingPage() {
           <SignedOut>
             <button
               onClick={handleGetStarted}
-              className="px-10 py-4 bg-white hover:bg-gray-100 text-blue-600 font-bold rounded-xl shadow-xl hover:shadow-2xl transform hover:scale-105 transition-all duration-200"
+              className="px-10 py-4 bg-background hover:bg-popover text-blue-600 font-bold rounded-xl shadow-xl hover:shadow-2xl transform hover:scale-105 transition-all duration-200"
             >
               Get Started Free
             </button>
@@ -178,23 +184,23 @@ export default function LandingPage() {
           </SignedOut>
           <SignedIn>
             <button
-              onClick={() => navigate("/app/dashboard")}
-              className="px-10 py-4 bg-white hover:bg-gray-100 text-blue-600 font-bold rounded-xl shadow-xl hover:shadow-2xl transform hover:scale-105 transition-all duration-200"
+              onClick={() => navigate("/app/library")}
+              className="px-10 py-4 bg-background hover:bg-popover text-blue-600 font-bold rounded-xl shadow-xl hover:shadow-2xl transform hover:scale-105 transition-all duration-200"
             >
-              Go to Dashboard
+              Go to App
             </button>
           </SignedIn>
         </div>
       </div>
 
       {/* Footer */}
-      <footer className="bg-gray-900 dark:bg-black text-gray-400 py-12">
+      <footer className="bg-background dark:bg-black text-muted-foreground py-12">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
             {/* Company */}
             <div>
               <div className="mb-4">
-                <span className="text-2xl font-bold text-white">
+                <span className="text-2xl font-bold text-foreground">
                   Sand Cloud
                 </span>
               </div>
@@ -205,12 +211,12 @@ export default function LandingPage() {
 
             {/* Product */}
             <div>
-              <h3 className="text-white font-semibold mb-4">Product</h3>
+              <h3 className="text-foreground font-semibold mb-4">Product</h3>
               <ul className="space-y-2 text-sm">
                 <li>
                   <a
                     href="#features"
-                    className="hover:text-white transition-colors"
+                    className="hover:text-foreground transition-colors"
                   >
                     Features
                   </a>
@@ -218,18 +224,24 @@ export default function LandingPage() {
                 {/* <li>
                   <a
                     href="#pricing"
-                    className="hover:text-white transition-colors"
+                    className="hover:text-foreground transition-colors"
                   >
                     Pricing
                   </a>
                 </li> */}
                 <li>
-                  <a href="#" className="hover:text-white transition-colors">
+                  <a
+                    href="#"
+                    className="hover:text-foreground transition-colors"
+                  >
                     Changelog
                   </a>
                 </li>
                 <li>
-                  <a href="#" className="hover:text-white transition-colors">
+                  <a
+                    href="#"
+                    className="hover:text-foreground transition-colors"
+                  >
                     Roadmap
                   </a>
                 </li>
@@ -238,25 +250,37 @@ export default function LandingPage() {
 
             {/* Company */}
             <div>
-              <h3 className="text-white font-semibold mb-4">Company</h3>
+              <h3 className="text-foreground font-semibold mb-4">Company</h3>
               <ul className="space-y-2 text-sm">
                 <li>
-                  <a href="#" className="hover:text-white transition-colors">
+                  <a
+                    href="#"
+                    className="hover:text-foreground transition-colors"
+                  >
                     About
                   </a>
                 </li>
                 <li>
-                  <a href="#" className="hover:text-white transition-colors">
+                  <a
+                    href="#"
+                    className="hover:text-foreground transition-colors"
+                  >
                     Blog
                   </a>
                 </li>
                 <li>
-                  <a href="#" className="hover:text-white transition-colors">
+                  <a
+                    href="#"
+                    className="hover:text-foreground transition-colors"
+                  >
                     Careers
                   </a>
                 </li>
                 <li>
-                  <a href="#" className="hover:text-white transition-colors">
+                  <a
+                    href="#"
+                    className="hover:text-foreground transition-colors"
+                  >
                     Contact
                   </a>
                 </li>
@@ -265,20 +289,29 @@ export default function LandingPage() {
 
             {/* Legal */}
             <div>
-              <h3 className="text-white font-semibold mb-4">Legal</h3>
+              <h3 className="text-foreground font-semibold mb-4">Legal</h3>
               <ul className="space-y-2 text-sm">
                 <li>
-                  <a href="#" className="hover:text-white transition-colors">
+                  <a
+                    href="#"
+                    className="hover:text-foreground transition-colors"
+                  >
                     Privacy Policy
                   </a>
                 </li>
                 <li>
-                  <a href="#" className="hover:text-white transition-colors">
+                  <a
+                    href="#"
+                    className="hover:text-foreground transition-colors"
+                  >
                     Terms of Service
                   </a>
                 </li>
                 <li>
-                  <a href="#" className="hover:text-white transition-colors">
+                  <a
+                    href="#"
+                    className="hover:text-foreground transition-colors"
+                  >
                     Security
                   </a>
                 </li>

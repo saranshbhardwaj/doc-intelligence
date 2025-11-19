@@ -11,7 +11,7 @@ export default function InvestmentThesis({ data }) {
   return (
     <Section title="Investment Thesis" icon={Target} highlight={true}>
       <div className="bg-gradient-to-br from-blue-50 to-indigo-50 p-6 rounded-xl border-2 border-blue-200">
-        <p className="text-gray-800 leading-relaxed whitespace-pre-line text-base">
+        <p className="text-muted-foreground leading-relaxed whitespace-pre-line text-base">
           {safeText(data.investment_thesis)}
         </p>
       </div>

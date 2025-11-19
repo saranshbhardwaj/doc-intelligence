@@ -7,7 +7,7 @@ export default function CompanyHeader({ data, metadata }) {
     <div
       className="bg-gradient-to-r from-blue-600 to-blue-800 
                 dark:from-blue-700 dark:to-blue-900 
-                rounded-xl shadow-xl p-8 text-white"
+                rounded-xl shadow-xl p-8 text-foreground"
     >
       <div className="flex items-center gap-4 mb-4">
         <Building2 className="w-12 h-12" />
@@ -22,11 +22,11 @@ export default function CompanyHeader({ data, metadata }) {
       </div>
       {data.company_info?.industry && (
         <div className="flex gap-2 mt-4">
-          <span className="bg-blue-500 px-4 py-2 rounded-full text-sm font-semibold">
+          <span className="bg-primary px-4 py-2 rounded-full text-sm font-semibold">
             {safeText(data.company_info.industry)}
           </span>
           {data.company_info.secondary_industry && (
-            <span className="bg-blue-500 px-4 py-2 rounded-full text-sm font-semibold">
+            <span className="bg-primary px-4 py-2 rounded-full text-sm font-semibold">
               {safeText(data.company_info.secondary_industry)}
             </span>
           )}

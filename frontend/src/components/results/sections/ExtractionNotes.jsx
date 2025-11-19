@@ -11,7 +11,7 @@ export default function ExtractionNotes({ data }) {
   return (
     <Section title="Extraction Notes" icon={FileText}>
       <div className="bg-yellow-50 p-4 rounded-lg border border-yellow-200">
-        <p className="text-sm text-gray-700 whitespace-pre-line">
+        <p className="text-sm text-muted-foreground whitespace-pre-line">
           {safeText(data.extraction_notes)}
         </p>
       </div>

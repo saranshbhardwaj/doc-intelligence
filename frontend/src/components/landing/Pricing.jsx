@@ -65,41 +65,43 @@ export default function Pricing({ onSelectPlan }) {
     },
   ];
 
+  // Semantic tokens only — no hard-coded tailwind palette or dark: classes
   const colorClasses = {
     gray: {
-      bg: "bg-gray-50 dark:bg-gray-800",
-      border: "border-gray-200 dark:border-gray-700",
-      button: "bg-gray-600 hover:bg-gray-700 text-white",
-      icon: "bg-gray-100 dark:bg-gray-700 text-gray-600 dark:text-gray-400",
+      bg: "bg-card",
+      border: "border-border",
+      button: "bg-popover text-foreground hover:bg-muted",
+      icon: "bg-popover text-muted-foreground",
     },
     blue: {
-      bg: "bg-blue-50 dark:bg-blue-900/20",
-      border: "border-blue-500 dark:border-blue-500",
+      // Use primary / accent tokens; gradient uses color names from tailwind config
+      bg: "bg-card",
+      border: "border-border",
       button:
-        "bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white shadow-lg",
-      icon: "bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400",
+        "bg-gradient-to-r from-primary to-accent text-primary-foreground shadow-lg hover:opacity-95",
+      icon: "bg-popover text-primary-foreground",
     },
     purple: {
-      bg: "bg-purple-50 dark:bg-purple-900/20",
-      border: "border-purple-300 dark:border-purple-700",
-      button: "bg-purple-600 hover:bg-purple-700 text-white",
-      icon: "bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400",
+      bg: "bg-card",
+      border: "border-border",
+      button: "bg-accent text-accent-foreground hover:bg-accent/90",
+      icon: "bg-popover text-accent-foreground",
     },
   };
 
   return (
-    <div className="py-24 bg-gray-50 dark:bg-gray-800">
+    <div className="py-24 bg-background text-foreground">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         {/* Section header */}
         <div className="text-center mb-16">
-          <h2 className="text-4xl sm:text-5xl font-bold text-gray-900 dark:text-white mb-4">
+          <h2 className="text-4xl sm:text-5xl font-bold text-foreground mb-4">
             Simple,
-            <span className="bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
+            <span className="bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
               {" "}
               Transparent Pricing
             </span>
           </h2>
-          <p className="text-xl text-gray-600 dark:text-gray-300 max-w-2xl mx-auto">
+          <p className="text-xl text-muted-foreground max-w-2xl mx-auto">
             Start free, upgrade when you need more. No hidden fees.
           </p>
         </div>
@@ -122,7 +124,7 @@ export default function Pricing({ onSelectPlan }) {
                 {/* Popular badge */}
                 {plan.popular && (
                   <div className="absolute -top-4 left-1/2 transform -translate-x-1/2">
-                    <span className="px-4 py-1 bg-gradient-to-r from-blue-600 to-purple-600 text-white text-sm font-semibold rounded-full shadow-lg">
+                    <span className="px-4 py-1 bg-gradient-to-r from-primary to-accent text-primary-foreground text-sm font-semibold rounded-full shadow-lg">
                       Most Popular
                     </span>
                   </div>
@@ -136,26 +138,24 @@ export default function Pricing({ onSelectPlan }) {
                 </div>
 
                 {/* Plan name */}
-                <h3 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">
+                <h3 className="text-2xl font-bold text-foreground mb-2">
                   {plan.name}
                 </h3>
 
                 {/* Price */}
                 <div className="mb-4">
-                  <span className="text-5xl font-extrabold text-gray-900 dark:text-white">
+                  <span className="text-5xl font-extrabold text-foreground">
                     {plan.price}
                   </span>
                   {plan.period && (
-                    <span className="text-gray-600 dark:text-gray-400 ml-2">
+                    <span className="text-muted-foreground ml-2">
                       / {plan.period}
                     </span>
                   )}
                 </div>
 
                 {/* Description */}
-                <p className="text-gray-600 dark:text-gray-400 mb-6">
-                  {plan.description}
-                </p>
+                <p className="text-muted-foreground mb-6">{plan.description}</p>
 
                 {/* CTA Button */}
                 <button
@@ -169,8 +169,8 @@ export default function Pricing({ onSelectPlan }) {
                 <div className="space-y-3 mb-4">
                   {plan.features.map((feature, idx) => (
                     <div key={idx} className="flex items-start gap-3">
-                      <Check className="w-5 h-5 text-green-600 dark:text-green-400 flex-shrink-0 mt-0.5" />
-                      <span className="text-sm text-gray-700 dark:text-gray-300">
+                      <Check className="w-5 h-5 text-accent-foreground flex-shrink-0 mt-0.5" />
+                      <span className="text-sm text-muted-foreground">
                         {feature}
                       </span>
                     </div>
@@ -179,10 +179,10 @@ export default function Pricing({ onSelectPlan }) {
 
                 {/* Limitations (if any) */}
                 {plan.limitations.length > 0 && (
-                  <div className="pt-4 border-t border-gray-200 dark:border-gray-700 space-y-2">
+                  <div className="pt-4 border-t border-border space-y-2">
                     {plan.limitations.map((limitation, idx) => (
                       <div key={idx} className="flex items-start gap-3">
-                        <span className="text-sm text-gray-500 dark:text-gray-500">
+                        <span className="text-sm text-muted-foreground">
                           • {limitation}
                         </span>
                       </div>
@@ -196,7 +196,7 @@ export default function Pricing({ onSelectPlan }) {
 
         {/* FAQ or guarantee */}
         <div className="mt-16 text-center">
-          <p className="text-gray-600 dark:text-gray-400">
+          <p className="text-muted-foreground">
             All plans include 7-day money-back guarantee • Cancel anytime • No
             credit card required for Free tier
           </p>

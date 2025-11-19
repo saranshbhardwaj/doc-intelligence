@@ -12,6 +12,7 @@ python-json-logger==2.0.7
 httpx==0.28.1
 aiohttp==3.9.1
 celery[redis]==5.3.6
+redis>=4.7.0
 
 # Database
 sqlalchemy==2.0.23
@@ -29,3 +30,12 @@ azure-ai-documentintelligence==1.0.0
 # Embeddings & Vector Search
 sentence-transformers==3.3.1  # For local embeddings (all-MiniLM-L6-v2)
 openai==1.59.5  # For OpenAI embeddings (optional, if enabled in config)
+Jinja2==3.1.4  # Template rendering for workflow prompts
+jsonschema==4.23.0  # Strict JSON Schema validation for workflow outputs
+python-docx==1.2.0
+pypandoc==1.16.2
+markdown==3.4.4
+pandas==2.2.3
+xlsxwriter==3.1.2
+prometheus-client==0.18.0
+boto3==1.35.54

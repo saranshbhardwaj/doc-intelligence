@@ -1,5 +1,5 @@
 // src/components/results/sections/ActionButtons.jsx
-import { Download, Share2, Printer } from "lucide-react";
+import { Download, Printer } from "lucide-react";
 import { exportToExcel } from "../../../utils/excelExport/index";
 
 export default function ActionButtons({ onFeedbackClick, data, metadata }) {
@@ -16,41 +16,34 @@ export default function ActionButtons({ onFeedbackClick, data, metadata }) {
     window.print();
   };
 
-  // const handleShare = () => {
-  //   console.log("Share");
-  //   // TODO: Implement
-  // };
-
   return (
-    <div className="bg-white dark:bg-gray-800 rounded-xl shadow-md p-4 flex flex-wrap justify-between items-center gap-3">
+    <div className="bg-card rounded-xl shadow-md p-4 flex flex-wrap justify-between items-center gap-3">
       <div className="flex flex-wrap gap-3">
         {/* Export to Excel */}
         <button
           onClick={handleExportExcel}
-          className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors font-semibold shadow-sm"
+          className="flex items-center gap-2 px-4 py-2 bg-destructive text-foreground rounded-lg hover:bg-destructive/90 transition-colors font-semibold shadow-sm"
         >
           <Download className="w-4 h-4" />
           Export to Excel
         </button>
 
+        {/* Print Report */}
         <button
           onClick={handlePrint}
-          className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors font-semibold shadow-sm"
+          className="flex items-center gap-2 px-4 py-2 bg-primary text-foreground rounded-lg hover:bg-primary/90 transition-colors font-semibold shadow-sm"
         >
           <Printer className="w-4 h-4" />
           Print Report
         </button>
-        {/* <button
-          onClick={handleShare}
-          className="flex items-center gap-2 px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors font-semibold shadow-sm"
-        >
-          <Share2 className="w-4 h-4" />
-          Share
-        </button> */}
+
+        {/* You can add Share button here if needed */}
       </div>
+
+      {/* Feedback button */}
       <button
         onClick={onFeedbackClick}
-        className="flex items-center gap-2 px-4 py-2 bg-gray-600 dark:bg-gray-700 text-white rounded-lg hover:bg-gray-700 dark:hover:bg-gray-600 transition-colors font-semibold shadow-sm"
+        className="flex items-center gap-2 px-4 py-2 bg-muted text-foreground rounded-lg hover:bg-muted/90 transition-colors font-semibold shadow-sm"
       >
         <svg
           className="w-4 h-4"

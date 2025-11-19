@@ -92,18 +92,65 @@ async def stream_job_progress(job_id: str, token: Optional[str] = Query(None)):
     if not job:
         raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
 
-    # Get the extraction to check user ownership
-    extraction = extraction_repo.get_extraction(job.extraction_id)
-    if not extraction:
-        raise HTTPException(status_code=404, detail=f"Extraction not found for job {job_id}")
+    # Generic ownership verification: check which entity type this job belongs to
+    # JobState supports: extraction_id, document_id, workflow_run_id (exactly one is set)
+    entity_owner_id = None
+    entity_type = None
 
-    # Verify user owns this extraction
-    if extraction.user_id != user_id:
-        logger.warning(f"[SSE] User {user_id} attempted to access job {job_id} owned by {extraction.user_id}",
-                     extra={"job_id": job_id, "user_id": user_id, "owner_id": extraction.user_id})
+    if job.extraction_id:
+        # Extract Mode: verify through extraction
+        extraction = extraction_repo.get_extraction(job.extraction_id)
+        if not extraction:
+            raise HTTPException(status_code=404, detail=f"Extraction not found for job {job_id}")
+        entity_owner_id = extraction.user_id
+        entity_type = "extraction"
+
+    elif job.workflow_run_id:
+        # Workflow Mode: verify through workflow run
+        from app.repositories.workflow_repository import WorkflowRepository
+        from app.database import SessionLocal
+        db = SessionLocal()
+        try:
+            workflow_repo = WorkflowRepository(db)
+            run = workflow_repo.get_run(job.workflow_run_id)
+            if not run:
+                raise HTTPException(status_code=404, detail=f"Workflow run not found for job {job_id}")
+            entity_owner_id = run.user_id
+            entity_type = "workflow"
+        finally:
+            db.close()
+
+    elif job.document_id:
+        # Chat Mode: verify through document
+        from app.db_models_documents import Document
+        from app.database import SessionLocal
+        db = SessionLocal()
+        try:
+            doc = db.query(Document).filter(Document.id == job.document_id).first()
+            if not doc:
+                raise HTTPException(status_code=404, detail=f"Document not found for job {job_id}")
+            entity_owner_id = doc.user_id
+            entity_type = "document"
+        finally:
+            db.close()
+    else:
+        # No entity associated with job (should never happen due to DB constraints)
+        logger.error(f"[SSE] Job {job_id} has no associated entity (extraction_id, workflow_run_id, or document_id)",
+                    extra={"job_id": job_id})
+        raise HTTPException(status_code=404, detail=f"Job {job_id} has no associated entity")
+
+    # Verify ownership
+    if entity_owner_id != user_id:
+        logger.warning(
+            f"[SSE] User {user_id} attempted to access {entity_type} job {job_id} owned by {entity_owner_id}",
+            extra={"job_id": job_id, "user_id": user_id, "owner_id": entity_owner_id, "entity_type": entity_type}
+        )
         raise HTTPException(status_code=403, detail="You don't have permission to access this job")
 
-    logger.info(f"[SSE] User {user_id} authorized to stream job {job_id}", extra={"job_id": job_id})
+    logger.info(
+        f"[SSE] User {user_id} authorized to stream {entity_type} job {job_id}",
+        extra={"job_id": job_id, "entity_type": entity_type}
+    )
 
     async def event_generator():
         """Async generator bridging Redis pub/sub to SSE.
@@ -243,9 +290,44 @@ async def get_job_status(job_id: str, user: User = Depends(get_current_user)):
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    # Verify user owns this job
-    extraction = extraction_repo.get_extraction(job.extraction_id)
-    if not extraction or extraction.user_id != user.id:
+    # Generic ownership verification (same as SSE endpoint)
+    entity_owner_id = None
+
+    if job.extraction_id:
+        extraction = extraction_repo.get_extraction(job.extraction_id)
+        if not extraction:
+            raise HTTPException(status_code=404, detail="Extraction not found")
+        entity_owner_id = extraction.user_id
+
+    elif job.workflow_run_id:
+        from app.repositories.workflow_repository import WorkflowRepository
+        from app.database import SessionLocal
+        db = SessionLocal()
+        try:
+            workflow_repo = WorkflowRepository(db)
+            run = workflow_repo.get_run(job.workflow_run_id)
+            if not run:
+                raise HTTPException(status_code=404, detail="Workflow run not found")
+            entity_owner_id = run.user_id
+        finally:
+            db.close()
+
+    elif job.document_id:
+        from app.db_models_documents import Document
+        from app.database import SessionLocal
+        db = SessionLocal()
+        try:
+            doc = db.query(Document).filter(Document.id == job.document_id).first()
+            if not doc:
+                raise HTTPException(status_code=404, detail="Document not found")
+            entity_owner_id = doc.user_id
+        finally:
+            db.close()
+    else:
+        raise HTTPException(status_code=404, detail="Job has no associated entity")
+
+    # Verify ownership
+    if entity_owner_id != user.id:
         raise HTTPException(status_code=403, detail="You don't have permission to access this job")
 
     return {
@@ -287,9 +369,45 @@ async def retry_job(job_id: str, user: User = Depends(get_current_user)):
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    # Verify user owns this job
-    extraction = extraction_repo.get_extraction(job.extraction_id)
-    if not extraction or extraction.user_id != user.id:
+    # Generic ownership verification (same as SSE endpoint)
+    entity_owner_id = None
+    extraction = None
+
+    if job.extraction_id:
+        extraction = extraction_repo.get_extraction(job.extraction_id)
+        if not extraction:
+            raise HTTPException(status_code=404, detail="Extraction not found")
+        entity_owner_id = extraction.user_id
+
+    elif job.workflow_run_id:
+        from app.repositories.workflow_repository import WorkflowRepository
+        from app.database import SessionLocal
+        db = SessionLocal()
+        try:
+            workflow_repo = WorkflowRepository(db)
+            run = workflow_repo.get_run(job.workflow_run_id)
+            if not run:
+                raise HTTPException(status_code=404, detail="Workflow run not found")
+            entity_owner_id = run.user_id
+        finally:
+            db.close()
+
+    elif job.document_id:
+        from app.db_models_documents import Document
+        from app.database import SessionLocal
+        db = SessionLocal()
+        try:
+            doc = db.query(Document).filter(Document.id == job.document_id).first()
+            if not doc:
+                raise HTTPException(status_code=404, detail="Document not found")
+            entity_owner_id = doc.user_id
+        finally:
+            db.close()
+    else:
+        raise HTTPException(status_code=404, detail="Job has no associated entity")
+
+    # Verify ownership
+    if entity_owner_id != user.id:
         raise HTTPException(status_code=403, detail="You don't have permission to retry this job")
 
     if job.status != "failed":

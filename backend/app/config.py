@@ -78,10 +78,35 @@ class Settings(BaseSettings):
     cheap_llm_max_tokens: int = 4000  # Summaries are shorter
     cheap_llm_timeout_seconds: int = 60  # Summaries are faster
 
+    # ===== CHAT MEMORY SETTINGS =====
+    # Number of most recent messages (user+assistant turns) to include verbatim
+    chat_verbatim_message_count: int = 4
+    # Ratio of estimated token usage (history + current user message) to max input
+    # at which we trigger summarization of older history (0.50 - 0.60 per user guidance)
+    chat_summary_trigger_ratio: float = 0.55
+    # Minimum number of messages before we even consider summarization
+    chat_summary_min_messages: int = 8
+    # Hard cap on total messages examined when building context (for safety)
+    chat_max_history_messages: int = 150
+    # Maximum user message length enforced at API/UI layer (documentation only here)
+    chat_max_user_chars: int = 10_000
+    # Chat-specific prompt budget (chars) separate from global llm_max_input_chars
+    # This is the maximum total characters we will pack (context + history + user message) BEFORE reserving
+    chat_max_input_chars: int = 60_000
+    # Reserved headroom for the model's own completion to avoid truncation (chars)
+    chat_answer_reserve_chars: int = 10_000
+    # Cache TTL for conversation summaries (seconds). If 0 or negative, caching disabled.
+    chat_summary_cache_ttl_seconds: int = 86_400
+
     # Celery / Task Queue
     use_celery: bool = False  # Toggle to enable Celery task pipeline
     celery_broker_url: str = "redis://localhost:6379/0"
     celery_result_backend: str = "redis://localhost:6379/0"
+
+    # Cache backend selection
+    # If enabled, DocumentCache will use Redis instead of file-backed JSON files
+    use_redis_cache: bool = False
+    redis_url: str = "redis://localhost:6379/1"
 
     # Chunking Settings
     enable_chunking: bool = True  # Enable multi-stage LLM processing with chunking
@@ -134,6 +159,22 @@ class Settings(BaseSettings):
     # Environment
     environment: str = "development"  # development, production
     mock_mode: bool = False
+
+    # ===== EXPORT / STORAGE SETTINGS =====
+    # Cloudflare R2 (S3-compatible) storage for large export artifacts
+    exports_use_r2: bool = False  # Enable R2 storage for exports instead of direct streaming
+    r2_access_key_id: str = ""
+    r2_secret_access_key: str = ""
+    r2_bucket: str = ""
+    r2_endpoint_url: str = ""  # e.g. https://<accountid>.r2.cloudflarestorage.com
+    r2_presign_expiry: int = 3600  # seconds for signed URL validity
+
+    # ===== WORKFLOW BUDGET SETTINGS =====
+    # Maximum tokens and cost per workflow run (to prevent runaway costs)
+    workflow_max_tokens_per_run: int = 200_000  # Max tokens (input + output) per workflow run
+    workflow_max_cost_per_run_usd: float = 5.0  # Max USD cost per workflow run
+    workflow_max_attempts: int = 3  # Max LLM generation attempts with retry
+    workflow_context_max_chars: int = 150_000  # Max context characters per workflow run
     
     class Config:
         # Point explicitly to backend/.env so scripts run from repo root still load variables

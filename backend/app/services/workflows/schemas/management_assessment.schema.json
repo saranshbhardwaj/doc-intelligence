@@ -1,0 +1,126 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "management_assessment.schema.json",
+  "title": "Management Assessment Output",
+  "type": "object",
+  "required": ["executive_summary", "leadership_team", "organizational_structure", "succession_planning", "capability_gaps", "recommendations", "meta"],
+  "properties": {
+    "executive_summary": {
+      "type": "object",
+      "required": ["overall_rating", "key_strengths", "critical_gaps", "recommendation"],
+      "properties": {
+        "overall_rating": {"type": "string", "enum": ["Strong", "Adequate", "Weak"]},
+        "key_strengths": {"type": "array", "items": {"type": "string"}},
+        "critical_gaps": {"type": "array", "items": {"type": "string"}},
+        "recommendation": {"type": "string"}
+      }
+    },
+    "leadership_team": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["name", "role", "background_summary", "rating", "citation"],
+        "properties": {
+          "name": {"type": "string"},
+          "role": {"type": "string"},
+          "tenure_years": {"type": ["integer", "number"]},
+          "background_summary": {"type": "string"},
+          "strengths": {"type": "array", "items": {"type": "string"}},
+          "weaknesses": {"type": "array", "items": {"type": "string"}},
+          "rating": {"type": "string", "enum": ["Strong", "Adequate", "Weak"]},
+          "succession_risk": {"type": "string", "enum": ["High", "Medium", "Low"]},
+          "citation": {"type": "array", "items": {"type": "string"}}
+        }
+      }
+    },
+    "organizational_structure": {
+      "type": "object",
+      "required": ["org_chart_summary"],
+      "properties": {
+        "org_chart_summary": {"type": "string"},
+        "headcount": {"type": "integer"},
+        "key_departments": {"type": "array", "items": {"type": "string"}},
+        "span_of_control_issues": {"type": "array", "items": {"type": "string"}},
+        "structural_gaps": {"type": "array", "items": {"type": "string"}},
+        "citation": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "compensation_alignment": {
+      "type": "object",
+      "properties": {
+        "equity_ownership": {"type": "array", "items": {"type": "string"}},
+        "incentive_structure": {"type": "string"},
+        "alignment_score": {"type": "string"},
+        "concerns": {"type": "array", "items": {"type": "string"}},
+        "citation": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "culture_assessment": {
+      "type": "object",
+      "properties": {
+        "cultural_strengths": {"type": "array", "items": {"type": "string"}},
+        "cultural_risks": {"type": "array", "items": {"type": "string"}},
+        "employee_retention_metrics": {"type": "string"},
+        "citation": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "succession_planning": {
+      "type": "object",
+      "required": ["key_person_dependencies", "succession_risks"],
+      "properties": {
+        "key_person_dependencies": {"type": "array", "items": {"type": "string"}},
+        "backup_readiness": {"type": "string"},
+        "succession_risks": {"type": "array", "items": {"type": "string"}},
+        "mitigation_plans": {"type": "array", "items": {"type": "string"}},
+        "citation": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "capability_gaps": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["gap_area", "severity", "impact_on_growth"],
+        "properties": {
+          "gap_area": {"type": "string"},
+          "severity": {"type": "string", "enum": ["High", "Medium", "Low"]},
+          "impact_on_growth": {"type": "string"},
+          "recommended_hire": {"type": "string"},
+          "citation": {"type": "array", "items": {"type": "string"}}
+        }
+      }
+    },
+    "board_governance": {
+      "type": "object",
+      "properties": {
+        "board_composition": {"type": "string"},
+        "independence_score": {"type": "string"},
+        "governance_strengths": {"type": "array", "items": {"type": "string"}},
+        "governance_gaps": {"type": "array", "items": {"type": "string"}},
+        "citation": {"type": "array", "items": {"type": "string"}}
+      }
+    },
+    "recommendations": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["priority", "action", "rationale", "timeline", "owner"],
+        "properties": {
+          "priority": {"type": "integer", "minimum": 1},
+          "action": {"type": "string"},
+          "rationale": {"type": "string"},
+          "timeline": {"type": "string"},
+          "owner": {"type": "string", "enum": ["Management", "Investor", "Joint", "Board"]}
+        }
+      }
+    },
+    "meta": {
+      "type": "object",
+      "required": ["version"],
+      "properties": {
+        "version": {"type": "integer", "const": 1}
+      }
+    }
+  }
+}

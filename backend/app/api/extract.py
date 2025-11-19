@@ -30,10 +30,17 @@ from app.config import settings
 from app.utils.logging import logger
 from app.repositories.job_repository import JobRepository
 from app.repositories.extraction_repository import ExtractionRepository
+from app.repositories.document_repository import DocumentRepository
 
 # Orchestration service
 from app.services.async_pipeline.extraction_orchestrator import process_document_async
 from app.services.tasks import start_extraction_chain
+from app.services.tasks.extraction import start_extraction_from_chunks_chain
+from app.services.artifacts import load_extraction_artifact, delete_artifact
+from app.utils.id_generator import generate_id
+from app.db_models_chat import DocumentChunk
+from app.database import SessionLocal
+import tempfile
 
 router = APIRouter()
 
@@ -489,3 +496,346 @@ async def get_extraction_result(extraction_id: str):
         },
         "from_cache": extraction.from_cache or False
     }
+
+
+@router.post("/api/extract/temp")
+async def extract_temp_document(
+    file: UploadFile = File(...),
+    context: str = Form(None),
+    user: User = Depends(get_current_user)
+):
+    """
+    Upload temporary file for extraction only (no library save, no embeddings).
+
+    Flow:
+        1. Create Document record (status='temp', no embeddings)
+        2. Create Extraction record
+        3. Create JobState
+        4. Trigger full extraction pipeline (parse → chunk → summarize → extract → store R2)
+        5. Return job_id for SSE streaming
+    """
+    logger.info("Temp extraction request", extra={"filename": file.filename, "user_id": user.id})
+
+    try:
+        # Read and validate file
+        content = await file.read()
+        document_processor.validate_file(file.filename, content)
+        content_hash = hashlib.sha256(content).hexdigest()
+
+        # Save temp file for processing
+        temp_dir = os.getenv("SHARED_UPLOAD_ROOT", tempfile.gettempdir())
+        os.makedirs(temp_dir, exist_ok=True)
+        safe_filename = file.filename.replace("/", "_").replace("\\", "_")
+        request_id = generate_id()
+        temp_path = os.path.join(temp_dir, f"{request_id}_{safe_filename}")
+
+        with open(temp_path, "wb") as f:
+            f.write(content)
+
+        # Create temporary document record
+        document_id = generate_id()
+        document_repo = DocumentRepository()
+        doc = document_repo.create_document(
+            document_id=document_id,
+            user_id=user.id,
+            filename=file.filename,
+            file_path=temp_path,
+            content_hash=content_hash,
+            file_size_bytes=len(content),
+            status="temp"
+        )
+
+        if not doc:
+            raise HTTPException(status_code=500, detail="Failed to create document record")
+
+        # Check for duplicate extraction (same file content_hash + same context)
+        extraction_repo = ExtractionRepository()
+        context_clean = context.strip()[:500] if context else None
+
+        existing = extraction_repo.check_duplicate_by_content_hash(
+            content_hash=content_hash,
+            user_id=user.id,
+            context=context_clean
+        )
+
+        if existing and existing.status == "completed":
+            logger.info("Duplicate temp extraction detected", extra={
+                "existing_extraction_id": existing.id,
+                "content_hash": content_hash
+            })
+
+            # Return existing extraction (from history)
+            artifact_data = load_extraction_artifact(existing.id, existing.artifact) if existing.artifact else existing.result
+
+            return {
+                "success": True,
+                "from_history": True,
+                "extraction_id": existing.id,
+                "message": "This extraction already exists",
+                "data": artifact_data,
+                "metadata": {
+                    "extraction_id": existing.id,
+                    "filename": existing.document.filename if existing.document else file.filename,
+                    "created_at": existing.created_at.isoformat() if existing.created_at else None,
+                    "completed_at": existing.completed_at.isoformat() if existing.completed_at else None
+                }
+            }
+
+        # Create extraction record
+        extraction_id = generate_id()
+
+        extraction = extraction_repo.create_extraction_from_document(
+            extraction_id=extraction_id,
+            document_id=document_id,
+            user_id=user.id,
+            context=context_clean,
+            status="processing"
+        )
+
+        if not extraction:
+            raise HTTPException(status_code=500, detail="Failed to create extraction record")
+
+        # Create job state
+        job_id = generate_id()
+        job_repo = JobRepository()
+        job = job_repo.create_job(
+            job_id=job_id,
+            extraction_id=extraction_id,
+            status="queued",
+            current_stage="queued",
+            progress_percent=0,
+            message="Queued for extraction..."
+        )
+
+        if not job:
+            raise HTTPException(status_code=500, detail="Failed to create job tracking record")
+
+        logger.info("Created temp extraction job", extra={"job_id": job_id, "extraction_id": extraction_id})
+
+        # Trigger full extraction pipeline
+        start_extraction_chain(
+            file_path=temp_path,
+            filename=file.filename,
+            job_id=job_id,
+            extraction_id=extraction_id,
+            user_id=user.id,
+            context=context_clean
+        )
+
+        return JSONResponse(
+            status_code=202,
+            content={
+                "success": True,
+                "job_id": job_id,
+                "extraction_id": extraction_id,
+                "document_id": document_id,
+                "message": "Document queued for extraction",
+                "stream_url": f"/api/jobs/{job_id}/stream",
+                "result_url": f"/api/extractions/{extraction_id}"
+            }
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Temp extraction failed", extra={"error": str(e)})
+        raise HTTPException(status_code=500, detail=f"Extraction failed: {str(e)}")
+
+
+@router.post("/api/extract/documents/{document_id}")
+async def extract_from_document(
+    document_id: str,
+    context: str = Form(None),
+    user: User = Depends(get_current_user)
+):
+    """
+    Run extraction on existing library document.
+
+    Flow:
+        1. Verify document exists and user owns it
+        2. Check for duplicate extraction (same document + context)
+        3. Verify DocumentChunk table has chunks
+        4. Create Extraction record
+        5. Create JobState
+        6. Trigger extraction from chunks (load chunks → summarize → extract → store R2)
+        7. Return job_id for SSE streaming
+    """
+    logger.info("Library extraction request", extra={"document_id": document_id, "user_id": user.id})
+
+    try:
+        # Verify document exists and user owns it
+        document_repo = DocumentRepository()
+        doc = document_repo.get_document(document_id)
+
+        if not doc:
+            raise HTTPException(status_code=404, detail="Document not found")
+        if doc.user_id != user.id:
+            raise HTTPException(status_code=403, detail="Not authorized to access this document")
+        if doc.status != "active":
+            raise HTTPException(status_code=400, detail="Document is not active (may be temp or not fully processed)")
+
+        # Validate and truncate context
+        context_clean = context.strip()[:500] if context else None
+
+        # Check for duplicate extraction (same document_id + same context)
+        # For existing library documents, use document_id check (faster)
+        extraction_repo = ExtractionRepository()
+        existing = extraction_repo.check_duplicate_by_document_id(
+            document_id=document_id,
+            user_id=user.id,
+            context=context_clean
+        )
+
+        if existing and existing.status == "completed":
+            logger.info("Duplicate extraction detected", extra={
+                "document_id": document_id,
+                "existing_extraction_id": existing.id
+            })
+
+            # Return existing extraction (from history)
+            artifact_data = load_extraction_artifact(existing.id, existing.artifact) if existing.artifact else existing.result
+
+            return {
+                "success": True,
+                "from_history": True,
+                "extraction_id": existing.id,
+                "message": "This extraction already exists",
+                "data": artifact_data,
+                "metadata": {
+                    "extraction_id": existing.id,
+                    "document_id": document_id,
+                    "filename": doc.filename,
+                    "created_at": existing.created_at.isoformat() if existing.created_at else None,
+                    "completed_at": existing.completed_at.isoformat() if existing.completed_at else None
+                }
+            }
+
+        # Verify document has chunks
+        db = SessionLocal()
+        try:
+            chunks_count = db.query(DocumentChunk).filter(
+                DocumentChunk.document_id == document_id
+            ).count()
+
+            if chunks_count == 0:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Document has not been indexed yet. Please upload it to a collection first."
+                )
+        finally:
+            db.close()
+
+        # Create extraction record
+        extraction_id = generate_id()
+        extraction = extraction_repo.create_extraction_from_document(
+            extraction_id=extraction_id,
+            document_id=document_id,
+            user_id=user.id,
+            context=context_clean,
+            status="processing"
+        )
+
+        if not extraction:
+            raise HTTPException(status_code=500, detail="Failed to create extraction record")
+
+        # Create job state
+        job_id = generate_id()
+        job_repo = JobRepository()
+        job = job_repo.create_job(
+            job_id=job_id,
+            extraction_id=extraction_id,
+            status="queued",
+            current_stage="queued",
+            progress_percent=0,
+            message="Queued for extraction..."
+        )
+
+        if not job:
+            raise HTTPException(status_code=500, detail="Failed to create job tracking record")
+
+        logger.info("Created library extraction job", extra={
+            "job_id": job_id,
+            "extraction_id": extraction_id,
+            "document_id": document_id
+        })
+
+        # Trigger extraction from chunks pipeline
+        start_extraction_from_chunks_chain(
+            job_id=job_id,
+            extraction_id=extraction_id,
+            document_id=document_id,
+            user_id=user.id,
+            filename=doc.filename,
+            context=context_clean
+        )
+
+        return JSONResponse(
+            status_code=202,
+            content={
+                "success": True,
+                "job_id": job_id,
+                "extraction_id": extraction_id,
+                "document_id": document_id,
+                "message": "Document queued for extraction",
+                "stream_url": f"/api/jobs/{job_id}/stream",
+                "result_url": f"/api/extractions/{extraction_id}"
+            }
+        )
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Library extraction failed", extra={"document_id": document_id, "error": str(e)})
+        raise HTTPException(status_code=500, detail=f"Extraction failed: {str(e)}")
+
+
+@router.delete("/api/extractions/{extraction_id}")
+async def delete_extraction(
+    extraction_id: str,
+    user: User = Depends(get_current_user)
+):
+    """
+    Delete an extraction and its associated artifacts.
+
+    Deletes:
+        - Extraction record from DB
+        - Artifact from R2 (if exists)
+    """
+    logger.info("Delete extraction request", extra={"extraction_id": extraction_id, "user_id": user.id})
+
+    try:
+        extraction_repo = ExtractionRepository()
+        extraction = extraction_repo.get_extraction(extraction_id)
+
+        if not extraction:
+            raise HTTPException(status_code=404, detail="Extraction not found")
+
+        if extraction.user_id != user.id:
+            raise HTTPException(status_code=403, detail="Not authorized to delete this extraction")
+
+        # Delete artifact from R2 if exists
+        if extraction.artifact:
+            try:
+                delete_artifact(extraction.artifact)
+                logger.info("Deleted extraction artifact from R2", extra={"extraction_id": extraction_id})
+            except Exception as e:
+                logger.warning(f"Failed to delete artifact from R2: {e}", extra={"extraction_id": extraction_id})
+
+        # Delete extraction record
+        success = extraction_repo.delete_extraction(extraction_id, user.id)
+
+        if not success:
+            raise HTTPException(status_code=500, detail="Failed to delete extraction")
+
+        logger.info("Extraction deleted successfully", extra={"extraction_id": extraction_id})
+
+        return {
+            "success": True,
+            "message": "Extraction deleted successfully"
+        }
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.exception("Delete extraction failed", extra={"extraction_id": extraction_id, "error": str(e)})
+        raise HTTPException(status_code=500, detail=f"Failed to delete extraction: {str(e)}")

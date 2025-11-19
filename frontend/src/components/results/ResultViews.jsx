@@ -90,7 +90,7 @@ export default function ResultsView({ result }) {
         <FeedbackBanner onFeedbackClick={() => setShowFeedback(true)} />
 
         {/* Footer */}
-        <div className="bg-white rounded-xl shadow-md p-6 text-center text-sm text-gray-600">
+        <div className="bg-background rounded-xl shadow-md p-6 text-center text-sm text-muted-foreground">
           <p>
             This is a confidential document prepared for private equity
             evaluation purposes.

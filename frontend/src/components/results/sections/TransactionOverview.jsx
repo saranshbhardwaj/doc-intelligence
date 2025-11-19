@@ -6,7 +6,7 @@ import { safeText } from "../../../utils/formatters";
 
 export default function TransactionOverview({ data }) {
   const tx = data.transaction_details || {};
-  const currency = data.financials?.currency || 'USD';
+  const currency = data.financials?.currency || "USD";
 
   if (!tx || !Object.values(tx).some((v) => v != null)) {
     return null;
@@ -37,38 +37,44 @@ export default function TransactionOverview({ data }) {
       </div>
       <div className="space-y-4">
         {tx.seller_motivation && (
-          <div className="bg-white p-4 rounded-lg border border-gray-200">
-            <h4 className="text-sm font-semibold text-gray-700 mb-2">
+          <div className="bg-background p-4 rounded-lg border border-border">
+            <h4 className="text-sm font-semibold text-muted-foreground mb-2">
               Seller Motivation
             </h4>
-            <p className="text-gray-600">{safeText(tx.seller_motivation)}</p>
+            <p className="text-muted-foreground">
+              {safeText(tx.seller_motivation)}
+            </p>
           </div>
         )}
         {tx.assets_for_sale && (
-          <div className="bg-white p-4 rounded-lg border border-gray-200">
-            <h4 className="text-sm font-semibold text-gray-700 mb-2">
+          <div className="bg-background p-4 rounded-lg border border-border">
+            <h4 className="text-sm font-semibold text-muted-foreground mb-2">
               Assets for Sale
             </h4>
-            <p className="text-gray-600">{safeText(tx.assets_for_sale)}</p>
+            <p className="text-muted-foreground">
+              {safeText(tx.assets_for_sale)}
+            </p>
           </div>
         )}
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {tx.post_sale_involvement && (
-            <div className="bg-white p-4 rounded-lg border border-gray-200">
-              <h4 className="text-sm font-semibold text-gray-700 mb-2">
+            <div className="bg-background p-4 rounded-lg border border-border">
+              <h4 className="text-sm font-semibold text-muted-foreground mb-2">
                 Post-Sale Involvement
               </h4>
-              <p className="text-gray-600">
+              <p className="text-muted-foreground">
                 {safeText(tx.post_sale_involvement)}
               </p>
             </div>
           )}
           {tx.auction_deadline && (
-            <div className="bg-white p-4 rounded-lg border border-gray-200">
-              <h4 className="text-sm font-semibold text-gray-700 mb-2">
+            <div className="bg-background p-4 rounded-lg border border-border">
+              <h4 className="text-sm font-semibold text-muted-foreground mb-2">
                 Auction Deadline
               </h4>
-              <p className="text-gray-600">{safeText(tx.auction_deadline)}</p>
+              <p className="text-muted-foreground">
+                {safeText(tx.auction_deadline)}
+              </p>
             </div>
           )}
         </div>

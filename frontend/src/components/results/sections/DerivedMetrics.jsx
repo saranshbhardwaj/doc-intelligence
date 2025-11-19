@@ -6,7 +6,7 @@ import { sortYearKeysDesc } from "../../../utils/formatters";
 
 export default function DerivedMetrics({ data }) {
   const derived = data.derived_metrics || {};
-  const currency = data.financials?.currency || 'USD';
+  const currency = data.financials?.currency || "USD";
 
   if (!derived || Object.keys(derived).length === 0) {
     return null;
@@ -25,7 +25,7 @@ export default function DerivedMetrics({ data }) {
             // Render as a year-based metric section
             return (
               <div key={key}>
-                <h5 className="text-md font-semibold text-gray-700 dark:text-gray-300 mb-2 flex items-center gap-2">
+                <h5 className="text-md font-semibold text-muted-foreground dark:text-gray-300 mb-2 flex items-center gap-2">
                   <div className="w-1 h-5 bg-blue-600 rounded"></div>
                   {key
                     .replace(/_/g, " ")
@@ -33,7 +33,9 @@ export default function DerivedMetrics({ data }) {
                 </h5>
                 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
                   {sortYearKeysDesc(Object.keys(value)).map((yearKey) => {
-                    const isCurrency = typeof value[yearKey] === "number" && Math.abs(value[yearKey]) > 1000;
+                    const isCurrency =
+                      typeof value[yearKey] === "number" &&
+                      Math.abs(value[yearKey]) > 1000;
                     return (
                       <DataField
                         key={yearKey}
@@ -56,7 +58,8 @@ export default function DerivedMetrics({ data }) {
             );
           } else {
             // Render as simple metric
-            const isCurrency = typeof value === "number" && Math.abs(value) > 1000;
+            const isCurrency =
+              typeof value === "number" && Math.abs(value) > 1000;
             return (
               <div
                 key={key}

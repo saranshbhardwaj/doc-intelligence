@@ -22,7 +22,7 @@ export default function StrategicRationale({ data }) {
             <h4 className="text-lg font-bold text-blue-900 mb-3">
               Deal Thesis
             </h4>
-            <p className="text-gray-800 leading-relaxed whitespace-pre-line">
+            <p className="text-muted-foreground leading-relaxed whitespace-pre-line">
               {safeText(rationale.deal_thesis)}
             </p>
           </div>
@@ -33,7 +33,7 @@ export default function StrategicRationale({ data }) {
             <h4 className="text-sm font-semibold text-green-800 mb-2">
               Value Creation Plan
             </h4>
-            <p className="text-sm text-gray-700 whitespace-pre-line">
+            <p className="text-sm text-muted-foreground whitespace-pre-line">
               {safeText(rationale.value_creation_plan)}
             </p>
           </div>
@@ -44,7 +44,7 @@ export default function StrategicRationale({ data }) {
             <h4 className="text-sm font-semibold text-purple-800 mb-2">
               Add-on / Roll-up Opportunities
             </h4>
-            <p className="text-sm text-gray-700 whitespace-pre-line">
+            <p className="text-sm text-muted-foreground whitespace-pre-line">
               {safeText(rationale.add_on_opportunities)}
             </p>
           </div>
@@ -53,14 +53,14 @@ export default function StrategicRationale({ data }) {
         {Array.isArray(rationale.competitive_advantages) &&
           rationale.competitive_advantages.length > 0 && (
             <div>
-              <h4 className="text-md font-semibold text-gray-700 dark:text-gray-200 mb-3">
+              <h4 className="text-md font-semibold text-muted-foreground dark:text-gray-200 mb-3">
                 Competitive Advantages (USPs)
               </h4>
               <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
                 {rationale.competitive_advantages.map((advantage, idx) => (
                   <div
                     key={idx}
-                    className="bg-white p-3 rounded-lg border border-gray-200 flex items-start gap-2"
+                    className="bg-background p-3 rounded-lg border border-border flex items-start gap-2"
                   >
                     <svg
                       className="w-5 h-5 text-green-600 flex-shrink-0 mt-0.5"
@@ -75,7 +75,7 @@ export default function StrategicRationale({ data }) {
                         d="M5 13l4 4L19 7"
                       />
                     </svg>
-                    <span className="text-sm text-gray-700">
+                    <span className="text-sm text-muted-foreground">
                       {safeText(advantage)}
                     </span>
                   </div>

@@ -159,6 +159,7 @@ async def get_collection(
                 "filename": d.filename,
                 "page_count": d.page_count,
                 "chunk_count": d.chunk_count,
+                "has_embeddings": d.chunk_count > 0 and d.status == "completed",
                 "status": d.status,
                 "error_message": d.error_message,
                 "created_at": d.created_at.isoformat() if d.created_at else None,

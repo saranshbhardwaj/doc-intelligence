@@ -1,38 +1,50 @@
 # backend/app/db_models.py
-"""SQLAlchemy database models"""
-from sqlalchemy import Column, String, Integer, Float, DateTime, Boolean, Text, ForeignKey, Date, JSON, CheckConstraint
+"""SQLAlchemy database models for Extract mode and job tracking"""
+from sqlalchemy import Column, String, Integer, Float, DateTime, Boolean, Text, ForeignKey, JSON, CheckConstraint, Index
 from sqlalchemy.sql import func
+from sqlalchemy.orm import relationship
 from app.database import Base
 import uuid
 
 
 class Extraction(Base):
-    """Track all extraction requests"""
+    """
+    Extraction results for Extract mode.
+
+    Links to canonical documents table for file metadata.
+    Stores extraction-specific data (context, results, cache info).
+    """
     __tablename__ = "extractions"
+    __table_args__ = (
+        Index("idx_extractions_user_id", "user_id"),
+        Index("idx_extractions_document_id", "document_id"),
+    )
 
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    user_id = Column(String(100), nullable=True, index=True)  # Clerk user ID (nullable for migration from IP-based)
-    user_tier = Column(String(20), default="free")  # free, standard, pro, admin
+    document_id = Column(String(36), ForeignKey("documents.id", ondelete="CASCADE"), nullable=False)
+    user_id = Column(String(100), nullable=False, index=True)  # Clerk user ID
 
-    filename = Column(String(255), nullable=False)
-    file_size_bytes = Column(Integer, nullable=False)
-    page_count = Column(Integer, nullable=False)
-    pdf_type = Column(String(20))  # 'digital' or 'scanned'
-    context = Column(Text, nullable=True)  # Optional user-provided context to guide extraction
-    content_hash = Column(String(64), nullable=True, index=True)  # SHA256 hash of file content for duplicate detection
+    # Extraction-specific data
+    context = Column(Text, nullable=True)  # User-provided context to guide extraction
+    result = Column(JSON, nullable=True)  # Extracted structured data (JSONB) - for small results or inline storage
+    artifact = Column(JSON, nullable=True)  # R2 pointer or inline artifact (same pattern as WorkflowRun)
 
-    parser_used = Column(String(50))  # 'pymupdf', 'llmwhisperer', etc.
-    processing_time_ms = Column(Integer)
-    cost_usd = Column(Float, default=0.0)
-
-    status = Column(String(20), default="processing")  # processing, completed, failed
+    # Status lifecycle
+    status = Column(String(20), nullable=False, default="processing")  # processing | completed | failed
     error_message = Column(Text, nullable=True)
 
+    # Cache/history flags
     from_cache = Column(Boolean, default=False)
-    cache_hit = Column(Boolean, default=False)
+    from_history = Column(Boolean, default=False)
+
+    # Cost tracking
+    total_cost_usd = Column(Float, default=0.0)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     completed_at = Column(DateTime(timezone=True), nullable=True)
+
+    # Relationships
+    document = relationship("Document", back_populates="extractions")
 
 
 class ParserOutput(Base):
@@ -40,7 +52,7 @@ class ParserOutput(Base):
     __tablename__ = "parser_outputs"
 
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    extraction_id = Column(String(36), ForeignKey("extractions.id"), nullable=False)
+    extraction_id = Column(String(36), ForeignKey("extractions.id", ondelete="CASCADE"), nullable=False)
 
     parser_name = Column(String(50), nullable=False)
     parser_version = Column(String(20), nullable=True)
@@ -78,49 +90,67 @@ class CacheEntry(Base):
 
 class JobState(Base):
     """
-    Track real-time job progress through extraction pipeline.
+    Track real-time job progress through processing pipeline.
 
-    Supports both Extract Mode and Chat Mode:
-    - Extract Mode: extraction_id is set, collection_document_id is NULL
-    - Chat Mode: collection_document_id is set, extraction_id is NULL
+    Supports Extract Mode, Chat Mode, and Workflow Mode:
+    - Extract Mode: extraction_id is set
+    - Chat Mode: document_id is set (for chat indexing)
+    - Workflow Mode: workflow_run_id is set
 
     A CHECK constraint ensures exactly one foreign key is set (XOR logic).
     """
     __tablename__ = "job_states"
     __table_args__ = (
-        # Ensure exactly one of extraction_id or collection_document_id is set
+        # Ensure exactly ONE of extraction_id, document_id, workflow_run_id is set
         CheckConstraint(
-            '(extraction_id IS NOT NULL AND collection_document_id IS NULL) OR '
-            '(extraction_id IS NULL AND collection_document_id IS NOT NULL)',
-            name='job_states_entity_xor_check'
+            '((extraction_id IS NOT NULL AND document_id IS NULL AND workflow_run_id IS NULL) OR '
+            '(extraction_id IS NULL AND document_id IS NOT NULL AND workflow_run_id IS NULL) OR '
+            '(extraction_id IS NULL AND document_id IS NULL AND workflow_run_id IS NOT NULL))',
+            name='job_states_entity_exactly_one_fk_check'
         ),
+        Index("idx_job_states_job_id", "job_id"),
+        Index("idx_job_states_status", "status"),
+        Index("idx_job_states_extraction_id", "extraction_id"),
+        Index("idx_job_states_document_id", "document_id"),
+        Index("idx_job_states_workflow_run_id", "workflow_run_id"),
     )
 
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    extraction_id = Column(String(36), ForeignKey("extractions.id", ondelete="CASCADE"), nullable=True, index=True)
-    collection_document_id = Column(String(36), ForeignKey("collection_documents.id", ondelete="CASCADE"), nullable=True, index=True)
+    job_id = Column(String(36), unique=True, nullable=False)  # Job ID for tracking
+
+    # Entity being processed (exactly one must be set)
+    extraction_id = Column(String(36), ForeignKey("extractions.id", ondelete="CASCADE"), nullable=True)
+    document_id = Column(String(36), ForeignKey("documents.id", ondelete="CASCADE"), nullable=True)
+    workflow_run_id = Column(String(36), ForeignKey("workflow_runs.id", ondelete="CASCADE"), nullable=True)
 
     # Current status
-    status = Column(String(20), default="queued")  # queued, parsing, chunking, summarizing, extracting, completed, failed
+    status = Column(String(20), default="queued")  # queued, parsing, chunking, embedding, storing, completed, failed
     current_stage = Column(String(50), nullable=True)  # Detailed stage name
     progress_percent = Column(Integer, default=0)  # 0-100
 
-    # Stage tracking (completed stages)
+    # Stage tracking flags (completed stages)
     parsing_completed = Column(Boolean, default=False)
     chunking_completed = Column(Boolean, default=False)
     summarizing_completed = Column(Boolean, default=False)
     extracting_completed = Column(Boolean, default=False)
+    embedding_completed = Column(Boolean, default=False)
+    storing_completed = Column(Boolean, default=False)
+
+    # Workflow-specific stage flags
+    context_completed = Column(Boolean, default=False)
+    artifact_completed = Column(Boolean, default=False)
+    validation_completed = Column(Boolean, default=False)
 
     # File paths for cached intermediate results (for resume capability)
-    parsed_output_path = Column(String(500), nullable=True)  # Saved ParserOutput
-    chunks_path = Column(String(500), nullable=True)  # Saved chunks JSON
-    summaries_path = Column(String(500), nullable=True)  # Saved summaries JSON
-    combined_context_path = Column(String(500), nullable=True)  # Saved combined context
+    parsed_output_path = Column(String(500), nullable=True)
+    chunks_path = Column(String(500), nullable=True)
+    summaries_path = Column(String(500), nullable=True)
+    combined_context_path = Column(String(500), nullable=True)
 
     # Error handling
-    error_stage = Column(String(50), nullable=True)  # Stage where error occurred
+    error_stage = Column(String(50), nullable=True)
     error_message = Column(Text, nullable=True)
-    error_type = Column(String(50), nullable=True)  # parsing_error, llm_error, validation_error, etc.
+    error_type = Column(String(50), nullable=True)
     is_retryable = Column(Boolean, default=True)
 
     # Metadata

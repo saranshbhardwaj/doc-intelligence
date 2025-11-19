@@ -35,24 +35,26 @@ export default function RedFlags({ data }) {
           <AlertCircle className="w-5 h-5 text-red-600 mt-0.5 flex-shrink-0" />
           <div className="flex-1">
             <h3 className="font-bold text-red-900 mb-1">
-              {data.red_flags.length} Quantitative Red Flag{data.red_flags.length !== 1 ? 's' : ''} Detected
+              {data.red_flags.length} Quantitative Red Flag
+              {data.red_flags.length !== 1 ? "s" : ""} Detected
             </h3>
             <p className="text-sm text-red-800 mb-2">
-              These flags are automatically detected based on financial metrics and industry benchmarks.
+              These flags are automatically detected based on financial metrics
+              and industry benchmarks.
             </p>
             <div className="flex gap-3 text-sm">
               {counts.high > 0 && (
-                <span className="bg-red-600 text-white px-2 py-1 rounded font-semibold">
+                <span className="bg-red-600 text-foreground px-2 py-1 rounded font-semibold">
                   {counts.high} High
                 </span>
               )}
               {counts.medium > 0 && (
-                <span className="bg-yellow-500 text-white px-2 py-1 rounded font-semibold">
+                <span className="bg-yellow-500 text-foreground px-2 py-1 rounded font-semibold">
                   {counts.medium} Medium
                 </span>
               )}
               {counts.low > 0 && (
-                <span className="bg-green-500 text-white px-2 py-1 rounded font-semibold">
+                <span className="bg-accent text-foreground px-2 py-1 rounded font-semibold">
                   {counts.low} Low
                 </span>
               )}
@@ -64,7 +66,7 @@ export default function RedFlags({ data }) {
       {/* Flags by Category */}
       {Object.entries(byCategory).map(([category, flags]) => (
         <div key={category} className="mb-6">
-          <h4 className="text-sm font-bold text-gray-700 uppercase mb-3 flex items-center gap-2">
+          <h4 className="text-sm font-bold text-muted-foreground uppercase mb-3 flex items-center gap-2">
             <TrendingDown className="w-4 h-4" />
             {category} Risks
           </h4>
@@ -87,15 +89,15 @@ export default function RedFlags({ data }) {
                       <span
                         className={`text-xs font-bold px-2 py-1 rounded-full ${
                           flag.severity === "High"
-                            ? "bg-red-600 text-white"
+                            ? "bg-red-600 text-foreground"
                             : flag.severity === "Medium"
-                            ? "bg-yellow-500 text-white"
-                            : "bg-green-500 text-white"
+                            ? "bg-yellow-500 text-foreground"
+                            : "bg-accent text-foreground"
                         }`}
                       >
                         {safeText(flag.severity)}
                       </span>
-                      <span className="font-bold text-gray-900">
+                      <span className="font-bold text-foreground">
                         {safeText(flag.flag)}
                       </span>
                       <span className="text-xs bg-blue-100 text-blue-700 px-2 py-1 rounded">
@@ -105,24 +107,24 @@ export default function RedFlags({ data }) {
 
                     {/* Description */}
                     {flag.description && (
-                      <p className="text-sm text-gray-700 mb-3">
+                      <p className="text-sm text-muted-foreground mb-3">
                         {safeText(flag.description)}
                       </p>
                     )}
 
                     {/* Metrics */}
                     {flag.metrics && Object.keys(flag.metrics).length > 0 && (
-                      <div className="bg-white p-3 rounded border border-gray-200">
-                        <span className="text-xs font-semibold text-gray-600 uppercase mb-2 block">
+                      <div className="bg-background p-3 rounded border border-border">
+                        <span className="text-xs font-semibold text-muted-foreground uppercase mb-2 block">
                           Supporting Data:
                         </span>
                         <div className="grid grid-cols-2 gap-2 text-xs">
                           {Object.entries(flag.metrics).map(([key, value]) => (
                             <div key={key} className="flex justify-between">
-                              <span className="text-gray-600 capitalize">
+                              <span className="text-muted-foreground capitalize">
                                 {key.replace(/_/g, " ")}:
                               </span>
-                              <span className="font-mono text-gray-900">
+                              <span className="font-mono text-foreground">
                                 {typeof value === "number"
                                   ? value.toLocaleString(undefined, {
                                       maximumFractionDigits: 2,
@@ -139,8 +141,11 @@ export default function RedFlags({ data }) {
 
                     {/* Rule info */}
                     {flag.rule_triggered && (
-                      <div className="mt-2 text-xs text-gray-500">
-                        Rule: <code className="bg-gray-100 px-1 py-0.5 rounded">{flag.rule_triggered}</code>
+                      <div className="mt-2 text-xs text-muted-foreground">
+                        Rule:{" "}
+                        <code className="bg-popover px-1 py-0.5 rounded">
+                          {flag.rule_triggered}
+                        </code>
                       </div>
                     )}
                   </div>

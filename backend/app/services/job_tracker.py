@@ -31,7 +31,7 @@ class JobProgressTracker:
 
     def get_job_state(self) -> JobState:
         """Get current job state from database using the tracker's session"""
-        job = self.db.query(JobState).filter(JobState.id == self.job_id).first()
+        job = self.db.query(JobState).filter(JobState.job_id == self.job_id).first()
         if not job:
             raise HTTPException(status_code=404, detail=f"Job {self.job_id} not found")
         return job
@@ -83,10 +83,22 @@ class JobProgressTracker:
 
         if should_commit:
             job.updated_at = datetime.now()
-            self.db.commit()
-            # refresh only on substantive change to reduce DB round-trips
-            if stage_changed or status_changed or flags_set:
-                self.db.refresh(job)
+            # Use safe commit to avoid leaving the session in an aborted state
+            try:
+                self.db.commit()
+            except Exception:
+                try:
+                    self.db.rollback()
+                except Exception:
+                    pass
+                logger.exception("DB commit failed during update_progress, rolled back", extra={"job_id": self.job_id})
+            else:
+                # refresh only on substantive change to reduce DB round-trips
+                if stage_changed or status_changed or flags_set:
+                    try:
+                        self.db.refresh(job)
+                    except Exception:
+                        logger.exception("DB refresh failed after commit", extra={"job_id": self.job_id})
 
             # Update last commit state trackers
             if progress_percent is not None:
@@ -144,8 +156,19 @@ class JobProgressTracker:
         job.error_type = error_type
         job.is_retryable = is_retryable
         job.updated_at = datetime.now()
-        self.db.commit()
-        self.db.refresh(job)
+        try:
+            self.db.commit()
+        except Exception:
+            try:
+                self.db.rollback()
+            except Exception:
+                pass
+            logger.exception("DB commit failed in mark_error, rolled back", extra={"job_id": self.job_id})
+        else:
+            try:
+                self.db.refresh(job)
+            except Exception:
+                logger.exception("DB refresh failed in mark_error", extra={"job_id": self.job_id})
 
         logger.error(f"Job {self.job_id} failed at {error_stage}: {error_message}", extra={
             "job_id": self.job_id,
@@ -173,8 +196,19 @@ class JobProgressTracker:
         job.message = "Extraction completed successfully"
         job.completed_at = datetime.now()
         job.updated_at = datetime.now()
-        self.db.commit()
-        self.db.refresh(job)
+        try:
+            self.db.commit()
+        except Exception:
+            try:
+                self.db.rollback()
+            except Exception:
+                pass
+            logger.exception("DB commit failed in mark_completed, rolled back", extra={"job_id": self.job_id})
+        else:
+            try:
+                self.db.refresh(job)
+            except Exception:
+                logger.exception("DB refresh failed in mark_completed", extra={"job_id": self.job_id})
 
         logger.info(f"Job {self.job_id} completed successfully", extra={
             "job_id": self.job_id
@@ -206,7 +240,14 @@ class JobProgressTracker:
         if stage in path_mapping:
             setattr(job, path_mapping[stage], file_path)
             job.updated_at = datetime.now()
-            self.db.commit()
+            try:
+                self.db.commit()
+            except Exception:
+                try:
+                    self.db.rollback()
+                except Exception:
+                    pass
+                logger.exception("DB commit failed in save_intermediate_result, rolled back", extra={"job_id": self.job_id})
 
             logger.info(f"Saved {stage} result to {file_path}", extra={
                 "job_id": self.job_id,

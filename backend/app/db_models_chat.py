@@ -15,7 +15,7 @@ class Collection(Base):
     Users can:
     - Upload multiple PDFs to a collection
     - Chat across all documents in the collection
-    - Add existing extractions to a collection
+    - Share documents across collections (future)
     """
     __tablename__ = "collections"
 
@@ -25,84 +25,78 @@ class Collection(Base):
     name = Column(String(255), nullable=False)  # User-provided name
     description = Column(Text, nullable=True)  # Optional description
 
-    # Metadata
-    document_count = Column(Integer, default=0)  # Cached count (updated on document add/remove)
-    total_chunks = Column(Integer, default=0)  # Total chunks across all documents
-    embedding_model = Column(String(100), nullable=True)  # Which embedding model was used
-    embedding_dimension = Column(Integer, nullable=True)  # Vector dimension (384, 768, 1536, etc.)
+    # Cached stats (updated when documents added/removed)
+    document_count = Column(Integer, default=0)
+    total_chunks = Column(Integer, default=0)
+
+    # Embedding configuration
+    embedding_model = Column(String(100), nullable=True)  # all-MiniLM-L6-v2, etc.
+    embedding_dimension = Column(Integer, nullable=True)  # 384, 768, 1536, etc.
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     # Relationships
-    documents = relationship("CollectionDocument", back_populates="collection", cascade="all, delete-orphan")
+    document_links = relationship("CollectionDocument", back_populates="collection", cascade="all, delete-orphan")
     chat_sessions = relationship("ChatSession", back_populates="collection", cascade="all, delete-orphan")
 
 
 class CollectionDocument(Base):
     """
-    Link between Collection and uploaded documents.
+    Link table between Collections and Documents.
 
-    Each document belongs to one collection (for now - could be many-to-many later).
-    Can optionally link to an existing Extraction (if user adds extraction to collection).
+    Pure join table - all metadata lives in canonical documents table.
+    Multiple collections can reference the same document.
     """
     __tablename__ = "collection_documents"
+    __table_args__ = (
+        Index("idx_collection_documents_collection_id", "collection_id"),
+        Index("idx_collection_documents_document_id", "document_id"),
+    )
 
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    collection_id = Column(String(36), ForeignKey("collections.id", ondelete="CASCADE"), nullable=False, index=True)
-    extraction_id = Column(String(36), ForeignKey("extractions.id", ondelete="SET NULL"), nullable=True, index=True)
+    collection_id = Column(String(36), ForeignKey("collections.id", ondelete="CASCADE"), nullable=False)
+    document_id = Column(String(36), ForeignKey("documents.id", ondelete="CASCADE"), nullable=False)
 
-    # Document metadata
-    filename = Column(String(255), nullable=False)
-    file_path = Column(String(512), nullable=True)  # Path to uploaded PDF file
-    file_size_bytes = Column(Integer, nullable=False)
-    page_count = Column(Integer, nullable=False)
-    content_hash = Column(String(64), nullable=True, index=True)  # SHA256 for deduplication
-
-    # Processing status
-    status = Column(String(20), default="processing")  # processing, completed, failed
-    error_message = Column(Text, nullable=True)
-
-    # Stats
-    chunk_count = Column(Integer, default=0)
-    processing_time_ms = Column(Integer, nullable=True)
-
-    created_at = Column(DateTime(timezone=True), server_default=func.now())
-    completed_at = Column(DateTime(timezone=True), nullable=True)
+    # Link metadata
+    added_at = Column(DateTime(timezone=True), server_default=func.now())
 
     # Relationships
-    collection = relationship("Collection", back_populates="documents")
-    chunks = relationship("DocumentChunk", back_populates="document", cascade="all, delete-orphan")
+    collection = relationship("Collection", back_populates="document_links")
+    document = relationship("Document", back_populates="collection_links")
 
 
 class DocumentChunk(Base):
     """
     Text chunks with embeddings for RAG retrieval.
 
-    Each chunk is a segment of a document with:
-    - Text content
-    - Embedding vector (for semantic search)
-    - Metadata (page number, section, etc.)
+    Each chunk belongs to a canonical document (not collection_document).
+    Chunks can be queried across collections by joining through collection_documents.
     """
     __tablename__ = "document_chunks"
+    __table_args__ = (
+        Index("idx_document_chunks_document_id", "document_id"),
+        Index("idx_document_chunks_embedding", "embedding", postgresql_using="hnsw"),
+    )
 
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    document_id = Column(String(36), ForeignKey("collection_documents.id", ondelete="CASCADE"), nullable=False, index=True)
+    document_id = Column(String(36), ForeignKey("documents.id", ondelete="CASCADE"), nullable=False)
 
     # Chunk content
     text = Column(Text, nullable=False)
     chunk_index = Column(Integer, nullable=False)  # Order within document (0, 1, 2, ...)
 
-    # Embedding vector (dimension depends on model: 384, 768, 1536, etc.)
-    # Dimension is set from config.embedding_dimension at runtime
-    # Default to 384 (all-MiniLM-L6-v2) - can be overridden by setting EMBEDDING_DIMENSION in .env
-    embedding = Column(Vector(None), nullable=True)  # None = dimension set dynamically
+    # Embedding vector (384 dimensions for all-MiniLM-L6-v2)
+    # NOTE: If you change embedding models, you'll need a new migration
+    embedding = Column(Vector(384), nullable=True)
+    embedding_model = Column(String(100), nullable=True)  # Track which model created this embedding
+    embedding_version = Column(String(20), nullable=True)  # Model version for gradual migration
 
-    # Chunk metadata (structure-aware chunking)
-    page_number = Column(Integer, nullable=True)  # Which page this chunk is from
-    section_type = Column(String(50), nullable=True)  # "narrative", "table", "balance_sheet", etc.
-    section_heading = Column(Text, nullable=True)  # Section title if available
-    is_tabular = Column(Boolean, default=False)  # Is this chunk a table?
+    # Chunk metadata
+    page_number = Column(Integer, nullable=True)
+    section_type = Column(String(50), nullable=True)  # "narrative", "table", etc.
+    section_heading = Column(Text, nullable=True)
+    is_tabular = Column(Boolean, default=False)
 
     # Token count (for cost estimation)
     token_count = Column(Integer, nullable=True)
@@ -110,13 +104,7 @@ class DocumentChunk(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     # Relationships
-    document = relationship("CollectionDocument", back_populates="chunks")
-
-    # Indexes for fast vector search
-    __table_args__ = (
-        Index("idx_document_chunks_embedding", "embedding", postgresql_using="hnsw"),  # HNSW index for vector similarity
-        Index("idx_document_chunks_document_id", "document_id"),
-    )
+    document = relationship("Document", back_populates="chunks")
 
 
 class ChatSession(Base):
@@ -127,13 +115,17 @@ class ChatSession(Base):
     (e.g., different analysis angles, comparisons, etc.)
     """
     __tablename__ = "chat_sessions"
+    __table_args__ = (
+        Index("idx_chat_sessions_collection_id", "collection_id"),
+        Index("idx_chat_sessions_user_id", "user_id"),
+    )
 
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    collection_id = Column(String(36), ForeignKey("collections.id", ondelete="CASCADE"), nullable=False, index=True)
+    collection_id = Column(String(36), ForeignKey("collections.id", ondelete="CASCADE"), nullable=False)
     user_id = Column(String(100), nullable=False, index=True)  # Clerk user ID
 
     # Session metadata
-    title = Column(String(255), nullable=True)  # Auto-generated or user-provided title
+    title = Column(String(255), nullable=True)  # Auto-generated or user-provided
     description = Column(Text, nullable=True)
 
     # Stats
@@ -158,22 +150,25 @@ class ChatMessage(Base):
     4. Store both user question and AI response
     """
     __tablename__ = "chat_messages"
+    __table_args__ = (
+        Index("idx_chat_messages_session_id_index", "session_id", "message_index"),
+    )
 
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    session_id = Column(String(36), ForeignKey("chat_sessions.id", ondelete="CASCADE"), nullable=False, index=True)
+    session_id = Column(String(36), ForeignKey("chat_sessions.id", ondelete="CASCADE"), nullable=False)
 
     # Message content
     role = Column(String(20), nullable=False)  # "user" or "assistant"
     content = Column(Text, nullable=False)
-    message_index = Column(Integer, nullable=False)  # Order within session (0, 1, 2, ...)
+    message_index = Column(Integer, nullable=False)  # Order within session
 
     # RAG metadata (for assistant messages)
-    source_chunks = Column(Text, nullable=True)  # JSON array of chunk IDs used for this response
-    retrieval_query = Column(Text, nullable=True)  # The query used for vector search (might differ from user message)
-    num_chunks_retrieved = Column(Integer, nullable=True)  # How many chunks were retrieved
+    source_chunks = Column(Text, nullable=True)  # JSON array of chunk IDs
+    retrieval_query = Column(Text, nullable=True)
+    num_chunks_retrieved = Column(Integer, nullable=True)
 
     # LLM metadata
-    model_used = Column(String(100), nullable=True)  # Claude model used
+    model_used = Column(String(100), nullable=True)
     tokens_used = Column(Integer, nullable=True)
     cost_usd = Column(Float, nullable=True)
 
@@ -181,8 +176,3 @@ class ChatMessage(Base):
 
     # Relationships
     session = relationship("ChatSession", back_populates="messages")
-
-    # Index for message ordering
-    __table_args__ = (
-        Index("idx_chat_messages_session_id_index", "session_id", "message_index"),
-    )

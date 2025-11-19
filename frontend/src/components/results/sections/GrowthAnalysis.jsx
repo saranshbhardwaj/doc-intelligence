@@ -54,7 +54,7 @@ export default function GrowthAnalysis({ data }) {
             <h4 className="text-sm font-semibold text-green-800 mb-2">
               Organic Growth Drivers
             </h4>
-            <p className="text-sm text-gray-700">
+            <p className="text-sm text-muted-foreground">
               {safeText(growth.organic_growth_estimate)}
             </p>
           </div>
@@ -64,7 +64,7 @@ export default function GrowthAnalysis({ data }) {
             <h4 className="text-sm font-semibold text-purple-800 mb-2">
               M&A Impact
             </h4>
-            <p className="text-sm text-gray-700">
+            <p className="text-sm text-muted-foreground">
               {safeText(growth.m_and_a_summary)}
             </p>
           </div>
@@ -74,7 +74,9 @@ export default function GrowthAnalysis({ data }) {
             <h4 className="text-sm font-semibold text-blue-800 mb-2">
               Additional Notes
             </h4>
-            <p className="text-sm text-gray-700">{safeText(growth.notes)}</p>
+            <p className="text-sm text-muted-foreground">
+              {safeText(growth.notes)}
+            </p>
           </div>
         )}
       </div>

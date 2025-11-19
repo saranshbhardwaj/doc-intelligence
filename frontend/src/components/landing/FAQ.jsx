@@ -63,18 +63,18 @@ export default function FAQ() {
   };
 
   return (
-    <div className="py-24 bg-white dark:bg-gray-900" id="faq">
+    <div className="py-24 bg-background " id="faq">
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
         {/* Section header */}
         <div className="text-center mb-12">
-          <h2 className="text-4xl sm:text-5xl font-bold text-gray-900 dark:text-white mb-4">
+          <h2 className="text-4xl sm:text-5xl font-bold text-foreground mb-4">
             Frequently Asked
             <span className="bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
               {" "}
               Questions
             </span>
           </h2>
-          <p className="text-xl text-gray-600 dark:text-gray-300">
+          <p className="text-xl text-muted-foreground dark:text-gray-300">
             Everything you need to know about Sand Cloud
           </p>
         </div>
@@ -84,25 +84,30 @@ export default function FAQ() {
           {faqs.map((faq, index) => (
             <div
               key={index}
-              className="border border-gray-200 dark:border-gray-700 rounded-xl overflow-hidden bg-gray-50 dark:bg-gray-800 transition-all duration-200 hover:border-blue-500 dark:hover:border-blue-500"
+              className="border border-border dark:border-gray-700 rounded-xl overflow-hidden bg-background dark:bg-card transition-all duration-200 hover:border-blue-500 dark:hover:border-blue-500"
             >
               <button
                 onClick={() => toggleFAQ(index)}
-                className="w-full px-6 py-5 flex items-center justify-between text-left hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                className="
+                  w-full px-6 py-5
+                  flex items-center justify-between text-left
+                  hover:bg-popover
+                  transition-colors
+                "
               >
-                <span className="text-lg font-semibold text-gray-900 dark:text-white pr-8">
+                <span className="text-lg font-semibold text-foreground pr-8">
                   {faq.question}
                 </span>
                 {openIndex === index ? (
                   <ChevronUp className="w-5 h-5 text-blue-600 dark:text-blue-400 flex-shrink-0" />
                 ) : (
-                  <ChevronDown className="w-5 h-5 text-gray-400 flex-shrink-0" />
+                  <ChevronDown className="w-5 h-5 text-muted-foreground flex-shrink-0" />
                 )}
               </button>
 
               {openIndex === index && (
-                <div className="px-6 pb-5 pt-2 bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700">
-                  <p className="text-gray-600 dark:text-gray-300 leading-relaxed">
+                <div className="px-6 pb-5 pt-2 bg-card border-t border-border dark:border-gray-700">
+                  <p className="text-muted-foreground dark:text-gray-300 leading-relaxed">
                     {faq.answer}
                   </p>
                 </div>
@@ -113,15 +118,15 @@ export default function FAQ() {
 
         {/* Contact CTA */}
         <div className="mt-12 text-center p-8 bg-gradient-to-r from-blue-50 to-purple-50 dark:from-gray-800 dark:to-gray-800 rounded-xl border border-blue-200 dark:border-gray-700">
-          <h3 className="text-xl font-bold text-gray-900 dark:text-white mb-2">
+          <h3 className="text-xl font-bold text-foreground mb-2">
             Still have questions?
           </h3>
-          <p className="text-gray-600 dark:text-gray-300 mb-4">
+          <p className="text-muted-foreground dark:text-gray-300 mb-4">
             Can't find the answer you're looking for? Reach out to our team.
           </p>
           <a
             href="mailto:saranshbhardwaj@gmail.com"
-            className="inline-block px-6 py-3 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white font-semibold rounded-lg transition-all duration-200"
+            className="inline-block px-6 py-3 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-foreground font-semibold rounded-lg transition-all duration-200"
           >
             Contact Us
           </a>
