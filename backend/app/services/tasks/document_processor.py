@@ -1,15 +1,11 @@
-# backend/app/services/tasks/chat.py
-"""Celery tasks for Chat Mode indexing pipeline.
+# backend/app/services/tasks/document_processor.py
+"""Celery tasks for Document indexing pipeline.
 
 Pipeline: Parse → Chunk → Embed → Store
 
 Reuses shared tasks from extraction.py:
 - parse_document_task: Parse PDF to text
 - chunk_document_task: Chunk text into sections
-
-Chat-specific tasks:
-- embed_chunks_task: Generate embeddings for chunks
-- store_vectors_task: Store chunks with embeddings in vector DB
 """
 from __future__ import annotations
 from typing import Dict, Any
@@ -33,7 +29,7 @@ def _get_db_session():
 @shared_task(bind=True)
 def embed_chunks_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Generate embeddings for document chunks (Chat Mode pipeline).
+    Generate embeddings for document chunks (Document indexing pipeline).
 
     Input payload:
         - chunks: List of chunks from chunk_document_task
@@ -307,7 +303,7 @@ def store_vectors_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
 # ============================================================================
 
 
-def start_chat_indexing_chain(
+def start_document_indexing_chain(
     file_path: str,
     filename: str,
     job_id: str,
@@ -318,7 +314,7 @@ def start_chat_indexing_chain(
     content_hash: str | None = None
 ):
     """
-    Start the chat indexing pipeline chain.
+    Start the document indexing pipeline chain.
 
     Pipeline: Parse → Chunk → Embed → Store
 
@@ -346,7 +342,7 @@ def start_chat_indexing_chain(
         "collection_id": collection_id,
         "user_id": user_id,
         "extraction_id": document_id,  # For compatibility with shared parse/chunk tasks
-        "mode": "chat",  # Mark as chat mode
+        "mode": "document",  # Mark as document mode
         "canonical_document_id": canonical_document_id,
         "content_hash": content_hash,
     }
@@ -362,7 +358,7 @@ def start_chat_indexing_chain(
 
     result = task_chain.apply_async()
     logger.info(
-        "Chat indexing pipeline started",
+        "Document indexing pipeline started",
         extra={
             "user_id": user_id,
             "job_id": job_id,

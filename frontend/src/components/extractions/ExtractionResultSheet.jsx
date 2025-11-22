@@ -169,14 +169,14 @@ export default function ExtractionResultSheet({
                 >
                   <Download className="w-4 h-4 mr-2" /> JSON
                 </Button>
-                <Button
+                {/* <Button
                   variant="outline"
                   size="sm"
                   onClick={handleExportExcel}
                   disabled={exporting}
                 >
                   <Download className="w-4 h-4 mr-2" /> Excel
-                </Button>
+                </Button> */}
               </>
             )}
             {extraction.error && effectiveExtractionId && (

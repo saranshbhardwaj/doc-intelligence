@@ -5,9 +5,9 @@ import DataField from "../DataField";
 import { safeText } from "../../../utils/formatters";
 
 export default function CustomerMetrics({ data }) {
-  const customers = data.customers || {};
+  const customers = data?.customers ?? {};
 
-  if (!customers || !Object.values(customers).some((v) => v != null)) {
+  if (!Object.values(customers).some((v) => v != null)) {
     return null;
   }
 
@@ -21,37 +21,42 @@ export default function CustomerMetrics({ data }) {
             format="number"
           />
         )}
+
         {customers.top_customer_concentration != null && (
           <DataField
             label="Top Customer Concentration"
-            value={customers.top_customer_concentration}
+            value={safeText(customers.top_customer_concentration)}
+            format="text"
           />
         )}
+
         {customers.top_customer_concentration_pct != null && (
           <DataField
             label="Top Customer %"
-            value={customers.top_customer_concentration_pct}
+            value={parseFloat(customers.top_customer_concentration_pct)}
             format="percentage"
-            highlight={true}
+            highlight
           />
         )}
+
         {customers.customer_retention_rate != null && (
           <DataField
             label="Retention Rate"
-            value={customers.customer_retention_rate}
+            value={parseFloat(customers.customer_retention_rate)}
+            format="percentage"
           />
         )}
+
         {customers.recurring_revenue_pct != null && (
           <DataField
             label="Recurring Revenue %"
-            value={customers.recurring_revenue_pct}
+            value={parseFloat(customers.recurring_revenue_pct)}
             format="percentage"
-            highlight={true}
+            highlight
           />
         )}
       </div>
 
-      {/* Revenue Mix */}
       {customers.revenue_mix_by_segment &&
         Object.keys(customers.revenue_mix_by_segment).length > 0 && (
           <div className="mb-6">
@@ -63,8 +68,8 @@ export default function CustomerMetrics({ data }) {
                 ([segment, pct]) => (
                   <DataField
                     key={segment}
-                    label={segment}
-                    value={pct}
+                    label={safeText(segment)}
+                    value={parseFloat(pct)}
                     format="percentage"
                   />
                 )
@@ -73,7 +78,6 @@ export default function CustomerMetrics({ data }) {
           </div>
         )}
 
-      {/* Notable Customers */}
       {Array.isArray(customers.notable_customers) &&
         customers.notable_customers.length > 0 && (
           <div>
