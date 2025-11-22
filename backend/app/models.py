@@ -259,3 +259,24 @@ class AnalyticsEvent(BaseModel):
     referrer: Optional[str] = None
     timestamp: datetime = Field(default_factory=datetime.now)
     metadata: Dict[str, Any] = Field(default_factory=dict)
+
+# ---------- Extraction List Model ----------
+class ExtractionListItem(BaseModel):
+    id: str
+    document_id: Optional[str]
+    filename: Optional[str]
+    page_count: Optional[int]
+    status: str
+    created_at: Optional[datetime]
+    completed_at: Optional[datetime]
+    cost_usd: Optional[float]
+    parser_used: Optional[str]
+    from_cache: Optional[bool]
+    error_message: Optional[str]
+    
+class PaginatedExtractionResponse(BaseModel):
+    """Paginated response for extraction list"""
+    items: list[ExtractionListItem]
+    total: int
+    limit: int
+    offset: int

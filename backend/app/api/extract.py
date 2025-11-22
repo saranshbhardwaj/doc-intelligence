@@ -14,6 +14,7 @@ import hashlib
 import os
 
 from fastapi import APIRouter, Request, UploadFile, File, Form, HTTPException, Depends
+from typing import Optional
 from fastapi.responses import JSONResponse
 
 from app.api.dependencies import (
@@ -33,16 +34,52 @@ from app.repositories.extraction_repository import ExtractionRepository
 from app.repositories.document_repository import DocumentRepository
 
 # Orchestration service
-from app.services.async_pipeline.extraction_orchestrator import process_document_async
+from app.services.async_pipeline.extraction_orchestrator import process_document_async, retry_document_async
 from app.services.tasks import start_extraction_chain
 from app.services.tasks.extraction import start_extraction_from_chunks_chain
 from app.services.artifacts import load_extraction_artifact, delete_artifact
 from app.utils.id_generator import generate_id
 from app.db_models_chat import DocumentChunk
 from app.database import SessionLocal
+from app.models import ExtractionListItem, PaginatedExtractionResponse
 import tempfile
 
+
 router = APIRouter()
+@router.get("/api/extractions", response_model=PaginatedExtractionResponse)
+async def list_user_extractions(
+    limit: int = 50,
+    offset: int = 0,
+    status: Optional[str] = None,
+    user: User = Depends(get_current_user)
+):
+    """
+    List extractions for the current user (paginated, newest first).
+    """
+    logger.info("Listing user extractions", extra={"user_id": user.id, "limit": limit, "offset": offset})
+    repo = ExtractionRepository()
+    extractions, total = repo.list_user_extractions(user.id, limit=limit, offset=offset, status=status)
+    result = []
+    for e in extractions:
+        result.append(ExtractionListItem(
+            id=e.id,
+            document_id=getattr(e, "document_id", None),
+            filename=e.filename,
+            page_count=e.page_count,
+            status=e.status,
+            created_at=e.created_at,
+            completed_at=e.completed_at,
+            cost_usd=e.cost_usd,
+            parser_used=e.parser_used,
+            from_cache=e.from_cache,
+            error_message=e.error_message,
+        ))
+    return PaginatedExtractionResponse(
+        items=result,
+        total=total,
+        limit=limit,
+        offset=offset
+    )
 
 
 @router.post("/api/extract")
@@ -115,6 +152,12 @@ async def extract_document(
     })
 
     try:
+        # Concurrency guard: prevent starting new extraction if one is already active
+        concurrency_repo = ExtractionRepository()
+        active_extraction = concurrency_repo.get_active_processing_extraction(user.id)
+        if active_extraction:
+            raise HTTPException(status_code=409, detail="Another extraction is already in progress. Please wait for it to finish.")
+
         # Read file content
         content = await file.read()
 
@@ -514,9 +557,16 @@ async def extract_temp_document(
         4. Trigger full extraction pipeline (parse → chunk → summarize → extract → store R2)
         5. Return job_id for SSE streaming
     """
-    logger.info("Temp extraction request", extra={"filename": file.filename, "user_id": user.id})
+    logger.info("Temp extraction request", 
+                extra={"document_name": file.filename, "user_id": user.id})
 
     try:
+        # Concurrency guard
+        concurrency_repo = ExtractionRepository()
+        active_extraction = concurrency_repo.get_active_processing_extraction(user.id)
+        if active_extraction:
+            raise HTTPException(status_code=409, detail="Another extraction is already in progress. Please wait for it to finish.")
+
         # Read and validate file
         content = await file.read()
         document_processor.validate_file(file.filename, content)
@@ -561,7 +611,8 @@ async def extract_temp_document(
         if existing and existing.status == "completed":
             logger.info("Duplicate temp extraction detected", extra={
                 "existing_extraction_id": existing.id,
-                "content_hash": content_hash
+                "content_hash": content_hash,
+                "user_id": user.id
             })
 
             # Return existing extraction (from history)
@@ -665,14 +716,22 @@ async def extract_from_document(
     try:
         # Verify document exists and user owns it
         document_repo = DocumentRepository()
-        doc = document_repo.get_document(document_id)
+        doc = document_repo.get_by_id(document_id)
 
         if not doc:
             raise HTTPException(status_code=404, detail="Document not found")
         if doc.user_id != user.id:
             raise HTTPException(status_code=403, detail="Not authorized to access this document")
-        if doc.status != "active":
-            raise HTTPException(status_code=400, detail="Document is not active (may be temp or not fully processed)")
+        # Accept documents that have finished processing (status 'completed') or explicitly 'active'.
+        # Original check for only 'active' blocked all normal completed documents.
+        if doc.status not in ("completed", "active"):
+            raise HTTPException(status_code=400, detail="Document is not ready for extraction (status: %s)" % doc.status)
+
+        # Concurrency guard
+        concurrency_repo = ExtractionRepository()
+        active_extraction = concurrency_repo.get_active_processing_extraction(user.id)
+        if active_extraction:
+            raise HTTPException(status_code=409, detail="Another extraction is already in progress. Please wait for it to finish.")
 
         # Validate and truncate context
         context_clean = context.strip()[:500] if context else None
@@ -711,19 +770,12 @@ async def extract_from_document(
             }
 
         # Verify document has chunks
-        db = SessionLocal()
-        try:
-            chunks_count = db.query(DocumentChunk).filter(
-                DocumentChunk.document_id == document_id
-            ).count()
-
-            if chunks_count == 0:
-                raise HTTPException(
-                    status_code=400,
-                    detail="Document has not been indexed yet. Please upload it to a collection first."
-                )
-        finally:
-            db.close()
+        chunks_count = document_repo.get_chunk_count(document_id)
+        if chunks_count == 0:
+            raise HTTPException(
+                status_code=400,
+                detail="Document has not been indexed yet. Please upload it to a collection first."
+            )
 
         # Create extraction record
         extraction_id = generate_id()
@@ -839,3 +891,85 @@ async def delete_extraction(
     except Exception as e:
         logger.exception("Delete extraction failed", extra={"extraction_id": extraction_id, "error": str(e)})
         raise HTTPException(status_code=500, detail=f"Failed to delete extraction: {str(e)}")
+
+
+@router.post("/api/extractions/{extraction_id}/retry")
+async def retry_extraction(
+    extraction_id: str,
+    user: User = Depends(get_current_user)
+):
+    """Retry a failed extraction by its extraction_id.
+
+    Frontend currently posts to /api/extractions/{id}/retry (got 404 before this route).
+    This wraps existing job retry logic (/api/jobs/{job_id}/retry) eliminating
+    the need for the client to store job_id explicitly.
+
+    Conditions for retry:
+      - Extraction exists and belongs to user
+      - Extraction status == failed
+      - Associated JobState exists and has combined_context_path (summarization completed)
+      - JobState.is_retryable is True
+    Resumes only the expensive LLM extraction stage.
+    """
+    extraction_repo = ExtractionRepository()
+    job_repo = JobRepository()
+
+    extraction = extraction_repo.get_extraction(extraction_id)
+    if not extraction:
+        raise HTTPException(status_code=404, detail="Extraction not found")
+    if extraction.user_id != user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to retry this extraction")
+    if extraction.status != "failed":
+        raise HTTPException(status_code=400, detail="Only failed extractions can be retried")
+
+    # Resolve job state
+    job = job_repo.get_job_by_extraction_id(extraction_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job state not found for extraction")
+    if not job.is_retryable:
+        raise HTTPException(status_code=400, detail="This extraction is not retryable")
+    if not job.combined_context_path:
+        raise HTTPException(status_code=400, detail="Cannot retry – combined context missing (pipeline did not reach summarizing stage)")
+
+    # Reset job state for retry (direct session update to clear error fields)
+    from app.database import SessionLocal
+    db = SessionLocal()
+    try:
+        job_db = db.query(type(job)).filter(type(job).job_id == job.job_id).first()
+        if job_db:
+            job_db.status = "queued"
+            job_db.current_stage = "queued"
+            job_db.progress_percent = 0
+            job_db.message = "Queued for retry (extracting stage)"
+            # Clear error fields
+            job_db.error_stage = None
+            job_db.error_message = None
+            job_db.error_type = None
+            job_db.is_retryable = True
+            db.commit()
+        else:
+            raise HTTPException(status_code=404, detail="Job state disappeared before retry")
+    finally:
+        db.close()
+
+    # Update extraction status back to processing so history reflects active retry
+    extraction_repo.update_status(extraction_id, status="processing")
+
+    # Kick off async retry from extraction stage
+    import asyncio as _asyncio
+    _asyncio.create_task(
+        retry_document_async(
+            job_id=job.job_id,
+            extraction_id=extraction_id,
+            resume_stage="extracting",
+            resume_data_path=job.combined_context_path
+        )
+    )
+
+    return {
+        "success": True,
+        "job_id": job.job_id,
+        "extraction_id": extraction_id,
+        "resume_stage": "extracting",
+        "message": "Retry initiated"
+    }

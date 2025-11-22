@@ -32,6 +32,7 @@ try:
     import app.db_models_users  # noqa: F401 - User
     import app.db_models_chat  # noqa: F401 - Collection, CollectionDocument, DocumentChunk, ChatSession, ChatMessage
     import app.db_models_workflows  # noqa: F401 - Workflow, WorkflowRun
+    import app.db_models_documents  # noqa: F401 - Document, DocumentChunk
 except Exception:
     # Non-fatal here; if imports fail the worker will likely fail later when using DB.
     pass

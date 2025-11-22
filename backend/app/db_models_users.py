@@ -1,6 +1,6 @@
 # backend/app/db_models_users.py
 """Database models for user management and authentication"""
-from sqlalchemy import Column, String, Integer, DateTime, Float, ForeignKey
+from sqlalchemy import Boolean, Column, String, Integer, DateTime, Float, ForeignKey
 from datetime import datetime
 from app.database import Base
 
@@ -36,7 +36,11 @@ class UsageLog(Base):
 
     id = Column(String(36), primary_key=True)
     user_id = Column(String(36), ForeignKey("users.id"), nullable=False, index=True)
-    extraction_id = Column(String(36), ForeignKey("extractions.id"), nullable=False)
+    extraction_id = Column(String(36), ForeignKey("extractions.id", ondelete="SET NULL"), nullable=True)
+    
+    filename = Column(String(255), nullable=True)
+    is_deleted = Column(Boolean, default=False, nullable=False)
+    deleted_at = Column(DateTime(timezone=True), nullable=True)
 
     pages_processed = Column(Integer, nullable=False)
     operation_type = Column(String(50), default="extraction")  # parsing, extraction

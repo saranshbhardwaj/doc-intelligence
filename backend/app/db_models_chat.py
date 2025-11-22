@@ -84,6 +84,8 @@ class DocumentChunk(Base):
 
     # Chunk content
     text = Column(Text, nullable=False)
+    narrative_text = Column(Text, nullable=True)
+    tables = Column(Text, nullable=True)
     chunk_index = Column(Integer, nullable=False)  # Order within document (0, 1, 2, ...)
 
     # Embedding vector (384 dimensions for all-MiniLM-L6-v2)

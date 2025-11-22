@@ -11,6 +11,10 @@ Pattern:
 from datetime import datetime
 from typing import Optional, List
 from contextlib import contextmanager
+from typing import Generator
+
+from app.db_models_users import UsageLog
+from pytz import timezone
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -35,7 +39,7 @@ class ExtractionRepository:
     """
 
     @contextmanager
-    def _get_session(self) -> Session:
+    def _get_session(self) -> Generator[Session, None, None]:
         """Context manager for database sessions.
 
         Ensures sessions are properly closed even on errors.
@@ -387,6 +391,26 @@ class ExtractionRepository:
                     from_history=False
                 )
 
+                # Snapshot document metadata for denormalized fast access
+                try:
+                    from app.db_models_documents import Document
+                    doc = db.query(Document).filter(Document.id == document_id).first()
+                    if doc:
+                        extraction.filename = getattr(doc, "filename", None)
+                        extraction.file_size_bytes = getattr(doc, "file_size_bytes", None)
+                        extraction.page_count = getattr(doc, "page_count", None)
+                        # Do NOT assign parser_used into pdf_type; pdf_type is reserved for 'digital'/'scanned'.
+                        # Leave pdf_type as None for library chunk extractions (parse stage skipped).
+                        extraction.parser_used = getattr(doc, "parser_used", None)
+                        extraction.processing_time_ms = getattr(doc, "processing_time_ms", None)
+                        extraction.cost_usd = getattr(doc, "cost_usd", None)
+                        extraction.content_hash = getattr(doc, "content_hash", None)
+                except Exception as snap_err:
+                    logger.warning(
+                        "Failed to snapshot document metadata for extraction",
+                        extra={"extraction_id": extraction_id, "document_id": document_id, "error": str(snap_err)}
+                    )
+
                 db.add(extraction)
                 db.commit()
                 db.refresh(extraction)
@@ -580,6 +604,17 @@ class ExtractionRepository:
                     )
                     return False
 
+                # Mark usage logs before deleting extraction
+                now = datetime.now(timezone("UTC"))
+                
+                db.query(UsageLog).filter(
+                    UsageLog.extraction_id == extraction_id
+                ).update({
+                    "filename": extraction.filename,
+                    "is_deleted": True,
+                    "deleted_at": now
+                })
+            
                 db.delete(extraction)
                 db.commit()
 
@@ -883,5 +918,24 @@ class ExtractionRepository:
                 logger.error(
                     f"Failed to check duplicate extraction: {e}",
                     extra={"document_id": document_id, "user_id": user_id, "error": str(e)}
+                )
+                return None
+
+    def get_active_processing_extraction(self, user_id: str) -> Optional[Extraction]:
+        """Return an active (queued or processing) extraction for user if one exists.
+
+        Used to enforce single-concurrent-extraction constraint per user.
+        Returns first matching extraction or None.
+        """
+        with self._get_session() as db:
+            try:
+                return db.query(Extraction).filter(
+                    Extraction.user_id == user_id,
+                    Extraction.status.in_(["processing", "queued"])
+                ).order_by(Extraction.created_at.desc()).first()
+            except SQLAlchemyError as e:
+                logger.error(
+                    "Failed to check active processing extraction",
+                    extra={"user_id": user_id, "error": str(e)}
                 )
                 return None

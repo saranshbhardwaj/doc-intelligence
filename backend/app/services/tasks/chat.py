@@ -194,6 +194,8 @@ def store_vectors_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
             db_chunk = DocumentChunk(
                 document_id=document_id,
                 text=chunk["text"],
+                narrative_text =chunk.get("narrative_text", ""),
+                tables=chunk.get("tables", []),
                 chunk_index=i,
                 embedding=embedding,
                 embedding_model=embedding_model,

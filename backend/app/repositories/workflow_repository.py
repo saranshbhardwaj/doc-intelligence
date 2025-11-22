@@ -107,6 +107,25 @@ class WorkflowRepository:
     def get_run(self, run_id: str) -> Optional[WorkflowRun]:
         return self.db.get(WorkflowRun, run_id)
 
-    def list_runs_for_user(self, user_id: str, limit: int = 50) -> List[WorkflowRun]:
-        stmt = select(WorkflowRun).where(WorkflowRun.user_id == user_id).order_by(WorkflowRun.created_at.desc()).limit(limit)
+    def list_runs_for_user(self, user_id: str, limit: int = 50, offset: int = 0) -> List[WorkflowRun]:
+        """List workflow runs for a user with pagination.
+
+        Args:
+            user_id: The user whose runs to list.
+            limit: Max number of runs to return.
+            offset: Number of runs to skip (for pagination).
+        """
+        # Sanitize pagination inputs
+        if limit <= 0:
+            limit = 50
+        if offset < 0:
+            offset = 0
+
+        stmt = (
+            select(WorkflowRun)
+            .where(WorkflowRun.user_id == user_id)
+            .order_by(WorkflowRun.created_at.desc())
+            .offset(offset)
+            .limit(limit)
+        )
         return list(self.db.execute(stmt).scalars())

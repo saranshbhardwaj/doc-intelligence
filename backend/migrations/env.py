@@ -20,6 +20,8 @@ try:
     import app.db_models  # noqa: F401
     import app.db_models_users  # noqa: F401
     import app.db_models_chat  # noqa: F401
+    import app.db_models_documents  # noqa: F401
+    import app.db_models_workflows  # noqa: F401
 except ModuleNotFoundError:
     # Fallback: explicitly add container root and current working directory
     ROOT_CANDIDATES = [Path('/app'), Path.cwd()]
@@ -31,6 +33,8 @@ except ModuleNotFoundError:
     import app.db_models  # noqa: F401
     import app.db_models_users  # noqa: F401
     import app.db_models_chat  # noqa: F401
+    import app.db_models_documents  # noqa: F401
+    import app.db_models_workflows  # noqa: F401
 
 # this is the Alembic Config object, which provides
 # access to the values within the .ini file in use.
