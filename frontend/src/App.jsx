@@ -11,6 +11,8 @@ import WorkflowsPage from "./pages/WorkflowsPage";
 import WorkflowSimplePage from "./pages/WorkflowSimplePage";
 import WorkflowResultPage from "./pages/WorkflowResultPage";
 import ExtractPage from "./pages/ExtractPage";
+import ExtractionHistoryPage from "./pages/ExtractionHistoryPage";
+import ExtractionDetailPage from "./pages/ExtractionDetailPage";
 import NotFound from "./pages/NotFound";
 import AppNotFound from "./components/layout/AppNotFound";
 import RequireAuth from "./components/common/RequireAuth";
@@ -48,6 +50,14 @@ export default function App() {
             />
 
             <Route path="/app/extract" element={<ExtractPage />} />
+            <Route
+              path="/app/extractions"
+              element={<ExtractionHistoryPage />}
+            />
+            <Route
+              path="/app/extractions/:id"
+              element={<ExtractionDetailPage />}
+            />
 
             {/* Catch-all for anything under /app that didn't match above */}
             <Route path="/app/*" element={<AppNotFound />} />

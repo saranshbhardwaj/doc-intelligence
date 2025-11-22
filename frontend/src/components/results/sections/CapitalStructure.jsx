@@ -5,7 +5,7 @@ import DataField from "../DataField";
 
 export default function CapitalStructure({ data }) {
   const capital = data.capital_structure;
-  const currency = data.financials?.currency || 'USD';
+  const currency = data.financials?.currency || "USD";
 
   if (!capital || !Object.values(capital).some((v) => v != null)) {
     return null;
@@ -20,20 +20,21 @@ export default function CapitalStructure({ data }) {
             value={capital.existing_debt}
             format="currency"
             currency={currency}
-            highlight={true}
+            highlight={true} // uses tokenized highlight
           />
         )}
         {capital.debt_to_ebitda != null && (
           <DataField
             label="Debt / EBITDA"
             value={`${capital.debt_to_ebitda.toFixed(1)}x`}
-            highlight={true}
+            highlight={true} // tokenized highlight
           />
         )}
         {capital.proposed_leverage != null && (
           <DataField
             label="Proposed Leverage"
             value={`${capital.proposed_leverage.toFixed(1)}x`}
+            highlight={true} // subtle tokenized highlight
           />
         )}
         {capital.equity_contribution_estimate != null && (
@@ -42,6 +43,7 @@ export default function CapitalStructure({ data }) {
             value={capital.equity_contribution_estimate}
             format="currency"
             currency={currency}
+            highlight={true} // tokenized highlight
           />
         )}
       </div>

@@ -3,6 +3,7 @@
 from sqlalchemy import Column, String, Integer, Float, DateTime, Boolean, Text, ForeignKey, JSON, CheckConstraint, Index
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
+from sqlalchemy.dialects.postgresql import JSONB
 from app.database import Base
 import uuid
 
@@ -24,20 +25,30 @@ class Extraction(Base):
     document_id = Column(String(36), ForeignKey("documents.id", ondelete="CASCADE"), nullable=False)
     user_id = Column(String(100), nullable=False, index=True)  # Clerk user ID
 
+    # Snapshot of source document & parsing metadata (duplicated for fast access & historical audit)
+    filename = Column(String(255), nullable=True)
+    file_size_bytes = Column(Integer, nullable=True)
+    page_count = Column(Integer, nullable=True)  # May be null for legacy records until backfilled
+    pdf_type = Column(String(20), nullable=True)  # 'digital' or 'scanned'
+    parser_used = Column(String(50), nullable=True)
+    processing_time_ms = Column(Integer, nullable=True)
+    cost_usd = Column(Float, nullable=True)  # Parser cost (LLM extraction cost tracked separately)
+    content_hash = Column(String(64), nullable=True, index=True)  # For duplicate detection & caching
+
     # Extraction-specific data
     context = Column(Text, nullable=True)  # User-provided context to guide extraction
-    result = Column(JSON, nullable=True)  # Extracted structured data (JSONB) - for small results or inline storage
-    artifact = Column(JSON, nullable=True)  # R2 pointer or inline artifact (same pattern as WorkflowRun)
+    result = Column(JSONB, nullable=True)  # Extracted structured data (JSONB) - for small results or inline storage
+    artifact = Column(JSONB, nullable=True)  # R2 pointer or inline artifact (same pattern as WorkflowRun)
 
     # Status lifecycle
-    status = Column(String(20), nullable=False, default="processing")  # processing | completed | failed
+    status = Column(String(20), nullable=False, default="processing")  # processing | completed | failed | queued
     error_message = Column(Text, nullable=True)
 
     # Cache/history flags
     from_cache = Column(Boolean, default=False)
     from_history = Column(Boolean, default=False)
 
-    # Cost tracking
+    # Aggregated total cost (parser + LLM + storage, etc.)
     total_cost_usd = Column(Float, default=0.0)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -59,7 +70,7 @@ class ParserOutput(Base):
     pdf_type = Column(String(20))  # 'digital' or 'scanned'
 
     # Store the raw output from the parser (before LLM processing)
-    raw_output = Column(JSON, nullable=True)  # For PostgreSQL JSONB, SQLite JSON
+    raw_output = Column(JSONB, nullable=True)  # For PostgreSQL JSONB, SQLite JSON
     raw_output_length = Column(Integer)  # Character count
 
     processing_time_ms = Column(Integer)
@@ -155,7 +166,7 @@ class JobState(Base):
 
     # Metadata
     message = Column(Text, nullable=True)  # Current user-facing message
-    details = Column(JSON, nullable=True)  # Additional details (stats, metrics, etc.)
+    details = Column(JSONB, nullable=True)  # Additional details (stats, metrics, etc.)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())

@@ -2,10 +2,10 @@
 export default function FeedbackBanner({ onFeedbackClick }) {
   return (
     <div className="bg-card rounded-xl shadow-md overflow-hidden">
-      <div className="bg-gradient-to-r from-blue-50 to-indigo-50 dark:from-blue-900/30 dark:to-indigo-900/30 p-6 flex items-start gap-4">
-        <div className="flex-shrink-0">
+      <div className="p-6 flex items-start gap-4 border-l-4 border-primary">
+        <div className="flex-shrink-0 text-primary">
           <svg
-            className="w-8 h-8 text-blue-600 dark:text-blue-400"
+            className="w-8 h-8"
             fill="none"
             stroke="currentColor"
             viewBox="0 0 24 24"
@@ -18,16 +18,19 @@ export default function FeedbackBanner({ onFeedbackClick }) {
             />
           </svg>
         </div>
+
         <div className="flex-1">
-          <h3 className="text-sm font-semibold text-foreground dark:text-gray-100 mb-1">
+          <h3 className="text-sm font-semibold text-foreground mb-1">
             Was this extraction helpful?
           </h3>
-          <p className="text-sm text-muted-foreground dark:text-muted-foreground mb-3">
+
+          <p className="text-sm text-muted-foreground mb-3">
             Your feedback helps us improve accuracy and add features you need.
           </p>
+
           <button
             onClick={onFeedbackClick}
-            className="text-sm font-medium text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 flex items-center gap-1"
+            className="text-sm font-medium text-primary hover:opacity-90 flex items-center gap-1"
           >
             Share your thoughts
             <svg

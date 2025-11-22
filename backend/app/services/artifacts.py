@@ -42,7 +42,7 @@ def persist_artifact(run_id: str, artifact: Dict[str, Any]) -> Dict[str, Any]:
         if settings.exports_use_r2 and get_r2_storage is not None:
             try:
                 storage = get_r2_storage()
-                key = f"artifacts/{run_id}/artifact.json"
+                key = f"workflow-artifacts/{run_id}/artifact.json"
                 data = json.dumps(artifact, ensure_ascii=False).encode("utf-8")
                 storage.store_bytes(key, data, "application/json")
                 pointer = {

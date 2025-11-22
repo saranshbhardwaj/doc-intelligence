@@ -1,5 +1,5 @@
 # backend/app/api/chat/documents.py
-"""Document upload and management endpoints for Chat Mode."""
+"""Document upload and management endpoints."""
 
 import os
 import uuid
@@ -11,7 +11,7 @@ from app.db_models_users import User
 from app.database import SessionLocal
 from app.db_models_chat import CollectionDocument
 from app.db_models_documents import Document
-from app.services.tasks import start_chat_indexing_chain
+from app.services.tasks import start_document_indexing_chain
 from app.repositories.collection_repository import CollectionRepository
 from app.repositories.document_repository import DocumentRepository
 from app.repositories.job_repository import JobRepository
@@ -213,7 +213,7 @@ async def upload_document(
             collection_repo.recompute_collection_stats(collection_id=collection_id)
 
             # Start Celery indexing chain
-            task_id = start_chat_indexing_chain(
+            task_id = start_document_indexing_chain(
                 file_path=file_path,
                 filename=safe_filename,
                 job_id=job.job_id,

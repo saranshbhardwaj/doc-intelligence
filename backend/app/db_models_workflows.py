@@ -2,6 +2,7 @@
 from sqlalchemy import Column, String, Integer, DateTime, Text, Float, Boolean, ForeignKey, JSON, Index
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
+from sqlalchemy.dialects.postgresql import JSONB
 from app.database import Base
 import uuid
 
@@ -25,8 +26,8 @@ class Workflow(Base):
     prompt_template = Column(Text, nullable=False)  # Jinja2 style template (full technical prompt)
     user_prompt_template = Column(Text, nullable=True)  # User-facing simplified prompt for editing
     user_prompt_max_length = Column(Integer, nullable=True)  # Character limit for user edits (default 1000)
-    variables_schema = Column(JSON, nullable=True)  # JSON schema for variables
-    output_schema = Column(JSON, nullable=True)  # JSON Schema for expected output
+    variables_schema = Column(JSONB, nullable=True)  # JSON schema for variables
+    output_schema = Column(JSONB, nullable=True)  # JSON Schema for expected output
     output_format = Column(String(50), nullable=False, default="markdown")  # markdown | json | pptx | xlsx | pdf
     min_documents = Column(Integer, nullable=False, default=1)
     max_documents = Column(Integer, nullable=True)  # null = no upper bound
@@ -60,8 +61,8 @@ class WorkflowRun(Base):
     collection_id = Column(String(36), ForeignKey("collections.id", ondelete="SET NULL"), nullable=True)
 
     # Document scope (references canonical documents, not collection_documents)
-    document_ids = Column(JSON, nullable=True)  # JSON array of document IDs
-    variables = Column(JSON, nullable=True)  # JSON of provided variables
+    document_ids = Column(JSONB, nullable=True)  # JSON array of document IDs
+    variables = Column(JSONB, nullable=True)  # JSON of provided variables
 
     # Strategy used (context assembly)
     mode = Column(String(30), nullable=False, default="single_doc")  # single_doc | multi_doc
@@ -72,7 +73,7 @@ class WorkflowRun(Base):
     error_message = Column(Text, nullable=True)
 
     # Artifacts
-    artifact = Column(JSON, nullable=True)  # JSON describing produced files/structured output
+    artifact = Column(JSONB, nullable=True)  # JSON describing produced files/structured output
     output_format = Column(String(50), nullable=True)
 
     # Metrics
@@ -82,8 +83,8 @@ class WorkflowRun(Base):
     citations_count = Column(Integer, nullable=True)
     attempts = Column(Integer, nullable=True)
     citation_invalid_count = Column(Integer, nullable=True)
-    validation_errors = Column(JSON, nullable=True)  # List of validation errors
-    context_stats = Column(JSON, nullable=True)  # Retrieval stats
+    validation_errors = Column(JSONB, nullable=True)  # List of validation errors
+    context_stats = Column(JSONB, nullable=True)  # Retrieval stats
 
     version = Column(Integer, nullable=False, default=1)
 

@@ -52,8 +52,8 @@ def _load_file_bytes(path: str) -> bytes:
 
 _DEF_LLMC = lambda: LLMClient(
     api_key=settings.anthropic_api_key,
-    model=settings.llm_model,
-    max_tokens=settings.llm_max_tokens,
+    model=settings.cheap_llm_model,
+    max_tokens=settings.cheap_llm_max_tokens,
     max_input_chars=settings.llm_max_input_chars,
     timeout_seconds=settings.llm_timeout_seconds,
 )
@@ -181,6 +181,26 @@ def parse_document_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
 
         # Save raw text for debugging
         save_raw_text(extraction_id, text, filename)
+        
+        raw_output = {
+            "text": parser_output.text[:400],
+            "page_count": parser_output.page_count,
+            "parser_name": parser_output.parser_name,
+            "parser_version": parser_output.parser_version,
+            "processing_time_ms": parser_output.processing_time_ms,
+            "cost_usd": parser_output.cost_usd,
+            "metadata": parser_output.metadata,
+}       
+        repo.create_parser_output(
+            extraction_id=extraction_id,
+            parser_name=parser_output.parser_name,
+            parser_version=parser_output.parser_version,
+            pdf_type=pdf_type,
+            raw_output=raw_output,
+            raw_output_length=len(parser_output.text),
+            processing_time_ms=parser_output.processing_time_ms,
+            cost_usd=parser_output.cost_usd
+        )
 
         tracker.update_progress(progress_percent=15, message="Parsing complete", parsing_completed=True)
 
@@ -323,6 +343,10 @@ def summarize_context_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
 
     try:
         chunks = payload.get("chunks", [])
+        # Ensure each chunk has a metadata dict to avoid KeyError
+        for ch in chunks:
+            if "metadata" not in ch:
+                ch["metadata"] = {}
         narrative_chunks = [c for c in chunks if c.get("narrative_text")]
         tracker.update_progress(status="summarizing", current_stage="summarizing", progress_percent=40, message="Summarizing sections...")
 
@@ -350,20 +374,21 @@ def summarize_context_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         tracker.update_progress(progress_percent=60, message="Summaries complete", summarizing_completed=True)
 
         # Build combined context
-        table_chunks = [c for c in chunks if c["metadata"].get("has_tables")]
+        table_chunks = [c for c in chunks if c.get("metadata", {}).get("has_tables")]
 
         combined_sections = []
         if summaries:
             combined_sections.append("=== DOCUMENT SUMMARIES (Narrative) ===\n")
             for idx, c in enumerate(narrative_chunks):
-                pg = c["metadata"].get("page_number")
+                pg = (c.get("metadata") or {}).get("page_number")
                 summary = summaries[idx] if idx < len(summaries) else (c.get("narrative_text") or "")
                 combined_sections.append(f"[Page {pg}]\n{summary}\n")
         if table_chunks:
             combined_sections.append("\n=== FINANCIAL TABLES (Complete Data) ===\n")
             for c in table_chunks:
-                pg = c["metadata"].get("page_number")
-                tc = c["metadata"].get("table_count")
+                meta = c.get("metadata", {})
+                pg = meta.get("page_number")
+                tc = meta.get("table_count")
                 combined_sections.append(f"[Page {pg} - Contains {tc} table(s)]\n{c['text']}\n")
         combined_text = "\n".join(combined_sections)
 
@@ -415,7 +440,6 @@ def extract_structured_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
     from sqlalchemy.exc import SQLAlchemyError
 
     try:
-        # --- ENFORCE USER PAGE LIMITS ---
         user_repo = UserRepository()
         user = user_repo.get_user(user_id)
         if not user:
@@ -423,23 +447,12 @@ def extract_structured_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
             repo.mark_failed(extraction_id, "User not found")
             return {"status": "failed", "error": "User not found", "extraction_id": extraction_id}
 
-        extraction = repo.get_extraction(extraction_id)
-        page_count = extraction.page_count if extraction and extraction.page_count else 0
-        pages_limit = user.pages_limit if user.pages_limit is not None else 100
-
-        if user.tier == "free":
-            if user.total_pages_processed + page_count > pages_limit:
-                tracker.mark_error(error_stage="extracting", error_message="Free tier page limit exceeded", error_type="limit_error", is_retryable=False)
-                repo.mark_failed(extraction_id, "Free tier page limit exceeded")
-                return {"status": "failed", "error": "Free tier page limit exceeded", "extraction_id": extraction_id}
-        else:
-            if user.pages_this_month + page_count > pages_limit:
-                tracker.mark_error(error_stage="extracting", error_message="Monthly page limit exceeded", error_type="limit_error", is_retryable=False)
-                repo.mark_failed(extraction_id, "Monthly page limit exceeded")
-                return {"status": "failed", "error": "Monthly page limit exceeded", "extraction_id": extraction_id}
+        # Re-query extraction within THIS task's session to avoid detached instance issues
+        from app.db_models import Extraction as ExtractionModel
+        extraction = db.query(ExtractionModel).filter(ExtractionModel.id == extraction_id).first()
 
         # --- EXTRACTION LOGIC ---
-        tracker.update_progress(status="extracting", current_stage="extracting", progress_percent=70, message="Extracting structured data...")
+        tracker.update_progress(status="extracting", current_stage="extracting", progress_percent=70, message="Extracting structured data this can take a while...")
         combined_text = payload["combined_context"]
         extracted_data = asyncio.run(llm_client.extract_structured_data(combined_text, context))
 
@@ -473,7 +486,7 @@ def extract_structured_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
             user_repo_usage = UserRepository()
             success = user_repo_usage.update_page_usage(
                 user_id=user_id,
-                pages_to_add=page_count,
+                pages_to_add=0,
                 update_monthly=True
             )
 
@@ -483,13 +496,13 @@ def extract_structured_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                     id=str(uuid.uuid4()),
                     user_id=user_id,
                     extraction_id=extraction_id,
-                    pages_processed=page_count,
+                    pages_processed=0,
                     operation_type="extraction",
                     cost_usd=extraction.cost_usd if extraction and extraction.cost_usd else 0.0,
                 )
                 db.add(usage_log)
                 db.commit()
-                logger.debug(f"Updated user usage: {page_count} pages", extra={
+                logger.debug(f"Updated user usage: 0 pages", extra={
                     "user_id": user_id,
                     "extraction_id": extraction_id
                 })
@@ -519,7 +532,13 @@ def extract_structured_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         except Exception:
             pass
 
-        return {"status": "completed", "extraction_id": extraction_id}
+        # Preserve full payload context for downstream store task (needs job_id, etc.)
+        return {
+            **payload,
+            "status": "completed",
+            "extraction_id": extraction_id,
+            "normalized_result": normalized_payload,
+        }
     except Exception as e:
         tracker.mark_error(error_stage="extracting", error_message=str(e), error_type="llm_error", is_retryable=True)
         repo.mark_failed(extraction_id, str(e)[:500])
@@ -549,22 +568,49 @@ def store_extraction_result_task(self, payload: Dict[str, Any]) -> Dict[str, Any
     Output: Publishes complete event via Redis
     """
     extraction_id = payload["extraction_id"]
-    job_id = payload["job_id"]
+    job_id = payload.get("job_id")
+    if not job_id:
+        # Fallback lookup to avoid hard failure if prior task dropped job_id
+        try:
+            from app.repositories.job_repository import JobRepository
+            jr = JobRepository()
+            # Try common accessor names
+            job = None
+            for accessor in ("get_job_by_extraction_id", "get_job_for_extraction", "get_job"):
+                if hasattr(jr, accessor):
+                    try:
+                        job = getattr(jr, accessor)(extraction_id)
+                    except Exception:
+                        job = None
+                    if job:
+                        break
+            if job:
+                job_id = getattr(job, "id", None)
+                logger.warning(
+                    "Recovered missing job_id in store_extraction_result_task via repository lookup",
+                    extra={"extraction_id": extraction_id, "job_id": job_id}
+                )
+        except Exception:
+            logger.warning(
+                "Unable to recover missing job_id in store_extraction_result_task; continuing without progress tracking",
+                extra={"extraction_id": extraction_id}
+            )
     result_data = payload.get("normalized_result", payload.get("data", {}))
     total_cost_usd = payload.get("total_cost_usd", 0.0)
 
     db = _get_db_session()
-    tracker = JobProgressTracker(db, job_id)
+    tracker = JobProgressTracker(db, job_id) if job_id else None
     extraction_repo = ExtractionRepository()
 
     try:
         # Import extraction artifact service
         from app.services.artifacts import persist_extraction_artifact
 
-        tracker.update_progress(
-            progress_percent=95,
-            message="Storing extraction result..."
-        )
+        if tracker:
+            tracker.update_progress(
+                progress_percent=95,
+                message="Storing extraction result..."
+            )
 
         # Persist extraction artifact (R2 if large, inline if small)
         artifact_pointer = persist_extraction_artifact(extraction_id, result_data)
@@ -580,7 +626,8 @@ def store_extraction_result_task(self, payload: Dict[str, Any]) -> Dict[str, Any
         if not success:
             raise Exception("Failed to update extraction record with artifact")
 
-        tracker.mark_completed()
+        if tracker:
+            tracker.mark_completed()
 
         logger.info(
             "Extraction result stored successfully",
@@ -598,12 +645,13 @@ def store_extraction_result_task(self, payload: Dict[str, Any]) -> Dict[str, Any
         logger.exception(error_msg, extra={"extraction_id": extraction_id})
 
         extraction_repo.mark_extraction_failed(extraction_id, error_msg)
-        tracker.mark_error(
-            error_stage="storing",
-            error_message=error_msg,
-            error_type="storage_error",
-            is_retryable=True
-        )
+        if tracker:
+            tracker.mark_error(
+                error_stage="storing",
+                error_message=error_msg,
+                error_type="storage_error",
+                is_retryable=True
+            )
 
         return {
             **payload,
@@ -660,17 +708,26 @@ def start_extraction_from_chunks_task(self, payload: Dict[str, Any]) -> Dict[str
             message=f"Loaded {len(chunks)} chunks from document"
         )
 
-        # Convert to expected format
-        chunk_data = [
-            {
-                "text": c.text,
-                "chunk_index": c.chunk_index,
-                "page_number": c.page_number,
-                "section_type": c.section_type or "narrative",
-                "is_tabular": c.is_tabular or False
+        # Normalize chunk representation to match output of chunk_document_task
+        chunk_data = []
+        for c in chunks:
+            table_count = getattr(c, "table_count", 0) or 0
+            has_tables = bool(table_count) or bool(getattr(c, "is_tabular", False))
+            metadata = {
+                "page_number": getattr(c, "page_number", None),
+                "table_count": table_count,
+                "has_tables": has_tables,
             }
-            for c in chunks
-        ]
+            narrative_text = getattr(c, "narrative_text", None) or (c.text[:400] if getattr(c, "text", None) else None)
+            tables = getattr(c, "tables", []) or []
+            chunk_id = f"{document_id}-{getattr(c, 'chunk_index', '0')}"
+            chunk_data.append({
+                "chunk_id": chunk_id,
+                "text": c.text,
+                "narrative_text": narrative_text,
+                "tables": tables,
+                "metadata": metadata,
+            })
 
         # Update payload with chunks and metadata
         payload_with_chunks = {
@@ -782,6 +839,6 @@ def start_extraction_from_chunks_chain(
 
     logger.info(
         "Extraction from chunks pipeline started",
-        extra={"job_id": job_id, "document_id": document_id, "task_id": result.id}
+        extra={"job_id": job_id, "document_id": document_id, "task_id": result.id, "user_id": user_id}
     )
     return result.id

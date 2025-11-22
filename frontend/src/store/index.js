@@ -48,6 +48,25 @@ export const useStore = create(
           },
         },
       }),
+      // Merge persisted slice keys into current state instead of overwriting
+      // so that non-persisted defaults (e.g. progress structure) remain intact.
+      merge: (persisted, current) => {
+        return {
+          ...current,
+          extraction: {
+            ...current.extraction,
+            ...persisted.extraction,
+          },
+          workflowDraft: {
+            ...current.workflowDraft,
+            ...persisted.workflowDraft,
+            execution: {
+              ...current.workflowDraft.execution,
+              ...(persisted.workflowDraft?.execution || {}),
+            },
+          },
+        };
+      },
     }
   )
 );
@@ -58,10 +77,16 @@ export const useStore = create(
 
 // Extraction selectors
 export const useExtraction = () => useStore((state) => state.extraction);
+
+export const useExtractionHistory = () =>
+  useStore((state) => state.extractionHistory);
+
 export const useExtractionActions = () =>
   useStore(
     useShallow((state) => ({
       uploadDocument: state.uploadDocument,
+      extractLibraryDocument: state.extractLibraryDocument,
+      extractTempDocument: state.extractTempDocument,
       retryExtraction: state.retryExtraction,
       reconnectExtraction: state.reconnectExtraction,
       cancelExtraction: state.cancelExtraction,
@@ -70,6 +95,7 @@ export const useExtractionActions = () =>
       setError: state.setError,
       setProgress: state.setProgress,
       setProcessing: state.setProcessing,
+      fetchExtractionHistory: state.fetchExtractionHistory,
     }))
   );
 

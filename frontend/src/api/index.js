@@ -20,6 +20,10 @@ export {
   fetchExtractionResult,
   retryExtraction,
   getJobStatus,
+  extractTempDocument,
+  extractFromDocument,
+  deleteExtraction as deleteResultFromExtraction,
+  fetchExtractionHistory,
 } from "./extraction";
 
 // User APIs

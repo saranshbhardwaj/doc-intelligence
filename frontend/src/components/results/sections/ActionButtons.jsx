@@ -22,7 +22,7 @@ export default function ActionButtons({ onFeedbackClick, data, metadata }) {
         {/* Export to Excel */}
         <button
           onClick={handleExportExcel}
-          className="flex items-center gap-2 px-4 py-2 bg-destructive text-foreground rounded-lg hover:bg-destructive/90 transition-colors font-semibold shadow-sm"
+          className="flex items-center gap-2 px-4 py-2 bg-success text-foreground rounded-lg hover:bg-success/90 transition-colors font-semibold shadow-sm"
         >
           <Download className="w-4 h-4" />
           Export to Excel

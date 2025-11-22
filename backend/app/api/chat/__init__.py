@@ -22,7 +22,7 @@ from fastapi import APIRouter
 
 # Import sub-routers
 from app.api.chat.collections import router as collections_router
-from app.api.chat.documents import router as documents_router
+from app.api.documents import router as documents_router
 from app.api.chat.progress import router as progress_router
 from app.api.chat.messages import router as messages_router
 from app.api.chat.sessions import router as sessions_router

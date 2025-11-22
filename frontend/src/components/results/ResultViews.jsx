@@ -33,13 +33,11 @@ export default function ResultsView({ result }) {
   if (!result || !result.data) {
     return null;
   }
+
   const data = result.data;
 
   return (
-    <div
-      className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100
-    dark:from-gray-900 dark:to-gray-800 py-8 px-4 transition-colors duration-200"
-    >
+    <div className="min-h-screen bg-background py-8 px-4 transition-colors duration-200">
       <div className="max-w-7xl mx-auto space-y-6">
         <ActionButtons
           onFeedbackClick={() => setShowFeedback(true)}
@@ -90,7 +88,7 @@ export default function ResultsView({ result }) {
         <FeedbackBanner onFeedbackClick={() => setShowFeedback(true)} />
 
         {/* Footer */}
-        <div className="bg-background rounded-xl shadow-md p-6 text-center text-sm text-muted-foreground">
+        <div className="bg-card rounded-xl shadow-md p-6 text-center text-sm text-muted-foreground">
           <p>
             This is a confidential document prepared for private equity
             evaluation purposes.

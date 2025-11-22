@@ -7,7 +7,7 @@
  * - Job status and retry
  */
 
-import { api, createAuthenticatedApi } from './client';
+import { api, createAuthenticatedApi } from "./client";
 
 /**
  * Upload a document for extraction (REQUIRES AUTHENTICATION)
@@ -28,19 +28,19 @@ import { api, createAuthenticatedApi } from './client';
  * ```
  */
 export async function uploadDocument(file, getToken, context = "") {
-    const authenticatedApi = createAuthenticatedApi(getToken);
+  const authenticatedApi = createAuthenticatedApi(getToken);
 
-    const formData = new FormData();
-    formData.append('file', file);
-    if (context && context.trim()) {
-        formData.append('context', context.trim());
-    }
+  const formData = new FormData();
+  formData.append("file", file);
+  if (context && context.trim()) {
+    formData.append("context", context.trim());
+  }
 
-    const response = await authenticatedApi.post('/api/extract', formData, {
-        headers: { 'Content-Type': 'multipart/form-data' }
-    });
+  const response = await authenticatedApi.post("/api/extract", formData, {
+    headers: { "Content-Type": "multipart/form-data" },
+  });
 
-    return response.data;
+  return response.data;
 }
 
 /**
@@ -79,197 +79,230 @@ export async function uploadDocument(file, getToken, context = "") {
 // Track active streams to prevent duplicate EventSource instances per job
 const _activeStreams = new Map(); // jobId -> { eventSource, callbacks }
 
-export async function streamProgress(jobId, getToken, { onProgress, onComplete, onError, onEnd, autoReconnect = true, fetchInitialState = false }) {
-    const baseURL = api.defaults.baseURL || '';
+export async function streamProgress(
+  jobId,
+  getToken,
+  {
+    onProgress,
+    onComplete,
+    onError,
+    onEnd,
+    autoReconnect = true,
+    fetchInitialState = false,
+  }
+) {
+  const baseURL = api.defaults.baseURL || "";
 
-    // Get auth token and pass as query parameter (EventSource doesn't support headers)
-    const token = await getToken();
-    const url = `${baseURL}/api/jobs/${jobId}/stream?token=${encodeURIComponent(token)}`;
+  // Get auth token and pass as query parameter (EventSource doesn't support headers)
+  const token = await getToken();
+  const url = `${baseURL}/api/jobs/${jobId}/stream?token=${encodeURIComponent(
+    token
+  )}`;
 
-    // If stream already exists, reuse and just update callbacks
-    if (_activeStreams.has(jobId)) {
-        const existing = _activeStreams.get(jobId);
-        existing.callbacks = { onProgress, onComplete, onError, onEnd };
-        return () => {
-            try { existing.eventSource.close(); } catch (_) {}
-            _activeStreams.delete(jobId);
-        };
-    }
-
-    // Fetch initial state before starting SSE if requested (for reconnection)
-    if (fetchInitialState) {
-        try {
-            const initialState = await getJobStatus(jobId, getToken);
-            console.log('[SSE Frontend] Fetched initial job state:', initialState);
-
-            // Emit initial progress to populate UI
-            if (initialState.status === 'completed') {
-                onComplete?.({
-                    message: initialState.message || 'Extraction completed',
-                    extraction_id: initialState.extraction_id
-                });
-                onEnd?.({ reason: 'completed', job_id: jobId });
-                return () => {}; // No cleanup needed, job already done
-            } else if (initialState.status === 'failed') {
-                onError?.({
-                    message: initialState.error_message || 'Job failed',
-                    stage: initialState.error_stage,
-                    type: initialState.error_type,
-                    isRetryable: initialState.is_retryable
-                });
-                onEnd?.({ reason: 'failed', job_id: jobId });
-                return () => {};
-            } else {
-                // In progress - send initial progress event
-                onProgress?.({
-                    status: initialState.status,
-                    stage: initialState.current_stage,
-                    progress: initialState.progress_percent,
-                    message: initialState.message,
-                    details: initialState.details || {},
-                    parsing_completed: initialState.parsing_completed,
-                    chunking_completed: initialState.chunking_completed,
-                    summarizing_completed: initialState.summarizing_completed,
-                    extracting_completed: initialState.extracting_completed
-                });
-            }
-        } catch (err) {
-            console.error('[SSE Frontend] Failed to fetch initial state:', err);
-            // Continue to SSE connection anyway
-        }
-    }
-
-    const eventSource = new EventSource(url);
-    let streamEnded = false;
-    let isCleaningUp = false;  // Prevent duplicate cleanup
-    let receivedDomainError = false; // True if backend emitted an application error event
-    let terminalFailed = false; // True if error is non-retryable (retryable === false)
-    let lastProgressTime = Date.now();
-
-    const cleanup = () => {
-        if (isCleaningUp) return;
-        isCleaningUp = true;
-        streamEnded = true;
-
-        console.log('[SSE Frontend] Cleaning up EventSource');
-        try {
-            eventSource.close();
-        } catch (err) {
-            console.error('[SSE Frontend] Error closing EventSource:', err);
-        }
-        _activeStreams.delete(jobId);
+  // If stream already exists, reuse and just update callbacks
+  if (_activeStreams.has(jobId)) {
+    const existing = _activeStreams.get(jobId);
+    existing.callbacks = { onProgress, onComplete, onError, onEnd };
+    return () => {
+      try {
+        existing.eventSource.close();
+      } catch (_) {}
+      _activeStreams.delete(jobId);
     };
+  }
 
-    eventSource.addEventListener('progress', (event) => {
-        const { callbacks } = _activeStreams.get(jobId) || { callbacks: {} };
-        try {
-            const data = JSON.parse(event.data);
-            lastProgressTime = Date.now();
-            callbacks.onProgress?.(data);
-        } catch (err) {
-            console.error('Failed to parse progress event:', err);
-        }
-    });
+  // Fetch initial state before starting SSE if requested (for reconnection)
+  if (fetchInitialState) {
+    try {
+      const initialState = await getJobStatus(jobId, getToken);
+      console.log("[SSE Frontend] Fetched initial job state:", initialState);
 
-    eventSource.addEventListener('complete', (event) => {
-        const { callbacks } = _activeStreams.get(jobId) || { callbacks: {} };
-        try {
-            const data = JSON.parse(event.data);
-            console.log('[SSE Frontend] 🎉 Complete event received:', data);
-            callbacks.onComplete?.(data);
-        } catch (err) {
-            console.error('Failed to parse complete event:', err);
-        }
-    });
-
-    eventSource.addEventListener('end', (event) => {
-        const { callbacks } = _activeStreams.get(jobId) || { callbacks: {} };
-        streamEnded = true;  // Set FIRST before any other operations
-        try {
-            const data = JSON.parse(event.data);
-            console.log('[SSE Frontend] End event data:', data);
-            callbacks.onEnd?.(data);
-        } catch (err) {
-            console.error('Failed to parse end event:', err);
-        } finally {
-            // Cleanup AFTER callback
-            cleanup();
-        }
-    });
-
-    eventSource.addEventListener('error', (event) => {
-        // Domain error (backend emitted SSE 'error' event with JSON payload)
-        if (event.data) {
-            try {
-                const raw = JSON.parse(event.data);
-                receivedDomainError = true;
-                const normalized = {
-                    message: raw.message,
-                    stage: raw.stage,
-                    type: raw.type || raw.error_type,
-                    isRetryable: raw.retryable ?? raw.is_retryable ?? false,
-                };
-                if (!normalized.isRetryable) {
-                    terminalFailed = true;
-                }
-                const { callbacks } = _activeStreams.get(jobId) || { callbacks: {} };
-                callbacks.onError?.(normalized);
-                // We allow the dedicated 'end' event to perform cleanup.
-            } catch (err) {
-                console.error('Failed to parse domain error event:', err);
-            }
-        }
-    });
-
-    let reconnectAttempts = 0;
-    const maxReconnect = 5;
-    const baseDelay = 1000;
-
-    eventSource.onerror = (err) => {
-        console.log(`[SSE Frontend] onerror fired: streamEnded=${streamEnded}, readyState=${eventSource.readyState}`);
-
-        // If domain error already received (application failure) or graceful end, skip transport reconnect
-        if (isCleaningUp || streamEnded || receivedDomainError || terminalFailed) {
-            console.log('[SSE Frontend] ✅ Ignoring transport onerror (terminal or ended)');
-            return;
-        }
-
-        // Treat as connection issue only if no domain error yet
-        console.error('[SSE Frontend] ❌ Connection error detected (no domain error yet):', err);
-        const { callbacks } = _activeStreams.get(jobId) || { callbacks: {} };
-        callbacks.onError?.({
-            message: 'Lost connection to server',
-            type: 'connection_error',
-            isRetryable: true,
+      // Emit initial progress to populate UI
+      if (initialState.status === "completed") {
+        onComplete?.({
+          message: initialState.message || "Extraction completed",
+          extraction_id: initialState.extraction_id,
         });
+        onEnd?.({ reason: "completed", job_id: jobId });
+        return () => {}; // No cleanup needed, job already done
+      } else if (initialState.status === "failed") {
+        onError?.({
+          message: initialState.error_message || "Job failed",
+          stage: initialState.error_stage,
+          type: initialState.error_type,
+          isRetryable: initialState.is_retryable,
+        });
+        onEnd?.({ reason: "failed", job_id: jobId });
+        return () => {};
+      } else {
+        // In progress - send initial progress event
+        onProgress?.({
+          status: initialState.status,
+          stage: initialState.current_stage,
+          progress: initialState.progress_percent,
+          message: initialState.message,
+          details: initialState.details || {},
+          parsing_completed: initialState.parsing_completed,
+          chunking_completed: initialState.chunking_completed,
+          summarizing_completed: initialState.summarizing_completed,
+          extracting_completed: initialState.extracting_completed,
+        });
+      }
+    } catch (err) {
+      console.error("[SSE Frontend] Failed to fetch initial state:", err);
+      // Continue to SSE connection anyway
+    }
+  }
 
-        cleanup();
+  const eventSource = new EventSource(url);
+  let streamEnded = false;
+  let isCleaningUp = false; // Prevent duplicate cleanup
+  let receivedDomainError = false; // True if backend emitted an application error event
+  let terminalFailed = false; // True if error is non-retryable (retryable === false)
+  let lastProgressTime = Date.now();
 
-        // Simple heuristic: if we've never seen progress (still at initial stage) limit reconnect attempts to 2
-        const strictLimit = (Date.now() - lastProgressTime) < 5000; // no progress within 5s window
-        const allowedReconnects = strictLimit ? 2 : maxReconnect;
+  const cleanup = () => {
+    if (isCleaningUp) return;
+    isCleaningUp = true;
+    streamEnded = true;
 
-        if (autoReconnect && reconnectAttempts < allowedReconnects) {
-            reconnectAttempts += 1;
-            const delay = baseDelay * Math.pow(2, reconnectAttempts - 1); // exponential backoff
-            console.log(`[SSE Frontend] Attempting reconnect #${reconnectAttempts} (limit ${allowedReconnects}) in ${delay}ms`);
-            setTimeout(() => {
-                streamProgress(jobId, getToken, { onProgress, onComplete, onError, onEnd, autoReconnect });
-            }, delay);
-        } else if (reconnectAttempts >= allowedReconnects) {
-            console.error('[SSE Frontend] Max reconnection attempts reached');
-            callbacks.onError?.({
-                message: 'Failed to reconnect after multiple attempts',
-                type: 'connection_error',
-                isRetryable: false,
-            });
+    console.log("[SSE Frontend] Cleaning up EventSource");
+    try {
+      eventSource.close();
+    } catch (err) {
+      console.error("[SSE Frontend] Error closing EventSource:", err);
+    }
+    _activeStreams.delete(jobId);
+  };
+
+  eventSource.addEventListener("progress", (event) => {
+    const { callbacks } = _activeStreams.get(jobId) || { callbacks: {} };
+    try {
+      const data = JSON.parse(event.data);
+      lastProgressTime = Date.now();
+      callbacks.onProgress?.(data);
+    } catch (err) {
+      console.error("Failed to parse progress event:", err);
+    }
+  });
+
+  eventSource.addEventListener("complete", (event) => {
+    const { callbacks } = _activeStreams.get(jobId) || { callbacks: {} };
+    try {
+      const data = JSON.parse(event.data);
+      console.log("[SSE Frontend] 🎉 Complete event received:", data);
+      callbacks.onComplete?.(data);
+    } catch (err) {
+      console.error("Failed to parse complete event:", err);
+    }
+  });
+
+  eventSource.addEventListener("end", (event) => {
+    const { callbacks } = _activeStreams.get(jobId) || { callbacks: {} };
+    streamEnded = true; // Set FIRST before any other operations
+    try {
+      const data = JSON.parse(event.data);
+      console.log("[SSE Frontend] End event data:", data);
+      callbacks.onEnd?.(data);
+    } catch (err) {
+      console.error("Failed to parse end event:", err);
+    } finally {
+      // Cleanup AFTER callback
+      cleanup();
+    }
+  });
+
+  eventSource.addEventListener("error", (event) => {
+    // Domain error (backend emitted SSE 'error' event with JSON payload)
+    if (event.data) {
+      try {
+        const raw = JSON.parse(event.data);
+        receivedDomainError = true;
+        const normalized = {
+          message: raw.message,
+          stage: raw.stage,
+          type: raw.type || raw.error_type,
+          isRetryable: raw.retryable ?? raw.is_retryable ?? false,
+        };
+        if (!normalized.isRetryable) {
+          terminalFailed = true;
         }
-    };
+        const { callbacks } = _activeStreams.get(jobId) || { callbacks: {} };
+        callbacks.onError?.(normalized);
+        // We allow the dedicated 'end' event to perform cleanup.
+      } catch (err) {
+        console.error("Failed to parse domain error event:", err);
+      }
+    }
+  });
 
-    _activeStreams.set(jobId, { eventSource, callbacks: { onProgress, onComplete, onError, onEnd } });
+  let reconnectAttempts = 0;
+  const maxReconnect = 5;
+  const baseDelay = 1000;
 
-    // Return cleanup function (explicit cancel)
-    return cleanup;
+  eventSource.onerror = (err) => {
+    console.log(
+      `[SSE Frontend] onerror fired: streamEnded=${streamEnded}, readyState=${eventSource.readyState}`
+    );
+
+    // If domain error already received (application failure) or graceful end, skip transport reconnect
+    if (isCleaningUp || streamEnded || receivedDomainError || terminalFailed) {
+      console.log(
+        "[SSE Frontend] ✅ Ignoring transport onerror (terminal or ended)"
+      );
+      return;
+    }
+
+    // Treat as connection issue only if no domain error yet
+    console.error(
+      "[SSE Frontend] ❌ Connection error detected (no domain error yet):",
+      err
+    );
+    const { callbacks } = _activeStreams.get(jobId) || { callbacks: {} };
+    callbacks.onError?.({
+      message: "Lost connection to server",
+      type: "connection_error",
+      isRetryable: true,
+    });
+
+    cleanup();
+
+    // Simple heuristic: if we've never seen progress (still at initial stage) limit reconnect attempts to 2
+    const strictLimit = Date.now() - lastProgressTime < 5000; // no progress within 5s window
+    const allowedReconnects = strictLimit ? 2 : maxReconnect;
+
+    if (autoReconnect && reconnectAttempts < allowedReconnects) {
+      reconnectAttempts += 1;
+      const delay = baseDelay * Math.pow(2, reconnectAttempts - 1); // exponential backoff
+      console.log(
+        `[SSE Frontend] Attempting reconnect #${reconnectAttempts} (limit ${allowedReconnects}) in ${delay}ms`
+      );
+      setTimeout(() => {
+        streamProgress(jobId, getToken, {
+          onProgress,
+          onComplete,
+          onError,
+          onEnd,
+          autoReconnect,
+        });
+      }, delay);
+    } else if (reconnectAttempts >= allowedReconnects) {
+      console.error("[SSE Frontend] Max reconnection attempts reached");
+      callbacks.onError?.({
+        message: "Failed to reconnect after multiple attempts",
+        type: "connection_error",
+        isRetryable: false,
+      });
+    }
+  };
+
+  _activeStreams.set(jobId, {
+    eventSource,
+    callbacks: { onProgress, onComplete, onError, onEnd },
+  });
+
+  // Return cleanup function (explicit cancel)
+  return cleanup;
 }
 
 /**
@@ -288,9 +321,11 @@ export async function streamProgress(jobId, getToken, { onProgress, onComplete, 
  * }
  */
 export async function fetchExtractionResult(extractionId, getToken) {
-    const authenticatedApi = createAuthenticatedApi(getToken);
-    const response = await authenticatedApi.get(`/api/extractions/${extractionId}`);
-    return response.data;
+  const authenticatedApi = createAuthenticatedApi(getToken);
+  const response = await authenticatedApi.get(
+    `/api/extractions/${extractionId}`
+  );
+  return response.data;
 }
 
 /**
@@ -310,9 +345,11 @@ export async function fetchExtractionResult(extractionId, getToken) {
  * }
  */
 export async function retryExtraction(extractionId, getToken) {
-    const authenticatedApi = createAuthenticatedApi(getToken);
-    const response = await authenticatedApi.post(`/api/extractions/${extractionId}/retry`);
-    return response.data;
+  const authenticatedApi = createAuthenticatedApi(getToken);
+  const response = await authenticatedApi.post(
+    `/api/extractions/${extractionId}/retry`
+  );
+  return response.data;
 }
 
 /**
@@ -323,7 +360,82 @@ export async function retryExtraction(extractionId, getToken) {
  * @returns {Promise<Object>} Current job state
  */
 export async function getJobStatus(jobId, getToken) {
-    const authenticatedApi = createAuthenticatedApi(getToken);
-    const response = await authenticatedApi.get(`/api/jobs/${jobId}/status`);
-    return response.data;
+  const authenticatedApi = createAuthenticatedApi(getToken);
+  const response = await authenticatedApi.get(`/api/jobs/${jobId}/status`);
+  return response.data;
+}
+
+/**
+ * Extract temp document (no library save)
+ * POST /api/extract/temp
+ */
+export async function extractTempDocument(file, getToken, context = "") {
+  const authenticatedApi = createAuthenticatedApi(getToken);
+
+  const formData = new FormData();
+  formData.append("file", file);
+  if (context && context.trim()) {
+    formData.append("context", context.trim());
+  }
+
+  const response = await authenticatedApi.post("/api/extract/temp", formData, {
+    headers: { "Content-Type": "multipart/form-data" },
+  });
+
+  return response.data;
+}
+
+/**
+ * Extract from existing library document
+ * POST /api/extract/documents/{docId}
+ */
+export async function extractFromDocument(documentId, getToken, context = "") {
+  const authenticatedApi = createAuthenticatedApi(getToken);
+
+  const formData = new FormData();
+  if (context && context.trim()) {
+    formData.append("context", context.trim());
+  }
+
+  const response = await authenticatedApi.post(
+    `/api/extract/documents/${documentId}`,
+    formData,
+    { headers: { "Content-Type": "multipart/form-data" } }
+  );
+
+  return response.data;
+}
+
+/**
+ * Delete extraction
+ * DELETE /api/extractions/{extractionId}
+ */
+export async function deleteExtraction(extractionId, getToken) {
+  const authenticatedApi = createAuthenticatedApi(getToken);
+  const response = await authenticatedApi.delete(
+    `/api/extractions/${extractionId}`
+  );
+  return response.data;
+}
+
+/**
+ * Fetch extraction history (paginated, requires authentication)
+ *
+ * @param {Function} getToken - Clerk's getToken function from useAuth hook
+ * @param {Object} options - { limit, offset, status }
+ * @returns {Promise<Object>} { items: ExtractionListItem[], total: number }
+ *
+ * Usage:
+ *   const { getToken } = useAuth();
+ *   const { items, total } = await fetchExtractionHistory(getToken, { limit: 20, offset: 0 });
+ */
+export async function fetchExtractionHistory(
+  getToken,
+  { limit = 50, offset = 0, status = null } = {}
+) {
+  const authenticatedApi = createAuthenticatedApi(getToken);
+  const params = { limit, offset };
+  if (status) params.status = status;
+  const response = await authenticatedApi.get("/api/extractions", { params });
+  return response.data;
 }

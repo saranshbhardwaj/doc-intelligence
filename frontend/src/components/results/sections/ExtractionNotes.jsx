@@ -4,14 +4,12 @@ import Section from "../Section";
 import { safeText } from "../../../utils/formatters";
 
 export default function ExtractionNotes({ data }) {
-  if (!data.extraction_notes) {
-    return null;
-  }
+  if (!data?.extraction_notes) return null;
 
   return (
     <Section title="Extraction Notes" icon={FileText}>
-      <div className="bg-yellow-50 p-4 rounded-lg border border-yellow-200">
-        <p className="text-sm text-muted-foreground whitespace-pre-line">
+      <div className="bg-accent/10 dark:bg-accent/20 p-4 rounded-lg border border-border">
+        <p className="text-foreground text-sm whitespace-pre-line">
           {safeText(data.extraction_notes)}
         </p>
       </div>

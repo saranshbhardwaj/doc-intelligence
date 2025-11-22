@@ -32,6 +32,7 @@ try:
     import app.db_models_users  # noqa: F401 - User
     import app.db_models_chat  # noqa: F401 - Collection, CollectionDocument, DocumentChunk, ChatSession, ChatMessage
     import app.db_models_workflows  # noqa: F401 - Workflow, WorkflowRun
+    import app.db_models_documents  # noqa: F401 - Document, DocumentChunk
 except Exception:
     # Non-fatal here; if imports fail the worker will likely fail later when using DB.
     pass
@@ -39,7 +40,7 @@ except Exception:
 # Tasks are organized in app/services/tasks/
 try:
     import app.services.tasks.extraction  # noqa: F401 - Extraction pipeline tasks
-    import app.services.tasks.chat  # noqa: F401 - Chat indexing pipeline tasks
+    import app.services.tasks.document_processor  # noqa: F401 - Document indexing pipeline tasks
     import app.services.tasks.workflows  # noqa: F401 - Workflow execution pipeline tasks
 except Exception:
     # Avoid hard failure if tasks module temporarily missing; log later after logging init.
