@@ -307,7 +307,7 @@ class DocumentRepository:
 
                 # Query workflow runs using this document
                 workflows = db.query(WorkflowRun).filter(
-                    WorkflowRun.document_id == document_id,
+                    WorkflowRun.document_ids.contains([document_id]),
                     WorkflowRun.user_id == user_id
                 ).all()
 
