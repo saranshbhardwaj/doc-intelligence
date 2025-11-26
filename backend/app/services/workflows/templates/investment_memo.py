@@ -299,6 +299,187 @@ def get_investment_memo_prompt(variables: dict, custom_prompt: str = None) -> st
     template = Template(INVESTMENT_MEMO_SYSTEM_PROMPT)
     return template.render(**variables_with_objective)
 
+# Retrieval specification for Investment Memo workflow
+# Defines what content to retrieve for each section
+INVESTMENT_MEMO_RETRIEVAL_SPEC = [
+    {
+        "key": "executive_overview",
+        "title": "EXECUTIVE OVERVIEW",
+        "queries": [
+            "investment highlights",
+            "key strengths",
+            "business overview",
+            "executive summary",
+            "investment thesis"
+        ],
+        "prefer_tables": False,
+        "priority": "critical",
+        "max_chunks": 15
+    },
+    {
+        "key": "company_overview",
+        "title": "COMPANY OVERVIEW",
+        "queries": [
+            "company description",
+            "business model",
+            "products and services",
+            "corporate structure",
+            "company history"
+        ],
+        "prefer_tables": False,
+        "priority": "high",
+        "max_chunks": 20
+    },
+    {
+        "key": "market_competition",
+        "title": "MARKET & COMPETITIVE LANDSCAPE",
+        "queries": [
+            "market size",
+            "market share",
+            "competitive position",
+            "competitors",
+            "industry trends",
+            "competitive advantages"
+        ],
+        "prefer_tables": False,
+        "priority": "medium",
+        "max_chunks": 15
+    },
+    {
+        "key": "financial_performance",
+        "title": "FINANCIAL PERFORMANCE",
+        "queries": [
+            "revenue growth",
+            "ebitda margin",
+            "profitability",
+            "financial statements",
+            "income statement",
+            "revenue breakdown",
+            "financial metrics"
+        ],
+        "prefer_tables": True,  # Critical: financial tables!
+        "priority": "critical",
+        "max_chunks": 25
+    },
+    {
+        "key": "unit_economics",
+        "title": "UNIT ECONOMICS",
+        "queries": [
+            "unit economics",
+            "customer acquisition cost",
+            "lifetime value",
+            "churn rate",
+            "average revenue per user"
+        ],
+        "prefer_tables": True,
+        "priority": "medium",
+        "max_chunks": 12
+    },
+    {
+        "key": "track_record",
+        "title": "TRACK RECORD & VALUE CREATION",
+        "queries": [
+            "historical performance",
+            "growth trajectory",
+            "value creation",
+            "past acquisitions",
+            "operational improvements"
+        ],
+        "prefer_tables": False,
+        "priority": "medium",
+        "max_chunks": 15
+    },
+    {
+        "key": "risks",
+        "title": "RISK FACTORS",
+        "queries": [
+            "risk factors",
+            "customer concentration",
+            "regulatory risk",
+            "operational challenges",
+            "market risks",
+            "key risks"
+        ],
+        "prefer_tables": False,
+        "priority": "high",
+        "max_chunks": 20
+    },
+    {
+        "key": "opportunities",
+        "title": "GROWTH OPPORTUNITIES",
+        "queries": [
+            "growth opportunities",
+            "expansion plans",
+            "market opportunities",
+            "strategic initiatives",
+            "new products",
+            "geographic expansion"
+        ],
+        "prefer_tables": False,
+        "priority": "high",
+        "max_chunks": 15
+    },
+    {
+        "key": "management_culture",
+        "title": "MANAGEMENT & ORGANIZATIONAL CULTURE",
+        "queries": [
+            "management team",
+            "executive leadership",
+            "organizational culture",
+            "board of directors",
+            "key personnel",
+            "leadership experience"
+        ],
+        "prefer_tables": False,
+        "priority": "medium",
+        "max_chunks": 15
+    },
+    {
+        "key": "esg",
+        "title": "ESG FACTORS",
+        "queries": [
+            "environmental impact",
+            "social responsibility",
+            "corporate governance",
+            "sustainability",
+            "ESG factors",
+            "carbon footprint"
+        ],
+        "prefer_tables": False,
+        "priority": "low",
+        "max_chunks": 10
+    },
+    {
+        "key": "valuation",
+        "title": "VALUATION & SCENARIOS",
+        "queries": [
+            "valuation",
+            "enterprise value",
+            "valuation multiples",
+            "comparable companies",
+            "DCF analysis",
+            "pricing"
+        ],
+        "prefer_tables": True,
+        "priority": "medium",
+        "max_chunks": 15
+    },
+    {
+        "key": "next_steps",
+        "title": "RECOMMENDED NEXT STEPS",
+        "queries": [
+            "recommended actions",
+            "next steps",
+            "follow-up diligence",
+            "action items",
+            "due diligence recommendations"
+        ],
+        "prefer_tables": False,
+        "priority": "high",
+        "max_chunks": 10
+    }
+]
+
 INVESTMENT_MEMO_SCHEMA = {
     "variables": [
         {"name": "company_name", "type": "string", "required": True, "description": "Company name being analyzed"},
@@ -326,6 +507,7 @@ TEMPLATE = {
     "prompt_template": INVESTMENT_MEMO_SYSTEM_PROMPT,  # Full technical prompt
     "user_prompt_template": INVESTMENT_MEMO_USER_PROMPT,  # User-friendly version for editing
     "prompt_generator": get_investment_memo_prompt,  # Function to combine user + system prompts
+    "retrieval_spec": INVESTMENT_MEMO_RETRIEVAL_SPEC,  # Workflow-specific retrieval sections
     "variables_schema": INVESTMENT_MEMO_SCHEMA,
     "output_format": "json",
     "min_documents": 1,

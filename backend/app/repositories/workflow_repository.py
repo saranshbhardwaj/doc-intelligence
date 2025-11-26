@@ -22,7 +22,8 @@ class WorkflowRepository:
         return self.db.get(Workflow, workflow_id)
 
     def create_workflow(self, name: str, prompt_template: str, category: str | None = None,
-                        variables_schema: dict | None = None, output_format: str = "markdown",
+                        variables_schema: dict | None = None, retrieval_spec: list | None = None,
+                        output_format: str = "markdown",
                         min_documents: int = 1, max_documents: int | None = None, version: int = 1,
                         description: str | None = None, user_prompt_template: str | None = None,
                         user_prompt_max_length: int | None = None) -> Workflow:
@@ -34,6 +35,7 @@ class WorkflowRepository:
             user_prompt_template=user_prompt_template,
             user_prompt_max_length=user_prompt_max_length,
             variables_schema=json.dumps(variables_schema or {}),
+            retrieval_spec_json=json.dumps(retrieval_spec) if retrieval_spec else None,
             output_format=output_format,
             min_documents=min_documents,
             max_documents=max_documents,
@@ -47,6 +49,14 @@ class WorkflowRepository:
     # ---- Workflow Runs ----
     def create_run(self, workflow: Workflow, user_id: str, collection_id: str | None,
                    document_ids: List[str], variables: dict, mode: str, strategy: str) -> WorkflowRun:
+        # Create snapshot of workflow at execution time to preserve context
+        workflow_snapshot = {
+            "name": workflow.name,
+            "description": workflow.description,
+            "version": workflow.version,
+            "category": workflow.category,
+        }
+
         run = WorkflowRun(
             id=generate_id(),
             workflow_id=workflow.id,
@@ -54,6 +64,7 @@ class WorkflowRepository:
             collection_id=collection_id,
             document_ids=document_ids,  # JSON column auto-serializes
             variables=variables,        # JSON column auto-serializes
+            workflow_snapshot=workflow_snapshot,  # Snapshot for historical preservation
             mode=mode,
             strategy=strategy,
             version=workflow.version,

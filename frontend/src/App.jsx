@@ -39,7 +39,6 @@ export default function App() {
             />
             <Route path="/app/library" element={<LibraryPage />} />
             <Route path="/app/chat" element={<ChatPage />} />
-            <Route path="/app/chat/:collectionId" element={<ChatPage />} />
 
             {/* Workflows - New simplified single-page experience */}
             <Route path="/app/workflows" element={<WorkflowSimplePage />} />

@@ -3,7 +3,7 @@
 
 Responsibilities limited to orchestration:
  1. Load & maybe summarize history via ConversationMemory
- 2. Perform vector retrieval
+ 2. Perform hybrid retrieval (semantic + keyword search)
  3. Enforce budget trims
  4. Build final prompt
  5. Stream LLM response
@@ -23,6 +23,8 @@ from app.utils.logging import logger
 from app.services.rag.prompt_builder import PromptBuilder
 from app.services.rag.memory import ConversationMemory
 from app.services.rag.budget_enforcer import BudgetEnforcer
+from app.services.rag.hybrid_retriever import HybridRetriever
+from app.services.rag.reranker import Reranker
 
 
 class RAGService:
@@ -30,12 +32,12 @@ class RAGService:
     RAG service for real-time chat responses.
 
     Workflow:
-    1. User asks a question
-    2. Embed the question
-    3. Vector search for relevant chunks
-    4. Build prompt with chunks + question
-    5. Stream response from Claude
-    6. Save chat history
+    1. Hybrid retrieval: Semantic (vector) + Keyword (FTS) search → 20 candidates
+    2. Re-ranking: Cross-encoder re-ranking with optional compression → Top 10
+    3. Budget enforcement: Trim context to fit within LLM limits
+    4. Build prompt: Assemble context + history + user message
+    5. Stream response: Generate answer from Claude
+    6. Save history: Persist messages to database
     """
 
     def __init__(self, db: Session):
@@ -58,28 +60,40 @@ class RAGService:
         self.prompt_builder = PromptBuilder()
         self.memory = ConversationMemory(self.llm_client)
         self.budget = BudgetEnforcer()
+        self.hybrid_retriever = HybridRetriever(db)  # Hybrid retrieval (semantic + keyword)
+
+        # Re-ranker (cross-encoder based, optional via config)
+        self.reranker = None
+        if settings.rag_use_reranker:
+            self.reranker = Reranker()
 
     async def chat(
         self,
         session_id: str,
-        collection_id: str,
+        collection_id: Optional[str],
         user_message: str,
         user_id: Optional[str] = None,
-        num_chunks: int = 5,
-        similarity_threshold: float = 0.0,  # Changed from 0.3 to 0.0 - return top chunks regardless of similarity
+        num_chunks: int = 5,  # DEPRECATED: Now uses rag_final_top_k from config
+        similarity_threshold: float = 0.0,  # DEPRECATED: Not used with hybrid retrieval
         document_ids: Optional[List[str]] = None
     ) -> AsyncIterator[str]:
         """
-        Generate streaming chat response using RAG.
+        Generate streaming chat response using RAG with hybrid retrieval + re-ranking.
+
+        Pipeline:
+        1. Hybrid retrieval: Semantic + Keyword search (20 candidates)
+        2. Re-ranking: Cross-encoder with optional compression (top 10)
+        3. Budget enforcement: Trim to fit context window
+        4. Build prompt and stream response
 
         Args:
             session_id: Chat session ID
-            collection_id: Collection ID to search within
+            collection_id: Optional collection ID to search within (if None, uses document_ids filter)
             user_message: User's question/message
             user_id: Optional user ID for logging
-            num_chunks: Number of chunks to retrieve (default: 5)
-            similarity_threshold: Minimum similarity score (0-1, default: 0.0 = return all top chunks)
-            document_ids: Optional filter by specific documents
+            num_chunks: DEPRECATED - Now uses settings.rag_final_top_k (kept for backwards compatibility)
+            similarity_threshold: DEPRECATED - Not used with hybrid retrieval (kept for backwards compatibility)
+            document_ids: Optional filter by specific documents (required if collection_id is None)
 
         Yields:
             Streaming response chunks from Claude
@@ -88,7 +102,7 @@ class RAGService:
         if not user_message or not user_message.strip():
             logger.warning(
                 "Empty user message received",
-                extra={"session_id": session_id, "collection_id": collection_id}
+                extra={"session_id": session_id}
             )
             raise ValueError("User message cannot be empty")
 
@@ -113,31 +127,66 @@ class RAGService:
         summary_text, recent_messages = await self.memory.maybe_summarize(session_id, history_messages, user_message)
 
         # ------------------------------------------------------------------
-        # STEP 1: Embed the user question
+        # STEP 1: Hybrid retrieval (semantic + keyword search)
         logger.info(
-            f"Generating embedding for user query",
+            f"Starting hybrid retrieval for user query",
             extra={"user_id": user_id, "session_id": session_id}
         )
-        query_embedding = self.embedder.embed_text(user_message)
 
-        # Step 2: Vector similarity search
-        relevant_chunks = await self._vector_search(
-            query_embedding=query_embedding,
+        # Use hybrid retriever (combines semantic + keyword search)
+        # Retrieve more candidates for potential re-ranking
+        retrieval_candidates = settings.rag_retrieval_candidates
+        hybrid_results = self.hybrid_retriever.retrieve(
+            query=user_message,
             collection_id=collection_id,
-            limit=num_chunks,
-            similarity_threshold=similarity_threshold,
+            top_k=retrieval_candidates,
             document_ids=document_ids
         )
 
+        # Get query analysis (needed for re-ranker metadata boosting)
+        query_analysis = self.hybrid_retriever.query_analyzer.analyze(user_message)
+
         logger.info(
-            f"Retrieved {len(relevant_chunks)} relevant chunks",
+            f"Hybrid retrieval complete: {len(hybrid_results)} candidates retrieved",
             extra={
                 "user_id": user_id,
                 "session_id": session_id,
-                "collection_id": collection_id,
-                "num_chunks": len(relevant_chunks)
+                "document_count": len(document_ids) if document_ids else 0,
+                "retrieval_candidates": retrieval_candidates,
+                "query_type": query_analysis.get("query_type")
             }
         )
+
+        # ------------------------------------------------------------------
+        # STEP 2: Re-ranking (optional, cross-encoder based)
+        if self.reranker and hybrid_results:
+            logger.info(
+                f"Starting re-ranking of {len(hybrid_results)} candidates",
+                extra={"session_id": session_id}
+            )
+
+            # Re-rank with compression and metadata boosting
+            relevant_chunks = self.reranker.rerank(
+                query=user_message,
+                chunks=hybrid_results,
+                query_analysis=query_analysis,
+                top_k=settings.rag_final_top_k
+            )
+
+            logger.info(
+                f"Re-ranking complete: {len(relevant_chunks)} final chunks selected",
+                extra={
+                    "session_id": session_id,
+                    "top_rerank_score": relevant_chunks[0]["rerank_score"] if relevant_chunks else 0
+                }
+            )
+        else:
+            # No re-ranker: use hybrid results directly
+            relevant_chunks = hybrid_results[:num_chunks]
+            logger.info(
+                f"Re-ranker disabled, using top {len(relevant_chunks)} hybrid results",
+                extra={"session_id": session_id}
+            )
 
         # Edge case: Handle when no relevant chunks are found
         if not relevant_chunks:
@@ -146,14 +195,15 @@ class RAGService:
                 extra={
                     "user_id": user_id,
                     "session_id": session_id,
-                    "collection_id": collection_id,
+                    "document_count": len(document_ids) if document_ids else 0,
                     "query_length": len(user_message),
                     "similarity_threshold": similarity_threshold
                 }
             )
             # Continue with empty context - let LLM respond that it can't find relevant info
 
-        # Step 3: Budget enforcement
+        # ------------------------------------------------------------------
+        # STEP 3: Budget enforcement
         summary_text, recent_messages, relevant_chunks = await self.budget.enforce(
             memory=self.memory,
             user_message=user_message,
@@ -166,7 +216,8 @@ class RAGService:
         if summary_text:
             self.memory.cache_summary(session_id, len(history_messages), summary_text)
 
-        # Step 4: Build prompt
+        # ------------------------------------------------------------------
+        # STEP 4: Build prompt
         prompt = self.prompt_builder.build(
             user_message=user_message,
             relevant_chunks=relevant_chunks,
@@ -174,7 +225,8 @@ class RAGService:
             summary_text=summary_text
         )
 
-        # Step 5: Stream response from Claude with error handling
+        # ------------------------------------------------------------------
+        # STEP 5: Stream response from Claude with error handling
         full_response = ""
         try:
             async for chunk in self.llm_client.stream_chat(prompt):
@@ -193,7 +245,7 @@ class RAGService:
                 f"LLM streaming failed: {stream_error}",
                 extra={
                     "session_id": session_id,
-                    "collection_id": collection_id,
+                    "document_count": len(document_ids) if document_ids else 0,
                     "partial_response_length": len(full_response),
                     "error_type": type(stream_error).__name__
                 },

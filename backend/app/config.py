@@ -128,7 +128,66 @@ class Settings(BaseSettings):
     # Vector dimension (auto-set based on model, but can override)
     # all-MiniLM-L6-v2: 384, all-mpnet-base-v2: 768, text-embedding-3-small: 1536
     embedding_dimension: int = 384
-    
+
+    # ===== RAG HYBRID SEARCH SETTINGS =====
+    # Combines semantic (vector) search with keyword (BM25/FTS) search
+    # for improved retrieval quality
+
+    # Weight for semantic search in hybrid scoring (0.0 - 1.0)
+    rag_hybrid_semantic_weight: float = 0.6
+
+    # Weight for keyword search in hybrid scoring (0.0 - 1.0)
+    rag_hybrid_keyword_weight: float = 0.4
+
+    # Number of candidates to retrieve from each search method before merging
+    rag_retrieval_candidates: int = 20
+
+    # Final number of chunks to return after re-ranking (Phase 2)
+    rag_final_top_k: int = 10
+
+    # ===== RAG RE-RANKER SETTINGS =====
+    # Cross-encoder re-ranking for improved relevance scoring
+
+    # Enable re-ranker (set to False to skip re-ranking step)
+    rag_use_reranker: bool = True
+
+    # Cross-encoder model for re-ranking
+    # Options: "cross-encoder/ms-marco-MiniLM-L-6-v2", "BAAI/bge-reranker-base", "BAAI/bge-reranker-large"
+    rag_reranker_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
+
+    # Batch size for re-ranking (process multiple query-doc pairs together)
+    rag_reranker_batch_size: int = 8
+
+    # Token limit for re-ranker input (most cross-encoders have 512 token limit)
+    rag_reranker_token_limit: int = 512
+
+    # Apply metadata boosting to re-ranker scores (gentle nudge for tables/narrative)
+    rag_reranker_apply_metadata_boost: bool = True
+
+    # ===== RAG CHUNK COMPRESSION SETTINGS =====
+    # Handle chunks that exceed re-ranker token limits
+
+    # Enable compression (set to False to use only truncation)
+    rag_use_compression: bool = True
+
+    # LLMLingua model for prompt compression
+    # Options: "microsoft/llmlingua-2-bert-base-multilingual-cased-meetingbank" (recommended),
+    #          "microsoft/llmlingua-2-xlm-roberta-large-meetingbank" (better quality, slower)
+    rag_compression_model: str = "microsoft/llmlingua-2-bert-base-multilingual-cased-meetingbank"
+
+    # Compression rate (0.0 - 1.0) - lower = more compression
+    # 0.5 = compress to 50% of original tokens
+    rag_compression_rate: float = 0.5
+
+    # Truncation strategy for chunks exceeding token limit
+    # "head_tail": Keep first 60% and last 40% of tokens
+    # "head": Keep only first N tokens
+    # "tail": Keep only last N tokens
+    rag_truncation_strategy: str = "head_tail"
+
+    # Preserve section headings during compression/truncation
+    rag_preserve_headings: bool = True
+
     # Paths
     log_dir: Path = Path("logs")
     raw_dir: Path = Path("logs/raw")

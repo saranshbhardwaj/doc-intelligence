@@ -212,3 +212,57 @@ async def delete_collection(
     )
 
     return {"success": True, "message": "Collection deleted"}
+
+
+@router.delete("/collections/{collection_id}/documents/{document_id}")
+async def remove_document_from_collection(
+    collection_id: str,
+    document_id: str,
+    user: User = Depends(get_current_user)
+):
+    """
+    Remove a document from a specific collection.
+
+    This unlinks the document from the collection but doesn't delete the document
+    itself. The document may still exist in other collections.
+
+    Args:
+        collection_id: Collection ID
+        document_id: Document ID
+        user: Current user
+
+    Returns:
+        Success message
+
+    Raises:
+        HTTPException 404: Collection not found, or document not in collection
+        HTTPException 403: User doesn't own the collection
+    """
+    collection_repo = CollectionRepository()
+
+    # Verify collection exists and belongs to user
+    collection = collection_repo.get_collection(collection_id, user.id)
+    if not collection:
+        raise HTTPException(status_code=404, detail="Collection not found")
+
+    # Remove document from collection
+    success = collection_repo.remove_document_from_collection(collection_id, document_id)
+    if not success:
+        raise HTTPException(
+            status_code=404,
+            detail="Document not found in this collection"
+        )
+
+    logger.info(
+        f"Removed document from collection",
+        extra={
+            "user_id": user.id,
+            "collection_id": collection_id,
+            "document_id": document_id
+        }
+    )
+
+    return {
+        "success": True,
+        "message": "Document removed from collection"
+    }

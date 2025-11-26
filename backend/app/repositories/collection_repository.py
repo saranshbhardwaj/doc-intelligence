@@ -505,6 +505,63 @@ class CollectionRepository:
                 db.rollback()
                 return False
 
+    def remove_document_from_collection(
+        self,
+        collection_id: str,
+        document_id: str
+    ) -> bool:
+        """Remove a document from a specific collection.
+
+        Finds and deletes the CollectionDocument link between the collection
+        and document. The document itself remains in the documents table and
+        may still be linked to other collections.
+
+        Args:
+            collection_id: Collection ID
+            document_id: Document ID
+
+        Returns:
+            True if successful, False otherwise
+        """
+        with self._get_session() as db:
+            try:
+                link = db.query(CollectionDocument).filter(
+                    CollectionDocument.collection_id == collection_id,
+                    CollectionDocument.document_id == document_id
+                ).first()
+
+                if not link:
+                    logger.warning(
+                        f"Document not found in collection",
+                        extra={"collection_id": collection_id, "document_id": document_id}
+                    )
+                    return False
+
+                db.delete(link)
+                db.commit()
+
+                # Recompute collection stats after removal
+                self.recompute_collection_stats(collection_id)
+
+                logger.info(
+                    "Removed document from collection",
+                    extra={
+                        "collection_id": collection_id,
+                        "document_id": document_id,
+                        "link_id": link.id
+                    }
+                )
+
+                return True
+
+            except SQLAlchemyError as e:
+                logger.error(
+                    f"Failed to remove document from collection: {e}",
+                    extra={"collection_id": collection_id, "document_id": document_id, "error": str(e)}
+                )
+                db.rollback()
+                return False
+
     def get_collection_document_link(
         self,
         link_id: str

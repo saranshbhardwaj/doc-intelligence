@@ -1,12 +1,14 @@
 """Repository for canonical Document operations (dedup & reuse)."""
-from typing import Optional, Generator
+from typing import Optional, Generator, Dict, List
 from contextlib import contextmanager
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy.exc import SQLAlchemyError, IntegrityError
 from sqlalchemy import select, func
 from app.database import SessionLocal
 from app.db_models_documents import Document
-from app.db_models_chat import DocumentChunk
+from app.db_models_chat import DocumentChunk, SessionDocument, ChatSession
+from app.db_models import Extraction
+from app.db_models_workflows import WorkflowRun
 from app.utils.logging import logger
 
 
@@ -215,3 +217,139 @@ class DocumentRepository:
                     extra={"document_id": document_id, "error": str(e)}
                 )
                 return 0
+
+    def get_document_usage(self, document_id: str, user_id: str) -> Optional[Dict]:
+        """
+        Get usage statistics for a document across all modes.
+
+        Args:
+            document_id: Document ID
+            user_id: User ID (for ownership verification)
+
+        Returns:
+            {
+                "document_id": str,
+                "document_name": str,
+                "usage": {
+                    "chat_sessions": [
+                        {"session_id": str, "title": str, "created_at": str},
+                        ...
+                    ],
+                    "extracts": [
+                        {"request_id": str, "created_at": str, "status": str},
+                        ...
+                    ],
+                    "workflows": [
+                        {"run_id": str, "workflow_name": str, "created_at": str},
+                        ...
+                    ]
+                },
+                "total_usage_count": int
+            }
+
+        Input:
+            - document_id: str
+            - user_id: str
+
+        Output:
+            - Dictionary with usage details or None if document not found
+        """
+        with self._get_session() as db:
+            try:
+                # Verify document exists and user owns it
+                document = db.get(Document, document_id)
+                if not document:
+                    logger.warning(
+                        "Document not found for usage query",
+                        extra={"document_id": document_id, "user_id": user_id}
+                    )
+                    return None
+
+                if document.user_id != user_id:
+                    logger.warning(
+                        "User does not own document",
+                        extra={"document_id": document_id, "user_id": user_id}
+                    )
+                    return None
+
+                # Query chat sessions using this document
+                chat_sessions = db.query(ChatSession).join(
+                    SessionDocument,
+                    SessionDocument.session_id == ChatSession.id
+                ).filter(
+                    SessionDocument.document_id == document_id,
+                    ChatSession.user_id == user_id
+                ).all()
+
+                chat_sessions_list = [
+                    {
+                        "session_id": session.id,
+                        "title": session.title,
+                        "created_at": session.created_at.isoformat() if session.created_at else None
+                    }
+                    for session in chat_sessions
+                ]
+
+                # Query extractions using this document
+                extracts = db.query(Extraction).filter(
+                    Extraction.document_id == document_id,
+                    Extraction.user_id == user_id
+                ).all()
+
+                extracts_list = [
+                    {
+                        "request_id": extraction.id,
+                        "created_at": extraction.created_at.isoformat() if extraction.created_at else None,
+                        "status": extraction.status
+                    }
+                    for extraction in extracts
+                ]
+
+                # Query workflow runs using this document
+                workflows = db.query(WorkflowRun).filter(
+                    WorkflowRun.document_ids.contains([document_id]),
+                    WorkflowRun.user_id == user_id
+                ).all()
+
+                workflows_list = [
+                    {
+                        "run_id": workflow.id,
+                        "workflow_name": workflow.workflow_name,
+                        "created_at": workflow.created_at.isoformat() if workflow.created_at else None
+                    }
+                    for workflow in workflows
+                ]
+
+                # Calculate total usage count
+                total_usage = len(chat_sessions_list) + len(extracts_list) + len(workflows_list)
+
+                logger.info(
+                    "Retrieved document usage",
+                    extra={
+                        "document_id": document_id,
+                        "user_id": user_id,
+                        "chat_sessions": len(chat_sessions_list),
+                        "extracts": len(extracts_list),
+                        "workflows": len(workflows_list),
+                        "total_usage": total_usage
+                    }
+                )
+
+                return {
+                    "document_id": document_id,
+                    "document_name": document.filename,
+                    "usage": {
+                        "chat_sessions": chat_sessions_list,
+                        "extracts": extracts_list,
+                        "workflows": workflows_list
+                    },
+                    "total_usage_count": total_usage
+                }
+
+            except SQLAlchemyError as e:
+                logger.error(
+                    "Failed to get document usage",
+                    extra={"document_id": document_id, "user_id": user_id, "error": str(e)},
+                    exc_info=True
+                )
+                return None

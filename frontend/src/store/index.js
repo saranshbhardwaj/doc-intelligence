@@ -117,19 +117,34 @@ export const useChat = () => useStore((state) => state.chat);
 export const useChatActions = () =>
   useStore(
     useShallow((state) => ({
+      // Collections
       fetchCollections: state.fetchCollections,
       createCollection: state.createCollection,
       selectCollection: state.selectCollection,
       deleteCollection: state.deleteCollection,
+      // Documents
       uploadDocumentToCollection: state.uploadDocumentToCollection,
       deleteDocument: state.deleteDocument,
       resetUploadStatus: state.resetUploadStatus,
-      sendMessage: state.sendMessage,
-      loadChatHistory: state.loadChatHistory,
-      startNewChat: state.startNewChat,
+      removeDocumentFromCollection: state.removeDocumentFromCollection,
+      // Sessions (NEW)
+      createNewSession: state.createNewSession,
+      loadSession: state.loadSession,
       fetchSessions: state.fetchSessions,
       deleteSession: state.deleteSession,
       exportSession: state.exportSession,
+      updateSessionTitle: state.updateSessionTitle,
+      // Session Documents (NEW)
+      addDocumentsToCurrentSession: state.addDocumentsToCurrentSession,
+      removeDocumentFromCurrentSession: state.removeDocumentFromCurrentSession,
+      // Messages
+      sendMessage: state.sendMessage,
+      loadChatHistory: state.loadChatHistory,
+      startNewChat: state.startNewChat,
+      // Legacy (deprecated)
+      toggleDocumentSelection: state.toggleDocumentSelection,
+      toggleSelectAll: state.toggleSelectAll,
+      setSelectedDocuments: state.setSelectedDocuments,
     }))
   );
 

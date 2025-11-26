@@ -27,7 +27,10 @@ export async function createCollection(getToken, { name, description }) {
   return response.data;
 }
 
-export async function listCollections(getToken, { limit = 50, offset = 0 } = {}) {
+export async function listCollections(
+  getToken,
+  { limit = 50, offset = 0 } = {}
+) {
   const api = createAuthenticatedApi(getToken);
   const response = await api.get("/api/chat/collections", {
     params: { limit, offset },
@@ -79,11 +82,19 @@ export async function uploadDocument(getToken, collectionId, file, onProgress) {
  *
  * NOTE: EventSource doesn't support custom headers, so auth token is passed as query parameter
  */
-export function connectToIndexingProgress(getToken, jobId, onProgress, onComplete, onError) {
+export function connectToIndexingProgress(
+  getToken,
+  jobId,
+  onProgress,
+  onComplete,
+  onError
+) {
   getToken().then((token) => {
     // Pass token as query parameter (EventSource doesn't support headers)
     const eventSource = new EventSource(
-      `${import.meta.env.VITE_API_URL}/api/chat/jobs/${jobId}/progress?token=${encodeURIComponent(token)}`
+      `${
+        import.meta.env.VITE_API_URL
+      }/api/chat/jobs/${jobId}/progress?token=${encodeURIComponent(token)}`
     );
 
     let endEventReceived = false; // Track if we received the end event
@@ -138,13 +149,14 @@ export function connectToIndexingProgress(getToken, jobId, onProgress, onComplet
 
 /**
  * Chat API (SSE streaming)
+ *
+ * Session-centric: Chat happens within a session that has its own documents
  */
 
 export function sendChatMessage(
   getToken,
-  collectionId,
-  message,
   sessionId,
+  message,
   numChunks = 5,
   callbacks = {}
 ) {
@@ -153,12 +165,11 @@ export function sendChatMessage(
   getToken().then((token) => {
     const formData = new FormData();
     formData.append("message", message);
-    if (sessionId) formData.append("session_id", sessionId);
     formData.append("num_chunks", numChunks.toString());
 
     // Use fetch for SSE streaming
     fetch(
-      `${import.meta.env.VITE_API_URL}/api/chat/collections/${collectionId}/chat`,
+      `${import.meta.env.VITE_API_URL}/api/chat/sessions/${sessionId}/chat`,
       {
         method: "POST",
         headers: {
@@ -224,15 +235,61 @@ export function sendChatMessage(
 
 /**
  * Session Management API
+ *
+ * Session-centric architecture:
+ * - Sessions are independent of collections
+ * - Each session maintains its own document selection
  */
 
-export async function listSessions(getToken, collectionId, limit = 20) {
+export async function createSession(
+  getToken,
+  { title, description, documentIds }
+) {
   const api = createAuthenticatedApi(getToken);
-  const response = await api.get(
-    `/api/chat/collections/${collectionId}/sessions`,
-    {
-      params: { limit },
-    }
+  const response = await api.post("/api/chat/sessions", {
+    title,
+    description,
+    document_ids: documentIds,
+  });
+  return response.data;
+}
+
+export async function listSessions(getToken, { limit = 20, offset = 0 } = {}) {
+  const api = createAuthenticatedApi(getToken);
+  const response = await api.get("/api/chat/sessions", {
+    params: { limit, offset },
+  });
+  return response.data;
+}
+
+export async function getSession(getToken, sessionId) {
+  const api = createAuthenticatedApi(getToken);
+  const response = await api.get(`/api/chat/sessions/${sessionId}`);
+  return response.data;
+}
+
+export async function updateSession(getToken, sessionId, updates) {
+  const api = createAuthenticatedApi(getToken);
+  const response = await api.patch(`/api/chat/sessions/${sessionId}`, updates);
+  return response.data;
+}
+
+export async function addDocumentsToSession(getToken, sessionId, documentIds) {
+  const api = createAuthenticatedApi(getToken);
+  const response = await api.post(`/api/chat/sessions/${sessionId}/documents`, {
+    document_ids: documentIds,
+  });
+  return response.data;
+}
+
+export async function removeDocumentFromSession(
+  getToken,
+  sessionId,
+  documentId
+) {
+  const api = createAuthenticatedApi(getToken);
+  const response = await api.delete(
+    `/api/chat/sessions/${sessionId}/documents/${documentId}`
   );
   return response.data;
 }
@@ -261,6 +318,18 @@ export async function deleteDocument(getToken, documentId) {
   return response.data;
 }
 
+export async function removeDocumentFromCollection(
+  getToken,
+  collectionId,
+  documentId
+) {
+  const api = createAuthenticatedApi(getToken);
+  const response = await api.delete(
+    `/api/chat/collections/${collectionId}/documents/${documentId}`
+  );
+  return response.data;
+}
+
 /**
  * Export API
  */
@@ -268,5 +337,42 @@ export async function deleteDocument(getToken, documentId) {
 export async function exportSession(getToken, sessionId) {
   const api = createAuthenticatedApi(getToken);
   const response = await api.get(`/api/chat/sessions/${sessionId}/export`);
+  return response.data;
+}
+
+/**
+ * Document Usage API
+ */
+
+export async function getDocumentUsage(getToken, documentId) {
+  /**
+   * Get document usage information across all modes
+   *
+   * Input:
+   *   - documentId: string
+   *
+   * Output:
+   *   {
+   *     document_id: string,
+   *     document_name: string,
+   *     usage: {
+   *       chat_sessions: [
+   *         {session_id: string, title: string, created_at: string},
+   *         ...
+   *       ],
+   *       extracts: [
+   *         {request_id: string, created_at: string, status: string},
+   *         ...
+   *       ],
+   *       workflows: [
+   *         {run_id: string, workflow_name: string, created_at: string},
+   *         ...
+   *       ]
+   *     },
+   *     total_usage_count: number
+   *   }
+   */
+  const api = createAuthenticatedApi(getToken);
+  const response = await api.get(`/api/chat/documents/${documentId}/usage`);
   return response.data;
 }

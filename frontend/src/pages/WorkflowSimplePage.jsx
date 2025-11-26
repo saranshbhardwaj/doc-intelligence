@@ -133,10 +133,13 @@ export default function WorkflowSimplePage() {
     }
   };
 
-  // Filter runs by selected workflow
+  // Filter runs by selected workflow and separate orphaned runs
   const filteredRuns = selectedWorkflow
     ? runs.filter((r) => r.workflow_id === selectedWorkflow.id)
-    : runs;
+    : runs.filter((r) => r.workflow_id !== null); // Exclude orphaned from main list
+
+  // Orphaned runs (workflow was deleted)
+  const orphanedRuns = runs.filter((r) => r.workflow_id === null);
 
   // Handle opening result sheet
   const handleOpenResult = (runId) => {
@@ -158,9 +161,9 @@ export default function WorkflowSimplePage() {
 
   return (
     <AppLayout breadcrumbs={breadcrumbs}>
-      <div className="h-[calc(100vh-12rem)] flex gap-4">
+      <div className="flex-1 flex gap-4">
         {/* LEFT PANEL: Selected Documents */}
-        <div className="w-64 flex-shrink-0 bg-card rounded-lg border border-border dark:border-gray-700 p-4 overflow-y-auto flex flex-col">
+        <div className="w-64 flex-shrink-0 bg-card rounded-lg border border-border p-4 flex flex-col">
           <h3 className="font-semibold text-sm text-foreground mb-3 flex items-center gap-2">
             <FileText className="w-4 h-4" />
             Selected Documents
@@ -394,7 +397,7 @@ export default function WorkflowSimplePage() {
             </Button>
           </div>
 
-          {filteredRuns.length === 0 ? (
+          {filteredRuns.length === 0 && orphanedRuns.length === 0 ? (
             <div className="text-center py-12">
               <Sparkles className="w-12 h-12 text-gray-300 dark:text-muted-foreground mx-auto mb-3" />
               <p className="text-sm text-muted-foreground dark:text-muted-foreground">
@@ -405,14 +408,43 @@ export default function WorkflowSimplePage() {
               </p>
             </div>
           ) : (
-            <div className="space-y-3">
-              {filteredRuns.slice(0, 5).map((run) => (
-                <ResultPreviewCard
-                  key={run.id}
-                  run={run}
-                  onOpenSheet={handleOpenResult}
-                />
-              ))}
+            <div className="space-y-4">
+              {/* Active Runs */}
+              {filteredRuns.length > 0 && (
+                <div className="space-y-3">
+                  {filteredRuns.slice(0, 5).map((run) => (
+                    <ResultPreviewCard
+                      key={run.id}
+                      run={run}
+                      onOpenSheet={handleOpenResult}
+                    />
+                  ))}
+                </div>
+              )}
+
+              {/* Orphaned Runs Section */}
+              {orphanedRuns.length > 0 && (
+                <div className="mt-6 pt-4 border-t border-border dark:border-gray-700">
+                  <div className="flex items-center gap-2 mb-3">
+                    <Badge variant="outline" className="text-xs bg-amber-50 dark:bg-amber-950 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800">
+                      ⚠️ Previous Runs
+                    </Badge>
+                  </div>
+                  <p className="text-xs text-muted-foreground dark:text-gray-400 mb-3">
+                    These runs reference workflows that were deleted
+                  </p>
+                  <div className="space-y-3">
+                    {orphanedRuns.slice(0, 3).map((run) => (
+                      <ResultPreviewCard
+                        key={run.id}
+                        run={run}
+                        onOpenSheet={handleOpenResult}
+                        isOrphaned={true}
+                      />
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
         </div>
@@ -445,7 +477,7 @@ export default function WorkflowSimplePage() {
 }
 
 // Placeholder for ResultPreviewCard - will create separate component
-function ResultPreviewCard({ run, onOpenSheet }) {
+function ResultPreviewCard({ run, onOpenSheet, isOrphaned = false }) {
   const getStatusBadge = () => {
     switch (run.status) {
       case "completed":
@@ -461,15 +493,29 @@ function ResultPreviewCard({ run, onOpenSheet }) {
     }
   };
 
+  // Get workflow name from workflow_snapshot if orphaned, otherwise from run
+  const workflowName = isOrphaned
+    ? run.workflow_snapshot?.name || "Unknown Workflow"
+    : run.workflow_name || "Workflow";
+
   return (
     <Card
-      className="p-4 hover:shadow-md transition-shadow cursor-pointer dark:bg-card dark:border-gray-700 dark:hover:shadow-lg"
+      className={`p-4 hover:shadow-md transition-shadow cursor-pointer dark:bg-card dark:border-gray-700 dark:hover:shadow-lg ${
+        isOrphaned ? "border-amber-200 dark:border-amber-800/50 bg-amber-50/30 dark:bg-amber-950/20" : ""
+      }`}
       onClick={() => onOpenSheet(run.id)}
     >
       <div className="flex items-start justify-between mb-2">
-        <p className="text-sm font-medium text-foreground flex-1">
-          {run.workflow_name || "Workflow"}
-        </p>
+        <div className="flex-1">
+          <p className="text-sm font-medium text-foreground">
+            {workflowName}
+          </p>
+          {isOrphaned && (
+            <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">
+              Workflow deleted
+            </p>
+          )}
+        </div>
         {getStatusBadge()}
       </div>
 

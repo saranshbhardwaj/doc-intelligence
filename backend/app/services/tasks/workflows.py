@@ -30,6 +30,7 @@ from jinja2 import Environment, StrictUndefined
 from app.db_models_chat import DocumentChunk, CollectionDocument
 from sqlalchemy import text as sql_text, select
 from app.services.embeddings import get_embedding_provider
+from app.services.rag.workflow_retriever import WorkflowRetriever
 from app.utils.costs import compute_llm_cost
 from app.services.artifacts import persist_artifact
 from app.services.workflows.normalization import normalize_workflow_output
@@ -361,168 +362,106 @@ def prepare_context_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                 snippet = c.text
                 context_sections.append(f"{prefix}\n{snippet}\n")
         else:
-            # ---------------- Multi-Doc Retrieval Upgrade ----------------
-            # Strategy: For each semantic section intent, run vector search queries across all selected documents.
-            # Fall back to simple sampling if any errors occur.
+            # ---------------- Multi-Doc Hybrid Retrieval + Re-ranking ----------------
+            # Strategy: Use workflow-specific retrieval spec with hybrid search + cross-encoder re-ranking
             try:
-                # Define retrieval sections (generic). Could be specialized per workflow later.
-                sections_spec = [
-                    {
-                        "key": "executive",
-                        "title": "EXECUTIVE OVERVIEW",
-                        "queries": ["investment highlights", "key strengths", "business overview"],
-                        "prefer_tables": False,
-                    },
-                    {
-                        "key": "market",
-                        "title": "MARKET & COMPETITION",
-                        "queries": ["market size", "competitive landscape", "growth drivers", "competition"],
-                        "prefer_tables": False,
-                    },
-                    {
-                        "key": "financial",
-                        "title": "FINANCIAL HIGHLIGHTS",
-                        "queries": ["revenue growth", "ebitda margin", "financial performance", "profitability"],
-                        "prefer_tables": True,
-                    },
-                    {
-                        "key": "risks",
-                        "title": "RISKS",
-                        "queries": ["risk factors", "customer concentration", "regulatory risk", "operational risk"],
-                        "prefer_tables": False,
-                    },
-                    {
-                        "key": "actions",
-                        "title": "RECOMMENDED ACTIONS",
-                        "queries": ["recommended actions", "follow-up diligence", "next steps"],
-                        "prefer_tables": False,
-                    },
-                ]
+                # Get workflow-specific retrieval spec
+                workflow = run.workflow
 
-                embed_provider = get_embedding_provider()
-                # Map doc id to short index used in citation labels
-                doc_index_map = {doc_id: i + 1 for i, doc_id in enumerate(doc_ids)}
+                # Load retrieval spec from workflow (if available)
+                if hasattr(workflow, 'retrieval_spec_json') and workflow.retrieval_spec_json:
+                    # Workflow has custom retrieval spec stored in database
+                    sections_spec = json.loads(workflow.retrieval_spec_json)
+                    logger.info(f"Using workflow-specific retrieval spec: {len(sections_spec)} sections")
+                else:
+                    # Fall back to generic sections (backwards compatibility)
+                    sections_spec = [
+                        {
+                            "key": "executive",
+                            "title": "EXECUTIVE OVERVIEW",
+                            "queries": ["investment highlights", "key strengths", "business overview"],
+                            "prefer_tables": False,
+                            "max_chunks": 15
+                        },
+                        {
+                            "key": "market",
+                            "title": "MARKET & COMPETITION",
+                            "queries": ["market size", "competitive landscape", "growth drivers", "competition"],
+                            "prefer_tables": False,
+                            "max_chunks": 15
+                        },
+                        {
+                            "key": "financial",
+                            "title": "FINANCIAL HIGHLIGHTS",
+                            "queries": ["revenue growth", "ebitda margin", "financial performance", "profitability"],
+                            "prefer_tables": True,
+                            "max_chunks": 20
+                        },
+                        {
+                            "key": "risks",
+                            "title": "RISKS",
+                            "queries": ["risk factors", "customer concentration", "regulatory risk", "operational risk"],
+                            "prefer_tables": False,
+                            "max_chunks": 15
+                        },
+                        {
+                            "key": "actions",
+                            "title": "RECOMMENDED ACTIONS",
+                            "queries": ["recommended actions", "follow-up diligence", "next steps"],
+                            "prefer_tables": False,
+                            "max_chunks": 10
+                        },
+                    ]
+                    logger.warning(f"No retrieval spec found for workflow {workflow.name}, using generic")
 
-                # Helper: run a vector search for a single query string
-                def vector_search(query: str, k: int = 8):
-                    """Run a parameterized vector search using SQLAlchemy and pgvector.
+                # Initialize workflow retriever (hybrid + re-ranking)
+                workflow_retriever = WorkflowRetriever(db)
 
-                    Uses DocumentChunk.embedding.cosine_distance(query_vector) to build a safe
-                    expression, and binds the list of document ids with an IN() clause using
-                    SQLAlchemy's parameterization (DocumentChunk.document_id.in_(doc_ids)).
+                # Retrieve all sections
+                sections_content = workflow_retriever.retrieve_all_sections(
+                    sections_spec=sections_spec,
+                    document_ids=doc_ids
+                )
 
-                    This avoids building SQL by string concatenation and prevents driver
-                    binding errors when passing Python lists to the DB.
-                    """
-                    q_emb = embed_provider.embed_text(query)
-
-                    # Use a short-lived DB session to isolate errors from the main task session
-                    tmp_db = next(get_db())
-                    try:
-                        # Build a labelled distance expression so we can order by it safely
-                        distance_expr = (DocumentChunk.embedding.cosine_distance(q_emb)).label("distance")
-
-                        stmt = select(
-                            DocumentChunk.id,
-                            DocumentChunk.document_id,
-                            DocumentChunk.page_number,
-                            DocumentChunk.chunk_index,
-                            DocumentChunk.text,
-                            DocumentChunk.is_tabular,
-                            distance_expr,
-                        )
-
-                        # Restrict to selected documents if provided (parameterized)
-                        if doc_ids:
-                            stmt = stmt.where(DocumentChunk.document_id.in_(doc_ids))
-
-                        # Order by the computed distance (lower is better) and limit
-                        stmt = stmt.order_by(distance_expr).limit(k)
-
-                        rows = tmp_db.execute(stmt).fetchall()
-                        return rows
-                    finally:
-                        try:
-                            tmp_db.close()
-                        except Exception:
-                            pass
-
+                # Format sections for context
                 MAX_CHARS_PER_CHUNK = 800
-                TOTAL_UNIQUE_PER_SECTION = 20
-                DIVERSITY_DOC_CAP_RATIO = 0.5  # max 50% from one doc per section
-
                 for spec in sections_spec:
-                    section_chunks = {}
-                    # Collect candidate rows from all queries
-                    for q in spec["queries"]:
-                        try:
-                            for r in vector_search(q):
-                                if r.id in section_chunks:
-                                    # Keep best (lowest distance)
-                                    if r.distance < section_chunks[r.id]["distance"]:
-                                        section_chunks[r.id]["distance"] = r.distance
-                                else:
-                                    section_chunks[r.id] = {
-                                        "document_id": r.document_id,
-                                        "page_number": r.page_number,
-                                        "text": r.text,
-                                        "is_tabular": r.is_tabular,
-                                        "distance": r.distance,
-                                    }
-                        except Exception as inner_err:
-                            # Rollback session to clear any aborted transaction caused by the failed vector query
-                            try:
-                                db.rollback()
-                            except Exception:
-                                pass
-                            logger.warning("Vector search failed for query", extra={"query": q, "error": str(inner_err)})
-                            continue
+                    section_key = spec["key"]
+                    section_title = spec["title"]
+                    chunks = sections_content.get(section_key, [])
 
-                    if not section_chunks:
+                    if not chunks:
+                        logger.debug(f"No content retrieved for section: {section_title}")
                         continue
 
-                    # Re-rank with bonuses / penalties
-                    ranked = []
-                    for cid, meta in section_chunks.items():
-                        score = meta["distance"]  # lower is better
-                        if spec.get("prefer_tables") and meta.get("is_tabular"):
-                            score *= 0.9  # 10% bonus
-                        ranked.append((cid, score, meta))
-                    ranked.sort(key=lambda x: x[1])
-
-                    # Diversity filtering
-                    max_per_doc = max(1, int(TOTAL_UNIQUE_PER_SECTION * DIVERSITY_DOC_CAP_RATIO))
-                    doc_counts = {}
-                    final_selection = []
-                    for cid, score, meta in ranked:
-                        d = meta["document_id"]
-                        doc_counts.setdefault(d, 0)
-                        if doc_counts[d] >= max_per_doc:
-                            continue
-                        final_selection.append((cid, score, meta))
-                        doc_counts[d] += 1
-                        if len(final_selection) >= TOTAL_UNIQUE_PER_SECTION:
-                            break
-
-                    if not final_selection:
-                        continue
-
-                    context_sections.append(f"=== SECTION: {spec['title']} ===")
-                    for cid, score, meta in final_selection:
-                        d_index = doc_index_map.get(meta["document_id"], 0)
-                        citation = f"[D{d_index}:p{meta['page_number']}]"
-                        snippet = (meta["text"] or "")[:MAX_CHARS_PER_CHUNK].replace("\n", " ")
+                    context_sections.append(f"=== SECTION: {section_title} ===")
+                    for chunk in chunks:
+                        citation = chunk.get("citation", "[?]")
+                        text = chunk.get("text", "")
+                        snippet = text[:MAX_CHARS_PER_CHUNK].replace("\n", " ")
                         context_sections.append(f"{citation} {snippet}")
 
+                logger.info(
+                    f"Workflow retrieval complete: {len(sections_content)} sections, "
+                    f"{sum(len(chunks) for chunks in sections_content.values())} total chunks"
+                )
+
             except Exception as retrieval_err:
-                # If any DB error occurred during retrieval, rollback to clear transaction before fallback queries
+                # If any error occurred during retrieval, rollback and fallback
                 try:
                     db.rollback()
                 except Exception:
                     pass
-                logger.error("Retrieval upgrade failed, falling back to sampling", extra={"error": str(retrieval_err)})
+                logger.error(
+                    "Workflow retrieval failed, falling back to sampling",
+                    extra={"error": str(retrieval_err), "error_type": type(retrieval_err).__name__},
+                    exc_info=True
+                )
+                # Fallback: Simple sampling
                 for idx, doc_id in enumerate(doc_ids):
-                    chunks = db.query(DocumentChunk).filter(DocumentChunk.document_id == doc_id).order_by(DocumentChunk.chunk_index.asc()).limit(30).all()
+                    chunks = db.query(DocumentChunk).filter(
+                        DocumentChunk.document_id == doc_id
+                    ).order_by(DocumentChunk.chunk_index.asc()).limit(30).all()
                     context_sections.append(f"=== DOCUMENT {idx+1} ({doc_id}) SAMPLE CHUNKS ===")
                     for c in chunks:
                         prefix = f"[D{idx+1}:p{c.page_number}]"

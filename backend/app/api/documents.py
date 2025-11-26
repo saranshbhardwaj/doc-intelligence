@@ -357,3 +357,69 @@ async def delete_document(
         "filename": filename,
         "message": f"Document '{filename}' deleted successfully"
     }
+
+
+@router.get("/documents/{document_id}/usage")
+async def get_document_usage(
+    document_id: str,
+    user: User = Depends(get_current_user)
+):
+    """
+    Get document usage across all modes (chat, extract, workflow).
+
+    Args:
+        document_id: Document ID (UUID format)
+        user: Current user
+
+    Returns:
+        Document usage statistics
+
+    Raises:
+        HTTPException 404: Document not found or access denied
+
+    Input:
+        - document_id: str (from path)
+        - user_id: str (from auth)
+
+    Output:
+        {
+            "document_id": "uuid",
+            "document_name": "Q4 Report.pdf",
+            "usage": {
+                "chat_sessions": [
+                    {"session_id": "uuid", "title": "Q4 Analysis", "created_at": "2025-01-24T10:00:00Z"},
+                    ...
+                ],
+                "extracts": [
+                    {"request_id": "uuid", "created_at": "2025-01-24T10:00:00Z", "status": "completed"},
+                    ...
+                ],
+                "workflows": [
+                    {"run_id": "uuid", "workflow_name": "Investment Analysis", "created_at": "2025-01-24T10:00:00Z"},
+                    ...
+                ]
+            },
+            "total_usage_count": 4
+        }
+    """
+    document_repo = DocumentRepository()
+
+    # Get usage statistics
+    usage_data = document_repo.get_document_usage(document_id, user.id)
+
+    if not usage_data:
+        raise HTTPException(
+            status_code=404,
+            detail="Document not found or access denied"
+        )
+
+    logger.debug(
+        "Retrieved document usage via API",
+        extra={
+            "document_id": document_id,
+            "user_id": user.id,
+            "total_usage": usage_data["total_usage_count"]
+        }
+    )
+
+    return usage_data

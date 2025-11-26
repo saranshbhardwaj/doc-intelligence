@@ -36,9 +36,9 @@ export default function AppLayout({ children, breadcrumbs }) {
   ];
 
   return (
-    <div className="min-h-screen bg-background ">
+    <div className="min-h-screen bg-background flex flex-col">
       {/* Header */}
-      <header className="bg-card border-b border-border dark:border-gray-700 sticky top-0 z-40">
+      <header className="bg-card border-b border-border sticky top-0 z-40">
         <div className="max-w-7xl mx-auto px-6 py-4">
           <div className="flex items-center justify-between">
             {/* Logo / Home Link */}
@@ -121,7 +121,7 @@ export default function AppLayout({ children, breadcrumbs }) {
       </header>
 
       {/* Main Content */}
-      <main>{children}</main>
+      <main className="flex-1 flex flex-col">{children}</main>
     </div>
   );
 }

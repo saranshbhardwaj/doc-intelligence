@@ -45,6 +45,10 @@ export {
   getChatHistory,
   deleteSession,
   exportSession,
+  getSession,
+  createSession,
+  updateSession,
+  addDocumentsToSession,
 } from "./chat";
 
 // Workflows
