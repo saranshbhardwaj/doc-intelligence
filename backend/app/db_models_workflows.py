@@ -28,18 +28,22 @@ class Workflow(Base):
     user_prompt_max_length = Column(Integer, nullable=True)  # Character limit for user edits (default 1000)
     variables_schema = Column(JSONB, nullable=True)  # JSON schema for variables
     output_schema = Column(JSONB, nullable=True)  # JSON Schema for expected output
+    retrieval_spec_json = Column(JSONB, nullable=True)  # Retrieval specification for workflow sections
     output_format = Column(String(50), nullable=False, default="markdown")  # markdown | json | pptx | xlsx | pdf
     min_documents = Column(Integer, nullable=False, default=1)
     max_documents = Column(Integer, nullable=True)  # null = no upper bound
 
     version = Column(Integer, nullable=False, default=1)
     active = Column(Boolean, nullable=False, default=True)
+    deprecated_at = Column(DateTime(timezone=True), nullable=True)  # When workflow was deprecated
+    replacement_workflow_id = Column(String(36), nullable=True)  # Points to replacement workflow
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     # Relationships
-    runs = relationship("WorkflowRun", back_populates="workflow", cascade="all, delete-orphan")
+    # NOTE: No cascade delete - preserve historical runs even if workflow template is deleted
+    runs = relationship("WorkflowRun", back_populates="workflow")
 
 
 class WorkflowRun(Base):
@@ -56,9 +60,13 @@ class WorkflowRun(Base):
     )
 
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    workflow_id = Column(String(36), ForeignKey("workflows.id", ondelete="CASCADE"), nullable=False)
+    # SET NULL on delete - preserve run history even if workflow template is deleted
+    workflow_id = Column(String(36), ForeignKey("workflows.id", ondelete="SET NULL"), nullable=True)
     user_id = Column(String(100), nullable=False)
     collection_id = Column(String(36), ForeignKey("collections.id", ondelete="SET NULL"), nullable=True)
+
+    # Workflow snapshot - preserves context even if workflow is deleted
+    workflow_snapshot = Column(JSONB, nullable=True)  # {name, description, version, category}
 
     # Document scope (references canonical documents, not collection_documents)
     document_ids = Column(JSONB, nullable=True)  # JSON array of document IDs

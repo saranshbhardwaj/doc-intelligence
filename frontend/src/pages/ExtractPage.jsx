@@ -220,7 +220,7 @@ export default function ExtractPage() {
 
   return (
     <AppLayout breadcrumbs={[{ label: "Extract" }]}>
-      <div className="h-[calc(100vh-12rem)] flex gap-4">
+      <div className="flex-1 flex gap-4">
         {/* LEFT PANEL - Source Selection */}
         <div className="w-[420px] flex-shrink-0 bg-card rounded-lg border border-border p-6 overflow-y-auto">
           <h2 className="text-lg font-semibold text-foreground mb-4">

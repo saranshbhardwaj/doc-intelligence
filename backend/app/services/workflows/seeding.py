@@ -21,6 +21,7 @@ def seed_workflows(db: Session):
             user_prompt_max_length=cfg.get("user_prompt_max_length"),  # Optional: character limit
             category=cfg["category"],
             variables_schema=cfg["variables_schema"],
+            retrieval_spec=cfg.get("retrieval_spec"),  # Optional: workflow-specific retrieval sections
             output_format=cfg["output_format"],
             min_documents=cfg["min_documents"],
             max_documents=cfg["max_documents"],

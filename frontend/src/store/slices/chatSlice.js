@@ -1,11 +1,10 @@
 /**
  * Chat Slice for Zustand Store
  *
- * Manages state for Chat Mode:
- * - Collections list
- * - Current collection and its documents
- * - Active chat session and messages
- * - Document upload progress
+ * Session-centric architecture:
+ * - Collections are folders for browsing documents
+ * - Sessions are independent and maintain their own document selection
+ * - Chat happens within sessions, not directly with collections
  */
 
 import * as chatApi from "../../api/chat";
@@ -20,12 +19,12 @@ const getErrorMessage = (error) => {
 
 export const createChatSlice = (set, get) => ({
   chat: {
-    // Collections
+    // Collections (for document browsing only)
     collections: [],
     collectionsLoading: false,
     collectionsError: null,
 
-    // Current collection
+    // Current collection (for document browsing)
     currentCollection: null,
     collectionLoading: false,
     collectionError: null,
@@ -36,8 +35,8 @@ export const createChatSlice = (set, get) => ({
     uploadError: null,
     currentJobId: null,
 
-    // Chat session
-    currentSession: null,
+    // Current session (with documents)
+    currentSession: null, // { id, title, description, documents: [{id, name, added_at}, ...] }
     messages: [],
     isStreaming: false,
     streamingMessage: "",
@@ -115,6 +114,7 @@ export const createChatSlice = (set, get) => ({
 
     try {
       const collection = await chatApi.getCollection(getToken, collectionId);
+
       set((state) => ({
         chat: {
           ...state.chat,
@@ -122,9 +122,6 @@ export const createChatSlice = (set, get) => ({
           collectionLoading: false,
         },
       }));
-
-      // Also fetch sessions for this collection
-      get().fetchSessions(getToken, collectionId);
     } catch (error) {
       console.error("Failed to select collection:", error);
       set((state) => ({
@@ -209,7 +206,7 @@ export const createChatSlice = (set, get) => ({
             },
           }));
         },
-        (completedData) => {
+        () => {
           set((state) => ({
             chat: {
               ...state.chat,
@@ -268,6 +265,23 @@ export const createChatSlice = (set, get) => ({
     }
   },
 
+  removeDocumentFromCollection: async (getToken, collectionId, documentId) => {
+    try {
+      await chatApi.removeDocumentFromCollection(getToken, collectionId, documentId);
+
+      // Refresh current collection to update document list
+      await get().selectCollection(getToken, collectionId);
+    } catch (error) {
+      console.error("Failed to remove document from collection:", error);
+      set((state) => ({
+        chat: {
+          ...state.chat,
+          uploadError: getErrorMessage(error),
+        },
+      }));
+    }
+  },
+
   resetUploadStatus: () => {
     set((state) => ({
       chat: {
@@ -281,11 +295,264 @@ export const createChatSlice = (set, get) => ({
   },
 
   /**
-   * Chat Actions
+   * Session Actions (NEW - Session-centric)
    */
 
-  sendMessage: async (getToken, collectionId, message, numChunks = 5) => {
-    const currentSession = get().chat.currentSession;
+  createNewSession: async (getToken, { title, documentIds }) => {
+    /**
+     * Create new chat session with documents
+     *
+     * Input:
+     *   - title: string (optional)
+     *   - documentIds: string[] (optional)
+     *
+     * Output:
+     *   Updates currentSession and messages
+     */
+    try {
+      const session = await chatApi.createSession(getToken, {
+        title: title || "New Chat",
+        description: null,
+        documentIds: documentIds || [],
+      });
+
+      set((state) => ({
+        chat: {
+          ...state.chat,
+          currentSession: session,
+          messages: [],
+          chatError: null,
+        },
+      }));
+
+      // Add to sessions list
+      set((state) => ({
+        chat: {
+          ...state.chat,
+          sessions: [session, ...state.chat.sessions],
+        },
+      }));
+
+      return session;
+    } catch (error) {
+      console.error("Failed to create session:", error);
+      set((state) => ({
+        chat: {
+          ...state.chat,
+          chatError: getErrorMessage(error),
+        },
+      }));
+      throw error;
+    }
+  },
+
+  loadSession: async (getToken, sessionId) => {
+    /**
+     * Load existing session with messages and documents
+     *
+     * Input:
+     *   - sessionId: string
+     *
+     * Output:
+     *   Updates currentSession and messages
+     */
+    try {
+      // Get session with documents
+      const session = await chatApi.getSession(getToken, sessionId);
+
+      // Get messages
+      const historyData = await chatApi.getChatHistory(getToken, sessionId);
+
+      set((state) => ({
+        chat: {
+          ...state.chat,
+          currentSession: session,
+          messages: historyData.messages,
+          chatError: null,
+        },
+      }));
+    } catch (error) {
+      console.error("Failed to load session:", error);
+      set((state) => ({
+        chat: {
+          ...state.chat,
+          chatError: getErrorMessage(error),
+        },
+      }));
+    }
+  },
+
+  addDocumentsToCurrentSession: async (getToken, documentIds) => {
+    /**
+     * Add documents to current session
+     *
+     * Input:
+     *   - documentIds: string[]
+     *
+     * Output:
+     *   Updates currentSession.documents AND sessions array
+     */
+    const sessionId = get().chat.currentSession?.id;
+    if (!sessionId) {
+      console.error("No active session");
+      return;
+    }
+
+    try {
+      await chatApi.addDocumentsToSession(getToken, sessionId, documentIds);
+
+      // Reload session to get updated documents list
+      const updatedSession = await chatApi.getSession(getToken, sessionId);
+
+      set((state) => ({
+        chat: {
+          ...state.chat,
+          currentSession: updatedSession,
+          // IMPORTANT: Also update the session in the sessions array
+          sessions: state.chat.sessions.map((s) =>
+            s.id === sessionId
+              ? {
+                  ...s,
+                  documents: updatedSession.documents,
+                  document_count: updatedSession.documents.length  // UPDATE COUNT
+                }
+              : s
+          ),
+        },
+      }));
+    } catch (error) {
+      console.error("Failed to add documents to session:", error);
+      set((state) => ({
+        chat: {
+          ...state.chat,
+          chatError: getErrorMessage(error),
+        },
+      }));
+    }
+  },
+
+  removeDocumentFromCurrentSession: async (getToken, documentId) => {
+    /**
+     * Remove document from current session
+     *
+     * Input:
+     *   - documentId: string
+     *
+     * Output:
+     *   Updates currentSession.documents AND sessions array
+     */
+    const sessionId = get().chat.currentSession?.id;
+    if (!sessionId) {
+      console.error("No active session");
+      return;
+    }
+
+    try {
+      await chatApi.removeDocumentFromSession(getToken, sessionId, documentId);
+
+      // Update local state - remove document from both currentSession and sessions array
+      set((state) => {
+        const updatedDocuments = state.chat.currentSession.documents.filter(
+          (doc) => doc.id !== documentId
+        );
+
+        return {
+          chat: {
+            ...state.chat,
+            currentSession: {
+              ...state.chat.currentSession,
+              documents: updatedDocuments,
+              document_count: updatedDocuments.length  // UPDATE COUNT
+            },
+            // IMPORTANT: Also update the session in the sessions array
+            sessions: state.chat.sessions.map((s) =>
+              s.id === sessionId
+                ? {
+                    ...s,
+                    documents: updatedDocuments,
+                    document_count: updatedDocuments.length  // UPDATE COUNT
+                  }
+                : s
+            ),
+          },
+        };
+      });
+    } catch (error) {
+      console.error("Failed to remove document from session:", error);
+      set((state) => ({
+        chat: {
+          ...state.chat,
+          chatError: getErrorMessage(error),
+        },
+      }));
+    }
+  },
+
+  updateSessionTitle: async (getToken, sessionId, title) => {
+    /**
+     * Update session title
+     *
+     * Input:
+     *   - sessionId: string
+     *   - title: string
+     *
+     * Output:
+     *   Updates currentSession.title AND sessions array
+     */
+    try {
+      await chatApi.updateSession(getToken, sessionId, { title });
+
+      // Update local state - both currentSession and sessions array
+      set((state) => ({
+        chat: {
+          ...state.chat,
+          currentSession: {
+            ...state.chat.currentSession,
+            title,
+          },
+          // IMPORTANT: Also update the session in the sessions array
+          sessions: state.chat.sessions.map((s) =>
+            s.id === sessionId ? { ...s, title } : s
+          ),
+        },
+      }));
+    } catch (error) {
+      console.error("Failed to update session title:", error);
+      set((state) => ({
+        chat: {
+          ...state.chat,
+          chatError: getErrorMessage(error),
+        },
+      }));
+    }
+  },
+
+  /**
+   * Chat Actions (UPDATED - Session-centric)
+   */
+
+  sendMessage: async (getToken, message, numChunks = 5) => {
+    /**
+     * Send message in current session
+     *
+     * Input:
+     *   - message: string
+     *   - numChunks: number (optional)
+     *
+     * Uses: currentSession.id from state
+     * Output: Streams response via SSE
+     */
+    const sessionId = get().chat.currentSession?.id;
+    if (!sessionId) {
+      console.error("No active session");
+      set((state) => ({
+        chat: {
+          ...state.chat,
+          chatError: "No active session. Please create a session first.",
+        },
+      }));
+      return;
+    }
 
     // Add user message immediately
     const userMessage = {
@@ -307,21 +574,13 @@ export const createChatSlice = (set, get) => ({
     // Send to API with streaming
     chatApi.sendChatMessage(
       getToken,
-      collectionId,
+      sessionId,
       message,
-      currentSession?.id,
       numChunks,
       {
-        onSession: (sessionId) => {
-          // New session created
-          if (!currentSession) {
-            set((state) => ({
-              chat: {
-                ...state.chat,
-                currentSession: { id: sessionId },
-              },
-            }));
-          }
+        onSession: (returnedSessionId) => {
+          // Session ID confirmed (should match)
+          console.log("Session confirmed:", returnedSessionId);
         },
         onChunk: (chunk) => {
           // Append to streaming message
@@ -351,7 +610,7 @@ export const createChatSlice = (set, get) => ({
           }));
 
           // Refresh sessions list
-          get().fetchSessions(getToken, collectionId);
+          get().fetchSessions(getToken);
         },
         onError: (error) => {
           console.error("Chat streaming error:", error);
@@ -369,6 +628,11 @@ export const createChatSlice = (set, get) => ({
   },
 
   loadChatHistory: async (getToken, sessionId) => {
+    /**
+     * Load chat history (DEPRECATED - use loadSession instead)
+     *
+     * Kept for backwards compatibility
+     */
     try {
       const data = await chatApi.getChatHistory(getToken, sessionId);
       set((state) => ({
@@ -376,7 +640,6 @@ export const createChatSlice = (set, get) => ({
           ...state.chat,
           currentSession: {
             id: data.session_id,
-            collection_id: data.collection_id,
           },
           messages: data.messages,
         },
@@ -393,6 +656,9 @@ export const createChatSlice = (set, get) => ({
   },
 
   startNewChat: () => {
+    /**
+     * Clear current session and messages
+     */
     console.log("Starting new chat - clearing session and messages");
     set((state) => ({
       chat: {
@@ -407,10 +673,19 @@ export const createChatSlice = (set, get) => ({
   },
 
   /**
-   * Sessions Actions
+   * Sessions Actions (UPDATED - User-centric)
    */
 
-  fetchSessions: async (getToken, collectionId) => {
+  fetchSessions: async (getToken, options = {}) => {
+    /**
+     * Fetch all user sessions (not collection-specific)
+     *
+     * Input:
+     *   - options: { limit: number, offset: number }
+     *
+     * Output:
+     *   Updates sessions list
+     */
     set((state) => ({
       chat: {
         ...state.chat,
@@ -419,11 +694,11 @@ export const createChatSlice = (set, get) => ({
     }));
 
     try {
-      const data = await chatApi.listSessions(getToken, collectionId);
+      const data = await chatApi.listSessions(getToken, options);
       set((state) => ({
         chat: {
           ...state.chat,
-          sessions: data.sessions,
+          sessions: data,
           sessionsLoading: false,
         },
       }));

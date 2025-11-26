@@ -3,6 +3,7 @@
 from sqlalchemy import Column, String, Integer, Float, DateTime, Boolean, Text, ForeignKey, Index
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
+from sqlalchemy.dialects.postgresql import TSVECTOR
 from pgvector.sqlalchemy import Vector  # pgvector extension for embeddings
 from app.database import Base
 import uuid
@@ -38,7 +39,6 @@ class Collection(Base):
 
     # Relationships
     document_links = relationship("CollectionDocument", back_populates="collection", cascade="all, delete-orphan")
-    chat_sessions = relationship("ChatSession", back_populates="collection", cascade="all, delete-orphan")
 
 
 class CollectionDocument(Base):
@@ -72,11 +72,16 @@ class DocumentChunk(Base):
 
     Each chunk belongs to a canonical document (not collection_document).
     Chunks can be queried across collections by joining through collection_documents.
+
+    Supports hybrid search:
+    - Semantic search via pgvector HNSW index on embeddings
+    - Keyword search via PostgreSQL GIN index on text_search_vector
     """
     __tablename__ = "document_chunks"
     __table_args__ = (
         Index("idx_document_chunks_document_id", "document_id"),
         Index("idx_document_chunks_embedding", "embedding", postgresql_using="hnsw"),
+        Index("idx_document_chunks_fts", "text_search_vector", postgresql_using="gin"),
     )
 
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
@@ -87,6 +92,11 @@ class DocumentChunk(Base):
     narrative_text = Column(Text, nullable=True)
     tables = Column(Text, nullable=True)
     chunk_index = Column(Integer, nullable=False)  # Order within document (0, 1, 2, ...)
+
+    # Full-text search vector (auto-generated from text column)
+    # PostgreSQL tsvector for keyword/lexical search (BM25-like ranking)
+    # Automatically maintained by PostgreSQL trigger (see migration)
+    text_search_vector = Column(TSVECTOR, nullable=True)
 
     # Embedding vector (384 dimensions for all-MiniLM-L6-v2)
     # NOTE: If you change embedding models, you'll need a new migration
@@ -109,21 +119,44 @@ class DocumentChunk(Base):
     document = relationship("Document", back_populates="chunks")
 
 
+class SessionDocument(Base):
+    """
+    Junction table linking chat sessions to documents.
+
+    Allows sessions to have documents from any collection.
+    Each session maintains its own document selection.
+    """
+    __tablename__ = "session_documents"
+    __table_args__ = (
+        Index("idx_session_documents_session_id", "session_id"),
+        Index("idx_session_documents_document_id", "document_id"),
+        # Unique constraint: same document can't be added twice to a session
+        {'sqlite_autoincrement': True}
+    )
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    session_id = Column(String(36), ForeignKey("chat_sessions.id", ondelete="CASCADE"), nullable=False)
+    document_id = Column(String(36), ForeignKey("documents.id", ondelete="CASCADE"), nullable=False)
+    added_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    # Relationships
+    session = relationship("ChatSession", back_populates="document_links")
+    document = relationship("Document")
+
+
 class ChatSession(Base):
     """
-    A chat conversation session within a collection.
+    A chat conversation session.
 
-    Users can have multiple chat sessions for the same collection
-    (e.g., different analysis angles, comparisons, etc.)
+    Sessions are independent and can contain documents from any collection.
+    Each session maintains its own document selection.
     """
     __tablename__ = "chat_sessions"
     __table_args__ = (
-        Index("idx_chat_sessions_collection_id", "collection_id"),
         Index("idx_chat_sessions_user_id", "user_id"),
     )
 
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    collection_id = Column(String(36), ForeignKey("collections.id", ondelete="CASCADE"), nullable=False)
     user_id = Column(String(100), nullable=False, index=True)  # Clerk user ID
 
     # Session metadata
@@ -137,8 +170,8 @@ class ChatSession(Base):
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
     # Relationships
-    collection = relationship("Collection", back_populates="chat_sessions")
     messages = relationship("ChatMessage", back_populates="session", cascade="all, delete-orphan")
+    document_links = relationship("SessionDocument", back_populates="session", cascade="all, delete-orphan")
 
 
 class ChatMessage(Base):

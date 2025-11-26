@@ -280,3 +280,41 @@ class PaginatedExtractionResponse(BaseModel):
     total: int
     limit: int
     offset: int
+
+
+# ---------- Chat Session Models ----------
+class CreateSessionRequest(BaseModel):
+    """Request to create a new chat session"""
+    title: Optional[str] = None
+    description: Optional[str] = None
+    document_ids: Optional[List[str]] = None  # Optional list of document IDs to add
+
+
+class UpdateSessionRequest(BaseModel):
+    """Request to update a chat session"""
+    title: Optional[str] = None
+    description: Optional[str] = None
+
+
+class AddDocumentsRequest(BaseModel):
+    """Request to add documents to a session"""
+    document_ids: List[str] = Field(..., min_items=1)  # At least one document required
+
+
+class SessionDocumentInfo(BaseModel):
+    """Document information in a session"""
+    id: str
+    name: str
+    added_at: datetime
+
+
+class SessionResponse(BaseModel):
+    """Response containing session data"""
+    id: str
+    title: Optional[str]
+    description: Optional[str]
+    message_count: int
+    document_count: int = 0  # Count of documents in session
+    created_at: datetime
+    updated_at: datetime
+    documents: List[SessionDocumentInfo] = Field(default_factory=list)

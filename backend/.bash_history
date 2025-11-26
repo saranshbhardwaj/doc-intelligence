@@ -18,3 +18,7 @@ alembic upgrade head
 clear
 alembic upgrade head
 exit
+alembic heads
+api alembic heads
+alembic heads
+exit
