@@ -27,7 +27,10 @@ export async function createCollection(getToken, { name, description }) {
   return response.data;
 }
 
-export async function listCollections(getToken, { limit = 50, offset = 0 } = {}) {
+export async function listCollections(
+  getToken,
+  { limit = 50, offset = 0 } = {}
+) {
   const api = createAuthenticatedApi(getToken);
   const response = await api.get("/api/chat/collections", {
     params: { limit, offset },
@@ -79,11 +82,19 @@ export async function uploadDocument(getToken, collectionId, file, onProgress) {
  *
  * NOTE: EventSource doesn't support custom headers, so auth token is passed as query parameter
  */
-export function connectToIndexingProgress(getToken, jobId, onProgress, onComplete, onError) {
+export function connectToIndexingProgress(
+  getToken,
+  jobId,
+  onProgress,
+  onComplete,
+  onError
+) {
   getToken().then((token) => {
     // Pass token as query parameter (EventSource doesn't support headers)
     const eventSource = new EventSource(
-      `${import.meta.env.VITE_API_URL}/api/chat/jobs/${jobId}/progress?token=${encodeURIComponent(token)}`
+      `${
+        import.meta.env.VITE_API_URL
+      }/api/chat/jobs/${jobId}/progress?token=${encodeURIComponent(token)}`
     );
 
     let endEventReceived = false; // Track if we received the end event
@@ -230,7 +241,10 @@ export function sendChatMessage(
  * - Each session maintains its own document selection
  */
 
-export async function createSession(getToken, { title, description, documentIds }) {
+export async function createSession(
+  getToken,
+  { title, description, documentIds }
+) {
   const api = createAuthenticatedApi(getToken);
   const response = await api.post("/api/chat/sessions", {
     title,
@@ -268,7 +282,11 @@ export async function addDocumentsToSession(getToken, sessionId, documentIds) {
   return response.data;
 }
 
-export async function removeDocumentFromSession(getToken, sessionId, documentId) {
+export async function removeDocumentFromSession(
+  getToken,
+  sessionId,
+  documentId
+) {
   const api = createAuthenticatedApi(getToken);
   const response = await api.delete(
     `/api/chat/sessions/${sessionId}/documents/${documentId}`
@@ -300,9 +318,15 @@ export async function deleteDocument(getToken, documentId) {
   return response.data;
 }
 
-export async function removeDocumentFromCollection(getToken, collectionId, documentId) {
+export async function removeDocumentFromCollection(
+  getToken,
+  collectionId,
+  documentId
+) {
   const api = createAuthenticatedApi(getToken);
-  const response = await api.delete(`/api/chat/collections/${collectionId}/documents/${documentId}`);
+  const response = await api.delete(
+    `/api/chat/collections/${collectionId}/documents/${documentId}`
+  );
   return response.data;
 }
 
