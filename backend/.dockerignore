@@ -15,3 +15,5 @@ chunks/
 combined/
 .ssh/
 .vscode/
+
+node_modules/

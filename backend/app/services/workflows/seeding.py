@@ -40,7 +40,7 @@ def seed_workflows(db: Session):
             category=cfg.get("category"),
             variables_schema=cfg.get("variables_schema", {}),
             retrieval_spec=cfg.get("retrieval_spec"),  # Optional: workflow-specific retrieval sections
-            # output_schema=cfg.get("output_schema"),
+            output_schema=cfg.get("output_schema"),
             output_format=cfg.get("output_format", "markdown"),
             min_documents=cfg.get("min_documents", 1),
             max_documents=cfg.get("max_documents"),

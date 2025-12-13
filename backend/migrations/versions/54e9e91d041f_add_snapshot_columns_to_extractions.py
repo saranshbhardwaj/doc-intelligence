@@ -23,7 +23,8 @@ def upgrade() -> None:
     op.alter_column('extractions', 'status',
                     existing_type=sa.VARCHAR(length=20),
                     existing_nullable=False)
-    op.create_foreign_key(None, 'usage_logs', 'extractions', ['extraction_id'], ['id'])
+    # Removed foreign key constraint - usage_logs should preserve historical records even after extraction deletion
+    # op.create_foreign_key(None, 'usage_logs', 'extractions', ['extraction_id'], ['id'])
 
     # JSONB columns (no conversion to JSON)
     op.alter_column('workflow_runs', 'document_ids',
@@ -122,5 +123,6 @@ def downgrade() -> None:
                     existing_type=postgresql.JSONB(astext_type=sa.Text()),
                     type_=postgresql.JSONB(astext_type=sa.Text()),
                     existing_nullable=True)
-    op.drop_constraint(None, 'usage_logs', type_='foreignkey')
+    # Removed foreign key constraint - usage_logs should preserve historical records even after extraction deletion
+    # op.drop_constraint(None, 'usage_logs', type_='foreignkey')
     # ### end Alembic commands ###
