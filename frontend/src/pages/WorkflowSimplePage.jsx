@@ -226,22 +226,23 @@ export default function WorkflowSimplePage() {
 
   return (
     <AppLayout breadcrumbs={breadcrumbs}>
-      <div className="flex-1 flex gap-4">
+      {/* Full-height three-pane layout with independent scrolls */}
+      <div className="h-[calc(100vh-64px)] flex gap-4">
         {/* LEFT PANEL: Selected Documents */}
-        <div className="w-64 flex-shrink-0 bg-card rounded-lg border border-border p-4 flex flex-col">
+        <div className="w-64 flex-shrink-0 bg-card rounded-lg border border-border p-4 flex flex-col overflow-y-auto scrollbar-thin">
           <h3 className="font-semibold text-sm text-foreground mb-3 flex items-center gap-2">
             <FileText className="w-4 h-4" />
             Selected Documents
           </h3>
 
-          <div className="flex-1 overflow-y-auto">
+          <div className="flex-1">
             {selectedDocuments.length === 0 ? (
               <div className="text-center py-8">
-                <FileText className="w-10 h-10 text-gray-300 dark:text-muted-foreground mx-auto mb-2" />
-                <p className="text-sm text-muted-foreground dark:text-muted-foreground mb-1">
+                <FileText className="w-10 h-10 text-muted-foreground mx-auto mb-2" />
+                <p className="text-sm text-muted-foreground mb-1">
                   No documents selected
                 </p>
-                <p className="text-xs text-muted-foreground dark:text-muted-foreground">
+                <p className="text-xs text-muted-foreground">
                   Add documents to get started
                 </p>
               </div>
@@ -250,15 +251,15 @@ export default function WorkflowSimplePage() {
                 {selectedDocuments.map((doc) => (
                   <div
                     key={doc.id}
-                    className="p-3 rounded-lg border border-border dark:border-gray-700 bg-background "
+                    className="p-3 rounded-lg border border-border bg-background "
                   >
                     <div className="flex items-start gap-2">
-                      <FileText className="w-4 h-4 text-blue-600 mt-0.5 flex-shrink-0" />
+                      <FileText className="w-4 h-4 text-primary mt-0.5 flex-shrink-0" />
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-medium text-foreground truncate">
                           {doc.filename}
                         </p>
-                        <p className="text-xs text-muted-foreground dark:text-muted-foreground">
+                        <p className="text-xs text-muted-foreground">
                           {doc.page_count} pages
                         </p>
                       </div>
@@ -301,14 +302,14 @@ export default function WorkflowSimplePage() {
         </div>
 
         {/* MIDDLE PANEL: Workflow Selection or Config */}
-        <div className="flex-1 bg-card rounded-lg border border-border dark:border-gray-700 p-6 overflow-y-auto">
+        <div className="flex-1 bg-card rounded-lg border border-border p-6 overflow-y-auto scrollbar-chat">
           {!selectedWorkflow ? (
             /* Workflow Selection */
             <div>
               <h2 className="text-xl font-bold text-foreground mb-1">
                 Select a Workflow
               </h2>
-              <p className="text-sm text-muted-foreground dark:text-gray-300 mb-6">
+              <p className="text-sm text-muted-foreground mb-6">
                 Choose a workflow template to generate insights from your
                 documents
               </p>
@@ -317,18 +318,18 @@ export default function WorkflowSimplePage() {
                 {templates.map((template) => (
                   <Card
                     key={template.id}
-                    className="p-5 hover:shadow-lg transition-shadow cursor-pointer border-2 hover:border-blue-500"
+                    className="p-5 hover:shadow-lg transition-shadow cursor-pointer border-2 hover:border-primary"
                     onClick={() => handleSelectTemplate(template)}
                   >
                     <div className="flex items-start justify-between">
                       <div className="flex-1">
                         <div className="flex items-center gap-2 mb-2">
-                          <Sparkles className="w-5 h-5 text-blue-600" />
+                          <Sparkles className="w-5 h-5 text-primary" />
                           <h3 className="text-lg font-semibold text-foreground">
                             {template.name}
                           </h3>
                         </div>
-                        <p className="text-sm text-muted-foreground dark:text-gray-300 mb-3">
+                        <p className="text-sm text-muted-foreground mb-3">
                           {template.description}
                         </p>
                         <div className="flex items-center gap-2">
@@ -444,7 +445,7 @@ export default function WorkflowSimplePage() {
         </div>
 
         {/* RIGHT PANEL: Results */}
-        <div className="w-96 flex-shrink-0 bg-card rounded-lg border border-border dark:border-gray-700 p-4 overflow-y-auto">
+        <div className="w-96 flex-shrink-0 bg-card rounded-lg border border-border p-4 overflow-y-auto scrollbar-thin">
           <div className="flex items-center justify-between mb-3">
             <h3 className="font-semibold text-sm text-foreground">
               {selectedWorkflow
@@ -463,11 +464,9 @@ export default function WorkflowSimplePage() {
 
           {filteredRuns.length === 0 && orphanedRuns.length === 0 ? (
             <div className="text-center py-12">
-              <Sparkles className="w-12 h-12 text-gray-300 dark:text-muted-foreground mx-auto mb-3" />
-              <p className="text-sm text-muted-foreground dark:text-muted-foreground">
-                No results yet
-              </p>
-              <p className="text-xs text-muted-foreground dark:text-muted-foreground mt-1">
+              <Sparkles className="w-12 h-12 text-muted-foreground mx-auto mb-3" />
+              <p className="text-sm text-muted-foreground">No results yet</p>
+              <p className="text-xs text-muted-foreground mt-1">
                 Generate a workflow to see results here
               </p>
             </div>

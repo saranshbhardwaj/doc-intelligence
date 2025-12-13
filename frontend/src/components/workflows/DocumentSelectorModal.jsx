@@ -406,10 +406,11 @@ export default function DocumentSelectorModal({ open, onOpenChange }) {
             ) : (
               collections.map((collection) => {
                 const collectionDocs = getDocumentsForCollection(collection.id);
-                const collectionPages = collectionDocs.reduce(
-                  (sum, doc) => sum + (doc.page_count || 0),
-                  0
-                );
+                // Use server-provided document_count for summary, avoid per-collection fetch
+                const shownDocsCount =
+                  typeof collection.document_count === "number"
+                    ? collection.document_count
+                    : collectionDocs.length;
                 const isOpen = openCollections.has(collection.id);
 
                 return (
@@ -435,8 +436,7 @@ export default function DocumentSelectorModal({ open, onOpenChange }) {
                             {collection.name}
                           </p>
                           <p className="text-xs text-muted-foreground dark:text-muted-foreground">
-                            {collectionDocs.length} docs • {collectionPages}{" "}
-                            pages
+                            {shownDocsCount} docs
                           </p>
                         </div>
                       </div>

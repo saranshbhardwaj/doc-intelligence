@@ -330,6 +330,46 @@ export default function LibraryPage() {
 
       // Remove from selected docs if it was selected
       setSelectedDocs((prev) => prev.filter((id) => id !== docId));
+
+      // Purge document references from localStorage used by other pages
+      try {
+        // 1) ExtractPage quick access cache
+        const lastDocRaw = localStorage.getItem("extractionLastDoc");
+        if (lastDocRaw) {
+          const lastDoc = JSON.parse(lastDocRaw);
+          if (lastDoc?.id === docId) {
+            localStorage.removeItem("extractionLastDoc");
+          }
+        }
+
+        // 2) WorkflowSimplePage persisted draft (selectedDocuments array)
+        const storeKey = "sand-cloud-storage"; // zustand persist key
+        const persistedRaw = localStorage.getItem(storeKey);
+        if (persistedRaw) {
+          const persisted = JSON.parse(persistedRaw);
+          const wf = persisted?.state?.workflowDraft;
+          if (wf?.selectedDocuments && Array.isArray(wf.selectedDocuments)) {
+            const filtered = wf.selectedDocuments.filter(
+              (d) => d?.id !== docId
+            );
+            if (filtered.length !== wf.selectedDocuments.length) {
+              const next = {
+                ...persisted,
+                state: {
+                  ...persisted.state,
+                  workflowDraft: {
+                    ...wf,
+                    selectedDocuments: filtered,
+                  },
+                },
+              };
+              localStorage.setItem(storeKey, JSON.stringify(next));
+            }
+          }
+        }
+      } catch (e) {
+        console.warn("LocalStorage cleanup after delete failed:", e);
+      }
     } catch (error) {
       console.error("Failed to delete document:", error);
       alert(`Failed to delete ${docFilename}: ${error.message}`);
