@@ -4,21 +4,30 @@ import json
 import uuid
 import asyncio
 import re
-from anthropic import Anthropic
+from anthropic import Anthropic, BaseModel
+from anthropic import AsyncAnthropic
 from httpx import Timeout
 from typing import Dict
 from fastapi import HTTPException
 
 from app.config import settings
-from app.services.extraction_prompt import SYSTEM_PROMPT, create_extraction_prompt
-from app.services.summary_prompt import SUMMARY_SYSTEM_PROMPT, create_summary_prompt, create_batch_summary_prompt
+from app.services.extractions.prompts import (
+    CIM_EXTRACTION_SYSTEM_PROMPT,
+    create_extraction_prompt,
+)
 from app.utils.logging import logger
 from app.utils.file_utils import save_raw_llm_response
 
 class LLMClient:
-    """Handle Anthropic Claude API interactions (extraction, summarization, chat).
+    """Core Anthropic Claude API client.
 
-    Enhancement: expose token usage & model metadata for cost tracking.
+    Responsibilities:
+    - Structured data extraction (with/without schema validation)
+    - Streaming chat responses
+    - JSON parsing and error recovery
+    - Token usage tracking
+
+    Note: Extraction-specific summarization moved to ExtractionLLMService.
     """
 
     def __init__(self, api_key: str, model: str, max_tokens: int, max_input_chars: int, timeout_seconds: int = 120):
@@ -26,6 +35,7 @@ class LLMClient:
         # read timeout is the important one for long-running API calls
         timeout = Timeout(timeout=float(timeout_seconds), read=float(timeout_seconds), write=10.0, connect=5.0)
         self.client = Anthropic(api_key=api_key, timeout=timeout)
+        self.async_client = AsyncAnthropic(api_key=api_key, timeout=timeout, max_retries=2)
 
         # Expensive LLM (for structured extraction)
         self.model = model
@@ -38,13 +48,25 @@ class LLMClient:
         self.cheap_max_tokens = settings.cheap_llm_max_tokens
         self.cheap_timeout_seconds = settings.cheap_llm_timeout_seconds
     
-    async def extract_structured_data(self, text: str, context: str = None) -> Dict:
+    async def extract_structured_data(
+        self,
+        text: str,
+        context: str = None,
+        system_prompt: str = None,
+        use_cache: bool = False
+    ) -> Dict:
         """
         Send text to Claude and get structured JSON back.
 
         Args:
-            text: Document text to extract from
+            text: Document text to extract from (user message)
             context: Optional user-provided context to guide extraction
+            system_prompt: System prompt defining extraction schema and rules.
+                          For CIM extraction: use CIM_EXTRACTION_SYSTEM_PROMPT
+                          For workflows: use workflow-specific system prompt (e.g., Investment Memo prompt)
+                          Defaults to CIM_EXTRACTION_SYSTEM_PROMPT for backward compatibility.
+            use_cache: Enable Anthropic system-level prompt caching (ephemeral, 5-min TTL)
+                      Caches the system_prompt for ~90% cost savings on calls 2-N.
 
         Raises HTTPException if API call fails.
         """
@@ -72,40 +94,107 @@ class LLMClient:
                     "kept_end": keep_end
                 }
             )
-        
-        prompt = self._create_prompt(text, context)
+
+        # For workflows with custom system prompts, use raw text as user message
+        # For CIM extraction (default), wrap text with extraction instructions
+        if system_prompt is not None and system_prompt.strip():
+            # Workflow mode: system prompt contains all instructions, user message is just the context
+            prompt = text if text is not None else ""
+            logger.debug(f"Using workflow mode: system_prompt={len(system_prompt)} chars, context={len(prompt)} chars")
+        else:
+            # CIM extraction mode: add extraction instructions to user message
+            prompt = self._create_prompt(text, context)
+            logger.debug(f"Using CIM mode: prompt={len(prompt)} chars")
+
+        # Safety check
+        if prompt is None:
+            raise ValueError("Prompt cannot be None. Check text/context parameters.")
 
         logger.info(
             f"Calling Claude API with {len(prompt)} char prompt (timeout: {self.timeout_seconds}s)",
             extra={"prompt_length": len(prompt), "timeout": self.timeout_seconds, "has_context": bool(context)}
         )
 
-        # Retry logic for API overloads and rate limits
+        # Retry logic for transient API errors (rate limits, overloads, network issues)
+        # Note: Workflow-level retries handle validation errors (wrong schema, missing citations)
         max_retries = 3
-        retry_delay = 2  # seconds
+        retry_delay = 2  # seconds (base delay, actual delay may come from retry-after header)
 
         for attempt in range(max_retries):
             try:
                 # Run blocking API call in thread pool to avoid blocking event loop
-                message = await asyncio.to_thread(
-                    self.client.messages.create,
-                    model=self.model,
-                    max_tokens=self.max_tokens,
-                    temperature=0.0,
-                    system=SYSTEM_PROMPT,
-                    messages=[{"role": "user", "content": prompt}]
-                )
+                # Use custom system prompt if provided (for workflows), otherwise use default CIM extraction prompt
+                final_system_prompt = system_prompt if (system_prompt is not None and system_prompt.strip()) else CIM_EXTRACTION_SYSTEM_PROMPT
+
+                # Validate inputs before API call
+                if not isinstance(prompt, str):
+                    raise ValueError(f"Prompt must be a string, got {type(prompt)}")
+                if not isinstance(final_system_prompt, str):
+                    raise ValueError(f"System prompt must be a string, got {type(final_system_prompt)}")
+
+                # Build messages and system with optional prompt caching
+                if use_cache:
+                    # System-level caching (recommended by Anthropic)
+                    # Cache the system prompt for maximum reuse across all calls
+                    system_with_cache = [
+                        {
+                            "type": "text",
+                            "text": final_system_prompt,
+                            "cache_control": {"type": "ephemeral"}
+                        }
+                    ]
+                    # Add assistant prefill to prioritize valid JSON completion if token limit reached
+                    messages = [
+                        {"role": "user", "content": prompt},
+                        {"role": "assistant", "content": "{"}  # Prefill to ensure valid JSON
+                    ]
+                    logger.debug(f"Using system-level caching with JSON prefill: system_prompt={len(final_system_prompt)} chars (cached), user_message={len(prompt)} chars")
+
+                    message = await asyncio.to_thread(
+                        self.client.messages.create,
+                        model=self.model,
+                        max_tokens=self.max_tokens,
+                        temperature=0.0,
+                        system=system_with_cache,  # Cacheable system
+                        messages=messages
+                    )
+                else:
+                    # No caching: standard format with JSON prefill
+                    messages = [
+                        {"role": "user", "content": prompt},
+                        {"role": "assistant", "content": "{"}  # Prefill to ensure valid JSON
+                    ]
+                    message = await asyncio.to_thread(
+                        self.client.messages.create,
+                        model=self.model,
+                        max_tokens=self.max_tokens,
+                        temperature=0.0,
+                        system=final_system_prompt,  # String format
+                        messages=messages
+                    )
                 break  # Success, exit retry loop
 
             except Exception as api_error:
-                # Check if it's a retryable error (500 overloaded, 529 rate limit)
+                # Check if it's a retryable error (429 rate limit, 500/529 overloaded)
                 error_str = str(api_error)
-                is_retryable = "Overloaded" in error_str or "overloaded_error" in error_str or "Error code: 529" in error_str
+                is_retryable = (
+                    "Overloaded" in error_str or
+                    "overloaded_error" in error_str or
+                    "Error code: 429" in error_str or  # Rate limit
+                    "Error code: 529" in error_str     # Overloaded
+                )
 
                 if is_retryable and attempt < max_retries - 1:
                     wait_time = retry_delay * (2 ** attempt)  # Exponential backoff: 2s, 4s, 8s
-                    logger.warning(f"API overloaded, retrying in {wait_time}s (attempt {attempt + 1}/{max_retries})")
-                    print(f"⚠️  API overloaded, retrying in {wait_time}s...")
+
+                    # Different message for rate limiting vs overload
+                    if "429" in error_str:
+                        logger.warning(f"API rate limit hit, retrying in {wait_time}s (attempt {attempt + 1}/{max_retries})")
+                        print(f"⚠️  Rate limit exceeded, retrying in {wait_time}s...")
+                    else:
+                        logger.warning(f"API overloaded, retrying in {wait_time}s (attempt {attempt + 1}/{max_retries})")
+                        print(f"⚠️  API overloaded, retrying in {wait_time}s...")
+
                     await asyncio.sleep(wait_time)  # ✅ Non-blocking sleep!
                 else:
                     # Not retryable or out of retries
@@ -118,8 +207,25 @@ class LLMClient:
             input_tokens = getattr(usage, "input_tokens", None) if usage else None
             output_tokens = getattr(usage, "output_tokens", None) if usage else None
             model_name = getattr(message, "model", self.model)
+            stop_reason = getattr(message, "stop_reason", None)
+
+            # Prepend the prefilled "{" to complete the JSON
+            response_text = "{" + response_text
 
             logger.info(f"Claude response: {len(response_text)} chars")
+
+            # Log if response was truncated due to token limit
+            if stop_reason == "max_tokens":
+                logger.warning(
+                    f"⚠️ RESPONSE TRUNCATED: Hit max_tokens limit ({self.max_tokens})",
+                    extra={
+                        "stop_reason": stop_reason,
+                        "max_tokens": self.max_tokens,
+                        "output_tokens": output_tokens,
+                        "response_length": len(response_text),
+                        "model": model_name
+                    }
+                )
 
             # Parse JSON from response
             parsed_json = self._parse_json_response(response_text)
@@ -176,7 +282,180 @@ class LLMClient:
                 status_code=503,
                 detail="AI service temporarily unavailable. Please try again in a moment."
             )
-    
+
+    async def extract_structured_data_with_schema(
+        self,
+        text: str,
+        system_prompt: str,
+        pydantic_model: type[BaseModel],
+        use_cache: bool = False
+    ) -> Dict:
+        """
+        Extract data with GUARANTEED schema compliance using Claude structured outputs.
+        
+        Args:
+            text: User message content (variables + context)
+            system_prompt: System prompt with extraction rules (cacheable)
+            schema: JSON schema defining exact output structure
+            use_cache: Enable prompt caching (recommended for workflows)
+            
+        Returns:
+            {
+                "data": <parsed_json>,  # Guaranteed to match schema
+                "raw_text": <response_text>,
+                "usage": {"input_tokens": int, "output_tokens": int, "model": str}
+            }
+            
+        Raises:
+            HTTPException: If API call fails (no JSON parsing errors possible!)
+        """
+        # Smart truncate if needed (same as extract_structured_data)
+        if len(text) > self.max_input_chars:
+            original_length = len(text)
+            chars_to_cut = original_length - self.max_input_chars
+            keep_start = int(self.max_input_chars * 0.8)
+            keep_end = int(self.max_input_chars * 0.2)
+            
+            text = (text[:keep_start] +
+                f"\n\n... [TRUNCATED: {chars_to_cut:,} characters removed] ...\n\n" +
+                text[-keep_end:])
+            
+            logger.warning(f"Document truncated: {original_length:,} → {self.max_input_chars:,} chars")
+        
+        # Validate inputs
+        if not isinstance(text, str):
+            raise ValueError(f"Text must be a string, got {type(text)}")
+        if not isinstance(system_prompt, str):
+            raise ValueError(f"System prompt must be a string, got {type(system_prompt)}")
+        
+        logger.info(
+            f"Calling Claude API with structured outputs (schema-enforced JSON)",
+            extra={
+                "prompt_length": len(text),
+                "system_prompt_length": len(system_prompt),
+                "use_cache": use_cache,
+                "model": self.model
+            }
+        )
+        
+        # Retry logic for transient errors
+        max_retries = 3
+        retry_delay = 2
+        
+        for attempt in range(max_retries):
+            try:
+                # Build request with structured outputs
+                if use_cache:
+                    system_with_cache = [
+                        {
+                            "type": "text",
+                            "text": system_prompt,
+                            "cache_control": {"type": "ephemeral"}
+                        }
+                    ]
+                    
+                    message = await asyncio.to_thread(
+                        self.client.beta.messages.parse,
+                        model=self.model,
+                        max_tokens=self.max_tokens,
+                        temperature=0.0,
+                        betas=["structured-outputs-2025-11-13"],  # ✅ Enable structured outputs
+                        system=system_with_cache,
+                        messages=[{"role": "user", "content": text}],
+                        output_format=pydantic_model
+                    )
+                else:
+                    message = await asyncio.to_thread(
+                        self.client.beta.messages.parse,
+                        model=self.model,
+                        max_tokens=self.max_tokens,
+                        temperature=0.0,
+                        betas=["structured-outputs-2025-11-13"],  # ✅ Enable structured outputs
+                        system=system_prompt,
+                        messages=[{"role": "user", "content": text}],
+                        output_format=pydantic_model
+                    )
+                
+                break  # Success
+                
+            except Exception as api_error:
+                error_str = str(api_error)
+                is_retryable = (
+                    "Overloaded" in error_str or
+                    "overloaded_error" in error_str or
+                    "Error code: 429" in error_str or
+                    "Error code: 529" in error_str
+                )
+                
+                if is_retryable and attempt < max_retries - 1:
+                    wait_time = retry_delay * (2 ** attempt)
+                    logger.warning(f"API error, retrying in {wait_time}s (attempt {attempt + 1}/{max_retries})")
+                    await asyncio.sleep(wait_time)
+                else:
+                    raise
+        
+        # Extract response
+        try:
+            response_text = message.content[0].text.strip()
+            usage = getattr(message, "usage", None)
+            
+            # ✅ Already validated by SDK!
+            parsed_output = message.parsed_output
+            
+            # Log cache usage if available
+            if hasattr(usage, "cache_creation_input_tokens"):
+                cache_stats = {
+                    "cache_creation_tokens": getattr(usage, "cache_creation_input_tokens", 0),
+                    "cache_read_tokens": getattr(usage, "cache_read_input_tokens", 0),
+                    "regular_input_tokens": getattr(usage, "input_tokens", 0),
+                }
+                logger.info("Cache usage stats", extra=cache_stats)
+            
+            stop_reason = getattr(message, "stop_reason", None)
+            
+            # Warn if truncated (but JSON still valid!)
+            if stop_reason == "max_tokens":
+                logger.warning(
+                    f"⚠️ Response truncated at max_tokens ({self.max_tokens})",
+                    extra={"stop_reason": stop_reason, "output_tokens": getattr(usage, "output_tokens", None)}
+                )
+            
+            return {
+                "data": parsed_output.model_dump(),  # Convert to dict
+                "raw_text": response_text,
+                "usage": {
+                    "input_tokens": getattr(usage, "input_tokens", None),
+                    "output_tokens": getattr(usage, "output_tokens", None),
+                    "model": getattr(message, "model", self.model),
+                    "cache_creation_input_tokens": getattr(usage, "cache_creation_input_tokens", None),
+                    "cache_read_input_tokens": getattr(usage, "cache_read_input_tokens", None),
+                }
+            }
+            
+        except json.JSONDecodeError as e:
+            # ⚠️ This should NEVER happen with structured outputs!
+            logger.error(f"IMPOSSIBLE: Structured output returned invalid JSON: {e}")
+            logger.error(f"Raw response: {response_text[:500]}...")
+            raise HTTPException(
+                status_code=500,
+                detail="Internal error: Structured output validation failed. Contact support."
+            )
+            
+        except Exception as e:
+            error_msg = str(e)
+            if "timeout" in error_msg.lower():
+                logger.error(f"API timeout after {self.timeout_seconds}s")
+                raise HTTPException(
+                    status_code=503,
+                    detail=f"Processing took too long (>{self.timeout_seconds}s)."
+                )
+            
+            logger.exception(f"Claude API error: {e}")
+            raise HTTPException(
+                status_code=503,
+                detail="AI service temporarily unavailable."
+            )
+
     def _parse_json_response(self, response_text: str) -> Dict:
         """Extract and parse JSON from Claude's response"""
         # Remove markdown code blocks if present
@@ -188,8 +467,21 @@ class LLMClient:
             parts = text.split("```")
             if len(parts) >= 2:
                 text = parts[1].strip()
+
         # Remove any leading/trailing whitespace
         text = text.strip()
+
+        # If text doesn't start with { or [, try to find JSON in the response
+        # This handles cases where LLM adds preamble text like "Here's the result: {..."
+        if not text.startswith('{') and not text.startswith('['):
+            # Find the first { or [ in the text
+            json_start = min(
+                (text.find('{') if '{' in text else len(text)),
+                (text.find('[') if '[' in text else len(text))
+            )
+            if json_start < len(text):
+                logger.warning(f"JSON response had preamble text (first {json_start} chars), extracting JSON only")
+                text = text[json_start:]
 
         try:
             return json.loads(text)
@@ -208,6 +500,24 @@ class LLMClient:
     
     def _fix_common_json_errors(self, text: str) -> str:
         """Attempt to fix common JSON formatting issues"""
+
+        # Fix citations array format: "citations": "[D1:p1]", "[D1:p3]" -> "citations": ["[D1:p1]", "[D1:p3]"]
+        # Claude sometimes forgets array brackets around citations
+        # Pattern: "citations": "citation1", "citation2", ... followed by comma or newline
+        def fix_citations_array(match):
+            # Extract all citation tokens from the matched string
+            citations = re.findall(r'"(\[D\d+:p\d+\])"', match.group(0))
+            if citations:
+                return '"citations": [' + ', '.join(f'"{c}"' for c in citations) + ']'
+            return match.group(0)
+
+        # Match: "citations": followed by one or more quoted citation tokens (but not in array)
+        # Look for pattern where citations aren't wrapped in []
+        text = re.sub(
+            r'"citations":\s*"(\[D\d+:p\d+\])"(?:\s*,\s*"(\[D\d+:p\d+\])")*',
+            fix_citations_array,
+            text
+        )
 
         # Fix page number ranges like [11, 54-70] -> [11, 54, 70]
         # Claude sometimes uses shorthand notation for page ranges in provenance
@@ -241,89 +551,6 @@ class LLMClient:
         """Create extraction prompt using the new comprehensive format"""
         return create_extraction_prompt(text, context)
 
-    async def summarize_chunk(self, chunk_text: str) -> str:
-        """Async wrapper to summarize a single chunk using thread offload."""
-        return await asyncio.to_thread(self._summarize_chunk_sync, chunk_text)
-
-    def _summarize_chunk_sync(self, chunk_text: str) -> str:
-        prompt = create_summary_prompt(chunk_text)
-        logger.info(
-            f"Calling cheap LLM ({self.cheap_model}) for chunk summary",
-            extra={"prompt_length": len(prompt)}
-        )
-        try:
-            message = self.client.messages.create(
-                model=self.cheap_model,
-                max_tokens=self.cheap_max_tokens,
-                temperature=0.0,
-                system=SUMMARY_SYSTEM_PROMPT,
-                messages=[{"role": "user", "content": prompt}]
-            )
-            summary = message.content[0].text.strip()
-            logger.debug(f"Cheap LLM summary: {len(summary)} chars")
-            return summary
-        except Exception as e:
-            logger.error(f"Cheap LLM summarization failed: {e}")
-            logger.warning("Falling back to original chunk text")
-            return chunk_text
-
-    async def summarize_chunks_batch(self, chunks: list[dict]) -> list[str]:
-        """Async wrapper for batch summarization using thread offload."""
-        return await asyncio.to_thread(self._summarize_chunks_batch_sync, chunks)
-
-    def _summarize_chunks_batch_sync(self, chunks: list[dict]) -> list[str]:
-        if not chunks:
-            return []
-        prompt = create_batch_summary_prompt(chunks)
-        logger.info(
-            f"Calling cheap LLM ({self.cheap_model}) for batch summary of {len(chunks)} chunks",
-            extra={"prompt_length": len(prompt), "chunk_count": len(chunks)}
-        )
-        try:
-            message = self.client.messages.create(
-                model=self.cheap_model,
-                max_tokens=self.cheap_max_tokens,
-                temperature=0.0,
-                system=SUMMARY_SYSTEM_PROMPT,
-                messages=[{"role": "user", "content": prompt}]
-            )
-            batch_summary = message.content[0].text.strip()
-            logger.info(f"Batch summary received: {len(batch_summary)} chars")
-            return self._parse_batch_summaries(batch_summary, len(chunks))
-        except Exception as e:
-            logger.error(f"Batch summarization failed: {e}")
-            logger.warning("Falling back to original chunk texts")
-            return [chunk["text"] for chunk in chunks]
-
-    def _parse_batch_summaries(self, batch_output: str, expected_count: int) -> list[str]:
-        """Parse individual summaries from batch output.
-
-        Expected format:
-        Page 1: [summary]
-        Key Numbers: [numbers]
-
-        Page 2: [summary]
-        Key Numbers: [numbers]
-        """
-
-        summaries = []
-        # Split by "Page N:" pattern
-        page_pattern = r"Page \d+:\s*(.+?)(?=Page \d+:|$)"
-        matches = re.findall(page_pattern, batch_output, re.DOTALL)
-
-        if len(matches) >= expected_count:
-            summaries = [match.strip() for match in matches[:expected_count]]
-        else:
-            # Parsing failed, return full output split by double newlines
-            logger.warning(f"Failed to parse {expected_count} summaries, got {len(matches)}. Using fallback parsing.")
-            parts = batch_output.split("\n\n")
-            summaries = parts[:expected_count]
-            # Pad with empty strings if needed
-            while len(summaries) < expected_count:
-                summaries.append("")
-
-        return summaries
-
     async def stream_chat(self, prompt: str):
         """
         Stream chat response from Claude (for real-time RAG chat).
@@ -332,7 +559,9 @@ class LLMClient:
             prompt: Full prompt with context and question
 
         Yields:
-            Response chunks as they arrive from Claude
+            Dict with either:
+            - {"type": "chunk", "text": str} for response chunks
+            - {"type": "usage", "data": {...}} for final usage data
         """
         logger.info(
             f"Streaming chat response (prompt: {len(prompt)} chars)",
@@ -340,21 +569,41 @@ class LLMClient:
         )
 
         try:
-            # Use Claude streaming API
-            async def stream_helper():
-                # Run streaming API call in thread pool
-                with self.client.messages.stream(
-                    model=self.model,
-                    max_tokens=self.max_tokens,
-                    temperature=0.0,
-                    messages=[{"role": "user", "content": prompt}]
-                ) as stream:
-                    for text in stream.text_stream:
-                        yield text
+            # Use async with on the AWAITED stream
+            async with self.async_client.messages.stream(
+                model=self.model,
+                max_tokens=self.max_tokens,
+                temperature=0.0,
+                messages=[{"role": "user", "content": prompt}]
+            ) as stream:
+                # Stream text chunks
+                async for text in stream.text_stream:
+                    yield {"type": "chunk", "text": text}
 
-            # Yield chunks from stream
-            async for chunk in stream_helper():
-                yield chunk
+                # Get final message with usage data
+                final_message = await stream.get_final_message()
+                usage = getattr(final_message, "usage", None)
+
+                if usage:
+                    usage_data = {
+                        "input_tokens": getattr(usage, "input_tokens", None),
+                        "output_tokens": getattr(usage, "output_tokens", None),
+                        "model": getattr(final_message, "model", self.model),
+                        "cache_creation_input_tokens": getattr(usage, "cache_creation_input_tokens", None),
+                        "cache_read_input_tokens": getattr(usage, "cache_read_input_tokens", None),
+                    }
+
+                    logger.info(
+                        "Chat streaming complete",
+                        extra={
+                            "input_tokens": usage_data["input_tokens"],
+                            "output_tokens": usage_data["output_tokens"],
+                            "cache_read_tokens": usage_data["cache_read_input_tokens"] or 0,
+                            "model": usage_data["model"]
+                        }
+                    )
+
+                    yield {"type": "usage", "data": usage_data}
 
         except Exception as e:
             error_msg = str(e)

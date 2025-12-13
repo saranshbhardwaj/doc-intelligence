@@ -77,6 +77,11 @@ class WorkflowRunOut(BaseModel):
     artifact_json: Optional[dict]
     error_message: Optional[str]
     job_id: Optional[str] = Field(None, description="Associated job state ID for progress streaming")
+    created_at: Optional[str] = Field(None, description="ISO timestamp when the run was created")
+    latency_ms: Optional[int] = Field(None, description="Total execution time in milliseconds")
+    cost_usd: Optional[float] = Field(None, description="Total cost in USD")
+    token_usage: Optional[int] = Field(None, description="Total tokens used")
+    currency: Optional[str] = Field(None, description="Detected currency from documents")
 
     class Config:
         from_attributes = True
@@ -85,14 +90,19 @@ class WorkflowRunOut(BaseModel):
 # -------------------- Endpoints --------------------
 
 @router.get("/templates", response_model=List[WorkflowTemplateListItem])
-def list_workflow_templates(db: Session = Depends(get_db)):
-    """List all active workflow templates."""
+def list_workflow_templates(domain: Optional[str] = None, db: Session = Depends(get_db)):
+    """List all active workflow templates, optionally filtered by domain.
+
+    Args:
+        domain: Optional domain filter (private_equity, real_estate)
+    """
     repo = WorkflowRepository(db)
-    workflows = repo.list_workflows(active_only=True)
+    workflows = repo.list_workflows(active_only=True, domain=domain)
     return [
         WorkflowTemplateListItem(
             id=wf.id,
             name=wf.name,
+            domain=wf.domain,
             category=wf.category,
             description=wf.description,
             output_format=wf.output_format,
@@ -131,6 +141,7 @@ def get_workflow_template(workflow_id: str, db: Session = Depends(get_db)):
     return WorkflowTemplateDetail(
         id=wf.id,
         name=wf.name,
+        domain=wf.domain,
         category=wf.category,
         description=wf.description,
         output_format=wf.output_format,
@@ -173,7 +184,7 @@ def create_workflow_run(payload: CreateWorkflowRunRequest, user: User = Depends(
     if workflow.max_documents and len(doc_ids) > workflow.max_documents:
         raise HTTPException(status_code=400, detail=f"Workflow accepts at most {workflow.max_documents} document(s)")
 
-    # Validate documents exist and have embeddings (for multi-doc mode)
+    # Validate documents exist and have embeddings
     if len(doc_ids) > 1:
         from app.db_models_chat import DocumentChunk
         # Query canonical Document table and check for embeddings
@@ -188,7 +199,7 @@ def create_workflow_run(payload: CreateWorkflowRunRequest, user: User = Depends(
         if missing_embeddings:
             raise HTTPException(
                 status_code=400,
-                detail=f"Documents missing embeddings (required for multi-doc workflows): {list(missing_embeddings)[:3]}"
+                detail=f"Documents missing embeddings: {list(missing_embeddings)[:3]}"
             )
 
     # Validate required variables from workflow schema
@@ -231,8 +242,8 @@ def create_workflow_run(payload: CreateWorkflowRunRequest, user: User = Depends(
                     raise HTTPException(status_code=400, detail=f"Variable '{var_name}' must be <= {var_def['max']}")
 
     # Determine mode & strategy
-    mode = "single_doc" if len(doc_ids) == 1 else "multi_doc"
-    strategy = payload.strategy or ("full_context" if mode == "single_doc" else "retrieval")
+    mode = "multi_doc"
+    strategy = payload.strategy or ("retrieval")
 
     run = repo.create_run(
         workflow=workflow,
@@ -286,6 +297,11 @@ def create_workflow_run(payload: CreateWorkflowRunRequest, user: User = Depends(
         artifact_json=artifact,
         error_message=run.error_message,
         job_id=job_id,
+        created_at=run.created_at.isoformat() if run.created_at else None,
+        latency_ms=run.latency_ms,
+        cost_usd=run.cost_usd,
+        token_usage=run.token_usage,
+        currency=run.currency,
     )
 
 
@@ -335,6 +351,11 @@ def get_workflow_run(run_id: str, user: User = Depends(get_current_user), db: Se
         artifact_json=artifact,
         error_message=run.error_message,
         job_id=job_id,
+        created_at=run.created_at.isoformat() if run.created_at else None,
+        latency_ms=run.latency_ms,
+        cost_usd=run.cost_usd,
+        token_usage=run.token_usage,
+        currency=run.currency,
     )
 
 
@@ -519,6 +540,185 @@ def delete_workflow_run(
 
     logger.info("Workflow run deleted", extra={"run_id": run_id, "user_id": user.id})
     return {"message": "Run deleted successfully", "run_id": run_id}
+
+
+@router.post("/runs/{run_id}/export")
+def export_workflow_run(
+    run_id: str,
+    format: str = 'word',
+    delivery: str = 'stream',
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """
+    Export workflow run to Word, Excel, or PDF.
+
+    Args:
+        run_id: Workflow run ID
+        format: Export format ('word'/'docx', 'excel'/'xlsx', 'pdf', 'md')
+        delivery: 'stream' (direct download) or 'url' (signed R2 URL if available)
+        user: Authenticated user
+        db: Database session
+
+    Returns:
+        File download or signed URL
+
+    Type Safety:
+        Input: run_id (str), format (str)
+        Data: Workflow artifact (Dict[str, Any])
+        Output: bytes (Word/Excel/PDF) or URL
+    """
+    from fastapi import Query, Response
+    from app.services.artifacts import load_artifact
+    from app.utils.metrics import (
+        EXPORT_GENERATION_SECONDS,
+        EXPORT_R2_STORE_SECONDS,
+        EXPORT_R2_FAILURES,
+        EXPORT_REQUESTS,
+        EXPORT_BYTES_TOTAL,
+    )
+    from app.config import settings
+    from app.services.storage.cloudflare_r2 import get_r2_storage
+
+    logger.info("Export workflow run", extra={
+        "run_id": run_id,
+        "format": format,
+        "delivery": delivery,
+        "user_id": user.id
+    })
+
+    repo = WorkflowRepository(db)
+    run = repo.get_run(run_id)
+
+    if not run:
+        raise HTTPException(status_code=404, detail='Run not found')
+    if run.user_id != user.id:
+        raise HTTPException(status_code=403, detail='Not authorized to access this run')
+    if not run.artifact:
+        raise HTTPException(status_code=400, detail='No artifact available')
+
+    # Load artifact from R2 if needed
+    try:
+        parsed = json.loads(run.artifact) if isinstance(run.artifact, str) else run.artifact
+    except Exception:
+        logger.exception('Invalid artifact stored')
+        raise HTTPException(status_code=500, detail='Invalid artifact stored')
+
+    full_artifact = load_artifact(parsed)
+    obj = full_artifact.get('parsed') or full_artifact.get('partial_parsed') or full_artifact
+
+    EXPORT_REQUESTS.labels(format=format, delivery=delivery).inc()
+    gen_timer = EXPORT_GENERATION_SECONDS.time()
+
+    try:
+        # Use new exporters for Word/Excel, keep old logic for PDF/MD
+        if format in ['docx', 'word']:
+            from app.services.exporters import WorkflowExporter
+            exporter = WorkflowExporter()
+
+            # Prepare run metadata
+            run_metadata = {
+                'id': run_id,
+                'workflow_name': run.workflow.name if run.workflow else 'Workflow',
+                'created_at': run.created_at,
+                'status': run.status,
+                'latency_ms': run.latency_ms,
+                'cost_usd': run.cost_usd,
+                'duration_seconds': run.latency_ms / 1000 if run.latency_ms else None
+            }
+
+            b, filename, ctype = exporter.export_to_word(full_artifact, run_metadata)
+
+        elif format in ['xlsx', 'excel']:
+            from app.services.exporters import WorkflowExporter
+            exporter = WorkflowExporter()
+
+            run_metadata = {
+                'id': run_id,
+                'workflow_name': run.workflow.name if run.workflow else 'Workflow',
+                'created_at': run.created_at
+            }
+
+            b, filename, ctype = exporter.export_to_excel(full_artifact, run_metadata)
+
+        else:
+            # Use old exporter for PDF and MD
+            from app.services.exporter import export_bytes
+            b, filename, ctype = export_bytes(obj, fmt=format)
+
+    except Exception as e:
+        logger.exception('Export generation failed')
+        raise HTTPException(status_code=500, detail=str(e))
+    finally:
+        try:
+            gen_timer.__exit__(None, None, None)
+        except Exception:
+            pass
+
+    # Decide storage vs streaming
+    use_r2 = (
+        settings.exports_use_r2
+        and settings.r2_bucket
+        and settings.r2_access_key_id
+        and settings.r2_secret_access_key
+        and settings.r2_endpoint_url
+    )
+
+    if delivery == 'url' and use_r2:
+        store_timer = EXPORT_R2_STORE_SECONDS.time()
+        try:
+            storage = get_r2_storage()
+
+            # Build hierarchical key: exports/{workflow}/{YYYY}/{MM}/{DD}/{runid}_{timestamp}_{filename}
+            import re
+            from datetime import datetime
+            workflow_name = run.workflow.name if run and run.workflow else "unknown"
+            safe_workflow_name = workflow_name.lower()
+            safe_workflow_name = re.sub(r'[^a-z0-9-]', '-', safe_workflow_name)
+
+            now = run.created_at if run else datetime.utcnow()
+            timestamp = now.strftime("%Y%m%d_%H%M%S")
+
+            key = (
+                f"exports/"
+                f"{safe_workflow_name}/"
+                f"{now.year}/"
+                f"{now.month:02d}/"
+                f"{now.day:02d}/"
+                f"{run_id[:8]}_{timestamp}_{filename}"
+            )
+
+            signed_url = storage.store_bytes(key, b, ctype)
+            EXPORT_BYTES_TOTAL.inc(len(b))
+            logger.info("Export stored in R2", extra={
+                "run_id": run_id,
+                "key": key,
+                "workflow": workflow_name
+            })
+            return {
+                'run_id': run_id,
+                'filename': filename,
+                'content_type': ctype,
+                'url': signed_url,
+                'stored': True
+            }
+        except Exception:
+            EXPORT_R2_FAILURES.inc()
+            logger.exception('R2 storage failed, falling back to streaming')
+        finally:
+            try:
+                store_timer.__exit__(None, None, None)
+            except Exception:
+                pass
+
+    # Stream the file directly
+    EXPORT_BYTES_TOTAL.inc(len(b))
+    logger.info("Export streamed", extra={"run_id": run_id, "filename": filename, "size": len(b)})
+    return Response(
+        content=b,
+        media_type=ctype,
+        headers={'Content-Disposition': f'attachment; filename="{filename}"'}
+    )
 
 
 @router.post("/runs/{run_id}/rerun", response_model=WorkflowRunOut)

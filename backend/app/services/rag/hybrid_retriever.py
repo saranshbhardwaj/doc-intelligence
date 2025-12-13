@@ -18,13 +18,13 @@ from app.utils.logging import logger
 
 class HybridRetriever:
     """
-    Combines semantic (vector) + keyword (BM25) search
+    Combines semantic (vector) + keyword (BM25) search using RRF
 
     Pipeline:
     1. Analyze query for content preferences
     2. Semantic search via pgvector (cosine similarity)
     3. Keyword search via PostgreSQL FTS (ts_rank_cd)
-    4. Merge results with weighted combination
+    4. Merge results using Reciprocal Rank Fusion (RRF)
     5. Apply metadata-based boosting
     6. Return top-k ranked chunks
     """
@@ -32,29 +32,25 @@ class HybridRetriever:
     def __init__(
         self,
         db: Session,
-        semantic_weight: float = None,
-        keyword_weight: float = None
+        rrf_k: int = None
     ):
         """
         Initialize hybrid retriever
 
         Args:
             db: SQLAlchemy database session
-            semantic_weight: Weight for semantic search (default from settings)
-            keyword_weight: Weight for keyword search (default from settings)
+            rrf_k: RRF constant parameter (default from settings)
         """
         self.db = db
         self.embedder = get_embedding_provider()
         self.query_analyzer = QueryAnalyzer()
         self.metadata_booster = MetadataBooster.for_hybrid_retriever()
 
-        # Use config or provided weights
-        self.semantic_weight = semantic_weight or settings.rag_hybrid_semantic_weight
-        self.keyword_weight = keyword_weight or settings.rag_hybrid_keyword_weight
+        # RRF configuration
+        self.rrf_k = rrf_k or settings.rag_hybrid_rrf_k
 
         logger.info(
-            f"HybridRetriever initialized: semantic_weight={self.semantic_weight}, "
-            f"keyword_weight={self.keyword_weight}"
+            f"HybridRetriever initialized: RRF merging with k={self.rrf_k}"
         )
 
     def retrieve(
@@ -143,6 +139,7 @@ class HybridRetriever:
             DocumentChunk.is_tabular,
             DocumentChunk.section_heading,
             DocumentChunk.section_type,
+            DocumentChunk.chunk_metadata,
             distance_expr
         )
 
@@ -192,6 +189,7 @@ class HybridRetriever:
                 "is_tabular": r.is_tabular,
                 "section_heading": r.section_heading,
                 "section_type": r.section_type,
+                "chunk_metadata": r.chunk_metadata,  # Include metadata with document_filename
                 "semantic_score": normalized_score,
                 "raw_similarity": similarity,
                 "distance": r.distance
@@ -234,6 +232,7 @@ class HybridRetriever:
             DocumentChunk.is_tabular,
             DocumentChunk.section_heading,
             DocumentChunk.section_type,
+            DocumentChunk.chunk_metadata,
             rank_expr
         )
 
@@ -283,6 +282,7 @@ class HybridRetriever:
                 "is_tabular": r.is_tabular,
                 "section_heading": r.section_heading,
                 "section_type": r.section_type,
+                "chunk_metadata": r.chunk_metadata,  # Include metadata with document_filename
                 "keyword_score": normalized_score,
                 "raw_rank": r.rank
             })
@@ -295,45 +295,76 @@ class HybridRetriever:
         keyword_results: List[Dict]
     ) -> List[Dict]:
         """
-        Merge semantic + keyword results with weighted combination
+        Merge semantic + keyword results using Reciprocal Rank Fusion (RRF).
 
-        Uses weighted score combination:
-        - Combines scores from both searches
-        - Weights by semantic_weight and keyword_weight
-        - Handles chunks that appear in only one search
+        RRF Formula: RRF_score = Σ(1 / (k + rank))
+        where k is a constant (default 60) and rank is 1-indexed position.
+
+        Advantages:
+        - Rank-based: More robust to score distribution differences
+        - No normalization needed: Avoids min-max issues
+        - Well-studied: Used by Elasticsearch, Vespa, etc.
+        - Position-focused: Emphasizes top results naturally
 
         Returns:
-            List of unique chunks with hybrid_score
+            List of unique chunks with hybrid_score (RRF score)
         """
-        # Create lookup for keyword scores
-        keyword_scores = {r["id"]: r["keyword_score"] for r in keyword_results}
-        semantic_scores = {r["id"]: r["semantic_score"] for r in semantic_results}
+        # Build rank lookups (1-indexed positions)
+        semantic_ranks = {r["id"]: idx + 1 for idx, r in enumerate(semantic_results)}
+        keyword_ranks = {r["id"]: idx + 1 for idx, r in enumerate(keyword_results)}
+
+        # Get all unique chunk IDs
+        all_chunk_ids = set(semantic_ranks.keys()) | set(keyword_ranks.keys())
 
         # Build merged result dict
         merged_dict = {}
 
-        # Start with semantic results (more complete metadata)
-        for r in semantic_results:
-            merged_dict[r["id"]] = {
-                **r,
-                "keyword_score": keyword_scores.get(r["id"], 0.0)
-            }
+        for chunk_id in all_chunk_ids:
+            # Find original chunk data (prefer semantic for metadata completeness)
+            chunk_data = None
+            for r in semantic_results:
+                if r["id"] == chunk_id:
+                    chunk_data = r.copy()
+                    break
 
-        # Add keyword-only results
-        for r in keyword_results:
-            if r["id"] not in merged_dict:
-                merged_dict[r["id"]] = {
-                    **r,
-                    "semantic_score": semantic_scores.get(r["id"], 0.0)
-                }
+            if not chunk_data:
+                for r in keyword_results:
+                    if r["id"] == chunk_id:
+                        chunk_data = r.copy()
+                        break
 
-        # Calculate hybrid score for each chunk
-        for data in merged_dict.values():
-            hybrid_score = (
-                self.semantic_weight * data["semantic_score"] +
-                self.keyword_weight * data["keyword_score"]
-            )
-            data["hybrid_score"] = hybrid_score
+            if not chunk_data:
+                logger.warning(f"Chunk {chunk_id} not found in either result set (should not happen)")
+                continue
+
+            # Calculate RRF score
+            rrf_score = 0.0
+
+            # Add semantic contribution
+            if chunk_id in semantic_ranks:
+                rrf_score += 1.0 / (self.rrf_k + semantic_ranks[chunk_id])
+
+            # Add keyword contribution
+            if chunk_id in keyword_ranks:
+                rrf_score += 1.0 / (self.rrf_k + keyword_ranks[chunk_id])
+
+            # Store RRF score and rank metadata
+            chunk_data["hybrid_score"] = rrf_score
+            chunk_data["semantic_rank"] = semantic_ranks.get(chunk_id)
+            chunk_data["keyword_rank"] = keyword_ranks.get(chunk_id)
+
+            # Preserve normalized scores if available (for analysis/debugging)
+            if "semantic_score" not in chunk_data:
+                chunk_data["semantic_score"] = 0.0
+            if "keyword_score" not in chunk_data:
+                chunk_data["keyword_score"] = 0.0
+
+            merged_dict[chunk_id] = chunk_data
+
+        logger.debug(
+            f"RRF merge: {len(semantic_results)} semantic + {len(keyword_results)} keyword "
+            f"→ {len(merged_dict)} unique chunks (k={self.rrf_k})"
+        )
 
         return list(merged_dict.values())
 

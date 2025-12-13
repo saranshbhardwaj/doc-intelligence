@@ -2,12 +2,20 @@ from __future__ import annotations
 from pydantic import BaseModel, Field
 from typing import Optional, Dict, Any, List
 from datetime import datetime
+from enum import Enum
+
+
+class WorkflowDomain(str, Enum):
+    """Workflow domain enum for PE vs RE workflows."""
+    PRIVATE_EQUITY = "private_equity"
+    REAL_ESTATE = "real_estate"
 
 
 class WorkflowTemplateListItem(BaseModel):
     """Workflow template summary for listing."""
     id: str
     name: str
+    domain: str = "private_equity"
     category: Optional[str]
     description: Optional[str]
     prompt_template: str
@@ -49,7 +57,7 @@ class WorkflowRunCreate(BaseModel):
 class WorkflowRunListItem(BaseModel):
     """Workflow run summary for listing."""
     id: str
-    workflow_id: str
+    workflow_id: Optional[str] = None
     workflow_name: Optional[str] = None
     status: str
     mode: str
@@ -113,6 +121,7 @@ class DocumentSummary(BaseModel):
 
 
 __all__ = [
+    'WorkflowDomain',
     'WorkflowTemplateListItem',
     'WorkflowTemplateDetail',
     'WorkflowVariableSchema',

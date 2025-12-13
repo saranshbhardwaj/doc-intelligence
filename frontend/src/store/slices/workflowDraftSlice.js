@@ -9,7 +9,7 @@
  * - Persists across page refresh via localStorage
  */
 
-import { streamProgress } from '../../api';
+import { streamWorkflowProgress } from "../../api/workflows";
 
 export const createWorkflowDraftSlice = (set, get) => ({
   // ========== State ==========
@@ -44,7 +44,9 @@ export const createWorkflowDraftSlice = (set, get) => ({
   addDocumentToDraft: (doc) => {
     set((state) => {
       // Prevent duplicates
-      const exists = state.workflowDraft.selectedDocuments.some(d => d.id === doc.id);
+      const exists = state.workflowDraft.selectedDocuments.some(
+        (d) => d.id === doc.id
+      );
       if (exists) {
         return state;
       }
@@ -65,8 +67,10 @@ export const createWorkflowDraftSlice = (set, get) => ({
   addDocumentsToDraft: (docs) => {
     set((state) => {
       // Filter out duplicates
-      const currentIds = new Set(state.workflowDraft.selectedDocuments.map(d => d.id));
-      const newDocs = docs.filter(doc => !currentIds.has(doc.id));
+      const currentIds = new Set(
+        state.workflowDraft.selectedDocuments.map((d) => d.id)
+      );
+      const newDocs = docs.filter((doc) => !currentIds.has(doc.id));
 
       if (newDocs.length === 0) {
         return state;
@@ -75,7 +79,10 @@ export const createWorkflowDraftSlice = (set, get) => ({
       return {
         workflowDraft: {
           ...state.workflowDraft,
-          selectedDocuments: [...state.workflowDraft.selectedDocuments, ...newDocs],
+          selectedDocuments: [
+            ...state.workflowDraft.selectedDocuments,
+            ...newDocs,
+          ],
         },
       };
     });
@@ -89,7 +96,9 @@ export const createWorkflowDraftSlice = (set, get) => ({
     set((state) => ({
       workflowDraft: {
         ...state.workflowDraft,
-        selectedDocuments: state.workflowDraft.selectedDocuments.filter(d => d.id !== docId),
+        selectedDocuments: state.workflowDraft.selectedDocuments.filter(
+          (d) => d.id !== docId
+        ),
       },
     }));
   },
@@ -153,7 +162,7 @@ export const createWorkflowDraftSlice = (set, get) => ({
    * @returns {Array<string>} Array of document IDs
    */
   getSelectedDocumentIds: () => {
-    return get().workflowDraft.selectedDocuments.map(doc => doc.id);
+    return get().workflowDraft.selectedDocuments.map((doc) => doc.id);
   },
 
   // ========== Workflow Execution Actions ==========
@@ -162,9 +171,10 @@ export const createWorkflowDraftSlice = (set, get) => ({
    * Start workflow execution tracking
    * @param {string} jobId - Job ID for progress tracking
    * @param {string} runId - Workflow run ID
+   * @param {Function} cleanup - Optional SSE cleanup function
    */
-  startWorkflowExecution: (jobId, runId) => {
-    console.log('🚀 Starting workflow execution tracking:', { jobId, runId });
+  startWorkflowExecution: (jobId, runId, cleanup = null) => {
+    console.log("🚀 Starting workflow execution tracking:", { jobId, runId });
     set((state) => ({
       workflowDraft: {
         ...state.workflowDraft,
@@ -174,8 +184,9 @@ export const createWorkflowDraftSlice = (set, get) => ({
           runId,
           isProcessing: true,
           progress: 0,
-          stage: 'queued',
-          message: 'Workflow queued...',
+          stage: "queued",
+          message: "Workflow queued...",
+          cleanup,
         },
       },
     }));
@@ -192,8 +203,10 @@ export const createWorkflowDraftSlice = (set, get) => ({
         execution: {
           ...state.workflowDraft.execution,
           progress: progressData.progress_percent || 0,
-          stage: progressData.current_stage || state.workflowDraft.execution.stage,
-          message: progressData.message || state.workflowDraft.execution.message,
+          stage:
+            progressData.current_stage || state.workflowDraft.execution.stage,
+          message:
+            progressData.message || state.workflowDraft.execution.message,
         },
       },
     }));
@@ -203,7 +216,6 @@ export const createWorkflowDraftSlice = (set, get) => ({
    * Complete workflow execution
    */
   completeWorkflowExecution: () => {
-    console.log('✅ Workflow execution completed');
     set((state) => ({
       workflowDraft: {
         ...state.workflowDraft,
@@ -211,8 +223,8 @@ export const createWorkflowDraftSlice = (set, get) => ({
           ...state.workflowDraft.execution,
           isProcessing: false,
           progress: 100,
-          stage: 'completed',
-          message: 'Workflow completed successfully',
+          stage: "completed",
+          message: "Workflow completed successfully",
         },
       },
     }));
@@ -223,15 +235,15 @@ export const createWorkflowDraftSlice = (set, get) => ({
    * @param {string} errorMessage - Error message
    */
   failWorkflowExecution: (errorMessage) => {
-    console.error('❌ Workflow execution failed:', errorMessage);
+    console.error("❌ Workflow execution failed:", errorMessage);
     set((state) => ({
       workflowDraft: {
         ...state.workflowDraft,
         execution: {
           ...state.workflowDraft.execution,
           isProcessing: false,
-          stage: 'failed',
-          message: errorMessage || 'Workflow failed',
+          stage: "failed",
+          message: errorMessage || "Workflow failed",
         },
       },
     }));
@@ -245,29 +257,41 @@ export const createWorkflowDraftSlice = (set, get) => ({
     const { jobId, runId } = get().workflowDraft.execution;
 
     if (!jobId || !runId) {
-      console.log('❌ No active workflow to reconnect');
+      console.log("❌ No active workflow to reconnect");
       return;
     }
 
-    console.log('🔄 Reconnecting to workflow execution:', { jobId, runId });
+    console.log("🔄 Reconnecting to workflow execution:", { jobId, runId });
 
     try {
-      const cleanup = await streamProgress(jobId, getToken, {
+      const cleanup = await streamWorkflowProgress(jobId, getToken, {
         onProgress: (data) => {
           get().updateWorkflowProgress(data);
         },
-        onComplete: (data) => {
+        onComplete: () => {
           get().completeWorkflowExecution();
         },
         onError: (errorData) => {
-          const errorMsg = typeof errorData === 'string'
-            ? errorData
-            : (errorData?.message || 'Workflow failed');
+          const errorMsg =
+            typeof errorData === "string"
+              ? errorData
+              : errorData?.message || "Workflow failed";
+
+          // If job not found (e.g., deleted), clear execution state entirely
+          const errorType =
+            typeof errorData === "object" ? errorData?.type : null;
+          if (errorType === "not_found") {
+            console.log("🗑️ Job not found - clearing execution state");
+            get().resetWorkflowExecution();
+            return;
+          }
+
           get().failWorkflowExecution(errorMsg);
         },
         onEnd: async (data) => {
-          console.log('🏁 Workflow SSE stream ended:', data?.reason);
-          // Don't reset jobId/runId here - keep them for result page navigation
+          console.log("🏁 Workflow SSE stream ended:", data?.reason);
+          // If stream ended due to not_found, state is already cleared in onError
+          // Don't reset jobId/runId here for other cases - keep them for result page navigation
         },
       });
 
@@ -282,8 +306,8 @@ export const createWorkflowDraftSlice = (set, get) => ({
         },
       }));
     } catch (err) {
-      console.error('Reconnection failed:', err);
-      get().failWorkflowExecution('Failed to reconnect to workflow');
+      console.error("Reconnection failed:", err);
+      get().failWorkflowExecution("Failed to reconnect to workflow");
     }
   },
 
@@ -297,7 +321,7 @@ export const createWorkflowDraftSlice = (set, get) => ({
       cleanup();
     }
 
-    console.log('🛑 Workflow execution canceled');
+    console.log("🛑 Workflow execution canceled");
     set((state) => ({
       workflowDraft: {
         ...state.workflowDraft,
@@ -320,7 +344,7 @@ export const createWorkflowDraftSlice = (set, get) => ({
       cleanup();
     }
 
-    console.log('🔄 Resetting workflow execution state');
+    console.log("🔄 Resetting workflow execution state");
     set((state) => ({
       workflowDraft: {
         ...state.workflowDraft,

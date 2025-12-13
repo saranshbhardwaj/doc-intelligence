@@ -3,9 +3,7 @@
  */
 
 import { api, createAuthenticatedApi } from "./client";
-
-// Track active streams to prevent duplicate EventSource instances per job
-const _activeWorkflowStreams = new Map(); // jobId -> { eventSource, callbacks }
+import { streamJobProgress } from "./sse-utils";
 
 export async function getRun(getToken, runId) {
   const api = createAuthenticatedApi(getToken);
@@ -37,14 +35,21 @@ export async function listRuns(getToken) {
 }
 
 /**
- * Export generator. Returns the raw axios response so caller can inspect
- * response.data (may be { url } or a binary blob depending on server)
+ * Export workflow run to Word, Excel, or PDF.
+ *
+ * New endpoint: POST /api/workflows/runs/{runId}/export
+ *
+ * @param {Function} getToken - Auth token getter
+ * @param {string} runId - Run ID to export
+ * @param {string} format - Export format ('word', 'excel', 'pdf')
+ * @param {string} delivery - Delivery mode ('stream' or 'url')
+ * @returns {Promise} Response with file or URL
  */
 export async function exportRun(getToken, runId, format, delivery = "url") {
   const api = createAuthenticatedApi(getToken);
   const response = await api.post(
-    `/export/generate?delivery=${encodeURIComponent(delivery)}`,
-    { run_id: runId, format },
+    `/api/workflows/runs/${runId}/export?format=${encodeURIComponent(format)}&delivery=${encodeURIComponent(delivery)}`,
+    {},
     { responseType: "json" }
   );
   return response;
@@ -79,7 +84,8 @@ export async function rerunWorkflow(getToken, runId, params = {}) {
 /**
  * Stream workflow job progress via Server-Sent Events (SSE)
  *
- * NOTE: EventSource doesn't support custom headers, so auth token is passed as query parameter
+ * This is a wrapper around the unified streamJobProgress utility.
+ * Uses the same endpoint as extraction.js: GET /api/jobs/{jobId}/stream
  *
  * @param {string} jobId - The job ID to stream progress for
  * @param {Function} getToken - Clerk's getToken function from useAuth hook
@@ -88,125 +94,17 @@ export async function rerunWorkflow(getToken, runId, params = {}) {
  * @param {Function} callbacks.onComplete - Called when job completes
  * @param {Function} callbacks.onError - Called on error
  * @param {Function} callbacks.onEnd - Called when stream ends
- * @returns {Function} Cleanup function to close the connection
- *
- * Progress event structure:
- * {
- *   status: "queued" | "running" | "completed" | "failed",
- *   progress_percent: 0-100,
- *   message: "User-friendly status message",
- *   current_stage: "processing",
- *   ...
- * }
+ * @returns {Promise<Function>} Cleanup function to close the connection
  */
-export async function streamWorkflowProgress(jobId, getToken, { onProgress, onComplete, onError, onEnd }) {
-  const baseURL = api.defaults.baseURL || '';
-
-  // Get auth token and pass as query parameter (EventSource doesn't support headers)
-  const token = await getToken();
-  const url = `${baseURL}/api/jobs/${jobId}/stream?token=${encodeURIComponent(token)}`;
-
-  // If stream already exists, reuse and just update callbacks
-  if (_activeWorkflowStreams.has(jobId)) {
-    const existing = _activeWorkflowStreams.get(jobId);
-    existing.callbacks = { onProgress, onComplete, onError, onEnd };
-    return () => {
-      try { existing.eventSource.close(); } catch (_) {}
-      _activeWorkflowStreams.delete(jobId);
-    };
-  }
-
-  const eventSource = new EventSource(url);
-  let streamEnded = false;
-  let isCleaningUp = false;
-
-  const cleanup = () => {
-    if (isCleaningUp) return;
-    isCleaningUp = true;
-    streamEnded = true;
-
-    console.log('[Workflow SSE] Cleaning up EventSource');
-    try {
-      eventSource.close();
-    } catch (err) {
-      console.error('[Workflow SSE] Error closing EventSource:', err);
-    }
-    _activeWorkflowStreams.delete(jobId);
-  };
-
-  eventSource.addEventListener('progress', (event) => {
-    const { callbacks } = _activeWorkflowStreams.get(jobId) || { callbacks: {} };
-    try {
-      const data = JSON.parse(event.data);
-      callbacks.onProgress?.(data);
-    } catch (err) {
-      console.error('[Workflow SSE] Failed to parse progress event:', err);
-    }
+export async function streamWorkflowProgress(
+  jobId,
+  getToken,
+  { onProgress, onComplete, onError, onEnd }
+) {
+  return streamJobProgress(jobId, getToken, {
+    onProgress,
+    onComplete,
+    onError,
+    onEnd,
   });
-
-  eventSource.addEventListener('complete', (event) => {
-    const { callbacks } = _activeWorkflowStreams.get(jobId) || { callbacks: {} };
-    try {
-      const data = JSON.parse(event.data);
-      console.log('[Workflow SSE] 🎉 Complete event received:', data);
-      callbacks.onComplete?.(data);
-    } catch (err) {
-      console.error('[Workflow SSE] Failed to parse complete event:', err);
-    }
-  });
-
-  eventSource.addEventListener('end', (event) => {
-    const { callbacks } = _activeWorkflowStreams.get(jobId) || { callbacks: {} };
-    streamEnded = true;
-    try {
-      const data = JSON.parse(event.data);
-      console.log('[Workflow SSE] End event data:', data);
-      callbacks.onEnd?.(data);
-    } catch (err) {
-      console.error('[Workflow SSE] Failed to parse end event:', err);
-    } finally {
-      cleanup();
-    }
-  });
-
-  eventSource.addEventListener('error', (event) => {
-    // Domain error (backend emitted SSE 'error' event with JSON payload)
-    if (event.data) {
-      try {
-        const raw = JSON.parse(event.data);
-        const normalized = {
-          message: raw.message,
-          stage: raw.stage,
-          type: raw.type || raw.error_type,
-          isRetryable: raw.retryable ?? raw.is_retryable ?? false,
-        };
-        const { callbacks } = _activeWorkflowStreams.get(jobId) || { callbacks: {} };
-        callbacks.onError?.(normalized);
-      } catch (err) {
-        console.error('[Workflow SSE] Failed to parse domain error event:', err);
-      }
-    }
-  });
-
-  eventSource.onerror = (err) => {
-    if (isCleaningUp || streamEnded) {
-      console.log('[Workflow SSE] ✅ Ignoring transport onerror (terminal or ended)');
-      return;
-    }
-
-    console.error('[Workflow SSE] ❌ Connection error detected:', err);
-    const { callbacks } = _activeWorkflowStreams.get(jobId) || { callbacks: {} };
-    callbacks.onError?.({
-      message: 'Lost connection to server',
-      type: 'connection_error',
-      isRetryable: true,
-    });
-
-    cleanup();
-  };
-
-  _activeWorkflowStreams.set(jobId, { eventSource, callbacks: { onProgress, onComplete, onError, onEnd } });
-
-  // Return cleanup function (explicit cancel)
-  return cleanup;
 }

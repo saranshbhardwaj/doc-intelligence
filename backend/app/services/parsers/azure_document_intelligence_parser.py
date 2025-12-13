@@ -164,11 +164,18 @@ class AzureDocumentIntelligenceParser(DocumentParser):
             if result is None:
                 raise RuntimeError("parse_error: Azure API returned None result")
 
+            # Extract structured data (paragraphs, sections, figures)
+            structured_data = self._extract_structured_data(result)
+
+            # Extract basic page data (text + tables)
             pages_data = self._extract_pages(result)
 
             # Edge case: Validate pages_data is not empty
             if not pages_data:
                 raise ValueError("parse_error: Azure parser extracted no pages from PDF")
+
+            # Build enhanced pages with paragraph roles and figures
+            enhanced_pages = self._build_enhanced_pages(pages_data, structured_data)
 
             # Combine page texts
             full_text = "\n\n".join(p.text for p in pages_data)
@@ -235,6 +242,23 @@ class AzureDocumentIntelligenceParser(DocumentParser):
                     }
                     for p in pages_data
                 ],
+                # NEW: Enhanced structure for smart chunking
+                "structured_data": {
+                    "paragraphs": structured_data["paragraphs"],
+                    "sections": structured_data["sections"],
+                    "figures": structured_data["figures"],
+                },
+                # NEW: Enhanced pages with paragraph roles and figures
+                "enhanced_pages": enhanced_pages,
+                # NEW: Document-level structure summary
+                "document_structure": {
+                    "total_paragraphs": len(structured_data["paragraphs"]),
+                    "total_sections": len(structured_data["sections"]),
+                    "total_figures": len(structured_data["figures"]),
+                    "paragraph_roles": self._count_paragraph_roles(structured_data["paragraphs"]),
+                    "pages_with_headings": sum(1 for p in enhanced_pages if p["has_section_heading"]),
+                    "pages_with_figures": sum(1 for p in enhanced_pages if p["has_figures"]),
+                },
             }
 
             return ParserOutput(
@@ -267,6 +291,229 @@ class AzureDocumentIntelligenceParser(DocumentParser):
             raise RuntimeError(f"parse_error: Unexpected failure in Azure parser: {e}") from e
 
     # --- Helpers ---
+    def _extract_structured_data(self, result: AnalyzeResult) -> Dict:
+        """Extract structured data (paragraphs, sections, figures) from Azure result.
+
+        Returns a dict containing:
+        - paragraphs: List of paragraphs with roles and metadata
+        - sections: List of sections (hierarchical structure)
+        - figures: List of figures with captions
+        - content: Full document text (for span-based extraction)
+        """
+        structured_data = {
+            "paragraphs": [],
+            "sections": [],
+            "figures": [],
+            "content": getattr(result, "content", "")
+        }
+
+        # Extract paragraphs with roles
+        logger.debug(f"Extracting paragraphs from Azure result")
+        for para in getattr(result, "paragraphs", []) or []:
+            if para is None:
+                continue
+
+            try:
+                para_data = {
+                    "content": getattr(para, "content", ""),
+                    "role": getattr(para, "role", None),  # title, sectionHeading, pageHeader, etc.
+                    "bounding_regions": [],
+                    "spans": []
+                }
+
+                # Extract bounding regions
+                for br in getattr(para, "bounding_regions", []) or []:
+                    if br is None:
+                        continue
+                    para_data["bounding_regions"].append({
+                        "page_number": getattr(br, "page_number", None),
+                        "polygon": getattr(br, "polygon", [])
+                    })
+
+                # Extract spans (offset, length for content mapping)
+                for span in getattr(para, "spans", []) or []:
+                    if span is None:
+                        continue
+                    para_data["spans"].append({
+                        "offset": getattr(span, "offset", 0),
+                        "length": getattr(span, "length", 0)
+                    })
+
+                structured_data["paragraphs"].append(para_data)
+            except Exception as e:
+                logger.warning(f"Failed to extract paragraph: {e}")
+                continue
+
+        logger.info(f"Extracted {len(structured_data['paragraphs'])} paragraphs")
+
+        # Extract sections (hierarchical grouping)
+        logger.debug(f"Extracting sections from Azure result")
+        for section in getattr(result, "sections", []) or []:
+            if section is None:
+                continue
+
+            try:
+                section_data = {
+                    "spans": [],
+                    "elements": getattr(section, "elements", []) or []
+                }
+
+                # Extract spans
+                for span in getattr(section, "spans", []) or []:
+                    if span is None:
+                        continue
+                    section_data["spans"].append({
+                        "offset": getattr(span, "offset", 0),
+                        "length": getattr(span, "length", 0)
+                    })
+
+                structured_data["sections"].append(section_data)
+            except Exception as e:
+                logger.warning(f"Failed to extract section: {e}")
+                continue
+
+        logger.info(f"Extracted {len(structured_data['sections'])} sections")
+
+        # Extract figures with captions
+        logger.debug(f"Extracting figures from Azure result")
+        for figure in getattr(result, "figures", []) or []:
+            if figure is None:
+                continue
+
+            try:
+                figure_data = {
+                    "id": getattr(figure, "id", None),
+                    "bounding_regions": [],
+                    "elements": getattr(figure, "elements", []) or [],
+                    "caption": None
+                }
+
+                # Extract bounding regions
+                for br in getattr(figure, "bounding_regions", []) or []:
+                    if br is None:
+                        continue
+                    figure_data["bounding_regions"].append({
+                        "page_number": getattr(br, "page_number", None),
+                        "polygon": getattr(br, "polygon", [])
+                    })
+
+                # Extract caption if available
+                caption = getattr(figure, "caption", None)
+                if caption:
+                    figure_data["caption"] = {
+                        "content": getattr(caption, "content", ""),
+                        "elements": getattr(caption, "elements", []) or []
+                    }
+
+                structured_data["figures"].append(figure_data)
+            except Exception as e:
+                logger.warning(f"Failed to extract figure: {e}")
+                continue
+
+        logger.info(f"Extracted {len(structured_data['figures'])} figures")
+
+        return structured_data
+
+    def _build_enhanced_pages(
+        self,
+        pages_data: List[_PageData],
+        structured_data: Dict
+    ) -> List[Dict]:
+        """Build enhanced page structure with paragraphs, their roles, and figures.
+
+        Args:
+            pages_data: Basic page data from _extract_pages
+            structured_data: Structured data from _extract_structured_data
+
+        Returns:
+            List of enhanced page dictionaries with rich metadata
+        """
+        enhanced_pages = []
+
+        for page_data in pages_data:
+            page_num = page_data.page_number
+
+            # Find paragraphs on this page
+            page_paragraphs = []
+            for para in structured_data["paragraphs"]:
+                for br in para["bounding_regions"]:
+                    if br["page_number"] == page_num:
+                        page_paragraphs.append(para)
+                        break
+
+            # Group paragraphs by role
+            paragraphs_by_role = {}
+            for para in page_paragraphs:
+                role = para.get("role") or "content"
+                paragraphs_by_role.setdefault(role, []).append(para)
+
+            # Find figures on this page
+            page_figures = []
+            for figure in structured_data["figures"]:
+                for br in figure["bounding_regions"]:
+                    if br["page_number"] == page_num:
+                        page_figures.append(figure)
+                        break
+
+            # Build enhanced page metadata
+            enhanced_page = {
+                "page_number": page_num,
+                "text": page_data.text,
+                "narrative_text": page_data.narrative_text,
+                "char_count": page_data.char_count,
+
+                # Rich structure
+                "paragraphs": page_paragraphs,
+                "paragraphs_by_role": paragraphs_by_role,
+                "tables": page_data.table_data,
+                "figures": page_figures,
+
+                # Quick flags
+                "has_title": "title" in paragraphs_by_role,
+                "has_section_heading": "sectionHeading" in paragraphs_by_role,
+                "has_page_header": "pageHeader" in paragraphs_by_role,
+                "has_page_footer": "pageFooter" in paragraphs_by_role,
+                "has_tables": page_data.table_count > 0,
+                "has_figures": len(page_figures) > 0,
+
+                # Extracted headings
+                "section_headings": [
+                    p["content"] for p in paragraphs_by_role.get("sectionHeading", [])
+                ],
+                "page_header_text": next(
+                    (p["content"] for p in paragraphs_by_role.get("pageHeader", [])), None
+                ),
+                "page_footer_text": next(
+                    (p["content"] for p in paragraphs_by_role.get("pageFooter", [])), None
+                ),
+            }
+
+            enhanced_pages.append(enhanced_page)
+
+        logger.info(
+            f"Built enhanced page structure: "
+            f"{len(enhanced_pages)} pages, "
+            f"{sum(p['has_section_heading'] for p in enhanced_pages)} with headings, "
+            f"{sum(p['has_figures'] for p in enhanced_pages)} with figures"
+        )
+
+        return enhanced_pages
+
+    def _count_paragraph_roles(self, paragraphs: List[Dict]) -> Dict[str, int]:
+        """Count paragraphs by role.
+
+        Args:
+            paragraphs: List of paragraph dicts with 'role' field
+
+        Returns:
+            Dict mapping role to count
+        """
+        role_counts = {}
+        for para in paragraphs:
+            role = para.get("role") or "content"
+            role_counts[role] = role_counts.get(role, 0) + 1
+        return role_counts
+
     def _extract_pages(self, result) -> List[_PageData]:
         """Extract page-wise text plus merged table content.
 

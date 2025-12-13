@@ -4,21 +4,28 @@ Handles:
  - Loading bounded history
  - Estimating token usage (heuristic)
  - Deciding whether to summarize
- - Generating summaries & compressed summaries
  - Summary caching lifecycle
 
-External dependencies injected: llm_client (streaming interface) and optional DB repository via ChatRepository.
+LLM operations (summarization, compression) delegated to ChatLLMService.
 """
 from __future__ import annotations
 
 from typing import List, Dict, Any, Optional, Tuple
 from app.config import settings
 from app.services.cache.conversation_summary_cache import ConversationSummaryCache
+from app.services.chat.llm_service import ChatLLMService
 from app.utils.logging import logger
+from app.utils.token_utils import count_tokens
 
 class ConversationMemory:
-    def __init__(self, llm_client):
-        self.llm_client = llm_client
+    def __init__(self, chat_llm_service: ChatLLMService):
+        """
+        Initialize conversation memory.
+
+        Args:
+            chat_llm_service: Chat LLM service for summarization operations
+        """
+        self.chat_llm_service = chat_llm_service
         self.cache = ConversationSummaryCache()
 
     # -------- History Loading --------
@@ -37,7 +44,8 @@ class ConversationMemory:
     def estimate_tokens(self, text: str) -> int:
         if not text:
             return 0
-        return max(1, len(text) // 4)
+        count_tokens
+        return max(1, count_tokens(text))
 
     # -------- Summarization Decision --------
     async def maybe_summarize(
@@ -52,6 +60,9 @@ class ConversationMemory:
         history_text = "\n".join([f"{m['role'].title()}: {m['content']}" for m in history_messages])
         est_history_tokens = self.estimate_tokens(history_text)
         est_user_tokens = self.estimate_tokens(user_message)
+
+        # Estimate max input tokens from max chars (rough approximation: 1 token ≈ 4 chars)
+        # settings.llm_max_input_chars is an integer (max characters), not text to tokenize
         max_input_tokens = settings.llm_max_input_chars // 4 if settings.llm_max_input_chars else 0
         usage_ratio = (est_history_tokens + est_user_tokens) / max_input_tokens if max_input_tokens else 0
 
@@ -76,49 +87,29 @@ class ConversationMemory:
 
     # -------- Summarization --------
     async def _summarize_messages(self, messages: List[Dict[str, Any]]) -> str:
+        """
+        Summarize older conversation messages.
+
+        Delegates to ChatLLMService for actual LLM call.
+        """
         if not messages:
             return ""
-        joined = "\n".join([f"{m['role'].title()}: {m['content']}" for m in messages])
-        prompt = (
-            "You are summarizing a financial analysis chat. Produce a concise, factual summary of prior messages. "
-            "Preserve important entities, metrics, time references, decisions, and uncertainties. Do NOT invent facts.\n\n"
-            f"Conversation:\n{joined}\n\nSummary:" )
-        try:
-            summary = ""
-            async for chunk in self.llm_client.stream_chat(prompt):
-                summary += chunk
-            return summary.strip()
-        except Exception as e:
-            logger.warning(f"Summarization failed, falling back to heuristic: {e}")
-            import re
-            assistant_sentences = []
-            for m in messages:
-                if m["role"] == "assistant":
-                    sentences = re.split(r"(?<=[.!?])\s+", m["content"].strip())
-                    if sentences:
-                        assistant_sentences.append(sentences[0])
-            fallback = "Previous discussion summary: " + "; ".join(assistant_sentences[:8])
-            return fallback[:1000]
+
+        # Delegate to ChatLLMService
+        return await self.chat_llm_service.summarize_conversation(messages)
 
     # -------- Compression --------
     async def compress_summary(self, summary_text: str) -> str:
+        """
+        Compress a summary to fit context window.
+
+        Delegates to ChatLLMService for actual LLM call.
+        """
         if not summary_text:
             return summary_text
-        prompt = (
-            "You are a compression assistant. Rewrite the following conversation summary to be FAR shorter (<= 3000 characters), "
-            "preserving only key entities, numeric values, decisions, disagreements, and open questions. Remove redundancy and narrative filler. "
-            "Do not add new facts.\n\nOriginal Summary:\n" + summary_text + "\n\nCompressed Summary:" )
-        try:
-            compressed = ""
-            async for chunk in self.llm_client.stream_chat(prompt):
-                compressed += chunk
-            compressed = compressed.strip()
-            if not compressed:
-                return summary_text
-            return compressed
-        except Exception as e:
-            logger.warning(f"Summary compression failed: {e}; returning original summary.")
-            return summary_text
+
+        # Delegate to ChatLLMService
+        return await self.chat_llm_service.compress_summary(summary_text)
 
     # -------- Cache Write --------
     def cache_summary(self, session_id: str, message_count: int, summary_text: str):

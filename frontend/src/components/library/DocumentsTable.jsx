@@ -31,6 +31,7 @@ import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Badge } from "../ui/badge";
 import { Checkbox } from "../ui/checkbox";
+import { Progress } from "../ui/progress";
 import {
   Select,
   SelectTrigger,
@@ -127,10 +128,25 @@ export default function DocumentsTable({
       );
     } else if (doc.status === "processing") {
       return (
-        <Badge variant="warning" className="text-xs font-normal">
-          <Clock className="w-3 h-3 mr-1" />
-          Processing
-        </Badge>
+        <div className="min-w-[140px] space-y-1.5">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-1.5">
+              <Clock className="w-3 h-3 text-primary" />
+              <span className="text-xs font-medium text-foreground">
+                {doc.status_detail || "Processing"}
+              </span>
+            </div>
+            <span className="text-xs text-muted-foreground">
+              {doc.progress_percent || 0}%
+            </span>
+          </div>
+          <Progress
+            value={doc.progress_percent || 0}
+            variant="primary"
+            className="h-1.5"
+            showShimmer={true}
+          />
+        </div>
       );
     } else if (doc.status === "failed") {
       return (
@@ -261,9 +277,7 @@ export default function DocumentsTable({
               >
                 <div className="flex items-center gap-2">
                   Name
-                  {sortBy === "name" && (
-                    <ArrowUpDown className="w-3.5 h-3.5" />
-                  )}
+                  {sortBy === "name" && <ArrowUpDown className="w-3.5 h-3.5" />}
                 </div>
               </TableHead>
               <TableHead
@@ -384,7 +398,9 @@ export default function DocumentsTable({
           <Button
             size="sm"
             variant="outline"
-            onClick={() => selectedDocs.forEach((id) => onToggleSelection?.(id))}
+            onClick={() =>
+              selectedDocs.forEach((id) => onToggleSelection?.(id))
+            }
           >
             Clear selection
           </Button>

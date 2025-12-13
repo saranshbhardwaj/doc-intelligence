@@ -31,7 +31,6 @@ export const useStore = create(
         // Only persist extraction state (jobId, extractionId) for reconnection
         // Don't persist isProcessing or progress - they will be restored via reconnection
         // Don't persist user data (should be fetched fresh)
-        // Don't persist chat state (should be fetched fresh from selected collection/session)
         extraction: {
           jobId: state.extraction?.jobId ?? null,
           extractionId: state.extraction?.extractionId ?? null,
@@ -45,6 +44,15 @@ export const useStore = create(
           execution: {
             jobId: state.workflowDraft.execution.jobId ?? null,
             runId: state.workflowDraft.execution.runId ?? null,
+          },
+        },
+        // Persist document indexing state for reconnection
+        chat: {
+          indexing: {
+            jobId: state.chat?.indexing?.jobId ?? null,
+            documentId: state.chat?.indexing?.documentId ?? null,
+            collectionId: state.chat?.indexing?.collectionId ?? null,
+            // Don't persist: isProcessing, progress, cleanup, message, error
           },
         },
       }),
@@ -63,6 +71,13 @@ export const useStore = create(
             execution: {
               ...current.workflowDraft.execution,
               ...(persisted.workflowDraft?.execution || {}),
+            },
+          },
+          chat: {
+            ...current.chat,
+            indexing: {
+              ...current.chat.indexing,
+              ...(persisted.chat?.indexing || {}),
             },
           },
         };
@@ -141,6 +156,13 @@ export const useChatActions = () =>
       sendMessage: state.sendMessage,
       loadChatHistory: state.loadChatHistory,
       startNewChat: state.startNewChat,
+      // Indexing actions
+      startDocumentIndexing: state.startDocumentIndexing,
+      updateIndexingProgress: state.updateIndexingProgress,
+      completeIndexing: state.completeIndexing,
+      failIndexing: state.failIndexing,
+      reconnectIndexing: state.reconnectIndexing,
+      resetIndexing: state.resetIndexing,
       // Legacy (deprecated)
       toggleDocumentSelection: state.toggleDocumentSelection,
       toggleSelectAll: state.toggleSelectAll,

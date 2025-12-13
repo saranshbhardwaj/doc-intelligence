@@ -9,7 +9,7 @@ Specialized retriever for workflow context assembly with:
 - Diversity filtering across documents
 """
 
-from typing import List, Dict, Optional
+from typing import List, Dict
 import logging
 from sqlalchemy.orm import Session
 from app.services.rag.hybrid_retriever import HybridRetriever
@@ -27,9 +27,11 @@ class WorkflowRetriever:
     1. Run multiple queries (3-5 per section)
     2. Hybrid retrieval for each query (semantic + keyword)
     3. Merge and deduplicate results
-    4. Re-rank with cross-encoder
+    4. Re-rank with cross-encoder (handles compression/truncation internally)
     5. Apply diversity filtering (max 50% from one doc)
-    6. Return top-k chunks per section
+    6. Return top-k chunks per section with citations
+
+    Note: Uses same compression/re-ranking infrastructure as free-form chat (via Reranker).
     """
 
     def __init__(
@@ -50,7 +52,7 @@ class WorkflowRetriever:
         self.hybrid_retriever = HybridRetriever(db)
         self.diversity_ratio = diversity_ratio
 
-        # Re-ranker (optional)
+        # Re-ranker (optional, handles compression internally)
         self.use_reranker = use_reranker if use_reranker is not None else settings.rag_use_reranker
         self.reranker = None
         if self.use_reranker:
@@ -131,6 +133,7 @@ class WorkflowRetriever:
         )
 
         # Step 2: Re-rank candidates (if enabled)
+        # Note: Reranker handles compression internally, no need to pre-compress
         candidates_list = list(all_candidates.values())
 
         if self.reranker and len(candidates_list) > 5:
@@ -145,7 +148,7 @@ class WorkflowRetriever:
                     "prefer_narrative": not prefer_tables
                 }
 
-                # Re-rank
+                # Re-rank (Reranker handles compression/truncation internally)
                 reranked = self.reranker.rerank(
                     query=combined_query,
                     chunks=candidates_list,
@@ -155,7 +158,7 @@ class WorkflowRetriever:
 
                 candidates_list = reranked
                 logger.debug(
-                    f"Section '{section_key}': Re-ranked to top {len(reranked)}"
+                    f"Section '{section_key}': Re-ranked to {len(candidates_list)} chunks"
                 )
 
             except Exception as e:
@@ -184,12 +187,35 @@ class WorkflowRetriever:
             document_ids=document_ids
         )
 
-        # Step 4: Add citation labels
+        # Step 4: Add citation labels and metadata
+        # Production approach: Add citation info to both in-memory dict AND chunk_metadata
+        # - In-memory dict: For immediate context assembly in tasks.py
+        # - chunk_metadata: For future citation resolution (if chunks re-queried)
         for chunk in final_chunks:
             doc_id = chunk.get("document_id")
             page_num = chunk.get("page_number", 0)
             doc_index = doc_index_map.get(doc_id, 0)
-            chunk["citation"] = f"[D{doc_index}:p{page_num}]"
+            citation_token = f"[D{doc_index}:p{page_num}]"
+
+            # Add to in-memory dict (for context assembly)
+            chunk["citation"] = citation_token
+
+            # Enhance chunk_metadata with citation info (preserve existing metadata from DB)
+            # chunk_metadata should already have: document_filename, section_heading, first_sentence, etc.
+            if "chunk_metadata" not in chunk or chunk["chunk_metadata"] is None:
+                chunk["chunk_metadata"] = {}
+            elif isinstance(chunk["chunk_metadata"], str):
+                # Handle case where JSONB came as string (deserialize it)
+                import json
+                try:
+                    chunk["chunk_metadata"] = json.loads(chunk["chunk_metadata"])
+                except (json.JSONDecodeError, TypeError):
+                    chunk["chunk_metadata"] = {}
+
+            # Add runtime citation metadata (without overwriting DB metadata)
+            chunk["chunk_metadata"]["citation_token"] = citation_token
+            chunk["chunk_metadata"]["doc_index"] = doc_index
+            chunk["chunk_metadata"]["runtime_document_id"] = doc_id
 
         logger.info(
             f"Section '{section_key}': Retrieved {len(final_chunks)} final chunks "

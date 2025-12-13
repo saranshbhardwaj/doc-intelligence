@@ -8,6 +8,7 @@
  */
 
 import * as chatApi from "../../api/chat";
+import { streamJobProgress } from "../../api/sse-utils";
 
 /**
  * Get safe error message from error object
@@ -29,11 +30,18 @@ export const createChatSlice = (set, get) => ({
     collectionLoading: false,
     collectionError: null,
 
-    // Document upload
-    uploadProgress: 0,
-    uploadStatus: null, // 'uploading', 'indexing', 'completed', 'failed'
-    uploadError: null,
-    currentJobId: null,
+    // Document indexing execution (similar to workflow execution)
+    indexing: {
+      jobId: null,
+      documentId: null,
+      collectionId: null,
+      isProcessing: false,
+      progress_percent: 0,
+      current_stage: null,
+      message: null,
+      error: null,
+      cleanup: null,  // SSE cleanup function
+    },
 
     // Current session (with documents)
     currentSession: null, // { id, title, description, documents: [{id, name, added_at}, ...] }
@@ -750,5 +758,154 @@ export const createChatSlice = (set, get) => ({
       console.error("Failed to export session:", error);
       throw error;
     }
+  },
+
+  /**
+   * Document Indexing Actions
+   * (Similar to workflow execution pattern)
+   */
+
+  // Start document indexing (called after upload)
+  startDocumentIndexing: (jobId, documentId, collectionId, cleanup) => {
+    set((state) => ({
+      chat: {
+        ...state.chat,
+        indexing: {
+          jobId,
+          documentId,
+          collectionId,
+          isProcessing: true,
+          progress_percent: 0,
+          current_stage: "uploading",
+          message: "Starting indexing...",
+          error: null,
+          cleanup,
+        },
+      },
+    }));
+  },
+
+  // Update indexing progress (called by SSE handler)
+  updateIndexingProgress: (progressData) => {
+    set((state) => ({
+      chat: {
+        ...state.chat,
+        indexing: {
+          ...state.chat.indexing,
+          progress_percent: progressData.progress_percent || 0,
+          current_stage: progressData.current_stage,
+          message: progressData.message,
+        },
+      },
+    }));
+  },
+
+  // Complete indexing
+  completeIndexing: () => {
+    set((state) => ({
+      chat: {
+        ...state.chat,
+        indexing: {
+          ...state.chat.indexing,
+          isProcessing: false,
+          progress_percent: 100,
+          message: "Indexing completed",
+        },
+      },
+    }));
+  },
+
+  // Fail indexing
+  failIndexing: (errorMessage) => {
+    set((state) => ({
+      chat: {
+        ...state.chat,
+        indexing: {
+          ...state.chat.indexing,
+          isProcessing: false,
+          error: errorMessage,
+        },
+      },
+    }));
+  },
+
+  // Reconnect to active indexing job (called on mount)
+  reconnectIndexing: async (getToken) => {
+    const { jobId, documentId, collectionId } = get().chat.indexing;
+
+    if (!jobId || !documentId) {
+      console.log("❌ No active indexing job to reconnect");
+      return;
+    }
+
+    console.log("🔄 Reconnecting to document indexing:", { jobId, documentId });
+
+    try {
+      const cleanup = await streamJobProgress(jobId, getToken, {
+        onProgress: (data) => {
+          get().updateIndexingProgress(data);
+        },
+        onComplete: () => {
+          get().completeIndexing();
+        },
+        onError: (errorData) => {
+          const errorMsg =
+            typeof errorData === "string"
+              ? errorData
+              : errorData?.message || "Indexing failed";
+
+          // If job not found, clear state
+          if (errorData?.type === "not_found") {
+            console.log("🗑️ Job not found - clearing indexing state");
+            get().resetIndexing();
+            return;
+          }
+
+          get().failIndexing(errorMsg);
+        },
+        onEnd: (data) => {
+          console.log("🏁 Indexing SSE stream ended:", data?.reason);
+        },
+      });
+
+      set((state) => ({
+        chat: {
+          ...state.chat,
+          indexing: {
+            ...state.chat.indexing,
+            cleanup,
+            isProcessing: true,
+          },
+        },
+      }));
+    } catch (err) {
+      console.error("Reconnection failed:", err);
+      get().failIndexing("Failed to reconnect");
+    }
+  },
+
+  // Reset indexing state
+  resetIndexing: () => {
+    const cleanup = get().chat.indexing.cleanup;
+    if (cleanup) {
+      cleanup();
+    }
+
+    set((state) => ({
+      chat: {
+        ...state.chat,
+        indexing: {
+          jobId: null,
+          documentId: null,
+          collectionId: null,
+          isProcessing: false,
+          progress_percent: 0,
+          current_stage: null,
+          message: null,
+          error: null,
+          cleanup: null,
+        },
+      },
+    }));
   },
 });

@@ -552,7 +552,7 @@ async def export_session(
         documents_info = [
             {
                 "id": link.document.id,
-                "name": link.document.name,
+                "name": link.document.filename,
                 "added_at": link.added_at.isoformat() if link.added_at else None
             }
             for link in session.document_links

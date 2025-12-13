@@ -18,6 +18,7 @@ import SessionSidebar from "../components/chat/SessionSidebar";
 import EmptyState from "../components/chat/EmptyState";
 import ActiveChat from "../components/chat/ActiveChat";
 import Spinner from "../components/common/Spinner";
+import { exportAsMarkdown, exportAsWord } from "../utils/exportChat";
 
 export default function ChatPage() {
   const { getToken, isLoaded } = useAuth();
@@ -91,43 +92,27 @@ export default function ChatPage() {
     // State is already updated in the slice action - no need to fetch
   };
 
-  const handleExportSession = async () => {
+  const handleExportSession = async (format = 'markdown') => {
     if (!chat.currentSession) return;
 
     try {
+      // Fetch export data from API
       const exportData = await actions.exportSession(
         getToken,
         chat.currentSession.id
       );
 
-      // Convert to markdown format
-      let markdown = `# ${exportData.session.title}\n\n`;
-      markdown += `**Date:** ${new Date(
-        exportData.session.created_at
-      ).toLocaleString()}\n\n`;
-      markdown += `---\n\n`;
-
-      exportData.messages.forEach((msg) => {
-        const role = msg.role === "user" ? "You" : "Assistant";
-        markdown += `### ${role}\n\n${msg.content}\n\n`;
-
-        if (msg.source_chunks && msg.source_chunks.length > 0) {
-          markdown += `*Sources: ${msg.num_chunks_retrieved} chunks*\n\n`;
-        }
-      });
-
-      // Download as markdown file
-      const blob = new Blob([markdown], { type: "text/markdown" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `chat-${exportData.session.title
-        .replace(/[^a-z0-9]/gi, "-")
-        .toLowerCase()}.md`;
-      a.click();
-      URL.revokeObjectURL(url);
+      // Export based on selected format
+      if (format === 'word') {
+        await exportAsWord(exportData);
+        console.log('✅ Exported as Word document');
+      } else {
+        await exportAsMarkdown(exportData);
+        console.log('✅ Exported as Markdown');
+      }
     } catch (error) {
-      console.error("Failed to export session:", error);
+      console.error('Failed to export session:', error);
+      alert(`Export failed: ${error.message || 'Unknown error'}`);
     }
   };
 
@@ -146,16 +131,18 @@ export default function ChatPage() {
 
   return (
     <AppLayout breadcrumbs={breadcrumbs}>
-      <div className="flex flex-1 bg-background overflow-hidden">
+      <div className="flex-1 flex gap-4">
         {/* Session Sidebar */}
-        <SessionSidebar
-          sessions={chat.sessions}
-          currentSession={chat.currentSession}
-          sessionsLoading={chat.sessionsLoading}
-          onNewChat={handleNewChat}
-          onSelectSession={handleSelectSession}
-          onDeleteSession={handleDeleteSession}
-        />
+        <div className="w-80 flex-shrink-0">
+          <SessionSidebar
+            sessions={chat.sessions}
+            currentSession={chat.currentSession}
+            sessionsLoading={chat.sessionsLoading}
+            onNewChat={handleNewChat}
+            onSelectSession={handleSelectSession}
+            onDeleteSession={handleDeleteSession}
+          />
+        </div>
 
         {/* Main Chat Area */}
         {!chat.currentSession ? (

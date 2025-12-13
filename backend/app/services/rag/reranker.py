@@ -6,6 +6,10 @@ for improved relevance scoring.
 
 Cross-encoders take (query, document) pairs and output direct relevance scores,
 making them more accurate than bi-encoder (embedding) based ranking.
+
+Cross-encoder token limit: 512 tokens
+Chunks exceeding this limit are truncated for scoring only.
+Original chunks are preserved and returned to caller.
 """
 
 from typing import List, Dict, Optional
@@ -13,6 +17,7 @@ import logging
 from sentence_transformers import CrossEncoder
 from app.config import settings
 from app.services.rag.metadata_booster import MetadataBooster
+from app.utils.token_utils import count_tokens, truncate_to_token_limit
 
 logger = logging.getLogger(__name__)
 
@@ -23,17 +28,22 @@ class Reranker:
 
     Pipeline:
     1. Takes query + list of chunks
-    2. Optionally compresses chunks to fit token limits
+    2. Truncates chunks > 512 tokens (for scoring only)
     3. Scores each (query, chunk) pair with cross-encoder
     4. Optionally applies metadata boosting (gentle nudge for tables)
-    5. Returns chunks sorted by relevance score
+    5. Returns ORIGINAL chunks sorted by relevance score
+
+    Token limit: 512 tokens (cross-encoder max_length)
+    Chunks > 512 tokens are truncated for scoring.
+    Original chunks are preserved and returned.
     """
+
+    CROSS_ENCODER_TOKEN_LIMIT = 512
 
     def __init__(
         self,
         model_name: str = None,
         batch_size: int = None,
-        use_compression: bool = None,
         apply_metadata_boost: bool = None
     ):
         """
@@ -42,19 +52,11 @@ class Reranker:
         Args:
             model_name: Cross-encoder model name (default from settings)
             batch_size: Batch size for scoring (default from settings)
-            use_compression: Use chunk compression (default from settings)
             apply_metadata_boost: Apply metadata boosting to scores (default from settings)
         """
         self.model_name = model_name or settings.rag_reranker_model
         self.batch_size = batch_size or settings.rag_reranker_batch_size
-        self.use_compression = use_compression if use_compression is not None else settings.rag_use_compression
         self.apply_metadata_boost = apply_metadata_boost if apply_metadata_boost is not None else settings.rag_reranker_apply_metadata_boost
-
-        # Lazy-load compression if enabled
-        self._compressor = None
-        if self.use_compression:
-            from app.services.rag.chunk_compressor import ChunkCompressor
-            self._compressor = ChunkCompressor()
 
         # Initialize metadata booster (gentler weights for re-ranker)
         self.metadata_booster = MetadataBooster.for_reranker()
@@ -64,7 +66,7 @@ class Reranker:
             self.model = CrossEncoder(self.model_name, max_length=512)
             logger.info(
                 f"Reranker initialized: model={self.model_name}, "
-                f"batch_size={self.batch_size}, compression={self.use_compression}, "
+                f"batch_size={self.batch_size}, "
                 f"metadata_boost={self.apply_metadata_boost}"
             )
         except Exception as e:
@@ -98,26 +100,30 @@ class Reranker:
             f"Re-ranking {len(chunks)} chunks",
             extra={
                 "query": query[:50],
-                "use_compression": self.use_compression,
                 "query_type": query_analysis.get("query_type")
             }
         )
 
-        # Step 1: Optionally compress chunks to fit token limits
-        if self.use_compression and self._compressor:
-            chunks = self._compressor.compress_chunks(chunks)
-            text_field = "compressed_text"
-        else:
-            # Use original text (cross-encoder will truncate if needed)
-            text_field = "text"
-
-        # Step 2: Build query-document pairs
+        # Step 1: Prepare text for scoring
+        # Truncate chunks > 512 tokens to fit cross-encoder limit (for scoring only)
+        # We return ORIGINAL chunks to caller (not truncated)
         pairs = []
         for chunk in chunks:
-            text = chunk.get(text_field, chunk.get("text", ""))
+            text = chunk.get("text", "")
+
+            # Check token count
+            token_count = count_tokens(text)
+
+            # Truncate if > 512 tokens (for scoring only)
+            if token_count > self.CROSS_ENCODER_TOKEN_LIMIT:
+                text = truncate_to_token_limit(text, self.CROSS_ENCODER_TOKEN_LIMIT)
+                logger.debug(
+                    f"Truncated chunk for re-ranking: {token_count} → {self.CROSS_ENCODER_TOKEN_LIMIT} tokens"
+                )
+
             pairs.append([query, text])
 
-        # Step 3: Score all pairs with cross-encoder
+        # Step 2: Score all pairs with cross-encoder
         try:
             # Cross-encoder returns relevance scores (higher = more relevant)
             scores = self.model.predict(
@@ -126,7 +132,7 @@ class Reranker:
                 show_progress_bar=False
             )
 
-            # Add rerank scores to chunks
+            # Add rerank scores to ORIGINAL chunks (not compressed copies)
             for chunk, score in zip(chunks, scores):
                 chunk["rerank_score"] = float(score)
 

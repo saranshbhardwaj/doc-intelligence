@@ -21,9 +21,6 @@ from app.config import settings
 from app.services.job_tracker import JobProgressTracker
 from app.services.pubsub import safe_subscribe
 
-# Import retry function from orchestrator service
-from app.services.async_pipeline.extraction_orchestrator import retry_document_async
-
 router = APIRouter()
 
 # Initialize Clerk client for token verification
@@ -85,12 +82,37 @@ async def stream_job_progress(job_id: str, token: Optional[str] = Query(None)):
         raise HTTPException(status_code=401, detail=f"Invalid authentication token: {str(e)}")
 
     # Verify user owns this job
+    # Note: We check job existence inside event_generator to send proper error events
+    # This initial check is just for ownership verification
     job_repo = JobRepository()
     extraction_repo = ExtractionRepository()
 
     job = job_repo.get_job(job_id)
+
+    # If job doesn't exist, we'll handle it gracefully in the SSE stream
+    # by sending error events instead of raising 404 here
     if not job:
-        raise HTTPException(status_code=404, detail=f"Job {job_id} not found")
+        # Skip ownership check, let event_generator handle the not-found case
+        async def event_generator():
+            logger.warning(f"[SSE] Job {job_id} not found during auth check", extra={"job_id": job_id})
+            yield ServerSentEvent(
+                data=json.dumps({
+                    'message': 'Job not found',
+                    'type': 'not_found',
+                    'isRetryable': False
+                }),
+                event="error"
+            )
+            yield ServerSentEvent(data=json.dumps({'reason': 'not_found', 'job_id': job_id}), event="end")
+
+        return EventSourceResponse(
+            event_generator(),
+            headers={
+                "X-Accel-Buffering": "no",
+                "Cache-Control": "no-cache",
+                "Content-Type": "text/event-stream; charset=utf-8"
+            }
+        )
 
     # Generic ownership verification: check which entity type this job belongs to
     # JobState supports: extraction_id, document_id, workflow_run_id (exactly one is set)
@@ -170,7 +192,17 @@ async def stream_job_progress(job_id: str, token: Optional[str] = Query(None)):
         job = job_repo.get_job(job_id)
 
         if not job:
-            yield ServerSentEvent(data=json.dumps({'message': 'Job not found'}), event="error")
+            # Send proper error event instead of raising 404
+            # This allows frontend to handle gracefully and clear state
+            logger.warning(f"[SSE] Job {job_id} not found - sending error event", extra={"job_id": job_id})
+            yield ServerSentEvent(
+                data=json.dumps({
+                    'message': 'Job not found',
+                    'type': 'not_found',
+                    'isRetryable': False
+                }),
+                event="error"
+            )
             yield ServerSentEvent(data=json.dumps({'reason': 'not_found', 'job_id': job_id}), event="end")
             return
 
@@ -205,7 +237,6 @@ async def stream_job_progress(job_id: str, token: Optional[str] = Query(None)):
         elapsed = 0
         keepalive_interval = 8  # seconds for keepalive comment
         last_keepalive = 0
-        loop = asyncio.get_event_loop()
 
         try:
             while elapsed < max_duration:
@@ -441,15 +472,15 @@ async def retry_job(job_id: str, user: User = Depends(get_current_user)):
         "resume_stage": resume_stage
     })
 
-    # Trigger background retry processing
-    asyncio.create_task(
-        retry_document_async(
-            job_id=job_id,
-            extraction_id=job.extraction_id,
-            resume_stage=resume_stage,
-            resume_data_path=resume_data_path
-        )
-    )
+    # # Trigger background retry processing
+    # asyncio.create_task(
+    #     retry_document_async(
+    #         job_id=job_id,
+    #         extraction_id=job.extraction_id,
+    #         resume_stage=resume_stage,
+    #         resume_data_path=resume_data_path
+    #     )
+    # )
 
     return {
         "success": True,

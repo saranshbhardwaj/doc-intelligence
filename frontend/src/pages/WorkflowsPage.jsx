@@ -1,10 +1,10 @@
 /**
- * Workflows History Page
+ * Workflows History Page - Redesigned
  *
- * Displays all workflow runs for the user (accessed via "View All" from main workflows page)
+ * ChatGPT-inspired professional table layout matching ExtractionHistoryPage
  */
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@clerk/clerk-react";
 import {
@@ -15,23 +15,36 @@ import {
   XCircle,
   AlertCircle,
   DollarSign,
+  Eye,
+  Download,
+  RefreshCw,
+  Search,
+  FileDown,
   Trash2,
 } from "lucide-react";
 import { Button } from "../components/ui/button";
-import { Card } from "../components/ui/card";
-import Spinner from "../components/common/Spinner";
-import AppLayout from "../components/layout/AppLayout";
-import { listRuns, deleteRun } from "../api";
+import { Input } from "../components/ui/input";
+import { Badge } from "../components/ui/badge";
 import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "../components/ui/alert-dialog";
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "../components/ui/table";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  DropdownMenuSeparator,
+} from "../components/ui/dropdown-menu";
+import Spinner from "../components/common/Spinner";
+import DeleteConfirmDialog from "../components/common/DeleteConfirmDialog";
+import AppLayout from "../components/layout/AppLayout";
+import { listRuns, exportRun, getRun, getRunArtifact, deleteRun } from "../api";
+import { exportWorkflowAsWord } from "../utils/exportWorkflow";
 
 export default function WorkflowsPage() {
   const navigate = useNavigate();
@@ -39,9 +52,8 @@ export default function WorkflowsPage() {
 
   const [runs, setRuns] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
-  const [runToDelete, setRunToDelete] = useState(null);
-  const [deleting, setDeleting] = useState(false);
+  const [searchQuery, setSearchQuery] = useState("");
+  const [exportingId, setExportingId] = useState(null);
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -59,75 +71,76 @@ export default function WorkflowsPage() {
     fetchData();
   }, [fetchData]);
 
-  const getStatusBadge = (status) => {
-    const variants = {
-      completed: {
-        icon: CheckCircle,
-        color:
-          "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200",
-      },
-      failed: {
-        icon: XCircle,
-        color: "bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200",
-      },
-      running: {
-        icon: Clock,
-        color: "bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200",
-      },
-      queued: {
-        icon: AlertCircle,
-        color:
-          "bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200",
-      },
-    };
-    const variant = variants[status] || variants.queued;
-    const Icon = variant.icon;
-
-    return (
-      <span
-        className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium ${variant.color}`}
-      >
-        <Icon className="w-3.5 h-3.5" />
-        {status}
-      </span>
-    );
+  const handleDeleteSuccess = async () => {
+    // Refresh list after successful deletion
+    await fetchData();
   };
 
-  const formatDate = (dateString) => {
-    const date = new Date(dateString);
-    return new Intl.DateTimeFormat("en-US", {
-      month: "short",
-      day: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    }).format(date);
-  };
-
-  const handleDeleteClick = (run, e) => {
-    e.stopPropagation(); // Prevent card click
-    setRunToDelete(run);
-    setDeleteDialogOpen(true);
-  };
-
-  const handleDeleteConfirm = async () => {
-    if (!runToDelete) return;
-
-    setDeleting(true);
+  const handleExport = async (runId, format) => {
+    setExportingId(runId);
     try {
-      await deleteRun(getToken, runToDelete.id);
-      // Refresh the runs list
-      await fetchData();
-      setDeleteDialogOpen(false);
-      setRunToDelete(null);
+      if (format === "word") {
+        // Get the run metadata and artifact data separately
+        const [runData, artifactData] = await Promise.all([
+          getRun(getToken, runId),
+          getRunArtifact(getToken, runId),
+        ]);
+
+        console.log("📦 Run data received:", runData);
+        console.log("📄 Artifact data received:", artifactData);
+
+        // Check if artifact exists
+        if (!artifactData) {
+          throw new Error(
+            "This workflow run does not have exportable data. The artifact may still be processing or was not generated."
+          );
+        }
+
+        await exportWorkflowAsWord(artifactData, runData);
+        console.log("✅ Exported as Word document");
+      } else {
+        // PDF uses backend export
+        const res = await exportRun(getToken, runId, format, "url");
+        if (res.data?.url) {
+          window.open(res.data.url, "_blank");
+        }
+      }
     } catch (error) {
-      console.error("Failed to delete run:", error);
+      console.error("Export failed", error);
       alert(
-        "Failed to delete workflow run: " +
-          (error.response?.data?.detail || error.message)
+        "Export failed: " + (error.response?.data?.detail || error.message)
       );
     } finally {
-      setDeleting(false);
+      setExportingId(null);
     }
+  };
+
+  // Filter workflows by search
+  const filteredRuns = useMemo(() => {
+    if (!searchQuery.trim()) return runs;
+
+    const query = searchQuery.toLowerCase();
+    return runs.filter((run) =>
+      (run.workflow_name || "").toLowerCase().includes(query)
+    );
+  }, [runs, searchQuery]);
+
+  const getStatusBadge = (status) => {
+    const variants = {
+      completed: { variant: "success", icon: CheckCircle },
+      failed: { variant: "destructive", icon: XCircle },
+      running: { variant: "default", icon: Clock },
+      queued: { variant: "warning", icon: AlertCircle },
+    };
+    const config = variants[status] || variants.queued;
+    const Icon = config.icon;
+
+    return (
+      <Badge variant={config.variant} className="text-xs gap-1">
+        <Icon className="w-3 h-3" />
+        {status}
+      </Badge>
+    );
   };
 
   const breadcrumbs = [
@@ -137,122 +150,205 @@ export default function WorkflowsPage() {
 
   return (
     <AppLayout breadcrumbs={breadcrumbs}>
-      <div className="max-w-7xl mx-auto px-6 py-8">
-        {/* Back Button */}
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => navigate("/app/workflows")}
-          className="mb-4"
-        >
-          <ArrowLeft className="w-4 h-4 mr-2" />
-          Back to Workflows
-        </Button>
-
-        {/* Page Header */}
+      <div className="h-full flex flex-col p-6">
+        {/* Header */}
         <div className="mb-6">
-          <h1 className="text-3xl font-bold text-foreground">
-            All Workflow Runs
-          </h1>
-          <p className="mt-2 text-muted-foreground dark:text-gray-300">
-            View all your workflow run history
-          </p>
+          <div className="flex items-center justify-between mb-4">
+            <div>
+              <div className="flex items-center gap-3 mb-2">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => navigate("/app/workflows")}
+                >
+                  <ArrowLeft className="w-4 h-4 mr-2" />
+                  Back
+                </Button>
+              </div>
+              <h1 className="text-2xl font-semibold text-foreground">
+                All Workflow Runs
+              </h1>
+              <p className="text-sm text-muted-foreground mt-1">
+                View and manage your workflow run history
+              </p>
+            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={fetchData}
+              disabled={loading}
+            >
+              <RefreshCw className="w-4 h-4 mr-2" />
+              Refresh
+            </Button>
+          </div>
+
+          {/* Search */}
+          <div className="relative max-w-md">
+            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+            <Input
+              placeholder="Search workflows..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="pl-9 h-10"
+            />
+          </div>
         </div>
 
-        {/* Content */}
-        {loading ? (
+        {/* Table */}
+        {loading && runs.length === 0 ? (
           <div className="flex justify-center py-12">
-            <Spinner size="lg" />
+            <Spinner />
           </div>
         ) : runs.length === 0 ? (
-          <Card className="p-12 text-center">
-            <FileText className="w-16 h-16 text-gray-300 dark:text-muted-foreground mx-auto mb-4" />
-            <p className="text-muted-foreground dark:text-muted-foreground mb-4">
+          <div className="flex flex-col items-center justify-center py-16 bg-muted/30 rounded-lg border-2 border-dashed border-border">
+            <FileText className="w-16 h-16 text-muted-foreground mb-4 opacity-40" />
+            <h3 className="text-lg font-medium text-foreground mb-2">
               No workflow runs yet
+            </h3>
+            <p className="text-sm text-muted-foreground mb-6">
+              Start your first workflow to see results here
             </p>
             <Button onClick={() => navigate("/app/workflows")}>
-              Start Your First Workflow
+              <FileText className="w-4 h-4 mr-2" />
+              Start Workflow
             </Button>
-          </Card>
+          </div>
         ) : (
-          /* Runs List */
-          <div className="space-y-4">
-            {runs.map((run) => (
-              <Card
-                key={run.id}
-                className="p-6 hover:shadow-md transition-shadow cursor-pointer"
-                onClick={() => navigate(`/app/workflows/runs/${run.id}`)}
-              >
-                <div className="flex items-start justify-between">
-                  <div className="flex-1">
-                    <div className="flex items-center gap-3">
-                      <h3 className="text-lg font-semibold text-foreground">
-                        {run.workflow_name || "Workflow"}
-                      </h3>
-                      {getStatusBadge(run.status)}
-                    </div>
-                    <p className="mt-1 text-sm text-muted-foreground dark:text-muted-foreground">
-                      {run.mode} mode • Created {formatDate(run.created_at)}
-                    </p>
-                    {run.error_message && (
-                      <p className="mt-2 text-sm text-red-600 dark:text-red-400">
-                        Error: {run.error_message}
+          <div className="rounded-lg border border-border overflow-hidden">
+            <Table>
+              <TableHeader>
+                <TableRow className="bg-muted/50 hover:bg-muted/50">
+                  <TableHead>Workflow</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead>Mode</TableHead>
+                  <TableHead>Created</TableHead>
+                  <TableHead className="text-right">Duration</TableHead>
+                  <TableHead className="text-right">Actions</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {filteredRuns.length === 0 ? (
+                  <TableRow>
+                    <TableCell colSpan={7} className="text-center py-8">
+                      <p className="text-sm text-muted-foreground">
+                        No workflows match your search
                       </p>
-                    )}
-                  </div>
-                  <div className="flex items-center gap-3">
-                    <div className="text-right text-sm text-muted-foreground dark:text-muted-foreground">
-                      {run.completed_at && (
-                        <div className="mb-1">
-                          {((run.latency_ms || 0) / 1000).toFixed(1)}s
-                        </div>
-                      )}
-                      {run.cost_usd && (
-                        <div className="flex items-center gap-1 text-green-600 dark:text-green-400">
-                          <DollarSign className="w-3.5 h-3.5" />
-                          {run.cost_usd.toFixed(3)}
-                        </div>
-                      )}
-                    </div>
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      onClick={(e) => handleDeleteClick(run, e)}
-                      className="text-red-600 hover:text-red-700 hover:bg-red-50 dark:text-red-400 dark:hover:text-red-300 dark:hover:bg-red-950"
+                    </TableCell>
+                  </TableRow>
+                ) : (
+                  filteredRuns.map((run) => (
+                    <TableRow
+                      key={run.id}
+                      className="hover:bg-muted/30 transition-colors"
                     >
-                      <Trash2 className="w-4 h-4" />
-                    </Button>
-                  </div>
-                </div>
-              </Card>
-            ))}
+                      <TableCell>
+                        <div className="flex flex-col max-w-md">
+                          <span className="font-medium text-sm truncate">
+                            {run.workflow_name || "Workflow"}
+                          </span>
+                          {run.error_message && (
+                            <span className="text-xs text-destructive truncate mt-0.5">
+                              {run.error_message}
+                            </span>
+                          )}
+                        </div>
+                      </TableCell>
+                      <TableCell>{getStatusBadge(run.status)}</TableCell>
+                      <TableCell className="text-sm text-muted-foreground capitalize">
+                        {run.mode}
+                      </TableCell>
+                      <TableCell className="text-sm text-muted-foreground">
+                        {new Date(run.created_at).toLocaleDateString(
+                          undefined,
+                          {
+                            month: "short",
+                            day: "numeric",
+                            year: "numeric",
+                            hour: "2-digit",
+                            minute: "2-digit",
+                          }
+                        )}
+                      </TableCell>
+                      <TableCell className="text-right text-sm text-muted-foreground">
+                        {run.completed_at
+                          ? `${((run.latency_ms || 0) / 1000).toFixed(1)}s`
+                          : "-"}
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center justify-end gap-1">
+                          {/* View Button */}
+                          <button
+                            onClick={() =>
+                              navigate(`/app/workflows/runs/${run.id}`)
+                            }
+                            className="p-1.5 hover:bg-primary/10 rounded transition-colors"
+                            title="View workflow run"
+                          >
+                            <Eye className="w-4 h-4 text-muted-foreground hover:text-primary" />
+                          </button>
+
+                          {/* Export Dropdown */}
+                          {run.status === "completed" && (
+                            <DropdownMenu>
+                              <DropdownMenuTrigger asChild>
+                                <button
+                                  className="p-1.5 hover:bg-primary/10 rounded transition-colors"
+                                  disabled={exportingId === run.id}
+                                  title="Export"
+                                >
+                                  <Download className="w-4 h-4 text-muted-foreground hover:text-primary" />
+                                </button>
+                              </DropdownMenuTrigger>
+                              <DropdownMenuContent align="end" className="w-48">
+                                <DropdownMenuItem
+                                  onClick={() => handleExport(run.id, "word")}
+                                >
+                                  <FileDown className="w-4 h-4 mr-2 text-primary" />
+                                  Word Document
+                                </DropdownMenuItem>
+                                <DropdownMenuSeparator />
+                                <DropdownMenuItem
+                                  onClick={() => handleExport(run.id, "pdf")}
+                                >
+                                  <FileText className="w-4 h-4 mr-2 text-muted-foreground" />
+                                  PDF
+                                </DropdownMenuItem>
+                              </DropdownMenuContent>
+                            </DropdownMenu>
+                          )}
+
+                          {/* Delete Button */}
+                          <DeleteConfirmDialog
+                            itemId={run.id}
+                            itemName={run.workflow_name || `Workflow ${run.id}`}
+                            itemType="workflow run"
+                            deleteApiCall={deleteRun}
+                            getToken={getToken}
+                            onSuccess={handleDeleteSuccess}
+                            trigger={
+                              <button className="p-1.5 hover:bg-destructive/10 rounded transition-colors">
+                                <Trash2 className="w-4 h-4 text-muted-foreground hover:text-destructive" />
+                              </button>
+                            }
+                          />
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  ))
+                )}
+              </TableBody>
+            </Table>
+          </div>
+        )}
+
+        {/* Search info */}
+        {searchQuery && filteredRuns.length > 0 && (
+          <div className="mt-4 text-sm text-muted-foreground">
+            Showing {filteredRuns.length} of {runs.length} workflow runs
           </div>
         )}
       </div>
-
-      {/* Delete Confirmation Dialog */}
-      <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Delete Workflow Run?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Are you sure you want to delete this workflow run? This will
-              permanently delete the run and all associated artifacts from
-              storage. This action cannot be undone.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={deleting}>Cancel</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={handleDeleteConfirm}
-              disabled={deleting}
-              className="bg-red-600 hover:bg-red-700 focus:ring-red-600"
-            >
-              {deleting ? "Deleting..." : "Delete"}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
     </AppLayout>
   );
 }

@@ -11,8 +11,6 @@ import { useWorkflowDraft, useWorkflowDraftActions } from "../store";
 import {
   Download,
   Clock,
-  DollarSign,
-  Hash,
   CheckCircle,
   XCircle,
   AlertCircle,
@@ -20,9 +18,18 @@ import {
   RefreshCw,
   Trash2,
   ArrowLeft,
+  FileDown,
+  FileSpreadsheet,
 } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  DropdownMenuSeparator,
+} from "../components/ui/dropdown-menu";
 import Spinner from "../components/common/Spinner";
 import AppLayout from "../components/layout/AppLayout";
 import { getRun, getRunArtifact, exportRun, deleteRun } from "../api";
@@ -37,6 +44,7 @@ import {
   AlertDialogTitle,
 } from "../components/ui/alert-dialog";
 import InvestmentMemoView from "../components/workflows/InvestmentMemoView";
+import { exportWorkflowAsWord } from "../utils/exportWorkflow";
 
 export default function WorkflowResultPage() {
   const { runId } = useParams();
@@ -54,12 +62,26 @@ export default function WorkflowResultPage() {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
+  // NEW: mark orphan/legacy run (no workflow_id)
+  const [isLegacy, setIsLegacy] = useState(false);
+  const [registering, setRegistering] = useState(false);
+
   const fetchRunDetails = useCallback(async () => {
+    // Clear previous state when switching runs
+    setRun(null);
+    setArtifact(null);
+
     try {
       const runData = await getRun(getToken, runId);
       const artifactData = await getRunArtifact(getToken, runId);
-      setRun(runData);
-      if (artifactData) setArtifact(artifactData);
+
+      // mark legacy runs (no workflow_id)
+      const legacy = !runData?.workflow_id;
+      setIsLegacy(Boolean(legacy));
+
+      // store run and artifact (explicitly set null if not present)
+      setRun(runData || null);
+      setArtifact(artifactData || null);
     } catch (error) {
       console.error("Failed to fetch run details:", error);
     } finally {
@@ -94,21 +116,28 @@ export default function WorkflowResultPage() {
   const handleExport = async (format) => {
     setExporting(true);
     try {
-      const res = await exportRun(getToken, runId, format, "url");
+      // Handle Word export locally
+      if (format === "word") {
+        await exportWorkflowAsWord(artifact, run);
+        console.log("✅ Exported as Word document");
+      } else {
+        // PDF and Excel use backend export
+        const res = await exportRun(getToken, runId, format, "url");
 
-      if (res.data?.url) {
-        // R2 signed URL
-        window.open(res.data.url, "_blank");
-      } else if (res.data instanceof Blob) {
-        // Direct download
-        const url = window.URL.createObjectURL(res.data);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = res.data.filename || `workflow_${runId}.${format}`;
-        document.body.appendChild(a);
-        a.click();
-        window.URL.revokeObjectURL(url);
-        document.body.removeChild(a);
+        if (res.data?.url) {
+          // R2 signed URL
+          window.open(res.data.url, "_blank");
+        } else if (res.data instanceof Blob) {
+          // Direct download
+          const url = window.URL.createObjectURL(res.data);
+          const a = document.createElement("a");
+          a.href = url;
+          a.download = res.data.filename || `workflow_${runId}.${format}`;
+          document.body.appendChild(a);
+          a.click();
+          window.URL.revokeObjectURL(url);
+          document.body.removeChild(a);
+        }
       }
     } catch (error) {
       console.error("Export failed:", error);
@@ -129,7 +158,7 @@ export default function WorkflowResultPage() {
     try {
       await deleteRun(getToken, runId);
       // Navigate back to workflows page after successful deletion
-      navigate("/app/workflows");
+      navigate("/app/workflows/history");
     } catch (error) {
       console.error("Failed to delete run:", error);
       alert(
@@ -143,10 +172,10 @@ export default function WorkflowResultPage() {
 
   const getStatusIcon = (status) => {
     const icons = {
-      completed: <CheckCircle className="w-6 h-6 text-green-600" />,
-      failed: <XCircle className="w-6 h-6 text-red-600" />,
-      running: <RefreshCw className="w-6 h-6 text-blue-600 animate-spin" />,
-      queued: <Clock className="w-6 h-6 text-yellow-600" />,
+      completed: <CheckCircle className="w-6 h-6 text-success" />,
+      failed: <XCircle className="w-6 h-6 text-destructive" />,
+      running: <RefreshCw className="w-6 h-6 text-primary animate-spin" />,
+      queued: <Clock className="w-6 h-6 text-warning" />,
     };
     return (
       icons[status] || <AlertCircle className="w-6 h-6 text-muted-foreground" />
@@ -160,10 +189,7 @@ export default function WorkflowResultPage() {
       return (
         <div className="space-y-2 ml-4">
           {data.map((item, idx) => (
-            <div
-              key={idx}
-              className="border-l-2 border-border dark:border-gray-700 pl-4"
-            >
+            <div key={idx} className="border-l-2 border-border pl-4">
               {renderArtifact(item, depth + 1)}
             </div>
           ))}
@@ -176,7 +202,7 @@ export default function WorkflowResultPage() {
         <div className="space-y-3">
           {Object.entries(data).map(([key, value]) => (
             <div key={key} className="ml-4">
-              <div className="font-medium text-muted-foreground dark:text-gray-300 text-sm mb-1">
+              <div className="font-medium text-muted-foreground text-sm mb-1">
                 {key}:
               </div>
               <div className="ml-2">{renderArtifact(value, depth + 1)}</div>
@@ -186,11 +212,7 @@ export default function WorkflowResultPage() {
       );
     }
 
-    return (
-      <div className="text-sm text-muted-foreground dark:text-muted-foreground">
-        {String(data)}
-      </div>
-    );
+    return <div className="text-sm text-muted-foreground">{String(data)}</div>;
   };
 
   if (loading) {
@@ -208,10 +230,11 @@ export default function WorkflowResultPage() {
       <AppLayout>
         <div className="flex items-center justify-center min-h-screen">
           <Card className="p-8 text-center">
-            <p className="text-muted-foreground dark:text-muted-foreground">
-              Run not found
-            </p>
-            <Button onClick={() => navigate("/app/workflows")} className="mt-4">
+            <p className="text-muted-foreground">Run not found</p>
+            <Button
+              onClick={() => navigate("/app/workflows/history")}
+              className="mt-4"
+            >
               Back to Workflows
             </Button>
           </Card>
@@ -221,7 +244,7 @@ export default function WorkflowResultPage() {
   }
 
   const breadcrumbs = [
-    { label: "Workflows", href: "/app/workflows" },
+    { label: "Workflows", href: "/app/workflows/history" },
     { label: run.workflow_name || "Workflow Run" },
   ];
 
@@ -232,7 +255,7 @@ export default function WorkflowResultPage() {
         <Button
           variant="ghost"
           size="sm"
-          onClick={() => navigate("/app/workflows")}
+          onClick={() => navigate("/app/workflows/history")}
           className="mb-4"
         >
           <ArrowLeft className="w-4 h-4 mr-2" />
@@ -247,133 +270,82 @@ export default function WorkflowResultPage() {
               <h1 className="text-2xl font-bold text-foreground">
                 {run.workflow_name || "Workflow Run"}
               </h1>
-              <p className="text-sm text-muted-foreground dark:text-gray-300">
-                Run ID: {run.id.slice(0, 8)}...
-              </p>
             </div>
           </div>
           <div className="flex gap-2">
             {run.status === "completed" && (
-              <>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => handleExport("pdf")}
-                  disabled={exporting}
-                >
-                  <Download className="w-4 h-4 mr-2" />
-                  PDF
-                </Button>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => handleExport("xlsx")}
-                  disabled={exporting}
-                >
-                  <Download className="w-4 h-4 mr-2" />
-                  Excel
-                </Button>
-              </>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button variant="outline" size="sm" disabled={exporting}>
+                    <Download className="w-4 h-4 mr-2" />
+                    {exporting ? "Exporting..." : "Export"}
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-56">
+                  <DropdownMenuItem onClick={() => handleExport("word")}>
+                    <FileDown className="w-4 h-4 mr-3 text-primary" />
+                    <div className="flex flex-col">
+                      <span className="font-medium">Word Document</span>
+                      <span className="text-xs text-muted-foreground">
+                        Professional report (.docx)
+                      </span>
+                    </div>
+                  </DropdownMenuItem>
+
+                  <DropdownMenuSeparator />
+
+                  <DropdownMenuItem onClick={() => handleExport("pdf")}>
+                    <FileText className="w-4 h-4 mr-3 text-destructive" />
+                    <div className="flex flex-col">
+                      <span className="font-medium">PDF</span>
+                      <span className="text-xs text-muted-foreground">
+                        Portable document (.pdf)
+                      </span>
+                    </div>
+                  </DropdownMenuItem>
+
+                  <DropdownMenuItem
+                    onClick={() => handleExport("xlsx")}
+                    disabled
+                  >
+                    <FileSpreadsheet className="w-4 h-4 mr-3 text-muted-foreground" />
+                    <div className="flex flex-col">
+                      <span className="font-medium">Excel (Coming Soon)</span>
+                      <span className="text-xs text-muted-foreground">
+                        Needs workflow-specific setup
+                      </span>
+                    </div>
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             )}
             <Button
               variant="outline"
               size="sm"
               onClick={handleDeleteClick}
-              className="text-red-600 hover:text-red-700 hover:bg-red-50 dark:text-red-400 dark:hover:text-red-300 dark:hover:bg-red-950"
+              className="text-destructive hover:bg-destructive/10"
             >
               <Trash2 className="w-4 h-4 mr-2" />
               Delete
             </Button>
           </div>
         </div>
-        {/* Metrics */}
-        <div className="grid grid-cols-1 md:grid-cols-4 gap-4 mb-8">
-          <Card className="p-4">
-            <div className="flex items-center gap-3">
-              <div className="p-2 bg-blue-100 dark:bg-blue-900 rounded-lg">
-                <FileText className="w-5 h-5 text-blue-600 dark:text-blue-400" />
-              </div>
-              <div>
-                <p className="text-sm text-muted-foreground dark:text-muted-foreground">
-                  Mode
-                </p>
-                <p className="text-lg font-semibold text-foreground">
-                  {run.mode}
-                </p>
-              </div>
-            </div>
-          </Card>
-
-          {run.latency_ms && (
-            <Card className="p-4">
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-purple-100 dark:bg-purple-900 rounded-lg">
-                  <Clock className="w-5 h-5 text-purple-600 dark:text-purple-400" />
-                </div>
-                <div>
-                  <p className="text-sm text-muted-foreground dark:text-muted-foreground">
-                    Duration
-                  </p>
-                  <p className="text-lg font-semibold text-foreground">
-                    {(run.latency_ms / 1000).toFixed(1)}s
-                  </p>
-                </div>
-              </div>
-            </Card>
-          )}
-
-          {run.cost_usd && (
-            <Card className="p-4">
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-green-100 dark:bg-green-900 rounded-lg">
-                  <DollarSign className="w-5 h-5 text-green-600 dark:text-green-400" />
-                </div>
-                <div>
-                  <p className="text-sm text-muted-foreground dark:text-muted-foreground">
-                    Cost
-                  </p>
-                  <p className="text-lg font-semibold text-foreground">
-                    ${run.cost_usd.toFixed(3)}
-                  </p>
-                </div>
-              </div>
-            </Card>
-          )}
-
-          {run.token_usage && (
-            <Card className="p-4">
-              <div className="flex items-center gap-3">
-                <div className="p-2 bg-orange-100 dark:bg-orange-900 rounded-lg">
-                  <Hash className="w-5 h-5 text-orange-600 dark:text-orange-400" />
-                </div>
-                <div>
-                  <p className="text-sm text-muted-foreground dark:text-muted-foreground">
-                    Tokens
-                  </p>
-                  <p className="text-lg font-semibold text-foreground">
-                    {run.token_usage.toLocaleString()}
-                  </p>
-                </div>
-              </div>
-            </Card>
-          )}
-        </div>
 
         {/* Status Messages */}
         {(run.status === "running" || run.status === "queued") &&
           execution &&
           execution.runId === runId && (
-            <Card className="p-6 mb-8 bg-blue-50 dark:bg-blue-900/20 border-blue-200 dark:border-blue-800">
+            <Card className="p-6 mb-8 bg-primary/10 border-primary/20">
               <div className="mb-4">
                 <div className="flex items-center gap-3 mb-3">
-                  <RefreshCw className="w-5 h-5 text-blue-600 animate-spin" />
-                  <p className="text-blue-900 dark:text-blue-200 font-semibold">
+                  <RefreshCw className="w-5 h-5 text-primary animate-spin" />
+                  <p className="text-primary font-semibold">
                     {run.status === "queued"
                       ? "Workflow Queued"
                       : "Workflow Running"}
                   </p>
                 </div>
-                <p className="text-sm text-blue-800 dark:text-blue-300 mb-4">
+                <p className="text-sm text-muted-foreground mb-4">
                   {execution.message ||
                     (run.status === "queued"
                       ? "Workflow is queued and will start shortly..."
@@ -384,16 +356,16 @@ export default function WorkflowResultPage() {
               {/* Progress Bar */}
               <div className="space-y-2">
                 <div className="flex items-center justify-between text-sm">
-                  <span className="text-blue-700 dark:text-blue-300 font-medium">
+                  <span className="text-primary font-medium">
                     {execution.stage || "Initializing"}
                   </span>
-                  <span className="text-blue-600 dark:text-blue-400 font-mono">
+                  <span className="text-primary font-mono">
                     {execution.progress || 0}%
                   </span>
                 </div>
-                <div className="w-full bg-blue-100 dark:bg-blue-900 rounded-full h-3 overflow-hidden">
+                <div className="w-full bg-muted rounded-full h-3 overflow-hidden">
                   <div
-                    className="bg-blue-600 dark:bg-blue-400 h-3 rounded-full transition-all duration-500 ease-out"
+                    className="bg-primary h-3 rounded-full transition-all duration-500 ease-out"
                     style={{ width: `${execution.progress || 0}%` }}
                   />
                 </div>
@@ -404,10 +376,10 @@ export default function WorkflowResultPage() {
         {(run.status === "running" || run.status === "queued") &&
           execution &&
           execution.runId !== runId && (
-            <Card className="p-6 mb-8 bg-yellow-50 dark:bg-yellow-900/20 border-yellow-200 dark:border-yellow-800">
+            <Card className="p-6 mb-8 bg-warning/10 border-warning/20">
               <div className="flex items-center gap-3">
-                <Clock className="w-5 h-5 text-yellow-600" />
-                <p className="text-yellow-900 dark:text-yellow-200">
+                <Clock className="w-5 h-5 text-warning" />
+                <p className="text-warning">
                   Workflow {run.status}... Refresh the page to see updates.
                 </p>
               </div>
@@ -415,15 +387,15 @@ export default function WorkflowResultPage() {
           )}
 
         {run.status === "failed" && (
-          <Card className="p-6 mb-8 bg-red-50 dark:bg-red-900/20 border-red-200 dark:border-red-800">
+          <Card className="p-6 mb-8 bg-destructive/10 border-destructive/20">
             <div className="flex items-center gap-3">
-              <XCircle className="w-5 h-5 text-red-600" />
+              <XCircle className="w-5 h-5 text-destructive" />
               <div>
-                <p className="text-red-900 dark:text-red-200 font-semibold">
+                <p className="text-destructive font-semibold">
                   Workflow Failed
                 </p>
                 {run.error_message && (
-                  <p className="text-sm text-red-700 dark:text-red-300 mt-1">
+                  <p className="text-sm text-destructive/80 mt-1">
                     {run.error_message}
                   </p>
                 )}
@@ -442,7 +414,7 @@ export default function WorkflowResultPage() {
               <h2 className="text-lg font-semibold text-foreground mb-4">
                 Workflow Output
               </h2>
-              <div className="bg-background dark:bg-card rounded-lg p-6 overflow-auto max-h-[600px]">
+              <div className="bg-background rounded-lg p-6 overflow-auto max-h-[600px]">
                 {renderArtifact(
                   artifact.artifact.parsed ||
                     artifact.artifact.partial_parsed ||
@@ -452,7 +424,7 @@ export default function WorkflowResultPage() {
 
               {artifact.artifact.citation_snippets && (
                 <div className="mt-6">
-                  <h3 className="text-sm font-semibold text-muted-foreground dark:text-gray-300 mb-3">
+                  <h3 className="text-sm font-semibold text-muted-foreground mb-3">
                     Citations
                   </h3>
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
@@ -460,12 +432,10 @@ export default function WorkflowResultPage() {
                       ([cite, snippet]) => (
                         <div
                           key={cite}
-                          className="bg-popover dark:bg-gray-700 p-3 rounded text-xs"
+                          className="bg-muted p-3 rounded text-xs"
                         >
-                          <span className="font-mono text-blue-600 dark:text-blue-400">
-                            {cite}
-                          </span>
-                          <p className="text-muted-foreground dark:text-muted-foreground mt-1">
+                          <span className="font-mono text-primary">{cite}</span>
+                          <p className="text-muted-foreground mt-1">
                             {snippet}
                           </p>
                         </div>
@@ -479,7 +449,7 @@ export default function WorkflowResultPage() {
 
         {!artifact && run.status === "completed" && (
           <Card className="p-8 text-center">
-            <p className="text-muted-foreground dark:text-muted-foreground">
+            <p className="text-muted-foreground">
               No artifact available for this run
             </p>
           </Card>
@@ -502,7 +472,7 @@ export default function WorkflowResultPage() {
             <AlertDialogAction
               onClick={handleDeleteConfirm}
               disabled={deleting}
-              className="bg-red-600 hover:bg-red-700 focus:ring-red-600"
+              className="bg-destructive hover:bg-destructive/90"
             >
               {deleting ? "Deleting..." : "Delete"}
             </AlertDialogAction>

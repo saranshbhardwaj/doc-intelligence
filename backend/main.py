@@ -2,7 +2,7 @@
 import os
 
 from app.core.lifespan import lifespan
-from app.api import extract, feedback, health, cache, jobs, users, chat, workflows, metrics
+from app.api import extractions, feedback, health, cache, jobs, users, chat, workflows, metrics
 from app.core.middleware import setup_middleware
 from fastapi import FastAPI
 
@@ -18,7 +18,7 @@ app = FastAPI(
 setup_middleware(app)
 
 # Register API routes
-app.include_router(extract.router, tags=["extraction"])  # Unified endpoint (handles both sync and async)
+app.include_router(extractions.router, tags=["extraction"])  # Unified endpoint (handles both sync and async)
 app.include_router(chat.router)  # Chat Mode endpoints
 app.include_router(workflows.router, tags=["workflows"])
 app.include_router(jobs.router, tags=["jobs"])

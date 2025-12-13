@@ -6,24 +6,30 @@ function cn(...classes) {
 }
 
 /**
- * Progress component (Radix based)
- * Usage: <Progress value={percent} />
+ * Progress component (Radix based) - ChatGPT-inspired with shimmer effect
+ * Usage: <Progress value={percent} variant="primary" showShimmer />
+ *
+ * Variants: primary (default), success, warning, destructive
  */
 export const Progress = React.forwardRef(
-  ({ className, value = 0, ...props }, ref) => {
+  ({ className, value = 0, variant = "primary", showShimmer = false, ...props }, ref) => {
     const clamped = Math.min(100, Math.max(0, value));
 
-    // Determine color dynamically: success green at 100%
-    const indicatorColor =
-      clamped === 100
-        ? "bg-success dark:bg-success"
-        : "bg-indigo-600 dark:bg-indigo-400";
+    // Variant colors using theme tokens only
+    const variantStyles = {
+      primary: "bg-primary",
+      success: "bg-success",
+      warning: "bg-warning",
+      destructive: "bg-destructive",
+    };
+
+    const indicatorColor = variantStyles[variant] || variantStyles.primary;
 
     return (
       <ProgressPrimitive.Root
         ref={ref}
         className={cn(
-          "relative h-2 w-full overflow-hidden rounded bg-muted dark:bg-neutral-800",
+          "relative h-2 w-full overflow-hidden rounded-full bg-muted",
           className
         )}
         value={clamped}
@@ -31,11 +37,37 @@ export const Progress = React.forwardRef(
       >
         <ProgressPrimitive.Indicator
           className={cn(
-            "h-full w-full transition-transform duration-300 ease-out",
-            indicatorColor
+            "h-full w-full transition-all duration-500 ease-out relative",
+            indicatorColor,
+            showShimmer && "overflow-hidden"
           )}
           style={{ transform: `translateX(-${100 - clamped}%)` }}
-        />
+        >
+          {showShimmer && (
+            <div
+              className="absolute inset-0 w-full h-full opacity-40"
+              style={{
+                background: 'linear-gradient(90deg, transparent 0%, rgba(255, 255, 255, 0.6) 50%, transparent 100%)',
+                animation: 'shimmer 2s ease-in-out infinite',
+              }}
+            />
+          )}
+        </ProgressPrimitive.Indicator>
+
+        {showShimmer && (
+          <style>
+            {`
+              @keyframes shimmer {
+                0% {
+                  transform: translateX(-100%);
+                }
+                100% {
+                  transform: translateX(100%);
+                }
+              }
+            `}
+          </style>
+        )}
       </ProgressPrimitive.Root>
     );
   }

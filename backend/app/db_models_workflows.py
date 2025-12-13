@@ -15,10 +15,12 @@ class Workflow(Base):
     __tablename__ = "workflows"
     __table_args__ = (
         Index("idx_workflows_name", "name"),
+        Index("idx_workflows_domain", "domain"),
     )
 
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     name = Column(String(255), nullable=False)
+    domain = Column(String(50), nullable=False, default="private_equity")  # private_equity | real_estate
     category = Column(String(100), nullable=True)  # deal_flow | diligence | portfolio | custom
     description = Column(Text, nullable=True)
 
@@ -88,11 +90,13 @@ class WorkflowRun(Base):
     token_usage = Column(Integer, nullable=True)
     cost_usd = Column(Float, nullable=True)
     latency_ms = Column(Integer, nullable=True)
+    currency = Column(String(10), nullable=True)  # ISO currency code (USD, EUR, GBP, etc.)
     citations_count = Column(Integer, nullable=True)
     attempts = Column(Integer, nullable=True)
     citation_invalid_count = Column(Integer, nullable=True)
     validation_errors = Column(JSONB, nullable=True)  # List of validation errors
     context_stats = Column(JSONB, nullable=True)  # Retrieval stats
+    section_summaries = Column(JSONB, nullable=True)  # Map-reduce section summaries with citations
 
     version = Column(Integer, nullable=False, default=1)
 

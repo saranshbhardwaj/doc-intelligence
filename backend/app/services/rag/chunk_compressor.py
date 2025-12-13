@@ -1,61 +1,51 @@
 """
 Chunk Compressor for RAG
 
-Handles chunks that exceed re-ranker token limits using:
-1. LLMLingua-2 compression for narrative text
-2. Smart truncation fallback for tables or over-compressed text
-3. Section heading preservation
+Compresses narrative text using LLMLingua-2 to reduce token count and LLM costs.
+
+Pure compression function - always compresses when called.
+Caller decides when compression is needed.
 
 Can be toggled on/off via config for A/B testing.
 """
 
 from typing import List, Dict, Optional
 import logging
-import tiktoken
 from app.config import settings
+from app.utils.token_utils import count_tokens
 
 logger = logging.getLogger(__name__)
 
 
 class ChunkCompressor:
     """
-    Compresses document chunks to fit within re-ranker token limits.
+    Compresses document chunks using LLMLingua-2.
+
+    Pure compression function - always compresses when called.
+    Caller decides when compression is needed (no token limit checking here).
 
     Strategy:
-    1. Count tokens in chunk
-    2. If within limit → return as-is
-    3. If over limit and compression enabled:
-       - For narrative text → LLMLingua compression
-       - For tabular text → Smart truncation
-    4. If still over limit or compression disabled → Truncate
+    - For narrative text: LLMLingua-2 compression
+    - For tabular text: Skip compression (tables should not be compressed)
     """
 
     def __init__(
         self,
-        token_limit: int = None,
         use_compression: bool = None,
         compression_rate: float = None,
-        truncation_strategy: str = None,
         preserve_headings: bool = None
     ):
         """
         Initialize chunk compressor.
 
         Args:
-            token_limit: Maximum tokens for re-ranker (default from settings)
             use_compression: Enable LLMLingua compression (default from settings)
-            compression_rate: Compression rate 0-1 (default from settings)
-            truncation_strategy: "head_tail", "head", or "tail" (default from settings)
+            compression_rate: Target compression rate 0-1 (default from settings)
             preserve_headings: Preserve section headings (default from settings)
         """
-        self.token_limit = token_limit or settings.rag_reranker_token_limit
         self.use_compression = use_compression if use_compression is not None else settings.rag_use_compression
         self.compression_rate = compression_rate or settings.rag_compression_rate
-        self.truncation_strategy = truncation_strategy or settings.rag_truncation_strategy
         self.preserve_headings = preserve_headings if preserve_headings is not None else settings.rag_preserve_headings
-
-        # Initialize tokenizer (using cl100k_base for compatibility with most models)
-        self.tokenizer = tiktoken.get_encoding("cl100k_base")
 
         # Lazy-load LLMLingua compressor (only if compression enabled)
         self._compressor = None
@@ -63,8 +53,8 @@ class ChunkCompressor:
             self._init_compressor()
 
         logger.info(
-            f"ChunkCompressor initialized: token_limit={self.token_limit}, "
-            f"use_compression={self.use_compression}, rate={self.compression_rate}"
+            f"ChunkCompressor initialized: use_compression={self.use_compression}, "
+            f"rate={self.compression_rate}"
         )
 
     def _init_compressor(self):
@@ -74,7 +64,8 @@ class ChunkCompressor:
 
             self._compressor = PromptCompressor(
                 model_name=settings.rag_compression_model,
-                use_llmlingua2=True  # Use LLMLingua-2
+                use_llmlingua2=True,  # Use LLMLingua-2
+                device_map="cpu"  # Force CPU usage (Docker containers typically don't have GPU)
             )
             logger.info(f"LLMLingua compressor loaded: {settings.rag_compression_model}")
         except ImportError:
@@ -88,7 +79,12 @@ class ChunkCompressor:
 
     def compress_chunks(self, chunks: List[Dict]) -> List[Dict]:
         """
-        Compress chunks to fit within token limits.
+        Compress chunks using LLMLingua-2.
+
+        Pure compression function - always compresses when called.
+        Caller is responsible for deciding whether to call this.
+
+        Skips tabular chunks (tables should not be compressed).
 
         Args:
             chunks: List of chunk dicts with "text" field
@@ -104,55 +100,28 @@ class ChunkCompressor:
             section_heading = chunk.get("section_heading", "")
 
             # Count tokens in original text
-            token_count = self._count_tokens(text)
+            token_count = count_tokens(text)
 
-            # If within limit, no compression needed
-            if token_count <= self.token_limit:
-                chunk["compressed_text"] = text
-                chunk["compression_applied"] = False
-                chunk["original_tokens"] = token_count
-                chunk["compressed_tokens"] = token_count
-                compressed_chunks.append(chunk)
-                continue
-
-            # Compression/truncation needed
+            # Compress narrative text only
             compressed_text = text
             compression_method = "none"
 
-            # Try compression for narrative text
             if self.use_compression and not is_tabular and self._compressor is not None:
                 try:
                     compressed_text = self._compress_with_llmlingua(
                         text, section_heading
                     )
                     compression_method = "llmlingua"
-
-                    # Check if still over limit (fallback to truncation)
-                    compressed_token_count = self._count_tokens(compressed_text)
-                    if compressed_token_count > self.token_limit:
-                        logger.debug(
-                            f"LLMLingua compression insufficient "
-                            f"({compressed_token_count} > {self.token_limit}), "
-                            f"falling back to truncation"
-                        )
-                        compressed_text = self._truncate(
-                            compressed_text, section_heading
-                        )
-                        compression_method = "llmlingua+truncate"
                 except Exception as e:
-                    logger.warning(f"LLMLingua compression failed: {e}, using truncation")
-                    compressed_text = self._truncate(text, section_heading)
-                    compression_method = "truncate"
-            else:
-                # Truncation for tables or when compression disabled
-                compressed_text = self._truncate(text, section_heading)
-                compression_method = "truncate"
+                    logger.warning(f"LLMLingua compression failed: {e}, using original text")
+                    compressed_text = text
+                    compression_method = "failed"
 
             # Final token count
-            final_token_count = self._count_tokens(compressed_text)
+            final_token_count = count_tokens(compressed_text)
 
             chunk["compressed_text"] = compressed_text
-            chunk["compression_applied"] = True
+            chunk["compression_applied"] = compression_method != "none"
             chunk["compression_method"] = compression_method
             chunk["original_tokens"] = token_count
             chunk["compressed_tokens"] = final_token_count
@@ -194,14 +163,10 @@ class ChunkCompressor:
             if text.startswith(section_heading):
                 text_to_compress = text[len(section_heading):].lstrip()
 
-        # Calculate target tokens
-        target_tokens = int(self.token_limit * self.compression_rate)
-
-        # Compress using LLMLingua-2
+        # Compress using LLMLingua-2 with target compression rate
         result = self._compressor.compress_prompt(
             text_to_compress,
             rate=self.compression_rate,
-            target_token=target_tokens,
             force_tokens=['\n', '?', '.', '!', ':', ';']  # Preserve punctuation
         )
 
@@ -213,80 +178,96 @@ class ChunkCompressor:
 
         return compressed_text
 
-    def _truncate(
+    def compress_text_to_token_limit(
         self,
         text: str,
+        target_tokens: int,
         section_heading: Optional[str] = None
     ) -> str:
         """
-        Truncate text to fit within token limit.
+        Compress text to fit within a target token limit.
 
-        Strategies:
-        - "head_tail": Keep first 60% and last 40% of tokens
-        - "head": Keep first N tokens
-        - "tail": Keep last N tokens
+        Used by re-ranker to compress chunks for cross-encoder scoring (512 token limit).
 
         Args:
-            text: Text to truncate
+            text: Text to compress
+            target_tokens: Target token count (e.g., 512 for cross-encoder)
             section_heading: Optional section heading to preserve
 
         Returns:
-            Truncated text
+            Compressed text fitting within target_tokens
         """
-        # Preserve heading if requested
-        heading_prefix = ""
-        text_to_truncate = text
-        heading_tokens = 0
+        if not text:
+            return text
 
-        if self.preserve_headings and section_heading:
-            heading_prefix = f"{section_heading}\n"
-            heading_tokens = self._count_tokens(heading_prefix)
-            # Remove heading from text if it starts with it
-            if text.startswith(section_heading):
-                text_to_truncate = text[len(section_heading):].lstrip()
+        # Count tokens in original text
+        original_tokens = count_tokens(text)
 
-        # Available tokens for content (after heading)
-        available_tokens = self.token_limit - heading_tokens
+        # If already within limit, return as-is
+        if original_tokens <= target_tokens:
+            return text
 
-        # Tokenize text
-        tokens = self.tokenizer.encode(text_to_truncate)
-
-        if len(tokens) <= available_tokens:
-            return heading_prefix + text_to_truncate
-
-        # Apply truncation strategy
-        if self.truncation_strategy == "head_tail":
-            # Keep first 60% and last 40%
-            head_count = int(available_tokens * 0.6)
-            tail_count = int(available_tokens * 0.4)
-
-            head_tokens = tokens[:head_count]
-            tail_tokens = tokens[-tail_count:]
-
-            truncated_text = (
-                self.tokenizer.decode(head_tokens) +
-                "\n...[truncated]...\n" +
-                self.tokenizer.decode(tail_tokens)
+        # If compression disabled, fall back to truncation
+        if not self.use_compression or self._compressor is None:
+            logger.debug(
+                f"Compression disabled, truncating {original_tokens} → {target_tokens} tokens"
             )
-        elif self.truncation_strategy == "tail":
-            # Keep last N tokens
-            truncated_tokens = tokens[-available_tokens:]
-            truncated_text = "...[truncated]...\n" + self.tokenizer.decode(truncated_tokens)
-        else:  # "head" or default
-            # Keep first N tokens
-            truncated_tokens = tokens[:available_tokens]
-            truncated_text = self.tokenizer.decode(truncated_tokens) + "\n...[truncated]..."
+            from app.utils.token_utils import truncate_to_token_limit
+            return truncate_to_token_limit(text, target_tokens)
 
-        return heading_prefix + truncated_text
+        # Calculate required compression rate
+        # Add 10% buffer to ensure we hit target (LLMLingua is approximate)
+        target_rate = (target_tokens * 0.9) / original_tokens
+        target_rate = max(0.1, min(target_rate, 1.0))  # Clamp to [0.1, 1.0]
 
-    def _count_tokens(self, text: str) -> int:
-        """
-        Count tokens in text.
+        logger.debug(
+            f"Compressing text: {original_tokens} → {target_tokens} tokens "
+            f"(rate={target_rate:.2f})"
+        )
 
-        Args:
-            text: Text to count tokens for
+        try:
+            # Preserve heading if requested
+            heading_prefix = ""
+            text_to_compress = text
+            if self.preserve_headings and section_heading:
+                heading_prefix = f"{section_heading}\n"
+                if text.startswith(section_heading):
+                    text_to_compress = text[len(section_heading):].lstrip()
 
-        Returns:
-            Number of tokens
-        """
-        return len(self.tokenizer.encode(text))
+            # Compress using LLMLingua-2 with calculated rate
+            result = self._compressor.compress_prompt(
+                text_to_compress,
+                rate=target_rate,
+                force_tokens=['\n', '?', '.', '!', ':', ';']
+            )
+
+            compressed_text = result.get("compressed_prompt", text_to_compress)
+
+            # Re-add heading
+            if heading_prefix:
+                compressed_text = heading_prefix + compressed_text
+
+            # Verify we hit target (if not, truncate as fallback)
+            final_tokens = count_tokens(compressed_text)
+            if final_tokens > target_tokens:
+                logger.warning(
+                    f"LLMLingua compression exceeded target: {final_tokens} > {target_tokens}, "
+                    "truncating as fallback"
+                )
+                from app.utils.token_utils import truncate_to_token_limit
+                compressed_text = truncate_to_token_limit(compressed_text, target_tokens)
+                final_tokens = target_tokens
+
+            logger.debug(
+                f"Compression complete: {original_tokens} → {final_tokens} tokens "
+                f"({(final_tokens/original_tokens)*100:.1f}%)"
+            )
+
+            return compressed_text
+
+        except Exception as e:
+            logger.warning(
+                f"LLMLingua compression failed: {e}, falling back to truncation"
+            )
+            from app.utils.token_utils import truncate_to_token_limit
+            return truncate_to_token_limit(text, target_tokens)

@@ -124,9 +124,6 @@ export default function ExtractionDetailPage() {
             <Button variant="ghost" size="sm" onClick={() => navigate(-1)}>
               <ArrowLeft className="w-4 h-4 mr-1" /> Back
             </Button>
-            <h1 className="text-lg font-semibold text-foreground">
-              Extraction Detail
-            </h1>
           </div>
           <div className="flex gap-2">
             {data && (
@@ -185,57 +182,7 @@ export default function ExtractionDetailPage() {
 
         {!loading && data && (
           <div className="space-y-6">
-            <Card className="p-6">
-              <div className="flex items-center gap-2 mb-4">
-                <CheckCircle className="w-5 h-5 text-success-foreground" />
-                <h2 className="text-sm font-semibold text-success">Result</h2>
-              </div>
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-4 mb-4 text-xs">
-                <MetaItem label="Filename" value={data.metadata?.filename} />
-                <MetaItem label="Pages" value={data.metadata?.pages} />
-                {data.metadata?.processing_time_ms && (
-                  <MetaItem
-                    label="Duration"
-                    value={
-                      (data.metadata.processing_time_ms / 1000).toFixed(2) + "s"
-                    }
-                  />
-                )}
-                {data.metadata?.cost_usd && (
-                  <MetaItem
-                    label="Cost"
-                    value={"$" + data.metadata.cost_usd.toFixed(3)}
-                  />
-                )}
-                <MetaItem
-                  label="Extraction ID"
-                  value={data.metadata?.extraction_id}
-                />
-                {data.metadata?.from_cache && (
-                  <MetaItem label="Source" value="Cache" />
-                )}
-              </div>
-              <div className="border border-border rounded p-3 max-h-[520px] overflow-y-auto bg-background/50">
-                <ResultViews result={data.data || data} />
-              </div>
-            </Card>
-
-            <Card className="p-4 flex items-center justify-between">
-              <div className="text-xs text-muted-foreground">
-                Extraction ID: {id}
-              </div>
-              <div className="flex gap-2">
-                <Button
-                  variant="outline"
-                  size="xs"
-                  onClick={handleRetry}
-                  disabled={retrying}
-                >
-                  <RotateCcw className="w-3 h-3 mr-1" />{" "}
-                  {retrying ? "Retrying..." : "Retry"}
-                </Button>
-              </div>
-            </Card>
+            <ResultViews result={data} />
           </div>
         )}
       </div>

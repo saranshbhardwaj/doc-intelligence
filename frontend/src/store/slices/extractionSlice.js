@@ -208,6 +208,15 @@ export const createExtractionSlice = (set, get) => ({
             typeof errorData === "string"
               ? errorData
               : errorData?.message || "Extraction failed";
+
+          // If job not found (e.g., deleted), clear extraction state entirely
+          const errorType = typeof errorData === 'object' ? errorData?.type : null;
+          if (errorType === 'not_found') {
+            console.log('🗑️ Extraction job not found - clearing state');
+            get().resetExtraction();
+            return;
+          }
+
           setError(errorMsg);
           setProcessing(false);
         },
@@ -602,6 +611,15 @@ export const createExtractionSlice = (set, get) => ({
             typeof errorData === "string"
               ? errorData
               : errorData?.message || "Extraction failed";
+
+          // If job not found (e.g., deleted), clear extraction state entirely
+          const errorType = typeof errorData === 'object' ? errorData?.type : null;
+          if (errorType === 'not_found') {
+            console.log('🗑️ Extraction job not found - clearing state');
+            get().resetExtraction();
+            return;
+          }
+
           setError(errorMsg);
           setProcessing(false);
         },

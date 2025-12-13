@@ -39,6 +39,7 @@ import {
   XCircle,
   Search,
   Filter,
+  FileDown,
 } from "lucide-react";
 import { Button } from "../ui/button";
 import { Card } from "../ui/card";
@@ -51,6 +52,12 @@ import {
   SelectContent,
   SelectItem,
 } from "../ui/select";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "../ui/dropdown-menu";
 import { Combobox } from "../ui/combobox";
 import Spinner from "../common/Spinner";
 import { getCollection } from "../../api/chat";
@@ -249,11 +256,31 @@ export default function ActiveChat({
             )}
           </div>
 
-          {/* Export Button */}
-          <Button variant="outline" size="sm" onClick={onExportSession}>
-            <Download className="w-4 h-4 mr-2" />
-            Export
-          </Button>
+          {/* Export Dropdown */}
+          <DropdownMenu>
+            <DropdownMenuTrigger asChild>
+              <Button variant="outline" size="sm">
+                <Download className="w-4 h-4 mr-2" />
+                Export
+              </Button>
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-48">
+              <DropdownMenuItem onClick={() => onExportSession?.('markdown')}>
+                <FileText className="w-4 h-4 mr-2" />
+                <div className="flex flex-col">
+                  <span className="font-medium">Markdown</span>
+                  <span className="text-xs text-muted-foreground">Simple .md file</span>
+                </div>
+              </DropdownMenuItem>
+              <DropdownMenuItem onClick={() => onExportSession?.('word')}>
+                <FileDown className="w-4 h-4 mr-2" />
+                <div className="flex flex-col">
+                  <span className="font-medium">Word Document</span>
+                  <span className="text-xs text-muted-foreground">Professional .docx</span>
+                </div>
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </div>
 
         {/* Document Chips */}
@@ -495,8 +522,8 @@ export default function ActiveChat({
         )}
       </div>
 
-      {/* Messages Area */}
-      <div className="flex-1 overflow-y-auto p-6 space-y-4 bg-background">
+      {/* Messages Area - ChatGPT-inspired centered layout */}
+      <div className="flex-1 overflow-y-auto bg-background">
         {messages.length === 0 && !streamingMessage ? (
           <div className="flex items-center justify-center h-full">
             <div className="text-center max-w-md">
@@ -516,98 +543,106 @@ export default function ActiveChat({
             </div>
           </div>
         ) : (
-          <>
+          <div className="max-w-4xl mx-auto py-6 px-4 space-y-6">
             {messages.map((msg, index) => (
               <div
                 key={index}
                 className={`flex ${
                   msg.role === "user" ? "justify-end" : "justify-start"
-                }`}
+                } animate-message-slide-left`}
               >
-                <Card
-                  className={`max-w-3xl p-4 ${
+                <div
+                  className={`max-w-[80%] rounded-2xl px-5 py-3 ${
                     msg.role === "user"
                       ? "bg-primary text-primary-foreground"
-                      : "bg-card"
+                      : "bg-card border border-border"
                   }`}
                 >
-                  <div className="whitespace-pre-wrap text-sm leading-relaxed">
+                  <div className="text-sm leading-relaxed whitespace-pre-wrap">
                     {msg.content}
                   </div>
                   {msg.source_chunks && msg.source_chunks.length > 0 && (
-                    <div className="mt-3 pt-3 border-t border-border/50 opacity-70">
+                    <div className="mt-3 pt-3 border-t border-border/30 opacity-70">
                       <p className="text-xs">
                         📚 Sources: {msg.num_chunks_retrieved} chunks used
                       </p>
                     </div>
                   )}
-                </Card>
+                </div>
               </div>
             ))}
 
             {isStreaming && streamingMessage && (
-              <div className="flex justify-start">
-                <Card className="max-w-3xl p-4 bg-card">
-                  <div className="whitespace-pre-wrap text-sm leading-relaxed">
+              <div className="flex justify-start animate-fade-in">
+                <div className="max-w-[80%] rounded-2xl px-5 py-3 bg-card border border-border">
+                  <div className="text-sm leading-relaxed whitespace-pre-wrap">
                     {streamingMessage}
                   </div>
-                  <div className="mt-2">
-                    <Spinner size="sm" />
+                  {/* Typing indicator */}
+                  <div className="flex items-center gap-1 mt-2">
+                    <div className="w-1.5 h-1.5 bg-primary rounded-full animate-typing-dot" />
+                    <div className="w-1.5 h-1.5 bg-primary rounded-full animate-typing-dot" style={{ animationDelay: '0.2s' }} />
+                    <div className="w-1.5 h-1.5 bg-primary rounded-full animate-typing-dot" style={{ animationDelay: '0.4s' }} />
                   </div>
-                </Card>
+                </div>
               </div>
             )}
 
             <div ref={messagesEndRef} />
-          </>
+          </div>
         )}
       </div>
 
-      {/* Input Area */}
+      {/* Input Area - Centered */}
       <div className="bg-card border-t border-border p-4">
-        {chatError && (
-          <div className="mb-3 p-3 bg-destructive/10 text-destructive rounded-lg text-sm border border-destructive/20">
-            ⚠️ {chatError}
-          </div>
-        )}
+        <div className="max-w-4xl mx-auto px-4">
+          {chatError && (
+            <div className="mb-3 p-3 bg-destructive/10 text-destructive rounded-lg text-sm border border-destructive/20">
+              ⚠️ {chatError}
+            </div>
+          )}
 
-        <form onSubmit={handleSendMessage} className="flex gap-3">
-          <input
-            type="text"
-            value={message}
-            onChange={(e) => setMessage(e.target.value)}
-            placeholder={
-              sessionDocIds.length === 0
-                ? "Add documents to start chatting..."
-                : "Ask a question about your documents..."
-            }
-            disabled={isStreaming || sessionDocIds.length === 0}
-            className="flex-1 px-4 py-3 border border-input rounded-lg bg-background text-foreground placeholder:text-muted-foreground disabled:bg-muted disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-ring transition-all"
-          />
-          <Button
-            type="submit"
-            disabled={
-              !message.trim() || isStreaming || sessionDocIds.length === 0
-            }
-            size="lg"
-            className="min-w-[100px]"
-          >
-            {isStreaming ? (
-              <Spinner size="sm" />
-            ) : (
-              <>
-                <Send className="w-4 h-4 mr-2" />
-                Send
-              </>
-            )}
-          </Button>
-        </form>
+          <form onSubmit={handleSendMessage} className="flex gap-3">
+            <input
+              type="text"
+              value={message}
+              onChange={(e) => setMessage(e.target.value)}
+              placeholder={
+                sessionDocIds.length === 0
+                  ? "Add documents to start chatting..."
+                  : "Ask a question about your documents..."
+              }
+              disabled={isStreaming || sessionDocIds.length === 0}
+              className="flex-1 px-4 py-3 border border-input rounded-lg bg-background text-foreground placeholder:text-muted-foreground disabled:bg-muted disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-ring transition-all"
+            />
+            <Button
+              type="submit"
+              disabled={
+                !message.trim() || isStreaming || sessionDocIds.length === 0
+              }
+              size="lg"
+              className="min-w-[100px]"
+            >
+              {isStreaming ? (
+                <>
+                  <Spinner size="sm" className="mr-2" />
+                  Sending...
+                </>
+              ) : (
+                <>
+                  <Send className="w-4 h-4 mr-2" />
+                  Send
+                </>
+              )}
+            </Button>
+          </form>
 
-        {sessionDocIds.length === 0 && (
-          <p className="text-xs text-muted-foreground mt-2 text-center">
-            💡 Click "+ Add" above to select documents from your collections
-          </p>
-        )}
+          {sessionDocIds.length === 0 && (
+            <p className="text-xs text-muted-foreground mt-2 text-center">
+              💡 Click "+ Add" above to select documents from your collections
+            </p>
+          )}
+        </div>
       </div>
     </div>
   );
