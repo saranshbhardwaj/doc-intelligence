@@ -432,6 +432,9 @@ class CollectionRepository:
                 db.commit()
                 db.refresh(collection_doc)
 
+                # Recompute collection stats after adding document
+                self.recompute_collection_stats(collection_id)
+
                 logger.info(
                     "Linked document to collection",
                     extra={

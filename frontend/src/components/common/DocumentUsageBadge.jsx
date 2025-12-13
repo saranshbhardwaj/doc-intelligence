@@ -61,21 +61,21 @@ export default function DocumentUsageBadge({ documentId, getToken }) {
     >
       {/* Usage Chips */}
       {chatCount > 0 && (
-        <div className="flex items-center gap-0.5 px-1.5 py-0.5 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 rounded text-xs font-medium">
+        <div className="flex items-center gap-0.5 px-1.5 py-0.5 bg-primary/10 text-primary rounded text-xs font-medium">
           <MessageSquare className="w-3 h-3" />
           <span>{chatCount}</span>
         </div>
       )}
 
       {extractCount > 0 && (
-        <div className="flex items-center gap-0.5 px-1.5 py-0.5 bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-300 rounded text-xs font-medium">
+        <div className="flex items-center gap-0.5 px-1.5 py-0.5 bg-success/10 text-success rounded text-xs font-medium">
           <FileText className="w-3 h-3" />
           <span>{extractCount}</span>
         </div>
       )}
 
       {workflowCount > 0 && (
-        <div className="flex items-center gap-0.5 px-1.5 py-0.5 bg-purple-100 dark:bg-purple-900/30 text-purple-700 dark:text-purple-300 rounded text-xs font-medium">
+        <div className="flex items-center gap-0.5 px-1.5 py-0.5 bg-accent/10 text-accent rounded text-xs font-medium">
           <Workflow className="w-3 h-3" />
           <span>{workflowCount}</span>
         </div>
@@ -151,7 +151,10 @@ export default function DocumentUsageBadge({ documentId, getToken }) {
 
           {/* Triangle pointer */}
           <div className="absolute top-full right-4 w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-border" />
-          <div className="absolute top-full right-4 w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-popover" style={{ marginTop: '-1px' }} />
+          <div
+            className="absolute top-full right-4 w-0 h-0 border-l-4 border-r-4 border-t-4 border-transparent border-t-popover"
+            style={{ marginTop: "-1px" }}
+          />
         </div>
       )}
     </div>

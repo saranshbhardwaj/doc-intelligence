@@ -8,8 +8,8 @@ export function useDarkMode() {
     if (saved !== null) {
       return saved === "true";
     }
-    // Check system preference
-    return window.matchMedia("(prefers-color-scheme: dark)").matches;
+    // Default to light theme when no preference saved
+    return false;
   });
 
   useEffect(() => {

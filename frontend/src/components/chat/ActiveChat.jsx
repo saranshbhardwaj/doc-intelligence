@@ -208,9 +208,9 @@ export default function ActiveChat({
   );
 
   return (
-    <div className="flex-1 flex flex-col">
-      {/* Header with Editable Title and Document Chips */}
-      <div className="bg-card border-b border-border px-6 py-3">
+    <div className="flex-1 flex flex-col h-full">
+      {/* Sticky Header with Editable Title and Document Chips */}
+      <div className="sticky top-0 z-10 bg-card/80 backdrop-blur border-b border-border px-6 py-3">
         <div className="flex items-center justify-between mb-3">
           {/* Editable Title */}
           <div className="flex items-center gap-2 flex-1 min-w-0">
@@ -265,18 +265,22 @@ export default function ActiveChat({
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-48">
-              <DropdownMenuItem onClick={() => onExportSession?.('markdown')}>
+              <DropdownMenuItem onClick={() => onExportSession?.("markdown")}>
                 <FileText className="w-4 h-4 mr-2" />
                 <div className="flex flex-col">
                   <span className="font-medium">Markdown</span>
-                  <span className="text-xs text-muted-foreground">Simple .md file</span>
+                  <span className="text-xs text-muted-foreground">
+                    Simple .md file
+                  </span>
                 </div>
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => onExportSession?.('word')}>
+              <DropdownMenuItem onClick={() => onExportSession?.("word")}>
                 <FileDown className="w-4 h-4 mr-2" />
                 <div className="flex flex-col">
                   <span className="font-medium">Word Document</span>
-                  <span className="text-xs text-muted-foreground">Professional .docx</span>
+                  <span className="text-xs text-muted-foreground">
+                    Professional .docx
+                  </span>
                 </div>
               </DropdownMenuItem>
             </DropdownMenuContent>
@@ -396,7 +400,8 @@ export default function ActiveChat({
                     {/* Results count */}
                     {(documentSearchQuery || statusFilter !== "all") && (
                       <p className="text-xs text-muted-foreground">
-                        {filteredDocuments.length} of {collectionDocuments.length} documents
+                        {filteredDocuments.length} of{" "}
+                        {collectionDocuments.length} documents
                       </p>
                     )}
                   </div>
@@ -522,7 +527,7 @@ export default function ActiveChat({
         )}
       </div>
 
-      {/* Messages Area - ChatGPT-inspired centered layout */}
+      {/* Messages Area - ChatGPT-inspired centered layout (scrollable) */}
       <div className="flex-1 overflow-y-auto bg-background">
         {messages.length === 0 && !streamingMessage ? (
           <div className="flex items-center justify-center h-full">
@@ -581,8 +586,14 @@ export default function ActiveChat({
                   {/* Typing indicator */}
                   <div className="flex items-center gap-1 mt-2">
                     <div className="w-1.5 h-1.5 bg-primary rounded-full animate-typing-dot" />
-                    <div className="w-1.5 h-1.5 bg-primary rounded-full animate-typing-dot" style={{ animationDelay: '0.2s' }} />
-                    <div className="w-1.5 h-1.5 bg-primary rounded-full animate-typing-dot" style={{ animationDelay: '0.4s' }} />
+                    <div
+                      className="w-1.5 h-1.5 bg-primary rounded-full animate-typing-dot"
+                      style={{ animationDelay: "0.2s" }}
+                    />
+                    <div
+                      className="w-1.5 h-1.5 bg-primary rounded-full animate-typing-dot"
+                      style={{ animationDelay: "0.4s" }}
+                    />
                   </div>
                 </div>
               </div>
@@ -593,8 +604,8 @@ export default function ActiveChat({
         )}
       </div>
 
-      {/* Input Area - Centered */}
-      <div className="bg-card border-t border-border p-4">
+      {/* Composer - sticky at bottom of scroll pane */}
+      <div className="sticky bottom-0 bg-card/90 backdrop-blur border-t border-border p-4">
         <div className="max-w-4xl mx-auto px-4">
           {chatError && (
             <div className="mb-3 p-3 bg-destructive/10 text-destructive rounded-lg text-sm border border-destructive/20">

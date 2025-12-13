@@ -6,7 +6,6 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "@clerk/clerk-react";
-import axios from "axios";
 import {
   Upload,
   FileText,
@@ -19,18 +18,11 @@ import {
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
 import { Label } from "../components/ui/label";
-import { Checkbox } from "../components/ui/checkbox";
 import { Progress } from "../components/ui/progress";
-import {
-  Select,
-  SelectTrigger,
-  SelectValue,
-  SelectContent,
-  SelectItem,
-} from "../components/ui/select";
 import Spinner from "../components/common/Spinner";
 import AppLayout from "../components/layout/AppLayout";
 import { listCollections } from "../api";
+import ExtractionDocumentSelectorModal from "../components/extractions/ExtractionDocumentSelectorModal";
 import { Textarea } from "../components/ui/textarea";
 import ExtractionResultSheet from "../components/extractions/ExtractionResultSheet";
 import {
@@ -56,9 +48,9 @@ export default function ExtractPage() {
   const [saveToLibrary, setSaveToLibrary] = useState(true);
   const [collections, setCollections] = useState([]);
   const [selectedCollection, setSelectedCollection] = useState(null);
-  const [documents, setDocuments] = useState([]);
   const [selectedDocId, setSelectedDocId] = useState(null);
-  const [loadingDocs, setLoadingDocs] = useState(false);
+  const [selectedDocMeta, setSelectedDocMeta] = useState(null);
+  const [selectorOpen, setSelectorOpen] = useState(false);
   const [extractionContext, setExtractionContext] = useState("");
   const [sheetOpen, setSheetOpen] = useState(false);
   const [selectedExtractionId, setSelectedExtractionId] = useState(null);
@@ -98,25 +90,12 @@ export default function ExtractPage() {
     })();
   }, [getToken]);
 
-  // Load documents when switching to library mode
+  // When entering library mode, prompt selector immediately
   useEffect(() => {
     if (mode === "library") {
-      (async () => {
-        setLoadingDocs(true);
-        try {
-          const token = await getToken();
-          const res = await axios.get(`${API_BASE}/api/workflows/documents`, {
-            headers: { Authorization: `Bearer ${token}` },
-          });
-          setDocuments(res.data || []);
-        } catch (err) {
-          console.error("Failed to load documents", err);
-        } finally {
-          setLoadingDocs(false);
-        }
-      })();
+      setSelectorOpen(true);
     }
-  }, [mode, getToken]);
+  }, [mode]);
 
   // Handle preselected doc
   useEffect(() => {
@@ -230,37 +209,21 @@ export default function ExtractPage() {
           {/* Library Mode */}
           {mode === "library" && (
             <div className="space-y-3">
-              {loadingDocs ? (
-                <div className="py-8 flex justify-center">
-                  <Spinner />
-                </div>
-              ) : documents.length === 0 ? (
-                <div className="text-center py-6 text-muted-foreground text-xs">
-                  <FileText className="w-10 h-10 mx-auto mb-2 opacity-50" />
-                  No documents. Upload one.
-                </div>
-              ) : (
-                <div className="max-h-64 overflow-y-auto space-y-2">
-                  {documents.map((doc) => (
-                    <div
-                      key={doc.id}
-                      onClick={() => setSelectedDocId(doc.id)}
-                      className={`p-3 border rounded cursor-pointer text-xs flex items-center gap-2 transition-all ${
-                        selectedDocId === doc.id
-                          ? "border-primary bg-primary/10"
-                          : "border-border hover:border-border"
-                      }`}
-                    >
-                      <FileText className="w-4 h-4 text-muted-foreground" />
-                      <span className="truncate flex-1">{doc.filename}</span>
-                      <span className="text-[10px] text-muted-foreground">
-                        {doc.page_count}p
-                      </span>
-                      {selectedDocId === doc.id && (
-                        <CheckCircle className="w-4 h-4 text-primary" />
-                      )}
-                    </div>
-                  ))}
+              <Button variant="outline" onClick={() => setSelectorOpen(true)}>
+                Choose from Library
+              </Button>
+              {selectedDocId && (
+                <div className="p-3 border rounded text-xs flex items-center gap-2">
+                  <FileText className="w-4 h-4 text-muted-foreground" />
+                  <span className="truncate flex-1">
+                    {selectedDocMeta?.filename || `Document ${selectedDocId}`}
+                  </span>
+                  {typeof selectedDocMeta?.page_count === "number" && (
+                    <span className="text-[10px] text-muted-foreground">
+                      {selectedDocMeta.page_count}p
+                    </span>
+                  )}
+                  <CheckCircle className="w-4 h-4 text-primary" />
                 </div>
               )}
             </div>
@@ -411,6 +374,19 @@ export default function ExtractPage() {
           )}
         </div>
       </div>
+
+      {/* Selector Modal */}
+      <ExtractionDocumentSelectorModal
+        open={selectorOpen}
+        onOpenChange={setSelectorOpen}
+        onSelect={(doc) => {
+          setSelectedDocId(doc.id);
+          setSelectedDocMeta({
+            filename: doc.filename,
+            page_count: doc.page_count,
+          });
+        }}
+      />
 
       {/* Extraction Result Sheet */}
       <ExtractionResultSheet

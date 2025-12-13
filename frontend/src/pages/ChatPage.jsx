@@ -26,24 +26,47 @@ export default function ChatPage() {
   const actions = useChatActions();
 
   const [selectedDocuments, setSelectedDocuments] = useState([]);
+  const [isInitializing, setIsInitializing] = useState(true);
 
   useEffect(() => {
     // Wait for Clerk to initialize
     if (!isLoaded) return;
 
     // Fetch initial data
-    actions.fetchSessions(getToken);
-    actions.fetchCollections(getToken);
+    (async () => {
+      await Promise.all([
+        actions.fetchSessions(getToken),
+        actions.fetchCollections(getToken),
+      ]);
+
+      // Auto-reopen last active session if present
+      const lastSessionId = localStorage.getItem("lastActiveChatSessionId");
+      if (lastSessionId) {
+        try {
+          await actions.loadSession(getToken, lastSessionId);
+        } catch (e) {
+          console.warn("Failed to auto-load last session:", e);
+          localStorage.removeItem("lastActiveChatSessionId");
+        }
+      }
+      setIsInitializing(false);
+    })();
   }, [isLoaded, actions, getToken]);
 
   const handleNewChat = () => {
     // Clear current session and show empty state
     actions.startNewChat();
     setSelectedDocuments([]);
+    try {
+      localStorage.removeItem("lastActiveChatSessionId");
+    } catch {}
   };
 
   const handleSelectSession = async (sessionId) => {
     await actions.loadSession(getToken, sessionId);
+    try {
+      localStorage.setItem("lastActiveChatSessionId", sessionId);
+    } catch {}
   };
 
   const handleDeleteSession = async (sessionId) => {
@@ -53,6 +76,12 @@ export default function ChatPage() {
       // If deleted session was active, clear it
       if (chat.currentSession?.id === sessionId) {
         actions.startNewChat();
+        try {
+          const saved = localStorage.getItem("lastActiveChatSessionId");
+          if (saved === String(sessionId)) {
+            localStorage.removeItem("lastActiveChatSessionId");
+          }
+        } catch {}
       }
     } catch (error) {
       console.error("Failed to delete session:", error);
@@ -62,11 +91,16 @@ export default function ChatPage() {
   const handleStartChat = async (documentIds) => {
     try {
       // Create new session with selected documents
-      await actions.createNewSession(getToken, {
+      const session = await actions.createNewSession(getToken, {
         title: "New Chat",
         documentIds,
       });
       setSelectedDocuments([]);
+      if (session?.id) {
+        try {
+          localStorage.setItem("lastActiveChatSessionId", session.id);
+        } catch {}
+      }
     } catch (error) {
       console.error("Failed to create session:", error);
     }
@@ -92,7 +126,7 @@ export default function ChatPage() {
     // State is already updated in the slice action - no need to fetch
   };
 
-  const handleExportSession = async (format = 'markdown') => {
+  const handleExportSession = async (format = "markdown") => {
     if (!chat.currentSession) return;
 
     try {
@@ -103,16 +137,16 @@ export default function ChatPage() {
       );
 
       // Export based on selected format
-      if (format === 'word') {
+      if (format === "word") {
         await exportAsWord(exportData);
-        console.log('✅ Exported as Word document');
+        console.log("✅ Exported as Word document");
       } else {
         await exportAsMarkdown(exportData);
-        console.log('✅ Exported as Markdown');
+        console.log("✅ Exported as Markdown");
       }
     } catch (error) {
-      console.error('Failed to export session:', error);
-      alert(`Export failed: ${error.message || 'Unknown error'}`);
+      console.error("Failed to export session:", error);
+      alert(`Export failed: ${error.message || "Unknown error"}`);
     }
   };
 
@@ -131,9 +165,10 @@ export default function ChatPage() {
 
   return (
     <AppLayout breadcrumbs={breadcrumbs}>
-      <div className="flex-1 flex gap-4">
-        {/* Session Sidebar */}
-        <div className="w-80 flex-shrink-0">
+      {/* Full-height two-pane layout with independent scroll */}
+      <div className="h-[calc(100vh-64px)] flex gap-4">
+        {/* Left: Session Sidebar (scrollable) */}
+        <div className="w-80 flex-shrink-0 overflow-y-auto scrollbar-thin">
           <SessionSidebar
             sessions={chat.sessions}
             currentSession={chat.currentSession}
@@ -144,34 +179,40 @@ export default function ChatPage() {
           />
         </div>
 
-        {/* Main Chat Area */}
-        {!chat.currentSession ? (
-          /* Empty State - No Active Session */
-          <EmptyState
-            collections={chat.collections}
-            collectionsLoading={chat.collectionsLoading}
-            selectedDocumentIds={selectedDocuments}
-            onSelectDocuments={setSelectedDocuments}
-            onStartChat={handleStartChat}
-            getToken={getToken}
-          />
-        ) : (
-          /* Active Chat */
-          <ActiveChat
-            currentSession={chat.currentSession}
-            messages={chat.messages}
-            isStreaming={chat.isStreaming}
-            streamingMessage={chat.streamingMessage}
-            chatError={chat.chatError}
-            collections={chat.collections}
-            getToken={getToken}
-            onSendMessage={handleSendMessage}
-            onAddDocuments={handleAddDocuments}
-            onRemoveDocument={handleRemoveDocument}
-            onUpdateSessionTitle={handleUpdateSessionTitle}
-            onExportSession={handleExportSession}
-          />
-        )}
+        {/* Right: Main Chat Area (scrollable pane) */}
+        <div className="flex-1 min-w-0 overflow-y-auto scrollbar-chat">
+          {isInitializing ? (
+            <div className="flex items-center justify-center h-full">
+              <Spinner />
+            </div>
+          ) : !chat.currentSession ? (
+            /* Empty State - No Active Session */
+            <EmptyState
+              collections={chat.collections}
+              collectionsLoading={chat.collectionsLoading}
+              selectedDocumentIds={selectedDocuments}
+              onSelectDocuments={setSelectedDocuments}
+              onStartChat={handleStartChat}
+              getToken={getToken}
+            />
+          ) : (
+            /* Active Chat */
+            <ActiveChat
+              currentSession={chat.currentSession}
+              messages={chat.messages}
+              isStreaming={chat.isStreaming}
+              streamingMessage={chat.streamingMessage}
+              chatError={chat.chatError}
+              collections={chat.collections}
+              getToken={getToken}
+              onSendMessage={handleSendMessage}
+              onAddDocuments={handleAddDocuments}
+              onRemoveDocument={handleRemoveDocument}
+              onUpdateSessionTitle={handleUpdateSessionTitle}
+              onExportSession={handleExportSession}
+            />
+          )}
+        </div>
       </div>
     </AppLayout>
   );

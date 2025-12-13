@@ -84,7 +84,11 @@ export default function AppLayout({ children, breadcrumbs }) {
 
             {/* Right Actions */}
             <div className="flex items-center gap-4">
-              <DarkModeToggle isDark={isDark} toggle={toggle} />
+              <DarkModeToggle
+                isDark={isDark}
+                toggle={toggle}
+                variant="inline"
+              />
               <UserButton
                 appearance={{
                   elements: {
