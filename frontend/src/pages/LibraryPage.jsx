@@ -28,10 +28,22 @@ import {
   uploadDocumentToCollection as apiUploadDocumentToCollection,
   connectToIndexingProgress,
 } from "../api";
+import { useChat, useChatActions } from "../store";
 
 export default function LibraryPage() {
   const { getToken } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
+
+  // Zustand store for document indexing
+  const { indexing } = useChat();
+  const {
+    startDocumentIndexing,
+    updateIndexingProgress,
+    completeIndexing,
+    failIndexing,
+    reconnectIndexing,
+    resetIndexing,
+  } = useChatActions();
 
   // Collections state
   const [collections, setCollections] = useState([]);
@@ -124,6 +136,14 @@ export default function LibraryPage() {
     }
   }, [selectedCollection, fetchDocuments]);
 
+  // Reconnect to active document indexing on mount (for page refresh support)
+  useEffect(() => {
+    if (indexing.jobId && indexing.documentId) {
+      console.log("🔄 Reconnecting to document indexing on mount");
+      reconnectIndexing(getToken);
+    }
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
   // Handlers
   const handleSelectCollection = (collection) => {
     setSelectedCollection(collection);
@@ -187,21 +207,92 @@ export default function LibraryPage() {
 
         // Connect to SSE for progress tracking
         if (response.job_id) {
-          connectToIndexingProgress(
+          // Add document with processing status immediately
+          const tempDoc = {
+            id: response.document_id,
+            filename: file.name,
+            status: "processing",
+            status_detail: "Uploading...",
+            progress_percent: 0,
+            page_count: 0,
+            chunk_count: 0,
+            has_embeddings: false,
+            created_at: new Date().toISOString(),
+          };
+          setDocuments((prev) => [tempDoc, ...prev]);
+
+          const cleanup = await connectToIndexingProgress(
             getToken,
             response.job_id,
             (progressData) => {
               console.log("Indexing progress:", progressData);
+
+              // Update Zustand store
+              updateIndexingProgress(progressData);
+
+              // Update local documents state for UI
+              setDocuments((prev) =>
+                prev.map((doc) =>
+                  doc.id === response.document_id
+                    ? {
+                        ...doc,
+                        status: "processing",
+                        status_detail:
+                          progressData.current_stage ||
+                          progressData.message ||
+                          "Processing...",
+                        progress_percent: progressData.progress_percent || 0,
+                      }
+                    : doc
+                )
+              );
             },
             (completeData) => {
               console.log("Indexing complete:", completeData);
+
+              // Update store
+              completeIndexing();
+
+              // Refresh documents
               fetchDocuments(targetCollectionId);
-              fetchCollections(); // Refresh collection counts
+              fetchCollections();
+
+              // Reset indexing state after short delay
+              setTimeout(() => resetIndexing(), 1000);
             },
             (error) => {
               console.error("Indexing error:", error);
+
+              // Update store
+              failIndexing(error.message);
+
+              // Update local UI
+              setDocuments((prev) =>
+                prev.map((doc) =>
+                  doc.id === response.document_id
+                    ? {
+                        ...doc,
+                        status: "failed",
+                        status_detail: error.message,
+                      }
+                    : doc
+                )
+              );
+
               alert(`Failed to index ${file.name}: ${error.message}`);
+            },
+            {
+              autoReconnect: true,
+              fetchInitialState: false,
             }
+          );
+
+          // Store in Zustand for reconnection
+          startDocumentIndexing(
+            response.job_id,
+            response.document_id,
+            targetCollectionId,
+            cleanup
           );
         } else {
           await fetchDocuments(targetCollectionId);

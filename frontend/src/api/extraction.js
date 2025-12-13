@@ -8,6 +8,7 @@
  */
 
 import { api, createAuthenticatedApi } from "./client";
+import { streamJobProgress } from "./sse-utils";
 
 /**
  * Upload a document for extraction (REQUIRES AUTHENTICATION)
@@ -44,41 +45,24 @@ export async function uploadDocument(file, getToken, context = "") {
 }
 
 /**
- * Stream job progress via Server-Sent Events (SSE)
+ * Stream extraction job progress via Server-Sent Events (SSE)
+ *
+ * This is a wrapper around the unified streamJobProgress utility.
+ * Uses the same endpoint as workflows.js: GET /api/jobs/{jobId}/stream
  *
  * NOTE: EventSource doesn't support custom headers, so auth token is passed as query parameter
  *
  * @param {string} jobId - The job ID to stream progress for
  * @param {Function} getToken - Clerk's getToken function from useAuth hook
- * @param {Object} callbacks - Event handler callbacks
- * @param {Function} callbacks.onProgress - Called with progress updates
- * @param {Function} callbacks.onComplete - Called when job completes
- * @param {Function} callbacks.onError - Called on error
- * @param {Function} callbacks.onEnd - Called when stream ends
- * @returns {Function} Cleanup function to close the connection
- *
- * Progress event structure:
- * {
- *   status: "parsing" | "chunking" | "summarizing" | "extracting" | "completed",
- *   progress_percent: 0-100,
- *   message: "User-friendly status message",
- *   current_stage: "parsing",
- *   parsing_completed: true,
- *   chunking_completed: false,
- *   ...
- * }
- *
- * Error event structure:
- * {
- *   error_stage: "parsing",
- *   error_message: "Detailed error message",
- *   error_type: "parsing_error" | "llm_error" | "chunking_error" | "unknown_error",
- *   is_retryable: true
- * }
+ * @param {Object} options - Configuration options
+ * @param {Function} options.onProgress - Called with progress updates
+ * @param {Function} options.onComplete - Called when job completes
+ * @param {Function} options.onError - Called on error
+ * @param {Function} options.onEnd - Called when stream ends
+ * @param {boolean} options.autoReconnect - Auto-reconnect on connection loss (default: true)
+ * @param {boolean} options.fetchInitialState - Fetch initial job state before SSE (default: false)
+ * @returns {Promise<Function>} Cleanup function to close the connection
  */
-// Track active streams to prevent duplicate EventSource instances per job
-const _activeStreams = new Map(); // jobId -> { eventSource, callbacks }
-
 export async function streamProgress(
   jobId,
   getToken,
@@ -91,218 +75,16 @@ export async function streamProgress(
     fetchInitialState = false,
   }
 ) {
-  const baseURL = api.defaults.baseURL || "";
-
-  // Get auth token and pass as query parameter (EventSource doesn't support headers)
-  const token = await getToken();
-  const url = `${baseURL}/api/jobs/${jobId}/stream?token=${encodeURIComponent(
-    token
-  )}`;
-
-  // If stream already exists, reuse and just update callbacks
-  if (_activeStreams.has(jobId)) {
-    const existing = _activeStreams.get(jobId);
-    existing.callbacks = { onProgress, onComplete, onError, onEnd };
-    return () => {
-      try {
-        existing.eventSource.close();
-      } catch (_) {}
-      _activeStreams.delete(jobId);
-    };
-  }
-
-  // Fetch initial state before starting SSE if requested (for reconnection)
-  if (fetchInitialState) {
-    try {
-      const initialState = await getJobStatus(jobId, getToken);
-      console.log("[SSE Frontend] Fetched initial job state:", initialState);
-
-      // Emit initial progress to populate UI
-      if (initialState.status === "completed") {
-        onComplete?.({
-          message: initialState.message || "Extraction completed",
-          extraction_id: initialState.extraction_id,
-        });
-        onEnd?.({ reason: "completed", job_id: jobId });
-        return () => {}; // No cleanup needed, job already done
-      } else if (initialState.status === "failed") {
-        onError?.({
-          message: initialState.error_message || "Job failed",
-          stage: initialState.error_stage,
-          type: initialState.error_type,
-          isRetryable: initialState.is_retryable,
-        });
-        onEnd?.({ reason: "failed", job_id: jobId });
-        return () => {};
-      } else {
-        // In progress - send initial progress event
-        onProgress?.({
-          status: initialState.status,
-          stage: initialState.current_stage,
-          progress: initialState.progress_percent,
-          message: initialState.message,
-          details: initialState.details || {},
-          parsing_completed: initialState.parsing_completed,
-          chunking_completed: initialState.chunking_completed,
-          summarizing_completed: initialState.summarizing_completed,
-          extracting_completed: initialState.extracting_completed,
-        });
-      }
-    } catch (err) {
-      console.error("[SSE Frontend] Failed to fetch initial state:", err);
-      // Continue to SSE connection anyway
-    }
-  }
-
-  const eventSource = new EventSource(url);
-  let streamEnded = false;
-  let isCleaningUp = false; // Prevent duplicate cleanup
-  let receivedDomainError = false; // True if backend emitted an application error event
-  let terminalFailed = false; // True if error is non-retryable (retryable === false)
-  let lastProgressTime = Date.now();
-
-  const cleanup = () => {
-    if (isCleaningUp) return;
-    isCleaningUp = true;
-    streamEnded = true;
-
-    console.log("[SSE Frontend] Cleaning up EventSource");
-    try {
-      eventSource.close();
-    } catch (err) {
-      console.error("[SSE Frontend] Error closing EventSource:", err);
-    }
-    _activeStreams.delete(jobId);
-  };
-
-  eventSource.addEventListener("progress", (event) => {
-    const { callbacks } = _activeStreams.get(jobId) || { callbacks: {} };
-    try {
-      const data = JSON.parse(event.data);
-      lastProgressTime = Date.now();
-      callbacks.onProgress?.(data);
-    } catch (err) {
-      console.error("Failed to parse progress event:", err);
-    }
+  // Use unified SSE utility with extraction-specific getJobStatus function
+  return streamJobProgress(jobId, getToken, {
+    onProgress,
+    onComplete,
+    onError,
+    onEnd,
+    autoReconnect,
+    fetchInitialState,
+    getJobStatus: fetchInitialState ? getJobStatus : null,
   });
-
-  eventSource.addEventListener("complete", (event) => {
-    const { callbacks } = _activeStreams.get(jobId) || { callbacks: {} };
-    try {
-      const data = JSON.parse(event.data);
-      console.log("[SSE Frontend] 🎉 Complete event received:", data);
-      callbacks.onComplete?.(data);
-    } catch (err) {
-      console.error("Failed to parse complete event:", err);
-    }
-  });
-
-  eventSource.addEventListener("end", (event) => {
-    const { callbacks } = _activeStreams.get(jobId) || { callbacks: {} };
-    streamEnded = true; // Set FIRST before any other operations
-    try {
-      const data = JSON.parse(event.data);
-      console.log("[SSE Frontend] End event data:", data);
-      callbacks.onEnd?.(data);
-    } catch (err) {
-      console.error("Failed to parse end event:", err);
-    } finally {
-      // Cleanup AFTER callback
-      cleanup();
-    }
-  });
-
-  eventSource.addEventListener("error", (event) => {
-    // Domain error (backend emitted SSE 'error' event with JSON payload)
-    if (event.data) {
-      try {
-        const raw = JSON.parse(event.data);
-        receivedDomainError = true;
-        const normalized = {
-          message: raw.message,
-          stage: raw.stage,
-          type: raw.type || raw.error_type,
-          isRetryable: raw.retryable ?? raw.is_retryable ?? false,
-        };
-        if (!normalized.isRetryable) {
-          terminalFailed = true;
-        }
-        const { callbacks } = _activeStreams.get(jobId) || { callbacks: {} };
-        callbacks.onError?.(normalized);
-        // We allow the dedicated 'end' event to perform cleanup.
-      } catch (err) {
-        console.error("Failed to parse domain error event:", err);
-      }
-    }
-  });
-
-  let reconnectAttempts = 0;
-  const maxReconnect = 5;
-  const baseDelay = 1000;
-
-  eventSource.onerror = (err) => {
-    console.log(
-      `[SSE Frontend] onerror fired: streamEnded=${streamEnded}, readyState=${eventSource.readyState}`
-    );
-
-    // If domain error already received (application failure) or graceful end, skip transport reconnect
-    if (isCleaningUp || streamEnded || receivedDomainError || terminalFailed) {
-      console.log(
-        "[SSE Frontend] ✅ Ignoring transport onerror (terminal or ended)"
-      );
-      return;
-    }
-
-    // Treat as connection issue only if no domain error yet
-    console.error(
-      "[SSE Frontend] ❌ Connection error detected (no domain error yet):",
-      err
-    );
-    const { callbacks } = _activeStreams.get(jobId) || { callbacks: {} };
-    callbacks.onError?.({
-      message: "Lost connection to server",
-      type: "connection_error",
-      isRetryable: true,
-    });
-
-    cleanup();
-
-    // Simple heuristic: if we've never seen progress (still at initial stage) limit reconnect attempts to 2
-    const strictLimit = Date.now() - lastProgressTime < 5000; // no progress within 5s window
-    const allowedReconnects = strictLimit ? 2 : maxReconnect;
-
-    if (autoReconnect && reconnectAttempts < allowedReconnects) {
-      reconnectAttempts += 1;
-      const delay = baseDelay * Math.pow(2, reconnectAttempts - 1); // exponential backoff
-      console.log(
-        `[SSE Frontend] Attempting reconnect #${reconnectAttempts} (limit ${allowedReconnects}) in ${delay}ms`
-      );
-      setTimeout(() => {
-        streamProgress(jobId, getToken, {
-          onProgress,
-          onComplete,
-          onError,
-          onEnd,
-          autoReconnect,
-        });
-      }, delay);
-    } else if (reconnectAttempts >= allowedReconnects) {
-      console.error("[SSE Frontend] Max reconnection attempts reached");
-      callbacks.onError?.({
-        message: "Failed to reconnect after multiple attempts",
-        type: "connection_error",
-        isRetryable: false,
-      });
-    }
-  };
-
-  _activeStreams.set(jobId, {
-    eventSource,
-    callbacks: { onProgress, onComplete, onError, onEnd },
-  });
-
-  // Return cleanup function (explicit cancel)
-  return cleanup;
 }
 
 /**
@@ -392,15 +174,16 @@ export async function extractTempDocument(file, getToken, context = "") {
 export async function extractFromDocument(documentId, getToken, context = "") {
   const authenticatedApi = createAuthenticatedApi(getToken);
 
-  const formData = new FormData();
+  // Send JSON body (context is optional)
+  const body = {};
   if (context && context.trim()) {
-    formData.append("context", context.trim());
+    body.context = context.trim();
   }
 
   const response = await authenticatedApi.post(
     `/api/extract/documents/${documentId}`,
-    formData,
-    { headers: { "Content-Type": "multipart/form-data" } }
+    body,
+    { headers: { "Content-Type": "application/json" } }
   );
 
   return response.data;

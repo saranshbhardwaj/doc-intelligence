@@ -3,10 +3,11 @@
 from sqlalchemy import Column, String, Integer, Float, DateTime, Boolean, Text, ForeignKey, Index
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
-from sqlalchemy.dialects.postgresql import TSVECTOR
+from sqlalchemy.dialects.postgresql import TSVECTOR, JSONB
 from pgvector.sqlalchemy import Vector  # pgvector extension for embeddings
 from app.database import Base
 import uuid
+from typing import Optional, List, Dict, Any
 
 
 class Collection(Base):
@@ -76,21 +77,27 @@ class DocumentChunk(Base):
     Supports hybrid search:
     - Semantic search via pgvector HNSW index on embeddings
     - Keyword search via PostgreSQL GIN index on text_search_vector
+
+    Smart chunking metadata (chunk_metadata JSONB):
+    - Chunk relationships (parent, siblings, linked chunks)
+    - Section and sequence tracking
+    - Rich context (heading hierarchy, table captions, etc.)
     """
     __tablename__ = "document_chunks"
     __table_args__ = (
         Index("idx_document_chunks_document_id", "document_id"),
         Index("idx_document_chunks_embedding", "embedding", postgresql_using="hnsw"),
         Index("idx_document_chunks_fts", "text_search_vector", postgresql_using="gin"),
+        Index("idx_document_chunks_metadata_gin", "chunk_metadata", postgresql_using="gin"),
     )
 
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     document_id = Column(String(36), ForeignKey("documents.id", ondelete="CASCADE"), nullable=False)
 
     # Chunk content
-    text = Column(Text, nullable=False)
-    narrative_text = Column(Text, nullable=True)
-    tables = Column(Text, nullable=True)
+    text = Column(Text, nullable=False)  # Unified searchable text (narrative OR table text)
+    narrative_text = Column(Text, nullable=True)  # Narrative-only text (empty for table chunks)
+    tables = Column(JSONB, nullable=True)  # Structured table metadata: [{"table_id": 0, "text": "...", "row_count": 2, "column_count": 3}]
     chunk_index = Column(Integer, nullable=False)  # Order within document (0, 1, 2, ...)
 
     # Full-text search vector (auto-generated from text column)
@@ -104,7 +111,7 @@ class DocumentChunk(Base):
     embedding_model = Column(String(100), nullable=True)  # Track which model created this embedding
     embedding_version = Column(String(20), nullable=True)  # Model version for gradual migration
 
-    # Chunk metadata
+    # Basic chunk metadata (backward compatible)
     page_number = Column(Integer, nullable=True)
     section_type = Column(String(50), nullable=True)  # "narrative", "table", etc.
     section_heading = Column(Text, nullable=True)
@@ -113,10 +120,94 @@ class DocumentChunk(Base):
     # Token count (for cost estimation)
     token_count = Column(Integer, nullable=True)
 
+    # Rich chunk metadata (JSONB) for smart chunking
+    # Schema: {
+    #   # Relationships
+    #   "section_id": "sec_2",
+    #   "parent_chunk_id": "chunk_123",
+    #   "sibling_chunk_ids": ["chunk_123", "chunk_124"],
+    #   "linked_narrative_id": "chunk_120",
+    #   "linked_table_ids": ["chunk_125"],
+    #
+    #   # Sequence tracking
+    #   "is_continuation": true,
+    #   "chunk_sequence": 2,
+    #   "total_chunks_in_section": 3,
+    #
+    #   # Context
+    #   "heading_hierarchy": ["Main Report", "Section 2"],
+    #   "paragraph_roles": ["sectionHeading", "content"],
+    #   "page_range": [2, 3],
+    #
+    #   # Table-specific
+    #   "table_caption": "Pro Forma Sources & Uses",
+    #   "table_context": "Preceding paragraph...",
+    #   "table_row_count": 15,
+    #   "table_column_count": 4,
+    #
+    #   # Figure-specific
+    #   "figure_id": "1.2",
+    #   "figure_caption": "Corporate Structure",
+    #
+    #   # Content characteristics
+    #   "has_figures": false,
+    #   "content_type": "financial_table"
+    # }
+    chunk_metadata = Column(JSONB, nullable=True)
+
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     # Relationships
     document = relationship("Document", back_populates="chunks")
+
+    # Helper methods for metadata access
+    def get_section_id(self) -> Optional[str]:
+        """Get section ID from metadata."""
+        return self.chunk_metadata.get("section_id") if self.chunk_metadata else None
+
+    def get_parent_chunk_id(self) -> Optional[str]:
+        """Get parent chunk ID (for continuation chunks)."""
+        return self.chunk_metadata.get("parent_chunk_id") if self.chunk_metadata else None
+
+    def get_sibling_chunk_ids(self) -> List[str]:
+        """Get sibling chunk IDs (chunks in same section)."""
+        return self.chunk_metadata.get("sibling_chunk_ids", []) if self.chunk_metadata else []
+
+    def get_linked_chunk_ids(self) -> List[str]:
+        """Get all linked chunk IDs (narrative + tables)."""
+        if not self.chunk_metadata:
+            return []
+
+        linked_ids = []
+        if self.chunk_metadata.get("linked_narrative_id"):
+            linked_ids.append(self.chunk_metadata["linked_narrative_id"])
+        if self.chunk_metadata.get("linked_table_ids"):
+            linked_ids.extend(self.chunk_metadata["linked_table_ids"])
+        return linked_ids
+
+    def is_continuation_chunk(self) -> bool:
+        """Check if this is a continuation chunk."""
+        return self.chunk_metadata.get("is_continuation", False) if self.chunk_metadata else False
+
+    def get_heading_hierarchy(self) -> List[str]:
+        """Get heading hierarchy breadcrumbs."""
+        return self.chunk_metadata.get("heading_hierarchy", []) if self.chunk_metadata else []
+
+    def get_table_context(self) -> Optional[str]:
+        """Get table context (preceding narrative for table chunks)."""
+        return self.chunk_metadata.get("table_context") if self.chunk_metadata else None
+
+    def set_metadata(self, key: str, value: Any) -> None:
+        """Set a metadata value (helper for building metadata)."""
+        if self.chunk_metadata is None:
+            self.chunk_metadata = {}
+        self.chunk_metadata[key] = value
+
+    def get_metadata(self, key: str, default: Any = None) -> Any:
+        """Get a metadata value with optional default."""
+        if not self.chunk_metadata:
+            return default
+        return self.chunk_metadata.get(key, default)
 
 
 class SessionDocument(Base):

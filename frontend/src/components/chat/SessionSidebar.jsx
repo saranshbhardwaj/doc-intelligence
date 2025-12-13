@@ -15,6 +15,7 @@
 import { useState, useMemo } from "react";
 import { Plus, MessageSquare, FileText, Trash2, Search } from "lucide-react";
 import { Button } from "../ui/button";
+import { Card } from "../ui/card";
 import { Input } from "../ui/input";
 import Spinner from "../common/Spinner";
 import {
@@ -49,9 +50,9 @@ export default function SessionSidebar({
   }, [sessions, searchQuery]);
 
   return (
-    <div className="w-64 bg-card border-r border-border flex flex-col h-full">
+    <Card className="p-4 h-full flex flex-col">
       {/* Header with New Chat Button */}
-      <div className="p-3 border-b border-border">
+      <div className="mb-3">
         <Button onClick={onNewChat} className="w-full h-10" size="default">
           <Plus className="w-4 h-4 mr-2" />
           New Chat
@@ -59,7 +60,7 @@ export default function SessionSidebar({
       </div>
 
       {/* Search */}
-      <div className="p-3 border-b border-border">
+      <div className="mb-3">
         <div className="relative">
           <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
           <Input
@@ -181,11 +182,11 @@ export default function SessionSidebar({
       </div>
 
       {/* Footer */}
-      <div className="border-t border-border p-2.5">
+      <div className="border-t border-border pt-3 mt-3">
         <div className="text-xs text-muted-foreground text-center">
           {sessions.length} {sessions.length === 1 ? "session" : "sessions"}
         </div>
       </div>
-    </div>
+    </Card>
   );
 }

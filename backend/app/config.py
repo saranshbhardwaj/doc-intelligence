@@ -32,6 +32,9 @@ class Settings(BaseSettings):
     cache_ttl: int = 48
     default_pages_limit: int = 100  # Default pages limit if user.pages_limit is None
 
+    # Full extraction scalability limits
+    max_pages_per_extraction: int = 150  # Max document size for full extraction (larger docs should use workflows)
+
     # ===== PARSER CONFIGURATION =====
     # Which parser to use for each tier + PDF type combination
     parser_free_digital: str = "pymupdf"
@@ -73,10 +76,15 @@ class Settings(BaseSettings):
     llm_max_input_chars: int = 130000
     llm_timeout_seconds: int = 300  # 5 minutes timeout for API calls (large documents can take 2-3 min)
 
-    # LLM Settings - Cheap Model (Chunk Summarization)
+    # LLM Settings - Cheap Model (Chunk Summarization & Workflows)
     cheap_llm_model: str = "claude-3-5-haiku-20241022"  # Much cheaper for summarization
-    cheap_llm_max_tokens: int = 4000  # Summaries are shorter
-    cheap_llm_timeout_seconds: int = 60  # Summaries are faster
+    cheap_llm_max_tokens: int = 8000  # Increased for workflow outputs (Investment Memos need ~10-15K tokens)
+    cheap_llm_timeout_seconds: int = 300  # Longer outputs need more time
+
+    # LLM Settings - Synthesis Model (Final workflow synthesis in map-reduce)
+    synthesis_llm_model: str = "claude-haiku-4-5-20251001"  # Haiku 4.5 for cost-effective synthesis (testing)
+    synthesis_llm_max_tokens: int = 50000  # Haiku 4.5 max output: 64K tokens (leave room for overhead)
+    synthesis_llm_timeout_seconds: int = 600  # 10 minutes for large workflow outputs
 
     # ===== CHAT MEMORY SETTINGS =====
     # Number of most recent messages (user+assistant turns) to include verbatim
@@ -131,13 +139,12 @@ class Settings(BaseSettings):
 
     # ===== RAG HYBRID SEARCH SETTINGS =====
     # Combines semantic (vector) search with keyword (BM25/FTS) search
-    # for improved retrieval quality
+    # using Reciprocal Rank Fusion (RRF) for improved retrieval quality
 
-    # Weight for semantic search in hybrid scoring (0.0 - 1.0)
-    rag_hybrid_semantic_weight: float = 0.6
-
-    # Weight for keyword search in hybrid scoring (0.0 - 1.0)
-    rag_hybrid_keyword_weight: float = 0.4
+    # RRF constant (k parameter) - controls rank decay
+    # Higher k = less emphasis on top ranks (typically 60)
+    # Formula: RRF_score = Σ(1 / (k + rank)) across all retrievers
+    rag_hybrid_rrf_k: int = 60
 
     # Number of candidates to retrieve from each search method before merging
     rag_retrieval_candidates: int = 20

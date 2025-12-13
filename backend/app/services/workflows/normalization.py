@@ -14,26 +14,84 @@ import re
 from app.utils.logging import logger
 
 
-def normalize_workflow_output(data: Dict[str, Any], workflow_name: str, currency: str = "USD") -> Dict[str, Any]:
+def normalize_workflow_output(
+    data: Dict[str, Any],
+    workflow_name: str,
+    currency: str = "USD",
+    document_ids: Optional[List[str]] = None,
+    db=None,
+    raw_text: Optional[str] = None,
+    citation_map: Optional[Dict[str, Dict]] = None
+) -> Dict[str, Any]:
     """Main normalization entry point for workflow outputs.
 
     Args:
         data: Raw LLM output
         workflow_name: Name of workflow for context-specific normalization
         currency: Currency code (USD, EUR, etc.)
+        document_ids: List of document IDs (unused, kept for signature compatibility)
+        db: Database session (unused, kept for signature compatibility)
+        raw_text: Raw LLM text output (for citation extraction)
+        citation_map: Pre-built citation map from retrieval (ZERO DB queries!)
 
     Returns:
         Normalized data ready for frontend display
     """
     if not isinstance(data, dict):
         return data
-    
+
     normalized = dict(data)
     normalized.setdefault("currency", currency)
-    
+
     # Ensure required top-level fields
     normalized.setdefault("meta", {"version": 2})
     normalized.setdefault("references", [])
+
+    # === Rich Citation Resolution (Production: Zero DB Queries!) ===
+    # Strategy: Keep normalized["references"] as simple string array for schema validation
+    # Store rich citation metadata separately in a non-schema field
+    if citation_map and raw_text:
+        try:
+            # Extract citation tokens from LLM output
+            citation_pattern = r'\[D\d+:p\d+\]'
+            citation_tokens = re.findall(citation_pattern, raw_text)
+            unique_tokens = list(set(citation_tokens))
+
+            logger.info(f"📍 Citation resolution: {len(unique_tokens)} unique citations in LLM output, {len(citation_map)} in map")
+
+            # Build rich citation list (for frontend display)
+            rich_citations = []
+            for token in sorted(unique_tokens):
+                citation_data = citation_map.get(token)
+                if citation_data:
+                    rich_citations.append(citation_data)
+                    logger.debug(f"✅ Resolved {token} → {citation_data.get('document')}, page {citation_data.get('page')}")
+                else:
+                    # Fallback for unknown citations
+                    logger.warning(f"❌ Citation {token} NOT found in citation_map (available: {list(citation_map.keys())[:5]}...)")
+                    rich_citations.append({
+                        "id": token,
+                        "token": token,
+                        "document": "Unknown",
+                        "page": None,
+                        "section": None,
+                        "snippet": token,
+                        "url": None
+                    })
+
+            # For schema validation: Set references as simple string array
+            # Use ground truth (citations actually found in LLM output) rather than trusting LLM's references field
+            # This ensures consistency between what LLM wrote and what it claims to have cited
+            normalized["references"] = sorted(unique_tokens)
+
+            logger.info(
+                f"Resolved {len(rich_citations)} citations using citation map "
+                f"(zero DB queries, {len(citation_map)} total citations available)"
+            )
+        except Exception as e:
+            logger.error(f"Citation map resolution failed: {e}", exc_info=True)
+            # Keep empty references on error
+            normalized.setdefault("references", [])
 
     # Workflow-specific normalization
     if workflow_name in ["Investment Memo", "Investment Memo Formatter"]:
@@ -99,14 +157,22 @@ def normalize_workflow_output(data: Dict[str, Any], workflow_name: str, currency
         #     section_conf = section.get("confidence")
         #     section["confidence"] = map_confidence_to_band(section_conf)
 
-        # Normalize references: union of all citations in sections
-        citations_set = set()
+        # Normalize section citation arrays (convert to strings if needed)
+        # Don't touch top-level references - already set from citation extraction
         for section in normalized["sections"]:
             if "citations" in section:
-                section_cits = [str(c) for c in section["citations"] if c]
+                # Ensure citations are strings (in case LLM output objects)
+                section_cits = []
+                for c in section["citations"]:
+                    if isinstance(c, str):
+                        section_cits.append(c)
+                    elif isinstance(c, dict) and "token" in c:
+                        section_cits.append(c["token"])  # Extract token from object
+                    elif isinstance(c, dict) and "id" in c:
+                        section_cits.append(c["id"])  # Extract id from object
+                    else:
+                        section_cits.append(str(c))  # Last resort
                 section["citations"] = section_cits
-                citations_set.update(section_cits)
-        normalized["references"] = sorted(list(citations_set))
         
         normalize_confidence_scores(normalized)
 
@@ -170,10 +236,18 @@ def normalize_sections(sections: Any) -> List[Dict[str, Any]]:
                 # Clean and format content
                 normalized_section["content"] = clean_markdown_content(normalized_section["content"])
 
+            # Ensure citations are strings (don't convert to objects)
             if "citations" not in normalized_section:
                 normalized_section["citations"] = []
+            elif isinstance(normalized_section["citations"], list):
+                # Keep citations as strings - they should be citation tokens like "[D1:p1]"
+                # No need to convert to objects or clean them
+                normalized_section["citations"] = [
+                    c if isinstance(c, str) else str(c)
+                    for c in normalized_section["citations"]
+                ]
             else:
-                normalized_section["citations"] = normalize_citations(normalized_section["citations"])
+                normalized_section["citations"] = []
         else:
             logger.warning(f"Unknown section type: {type(section)}")
             continue

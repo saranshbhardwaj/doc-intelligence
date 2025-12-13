@@ -18,6 +18,7 @@ from app.db_models_chat import DocumentChunk, CollectionDocument, ChatMessage
 from app.repositories.chat_repository import ChatRepository
 from app.services.embeddings import get_embedding_provider
 from app.services.llm_client import LLMClient
+from app.services.chat.llm_service import ChatLLMService
 from app.config import settings
 from app.utils.logging import logger
 from app.services.rag.prompt_builder import PromptBuilder
@@ -25,6 +26,8 @@ from app.services.rag.memory import ConversationMemory
 from app.services.rag.budget_enforcer import BudgetEnforcer
 from app.services.rag.hybrid_retriever import HybridRetriever
 from app.services.rag.reranker import Reranker
+from app.utils.chunk_metadata import validate_and_normalize_chunks
+from app.services.service_locator import get_reranker
 
 
 class RAGService:
@@ -40,7 +43,7 @@ class RAGService:
     6. Save history: Persist messages to database
     """
 
-    def __init__(self, db: Session):
+    def __init__(self, db: Session, reranker: Reranker | None = None):
         """
         Initialize RAG service.
 
@@ -56,16 +59,18 @@ class RAGService:
             max_input_chars=settings.llm_max_input_chars,
             timeout_seconds=settings.cheap_llm_timeout_seconds,
         )
+
+        # Initialize chat LLM service for conversation operations
+        self.chat_llm_service = ChatLLMService(self.llm_client)
+
         # Inject modular components
         self.prompt_builder = PromptBuilder()
-        self.memory = ConversationMemory(self.llm_client)
+        self.memory = ConversationMemory(self.chat_llm_service)
         self.budget = BudgetEnforcer()
         self.hybrid_retriever = HybridRetriever(db)  # Hybrid retrieval (semantic + keyword)
 
         # Re-ranker (cross-encoder based, optional via config)
-        self.reranker = None
-        if settings.rag_use_reranker:
-            self.reranker = Reranker()
+        self.reranker = reranker if reranker is not None else (get_reranker() if settings.rag_use_reranker else None)
 
     async def chat(
         self,
@@ -203,6 +208,19 @@ class RAGService:
             # Continue with empty context - let LLM respond that it can't find relevant info
 
         # ------------------------------------------------------------------
+        # STEP 2.5: Validate and normalize chunk metadata
+        if relevant_chunks:
+            logger.debug(
+                f"Validating {len(relevant_chunks)} chunks before budget enforcement",
+                extra={"session_id": session_id}
+            )
+            relevant_chunks = validate_and_normalize_chunks(relevant_chunks)
+            logger.debug(
+                f"Chunk validation complete: {len(relevant_chunks)} valid chunks",
+                extra={"session_id": session_id}
+            )
+
+        # ------------------------------------------------------------------
         # STEP 3: Budget enforcement
         summary_text, recent_messages, relevant_chunks = await self.budget.enforce(
             memory=self.memory,
@@ -228,17 +246,33 @@ class RAGService:
         # ------------------------------------------------------------------
         # STEP 5: Stream response from Claude with error handling
         full_response = ""
+        usage_data = None
         try:
-            async for chunk in self.llm_client.stream_chat(prompt):
-                full_response += chunk
-                yield chunk
+            async for item in self.llm_client.stream_chat(prompt):
+                # Handle different stream item types
+                if item["type"] == "chunk":
+                    text_chunk = item["text"]
+                    full_response += text_chunk
+                    yield text_chunk
+                elif item["type"] == "usage":
+                    # Capture usage data for persistence
+                    usage_data = item["data"]
+                    logger.debug(
+                        "Captured token usage from stream",
+                        extra={
+                            "session_id": session_id,
+                            "input_tokens": usage_data.get("input_tokens"),
+                            "output_tokens": usage_data.get("output_tokens")
+                        }
+                    )
 
             # Persist chat messages only after successful streaming
             await self._save_chat_messages(
                 session_id=session_id,
                 user_message=user_message,
                 assistant_message=full_response,
-                source_chunks=[chunk["id"] for chunk in relevant_chunks]
+                source_chunks=[chunk["id"] for chunk in relevant_chunks],
+                usage_data=usage_data
             )
         except Exception as stream_error:
             logger.error(
@@ -258,7 +292,8 @@ class RAGService:
                         session_id=session_id,
                         user_message=user_message,
                         assistant_message=f"{full_response}\n\n[Error: Response was interrupted due to technical issues]",
-                        source_chunks=[chunk["id"] for chunk in relevant_chunks]
+                        source_chunks=[chunk["id"] for chunk in relevant_chunks],
+                        usage_data=usage_data  # Include usage data if captured before error
                     )
                 except Exception as save_error:
                     logger.error(
@@ -341,7 +376,8 @@ class RAGService:
         session_id: str,
         user_message: str,
         assistant_message: str,
-        source_chunks: List[str]
+        source_chunks: List[str],
+        usage_data: Optional[Dict[str, Any]] = None
     ):
         """
         Save user message and assistant response to database.
@@ -351,6 +387,7 @@ class RAGService:
             user_message: User's message
             assistant_message: Assistant's response
             source_chunks: List of chunk IDs used for response
+            usage_data: Optional token usage data from LLM API
         """
         import json
 
@@ -385,6 +422,47 @@ class RAGService:
                 )
                 raise ValueError("Failed to save user message")
 
+            # Calculate token usage and cost
+            tokens_used = None
+            cost_usd = None
+            model_used = settings.cheap_llm_model
+
+            if usage_data:
+                input_tokens = usage_data.get("input_tokens", 0) or 0
+                output_tokens = usage_data.get("output_tokens", 0) or 0
+                cache_read_tokens = usage_data.get("cache_read_input_tokens", 0) or 0
+                cache_creation_tokens = usage_data.get("cache_creation_input_tokens", 0) or 0
+
+                # Total tokens (input + output)
+                tokens_used = input_tokens + output_tokens
+
+                # Get model from usage data if available
+                model_used = usage_data.get("model", settings.cheap_llm_model)
+
+                # Calculate cost based on model pricing (Haiku 3.5 pricing as of 2025)
+                # Input: $0.25 per MTok, Output: $1.25 per MTok
+                # Cache write: $0.30 per MTok, Cache read: $0.03 per MTok
+                input_cost = (input_tokens / 1_000_000) * 0.25
+                output_cost = (output_tokens / 1_000_000) * 1.25
+                cache_write_cost = (cache_creation_tokens / 1_000_000) * 0.30
+                cache_read_cost = (cache_read_tokens / 1_000_000) * 0.03
+
+                cost_usd = input_cost + output_cost + cache_write_cost + cache_read_cost
+
+                logger.info(
+                    "Token usage for chat message",
+                    extra={
+                        "session_id": session_id,
+                        "input_tokens": input_tokens,
+                        "output_tokens": output_tokens,
+                        "cache_read_tokens": cache_read_tokens,
+                        "cache_creation_tokens": cache_creation_tokens,
+                        "total_tokens": tokens_used,
+                        "cost_usd": round(cost_usd, 6),
+                        "model": model_used
+                    }
+                )
+
             # Save assistant message
             assistant_msg_saved = chat_repo.save_message(
                 session_id=session_id,
@@ -393,10 +471,9 @@ class RAGService:
                 message_index=message_count + 1,
                 source_chunks=json.dumps(source_chunks),
                 num_chunks_retrieved=len(source_chunks),
-                model_used=settings.cheap_llm_model,  # Using Haiku for testing
-                # TODO: Calculate actual tokens and cost
-                tokens_used=None,
-                cost_usd=None
+                model_used=model_used,
+                tokens_used=tokens_used,
+                cost_usd=cost_usd
             )
 
             # Edge case: Check if assistant message save succeeded

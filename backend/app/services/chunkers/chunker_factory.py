@@ -4,6 +4,7 @@ from typing import Optional
 
 from app.services.chunkers.base import DocumentChunker
 from app.services.chunkers.azure_chunker import AzurePageWiseChunker
+from app.services.chunkers.azure_smart_chunker import AzureSmartChunker
 from app.utils.logging import logger
 
 
@@ -15,7 +16,9 @@ class ChunkerFactory:
 
     # Registry of chunkers by parser name
     _CHUNKER_REGISTRY = {
-        "azure_document_intelligence": AzurePageWiseChunker,
+        "azure_document_intelligence": AzureSmartChunker,  # Smart chunker (default)
+        # Legacy chunker (page-wise) - available but not default
+        "azure_document_intelligence_pagewise": AzurePageWiseChunker,
         # Future chunkers:
         # "google_documentai": GooglePageWiseChunker,
         # "llmwhisperer": LLMWhispererChunker,

@@ -32,7 +32,9 @@ async def upload_document(
     user: User = Depends(get_current_user)
 ):
     """
-    Upload a PDF to a collection and start async indexing.
+    Upload a document to a collection and start async indexing.
+
+    Supported formats: PDF (digital & scanned), DOCX
 
     New Schema Flow:
     1. Validate file (type, size, name)
@@ -46,14 +48,14 @@ async def upload_document(
 
     Args:
         collection_id: Collection ID (UUID format)
-        file: PDF file to upload
+        file: Document file (PDF or DOCX)
         user: Current user
 
     Returns:
         job_id and document_id for tracking indexing progress
 
     Raises:
-        HTTPException 400: Invalid file
+        HTTPException 400: Invalid file or unsupported format
         HTTPException 404: Collection not found
         HTTPException 413: File too large
         HTTPException 500: Server error
@@ -74,9 +76,25 @@ async def upload_document(
             detail=f"Filename too long (max {MAX_FILENAME_LENGTH} characters)"
         )
 
-    # Validate file type
-    if not file.filename.lower().endswith('.pdf'):
-        raise HTTPException(status_code=400, detail="Only PDF files are supported")
+    # Validate file type - Azure Document Intelligence supported formats
+    # https://learn.microsoft.com/en-us/azure/ai-services/document-intelligence/
+    ALLOWED_EXTENSIONS = {
+        # Documents
+        '.pdf',   # PDF (digital and scanned/OCR)
+        '.docx',  # Microsoft Word
+        # Note: Excel, PowerPoint, and images not supported yet
+        # - Excel loses table structure (returned as paragraphs)
+        # - PowerPoint needs slide-based chunking strategy
+        # - Images need OCR-specific handling
+    }
+
+    file_ext = os.path.splitext(file.filename.lower())[1]
+    if file_ext not in ALLOWED_EXTENSIONS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"File type '{file_ext}' not supported. "
+                   f"Allowed: {', '.join(sorted(ALLOWED_EXTENSIONS))}"
+        )
 
     # Read file and validate
     try:

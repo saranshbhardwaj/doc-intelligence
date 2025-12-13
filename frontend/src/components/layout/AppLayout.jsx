@@ -65,9 +65,9 @@ export default function AppLayout({ children, breadcrumbs }) {
                   <Link
                     key={link.path}
                     to={link.path}
-                    onClick={(e) =>
-                      console.log("nav click:", link.path, e.target)
-                    }
+                    // onClick={(e) =>
+                    //   console.log("nav click:", link.path, e.target)
+                    // }
                     className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
                       active
                         ? "bg-primary/10 text-primary" // active: subtle primary background + primary text
@@ -94,29 +94,6 @@ export default function AppLayout({ children, breadcrumbs }) {
               />
             </div>
           </div>
-
-          {/* Breadcrumbs (optional) */}
-          {breadcrumbs && breadcrumbs.length > 0 && (
-            <div className="flex items-center gap-2 mt-3 text-sm text-muted-foreground dark:text-muted-foreground">
-              {breadcrumbs.map((crumb, idx) => (
-                <div key={idx} className="flex items-center gap-2">
-                  {idx > 0 && <span>/</span>}
-                  {crumb.href ? (
-                    <Link
-                      to={crumb.href}
-                      className="hover:text-foreground dark:hover:text-foreground transition-colors"
-                    >
-                      {crumb.label}
-                    </Link>
-                  ) : (
-                    <span className="text-foreground font-medium">
-                      {crumb.label}
-                    </span>
-                  )}
-                </div>
-              ))}
-            </div>
-          )}
         </div>
       </header>
 

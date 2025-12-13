@@ -17,8 +17,9 @@ from app.db_models_users import User
 from app.database import get_db
 from app.services.rag import RAGService
 from app.repositories.session_repository import SessionRepository
-from app.repositories.chat_repository import ChatRepository
+from app.repositories.rag_repository import RAGRepository
 from app.utils.logging import logger
+from app.services.service_locator import get_reranker
 
 router = APIRouter()
 
@@ -81,7 +82,7 @@ async def chat_with_session(
 
     # Use repositories
     session_repo = SessionRepository()
-    chat_repo = ChatRepository()
+    rag_repo = RAGRepository(db)
 
     # Verify session exists and belongs to user (with documents eagerly loaded)
     session = session_repo.get_session(session_id, user.id)
@@ -99,18 +100,37 @@ async def chat_with_session(
     document_ids = [link.document_id for link in session.document_links]
     document_names = [link.document.filename for link in session.document_links]
 
+    # Edge case: Validate documents are indexed (have chunks)
+    chunk_count = rag_repo.count_chunks_for_documents(document_ids)
+
+    if chunk_count == 0:
+        logger.warning(
+            "Documents not indexed yet for session",
+            extra={
+                "session_id": session_id,
+                "document_count": len(document_ids),
+                "document_names": document_names[:3]
+            }
+        )
+        raise HTTPException(
+            status_code=400,
+            detail="Documents haven't been indexed yet. Please wait for document processing to complete before chatting."
+        )
+
     logger.info(
         "Starting chat in session",
         extra={
             "session_id": session_id,
             "user_id": user.id,
             "document_count": len(document_ids),
-            "document_names": document_names[:5]  # Log first 5 for debugging
+            "document_names": document_names[:5],  # Log first 5 for debugging
+            "total_chunks": chunk_count
         }
     )
 
     # Initialize RAG service (still needs db session for vector search)
-    rag_service = RAGService(db)
+    reranker = get_reranker()
+    rag_service = RAGService(db, reranker=reranker)
 
     # Stream chat response
     async def event_generator():

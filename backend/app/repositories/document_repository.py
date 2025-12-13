@@ -176,7 +176,11 @@ class DocumentRepository:
         )
 
     def delete_document(self, document_id: str) -> bool:
-        """Delete a document (cascades to chunks, collection_documents, job_states)."""
+        """Delete a document (cascades to chunks, collection_documents, job_states).
+
+        Preserves extractions and workflows - they will have NULL document_id after deletion.
+        Handles cleanup of foreign key references to prevent constraint violations.
+        """
         with self._get_session() as db:
             try:
                 doc = db.get(Document, document_id)
@@ -187,13 +191,33 @@ class DocumentRepository:
                     )
                     return False
 
+                # Nullify extraction.document_id to prevent foreign key violation
+                extractions_updated = db.query(Extraction).filter(
+                    Extraction.document_id == document_id
+                ).update(
+                    {Extraction.document_id: None},
+                    synchronize_session=False
+                )
+
+                if extractions_updated > 0:
+                    logger.info(
+                        f"Nullified document_id in {extractions_updated} extractions",
+                        extra={"document_id": document_id}
+                    )
+
+                # Delete the document (cascades to chunks, collection_documents, job_states)
                 db.delete(doc)
                 db.commit()
+
                 logger.info(
-                    "Deleted canonical document",
-                    extra={"document_id": document_id}
+                    "Deleted canonical document (preserved extractions/workflows)",
+                    extra={
+                        "document_id": document_id,
+                        "extractions_preserved": extractions_updated
+                    }
                 )
                 return True
+
             except SQLAlchemyError as e:
                 db.rollback()
                 logger.error(
@@ -311,14 +335,20 @@ class DocumentRepository:
                     WorkflowRun.user_id == user_id
                 ).all()
 
-                workflows_list = [
-                    {
-                        "run_id": workflow.id,
-                        "workflow_name": workflow.workflow_name,
-                        "created_at": workflow.created_at.isoformat() if workflow.created_at else None
-                    }
-                    for workflow in workflows
-                ]
+                workflows_list = []
+                for workflow_run in workflows:
+                    # Get workflow name from snapshot (preferred) or relationship (fallback)
+                    workflow_name = "Unknown Workflow"
+                    if workflow_run.workflow_snapshot and isinstance(workflow_run.workflow_snapshot, dict):
+                        workflow_name = workflow_run.workflow_snapshot.get("name", "Unknown Workflow")
+                    elif workflow_run.workflow:
+                        workflow_name = workflow_run.workflow.name
+
+                    workflows_list.append({
+                        "run_id": workflow_run.id,
+                        "workflow_name": workflow_name,
+                        "created_at": workflow_run.created_at.isoformat() if workflow_run.created_at else None
+                    })
 
                 # Calculate total usage count
                 total_usage = len(chat_sessions_list) + len(extracts_list) + len(workflows_list)

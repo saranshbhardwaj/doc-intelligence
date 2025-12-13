@@ -22,7 +22,7 @@ class Extraction(Base):
     )
 
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
-    document_id = Column(String(36), ForeignKey("documents.id", ondelete="CASCADE"), nullable=False)
+    document_id = Column(String(36), ForeignKey("documents.id", ondelete="SET NULL"), nullable=True)
     user_id = Column(String(100), nullable=False, index=True)  # Clerk user ID
 
     # Snapshot of source document & parsing metadata (duplicated for fast access & historical audit)

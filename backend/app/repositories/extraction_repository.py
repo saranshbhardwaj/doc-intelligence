@@ -604,12 +604,13 @@ class ExtractionRepository:
                     )
                     return False
 
-                # Mark usage logs before deleting extraction
+                # Mark usage logs and nullify foreign key before deleting extraction
                 now = datetime.now(timezone("UTC"))
-                
+
                 db.query(UsageLog).filter(
                     UsageLog.extraction_id == extraction_id
                 ).update({
+                    "extraction_id": None,  # Nullify foreign key to avoid constraint violation
                     "filename": extraction.filename,
                     "is_deleted": True,
                     "deleted_at": now

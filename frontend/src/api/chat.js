@@ -10,6 +10,7 @@
  */
 
 import { createAuthenticatedApi } from "./client";
+import { streamJobProgress } from "./sse-utils";
 
 /**
  * Collections API
@@ -80,71 +81,58 @@ export async function uploadDocument(getToken, collectionId, file, onProgress) {
 /**
  * Connect to SSE stream for document indexing progress
  *
- * NOTE: EventSource doesn't support custom headers, so auth token is passed as query parameter
+ * Modernized to use the unified streamJobProgress utility with:
+ * - Auto-reconnect on connection loss
+ * - Initial state fetching for page refresh support
+ * - Better error handling with actual error messages
+ *
+ * @param {Function} getToken - Clerk's getToken function
+ * @param {string} jobId - Job ID to stream progress for
+ * @param {Function} onProgress - Called with progress updates
+ * @param {Function} onComplete - Called when indexing completes
+ * @param {Function} onError - Called on error
+ * @param {Object} options - Additional options
+ * @param {boolean} options.autoReconnect - Enable auto-reconnect (default: true)
+ * @param {boolean} options.fetchInitialState - Fetch initial state on mount (default: false)
+ * @returns {Promise<Function>} Cleanup function to close the connection
  */
-export function connectToIndexingProgress(
+export async function connectToIndexingProgress(
   getToken,
   jobId,
   onProgress,
   onComplete,
-  onError
+  onError,
+  { autoReconnect = true, fetchInitialState = false } = {}
 ) {
-  getToken().then((token) => {
-    // Pass token as query parameter (EventSource doesn't support headers)
-    const eventSource = new EventSource(
-      `${
-        import.meta.env.VITE_API_URL
-      }/api/chat/jobs/${jobId}/progress?token=${encodeURIComponent(token)}`
-    );
-
-    let endEventReceived = false; // Track if we received the end event
-
-    eventSource.addEventListener("progress", (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        onProgress(data);
-      } catch (err) {
-        console.error("Failed to parse progress event:", err);
-      }
-    });
-
-    eventSource.addEventListener("complete", (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        onComplete(data);
-      } catch (err) {
-        console.error("Failed to parse complete event:", err);
-      }
-    });
-
-    eventSource.addEventListener("error", (event) => {
-      try {
-        const data = JSON.parse(event.data);
-        eventSource.close();
-        endEventReceived = true;
-        onError(new Error(data.message || "Indexing failed"));
-      } catch (err) {
-        console.error("Failed to parse error event:", err);
-      }
-    });
-
-    eventSource.addEventListener("end", (event) => {
-      console.log("Received end event, closing SSE connection");
-      endEventReceived = true;
-      eventSource.close();
-    });
-
-    eventSource.onerror = (error) => {
-      // Only treat as error if we didn't receive the end event
-      if (!endEventReceived) {
-        console.error("SSE connection error:", error);
-        eventSource.close();
-        onError(new Error("Connection lost"));
-      }
-    };
-
-    return () => eventSource.close();
+  // Use unified SSE utility with document indexing support
+  return streamJobProgress(jobId, getToken, {
+    onProgress,
+    onComplete,
+    onError: (errorData) => {
+      // Convert error object to Error instance for backward compatibility
+      const errorMsg =
+        typeof errorData === "string"
+          ? errorData
+          : errorData?.message || "Indexing failed";
+      onError(new Error(errorMsg));
+    },
+    onEnd: (data) => {
+      console.log("[Document Indexing] SSE stream ended:", data?.reason);
+    },
+    autoReconnect,
+    fetchInitialState,
+    getJobStatus: fetchInitialState ? getJobStatus : null,
   });
+}
+
+/**
+ * Get job status for document indexing
+ * Used by SSE utility for initial state fetching
+ */
+async function getJobStatus(jobId, getToken) {
+  const api = createAuthenticatedApi(getToken);
+  const response = await api.get(`/api/jobs/${jobId}/status`);
+  return response.data;
 }
 
 /**

@@ -112,8 +112,11 @@ export default function EnhancedDeleteWarning({
               {isInUse ? (
                 <AlertDialogDescription className="space-y-4">
                   <p className="text-base">
-                    <strong className="text-foreground">{documentName}</strong> is currently being used in{" "}
-                    <strong className="text-destructive">{usageData.total_usage_count}</strong>{" "}
+                    <strong className="text-foreground">{documentName}</strong>{" "}
+                    is currently being used in{" "}
+                    <strong className="text-destructive">
+                      {usageData.total_usage_count}
+                    </strong>{" "}
                     {usageData.total_usage_count === 1 ? "place" : "places"}:
                   </p>
 
@@ -127,14 +130,16 @@ export default function EnhancedDeleteWarning({
                           <span>Chat Sessions ({chatCount})</span>
                         </div>
                         <ul className="space-y-1 pl-6">
-                          {usageData.usage.chat_sessions.slice(0, 5).map((session) => (
-                            <li
-                              key={session.session_id}
-                              className="text-sm text-muted-foreground"
-                            >
-                              • {session.title}
-                            </li>
-                          ))}
+                          {usageData.usage.chat_sessions
+                            .slice(0, 5)
+                            .map((session) => (
+                              <li
+                                key={session.session_id}
+                                className="text-sm text-muted-foreground"
+                              >
+                                • {session.title}
+                              </li>
+                            ))}
                           {chatCount > 5 && (
                             <li className="text-sm text-muted-foreground italic">
                               • ... and {chatCount - 5} more
@@ -152,7 +157,9 @@ export default function EnhancedDeleteWarning({
                           <span>Extractions ({extractCount})</span>
                         </div>
                         <p className="text-sm text-muted-foreground pl-6">
-                          {extractCount} extraction{extractCount !== 1 ? "s" : ""} will lose reference to this document
+                          {extractCount} extraction
+                          {extractCount !== 1 ? "s" : ""} will lose reference to
+                          this document
                         </p>
                       </div>
                     )}
@@ -165,14 +172,16 @@ export default function EnhancedDeleteWarning({
                           <span>Workflow Runs ({workflowCount})</span>
                         </div>
                         <ul className="space-y-1 pl-6">
-                          {usageData.usage.workflows.slice(0, 5).map((workflow) => (
-                            <li
-                              key={workflow.run_id}
-                              className="text-sm text-muted-foreground"
-                            >
-                              • {workflow.workflow_name}
-                            </li>
-                          ))}
+                          {usageData.usage.workflows
+                            .slice(0, 5)
+                            .map((workflow) => (
+                              <li
+                                key={workflow.run_id}
+                                className="text-sm text-muted-foreground"
+                              >
+                                • {workflow.workflow_name}
+                              </li>
+                            ))}
                           {workflowCount > 5 && (
                             <li className="text-sm text-muted-foreground italic">
                               • ... and {workflowCount - 5} more
@@ -190,8 +199,10 @@ export default function EnhancedDeleteWarning({
                     </p>
                     <ul className="space-y-1 text-sm text-muted-foreground">
                       <li>• Document will be removed from all chat sessions</li>
-                      <li>• All document chunks and embeddings will be deleted</li>
-                      <li>• Extraction and workflow history will remain, but won't reference this document</li>
+                      <li>
+                        • Extraction and workflow history will remain, but won't
+                        reference this document
+                      </li>
                       <li>• This action cannot be undone</li>
                     </ul>
                   </div>
@@ -199,7 +210,11 @@ export default function EnhancedDeleteWarning({
                   {/* Confirmation Input */}
                   <div>
                     <p className="text-sm text-foreground font-medium mb-2">
-                      Type <code className="px-1.5 py-0.5 bg-muted rounded text-destructive font-mono">DELETE</code> to confirm:
+                      Type{" "}
+                      <code className="px-1.5 py-0.5 bg-muted rounded text-destructive font-mono">
+                        DELETE
+                      </code>{" "}
+                      to confirm:
                     </p>
                     <Input
                       value={confirmText}
@@ -216,8 +231,8 @@ export default function EnhancedDeleteWarning({
                     <strong className="text-foreground">{documentName}</strong>.
                   </p>
                   <p className="text-sm text-muted-foreground">
-                    The document is not currently used in any chat sessions, extractions, or workflows.
-                    This action cannot be undone.
+                    The document is not currently used in any chat sessions,
+                    extractions, or workflows. This action cannot be undone.
                   </p>
                 </AlertDialogDescription>
               )}

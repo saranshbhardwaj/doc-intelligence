@@ -9,6 +9,8 @@ from app.utils.logging import logger
 from app.api.dependencies import cache
 from app.database import get_db
 from app.services.workflows.seeding import seed_workflows
+from app.services.embeddings.factory import get_embedding_provider
+from app.services.service_locator import get_reranker
 
 # Retention settings (could later move to settings)
 UPLOAD_RETENTION_HOURS = 6  # Delete uploaded source PDFs older than this
@@ -52,6 +54,12 @@ async def lifespan(app):
 
     # Start background cleanup task (cache + uploaded file pruning)
     cleanup_task = asyncio.create_task(periodic_cleanup())
+    
+    get_embedding_provider()
+    if settings.rag_use_reranker:
+        get_reranker()  # Preload reranker
+    
+    logger.info("✅ Models ready")
 
     # yield control to the running app
     yield

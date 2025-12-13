@@ -20,6 +20,7 @@ import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
 import { Label } from "../components/ui/label";
 import { Checkbox } from "../components/ui/checkbox";
+import { Progress } from "../components/ui/progress";
 import {
   Select,
   SelectTrigger,
@@ -145,19 +146,19 @@ export default function ExtractPage() {
     fetchExtractionHistory,
   ]);
 
-  const handleFileSelect = (e) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    if (file.type !== "application/pdf") {
-      alert("Please select a PDF file");
-      return;
-    }
-    if (file.size > 50 * 1024 * 1024) {
-      alert("File size must be < 50MB");
-      return;
-    }
-    setSelectedFile(file);
-  };
+  // const handleFileSelect = (e) => {
+  //   const file = e.target.files?.[0];
+  //   if (!file) return;
+  //   if (file.type !== "application/pdf") {
+  //     alert("Please select a PDF file");
+  //     return;
+  //   }
+  //   if (file.size > 50 * 1024 * 1024) {
+  //     alert("File size must be < 50MB");
+  //     return;
+  //   }
+  //   setSelectedFile(file);
+  // };
 
   const handleExtract = async () => {
     if (mode === "upload" && !selectedFile) {
@@ -168,25 +169,9 @@ export default function ExtractPage() {
       alert("Select a document");
       return;
     }
-    if (mode === "upload" && saveToLibrary && !selectedCollection) {
-      alert("Select a collection");
-      return;
-    }
 
     try {
-      if (mode === "upload") {
-        if (saveToLibrary) {
-          await uploadDocument(selectedFile, getToken, extractionContext);
-        } else {
-          await extractTemp(selectedFile, getToken, extractionContext);
-        }
-      } else {
-        await extractLibraryDocument(
-          selectedDocId,
-          getToken,
-          extractionContext
-        );
-      }
+      await extractLibraryDocument(selectedDocId, getToken, extractionContext);
     } catch (err) {
       console.error("Extraction start failed", err);
     }
@@ -210,7 +195,7 @@ export default function ExtractPage() {
   };
 
   const handleViewAllHistory = () => {
-    navigate("/app/extractions/history");
+    navigate("/app/extractions");
   };
 
   const handleDeleteExtraction = (extractionId) => {
@@ -228,18 +213,7 @@ export default function ExtractPage() {
           </h2>
 
           {/* Mode Selection */}
-          <div className="grid grid-cols-2 gap-3 mb-4">
-            <button
-              onClick={() => setMode("upload")}
-              className={`p-3 border rounded-lg text-sm transition-all ${
-                mode === "upload"
-                  ? "border-primary bg-primary/10"
-                  : "border-border hover:border-border"
-              }`}
-            >
-              <Upload className="w-5 h-5 mb-1 mx-auto text-primary" />
-              Upload
-            </button>
+          <div className="grid grid-cols-1 gap-3 mb-4">
             <button
               onClick={() => setMode("library")}
               className={`p-3 border rounded-lg text-sm transition-all ${
@@ -252,93 +226,6 @@ export default function ExtractPage() {
               Library
             </button>
           </div>
-
-          {/* File Upload Section */}
-          {mode === "upload" && (
-            <div className="space-y-4">
-              <div>
-                <Label className="text-sm font-medium text-foreground mb-2 block">
-                  Upload PDF
-                </Label>
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  accept=".pdf"
-                  onChange={handleFileSelect}
-                  className="hidden"
-                />
-                <Button
-                  variant="outline"
-                  onClick={() => fileInputRef.current?.click()}
-                  disabled={extraction.isProcessing}
-                  className="w-full"
-                >
-                  <Upload className="w-4 h-4 mr-2" /> Choose PDF File
-                </Button>
-                {selectedFile && (
-                  <div className="mt-3 p-3 bg-muted/50 rounded-lg">
-                    <div className="flex items-start gap-2">
-                      <FileText className="w-4 h-4 text-primary mt-0.5" />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-foreground truncate">
-                          {selectedFile.name}
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          {(selectedFile.size / 1024 / 1024).toFixed(2)} MB
-                        </p>
-                      </div>
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Save to Library Option */}
-              <div className="flex items-start gap-3 p-3 bg-muted/30 rounded-lg">
-                <Checkbox
-                  checked={saveToLibrary}
-                  onCheckedChange={setSaveToLibrary}
-                  id="save-to-library"
-                  disabled={extraction.isProcessing}
-                />
-                <div className="flex-1">
-                  <Label
-                    htmlFor="save-to-library"
-                    className="text-sm font-medium text-foreground cursor-pointer"
-                  >
-                    Save to Library
-                  </Label>
-                  <p className="text-xs text-muted-foreground mt-1">
-                    Embeddings will be created for future queries
-                  </p>
-                </div>
-              </div>
-
-              {/* Collection Selector */}
-              {saveToLibrary && (
-                <div>
-                  <Label className="text-sm font-medium text-foreground mb-2 block">
-                    Collection
-                  </Label>
-                  <Select
-                    value={selectedCollection || ""}
-                    onValueChange={setSelectedCollection}
-                    disabled={extraction.isProcessing}
-                  >
-                    <SelectTrigger className="w-full">
-                      <SelectValue placeholder="Select collection" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {collections.map((col) => (
-                        <SelectItem key={col.id} value={col.id}>
-                          {col.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
-            </div>
-          )}
 
           {/* Library Mode */}
           {mode === "library" && (
@@ -430,34 +317,34 @@ export default function ExtractPage() {
 
           {/* Progress Indicator */}
           {extraction.isProcessing && (
-            <div className="mt-4 p-4 bg-blue-50 dark:bg-blue-950 rounded-lg border border-blue-200 dark:border-blue-800">
+            <div className="mt-4 p-4 bg-primary/5 rounded-lg border border-primary/20">
               <div className="flex items-center justify-between mb-2">
-                <span className="text-sm font-medium text-blue-900 dark:text-blue-100">
+                <span className="text-sm font-medium text-foreground">
                   {extraction.progress?.message || "Processing..."}
                 </span>
-                <span className="text-xs text-blue-700 dark:text-blue-300">
+                <span className="text-xs text-muted-foreground">
                   {extraction.progress?.percent || 0}%
                 </span>
               </div>
-              <div className="w-full bg-blue-100 dark:bg-blue-900 rounded-full h-2 overflow-hidden">
-                <div
-                  className="bg-blue-600 dark:bg-blue-400 h-2 rounded-full transition-all duration-500"
-                  style={{ width: `${extraction.progress?.percent || 0}%` }}
-                />
-              </div>
+              <Progress
+                value={extraction.progress?.percent || 0}
+                variant="primary"
+                className="h-2"
+                showShimmer={true}
+              />
             </div>
           )}
 
           {/* Error Display */}
           {extraction.error && !extraction.isProcessing && (
-            <div className="mt-4 p-4 bg-red-50 dark:bg-red-950 rounded-lg border border-red-200 dark:border-red-800">
+            <div className="mt-4 p-4 bg-destructive/5 rounded-lg border border-destructive/20">
               <div className="flex items-start gap-2">
-                <AlertCircle className="w-4 h-4 text-red-600 dark:text-red-400 mt-0.5" />
+                <AlertCircle className="w-4 h-4 text-destructive mt-0.5" />
                 <div className="flex-1">
-                  <p className="text-sm font-medium text-red-900 dark:text-red-100">
+                  <p className="text-sm font-medium text-destructive-foreground">
                     Extraction Failed
                   </p>
-                  <p className="text-xs text-red-700 dark:text-red-300 mt-1">
+                  <p className="text-xs text-destructive mt-1">
                     {extraction.error}
                   </p>
                 </div>

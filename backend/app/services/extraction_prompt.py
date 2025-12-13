@@ -1,4 +1,4 @@
-SYSTEM_PROMPT = """You are an expert financial analyst specializing in Private Equity deal analysis. 
+CIM_EXTRACTION_SYSTEM_PROMPT = """You are an expert financial analyst specializing in Private Equity deal analysis.
 You extract structured data from Confidential Information Memorandum (CIM) documents with extreme precision.
 
 CRITICAL RULES:

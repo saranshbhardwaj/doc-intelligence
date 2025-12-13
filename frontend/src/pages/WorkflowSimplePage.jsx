@@ -13,6 +13,7 @@ import AppLayout from "../components/layout/AppLayout";
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
 import { Badge } from "../components/ui/badge";
+import { Progress } from "../components/ui/progress";
 import Spinner from "../components/common/Spinner";
 import VariableConfigModal from "../components/workflows/VariableConfigModal";
 import DocumentSelectorModal from "../components/workflows/DocumentSelectorModal";
@@ -35,6 +36,10 @@ export default function WorkflowSimplePage() {
     setWorkflowVariables,
     removeDocumentFromDraft,
     reconnectWorkflowExecution,
+    startWorkflowExecution,
+    updateWorkflowProgress,
+    completeWorkflowExecution,
+    failWorkflowExecution,
   } = useWorkflowDraftActions();
 
   // Local state (not persisted)
@@ -127,9 +132,69 @@ export default function WorkflowSimplePage() {
     }
 
     // Prevent duplicate starts
-    if (execution && execution.isProcessing) {
+    if (execution && execution.isProcessing === true) {
       console.warn("⚠️ Workflow already in progress");
       return;
+    }
+
+    try {
+      console.log("🚀 Starting workflow...");
+      const token = await getToken();
+
+      // Prepare payload
+      const payload = {
+        workflow_id: selectedWorkflow.id,
+        document_ids: selectedDocuments.map((doc) => doc.id),
+        variables: variables || {},
+      };
+
+      // Call API to create workflow run
+      const response = await axios.post(
+        `${API_BASE}/api/workflows/runs`,
+        payload,
+        {
+          headers: { Authorization: `Bearer ${token}` },
+        }
+      );
+
+      const { id: runId, job_id: jobId } = response.data;
+      console.log("✅ Workflow run created:", { runId, jobId });
+
+      // Connect to SSE stream for progress updates
+      const cleanup = await streamWorkflowProgress(jobId, getToken, {
+        onProgress: (progressData) => {
+          console.log("📊 Progress update:", progressData);
+          updateWorkflowProgress(progressData);
+        },
+        onComplete: (data) => {
+          console.log("🎉 Workflow completed:", data);
+          completeWorkflowExecution();
+          // Refresh runs list to show new result
+          fetchInitialData();
+        },
+        onError: (errorData) => {
+          console.error("❌ Workflow error:", errorData);
+          const errorMsg =
+            typeof errorData === "string"
+              ? errorData
+              : errorData?.message || "Workflow failed";
+          failWorkflowExecution(errorMsg);
+        },
+        onEnd: (data) => {
+          console.log("🏁 SSE stream ended:", data?.reason);
+        },
+      });
+
+      // Start execution tracking in store with cleanup function
+      startWorkflowExecution(jobId, runId, cleanup);
+    } catch (error) {
+      console.error("Failed to start workflow:", error);
+      const errorMsg =
+        error.response?.data?.detail ||
+        error.message ||
+        "Failed to start workflow";
+      failWorkflowExecution(errorMsg);
+      alert(`Error: ${errorMsg}`);
     }
   };
 
@@ -345,24 +410,23 @@ export default function WorkflowSimplePage() {
 
               {/* Elegant Progress Indicator */}
               {execution && execution.isProcessing && (
-                <div className="mt-4 p-4 bg-blue-50 dark:bg-blue-950 rounded-lg border border-blue-200 dark:border-blue-800">
+                <div className="mt-4 p-4 bg-primary/5 rounded-lg border border-primary/20">
                   <div className="flex items-center justify-between mb-2">
-                    <span className="text-sm font-medium text-blue-900 dark:text-blue-100">
+                    <span className="text-sm font-medium text-foreground">
                       {execution.message || "Processing..."}
                     </span>
-                    <span className="text-xs text-blue-700 dark:text-blue-300">
+                    <span className="text-xs text-muted-foreground">
                       {execution.progress}%
                     </span>
                   </div>
-                  {/* Progress Bar */}
-                  <div className="w-full bg-blue-100 dark:bg-blue-900 rounded-full h-2 overflow-hidden">
-                    <div
-                      className="bg-blue-600 dark:bg-blue-400 h-2 rounded-full transition-all duration-500 ease-out"
-                      style={{ width: `${execution.progress}%` }}
-                    />
-                  </div>
+                  <Progress
+                    value={execution.progress || 0}
+                    variant="primary"
+                    className="h-2"
+                    showShimmer={true}
+                  />
                   {execution.stage === "failed" && (
-                    <p className="mt-2 text-xs text-red-600 dark:text-red-400">
+                    <p className="mt-2 text-xs text-destructive">
                       {execution.message}
                     </p>
                   )}
@@ -371,7 +435,7 @@ export default function WorkflowSimplePage() {
 
               {selectedDocuments.length === 0 &&
                 !(execution && execution.isProcessing) && (
-                  <p className="mt-3 text-sm text-amber-600 dark:text-amber-400">
+                  <p className="mt-3 text-sm text-warning">
                     ⚠️ Please select at least one document
                   </p>
                 )}
@@ -426,7 +490,10 @@ export default function WorkflowSimplePage() {
               {orphanedRuns.length > 0 && (
                 <div className="mt-6 pt-4 border-t border-border dark:border-gray-700">
                   <div className="flex items-center gap-2 mb-3">
-                    <Badge variant="outline" className="text-xs bg-amber-50 dark:bg-amber-950 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800">
+                    <Badge
+                      variant="outline"
+                      className="text-xs bg-amber-50 dark:bg-amber-950 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800"
+                    >
                       ⚠️ Previous Runs
                     </Badge>
                   </div>
@@ -458,6 +525,7 @@ export default function WorkflowSimplePage() {
         variables={variables}
         onVariablesChange={setWorkflowVariables}
         onGenerate={handleGenerate}
+        isProcessing={execution && execution.isProcessing}
       />
 
       {/* Document Selector Modal */}
@@ -482,14 +550,28 @@ function ResultPreviewCard({ run, onOpenSheet, isOrphaned = false }) {
     switch (run.status) {
       case "completed":
         return (
-          <Badge className="bg-green-600 text-foreground">✓ Completed</Badge>
+          <Badge className="bg-success text-success-foreground text-xs">
+            ✓ Completed
+          </Badge>
         );
       case "running":
-        return <Badge className="bg-blue-600 text-foreground">Running</Badge>;
+        return (
+          <Badge className="bg-primary text-primary-foreground text-xs">
+            Running
+          </Badge>
+        );
       case "failed":
-        return <Badge className="bg-red-600 text-foreground">Failed</Badge>;
+        return (
+          <Badge className="bg-destructive text-destructive-foreground text-xs">
+            Failed
+          </Badge>
+        );
       default:
-        return <Badge variant="outline">{run.status}</Badge>;
+        return (
+          <Badge variant="outline" className="text-xs">
+            {run.status}
+          </Badge>
+        );
     }
   };
 
@@ -498,41 +580,75 @@ function ResultPreviewCard({ run, onOpenSheet, isOrphaned = false }) {
     ? run.workflow_snapshot?.name || "Unknown Workflow"
     : run.workflow_name || "Workflow";
 
+  // Extract company name from artifact if available
+  const companyName =
+    run.artifact_json?.parsed?.company_overview?.company_name ||
+    run.artifact_json?.company_overview?.company_name;
+
+  // Format created date
+  const createdDate = run.created_at
+    ? new Date(run.created_at).toLocaleDateString("en-US", {
+        month: "short",
+        day: "numeric",
+        year: "numeric",
+      })
+    : null;
+
+  // Get document count
+  const docCount = run.document_ids?.length || 0;
+
+  // Create display title
+  const displayTitle = companyName || workflowName;
+
   return (
     <Card
-      className={`p-4 hover:shadow-md transition-shadow cursor-pointer dark:bg-card dark:border-gray-700 dark:hover:shadow-lg ${
-        isOrphaned ? "border-amber-200 dark:border-amber-800/50 bg-amber-50/30 dark:bg-amber-950/20" : ""
+      className={`p-4 hover:shadow-md transition-all cursor-pointer hover:border-primary/50 ${
+        isOrphaned ? "border-warning/50 bg-warning/5" : ""
       }`}
       onClick={() => onOpenSheet(run.id)}
     >
-      <div className="flex items-start justify-between mb-2">
-        <div className="flex-1">
-          <p className="text-sm font-medium text-foreground">
-            {workflowName}
+      <div className="flex items-start justify-between mb-3">
+        <div className="flex-1 min-w-0">
+          <p className="text-sm font-semibold text-foreground truncate">
+            {displayTitle}
           </p>
-          {isOrphaned && (
-            <p className="text-xs text-amber-600 dark:text-amber-400 mt-1">
-              Workflow deleted
+          {companyName && (
+            <p className="text-xs text-muted-foreground mt-0.5">
+              {workflowName}
             </p>
+          )}
+          {isOrphaned && (
+            <p className="text-xs text-warning mt-1">⚠️ Workflow deleted</p>
           )}
         </div>
         {getStatusBadge()}
       </div>
 
-      {run.status === "completed" && run.artifact_json?.sections?.[0] && (
-        <div className="text-xs text-muted-foreground dark:text-gray-300 line-clamp-3">
-          {run.artifact_json.sections[0].content?.slice(0, 150)}...
-        </div>
-      )}
+      {/* Metadata row */}
+      <div className="flex items-center gap-3 text-xs text-muted-foreground mb-3">
+        {createdDate && <span>📅 {createdDate}</span>}
+        {docCount > 0 && (
+          <span>
+            📄 {docCount} {docCount === 1 ? "doc" : "docs"}
+          </span>
+        )}
+        {run.latency_ms && run.status === "completed" && (
+          <span>⏱️ {(run.latency_ms / 1000).toFixed(1)}s</span>
+        )}
+      </div>
 
       {run.status === "failed" && (
-        <p className="text-xs text-red-600 dark:text-red-400">
+        <p className="text-xs text-destructive mb-2 line-clamp-2">
           {run.error_message}
         </p>
       )}
 
-      <Button variant="ghost" size="sm" className="mt-2 w-full text-xs">
-        View Details →
+      <Button
+        variant="ghost"
+        size="sm"
+        className="mt-1 w-full text-xs hover:bg-primary/10"
+      >
+        View Results →
       </Button>
     </Card>
   );

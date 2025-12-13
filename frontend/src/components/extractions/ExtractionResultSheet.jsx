@@ -138,7 +138,7 @@ export default function ExtractionResultSheet({
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="left"
-        className="w-[900px] sm:max-w-[900px] overflow-y-auto bg-background"
+        className="w-[1400px] sm:max-w-[1400px] overflow-y-auto bg-background"
       >
         <SheetHeader>
           <div className="flex items-center gap-3">
@@ -161,14 +161,14 @@ export default function ExtractionResultSheet({
           <div className="flex flex-wrap gap-2">
             {data && (
               <>
-                <Button
+                {/* <Button
                   variant="outline"
                   size="sm"
                   onClick={handleExportJSON}
                   disabled={exporting}
                 >
                   <Download className="w-4 h-4 mr-2" /> JSON
-                </Button>
+                </Button> */}
                 {/* <Button
                   variant="outline"
                   size="sm"

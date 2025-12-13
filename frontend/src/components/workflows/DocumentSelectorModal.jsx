@@ -609,7 +609,12 @@ export default function DocumentSelectorModal({ open, onOpenChange }) {
                       {(upload.status === "uploading" ||
                         upload.status === "processing") && (
                         <div>
-                          <Progress value={upload.progress} className="h-1.5" />
+                          <Progress
+                            value={upload.progress}
+                            variant="primary"
+                            className="h-1.5"
+                            showShimmer={true}
+                          />
                           <p className="text-xs text-muted-foreground dark:text-muted-foreground mt-1">
                             {upload.status === "uploading"
                               ? `Uploading ${upload.progress}%`

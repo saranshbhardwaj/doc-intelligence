@@ -12,23 +12,28 @@ class WorkflowRepository:
         self.db = db
 
     # ---- Workflows ----
-    def list_workflows(self, active_only: bool = True) -> List[Workflow]:
+    def list_workflows(self, active_only: bool = True, domain: str | None = None) -> List[Workflow]:
         stmt = select(Workflow)
         if active_only:
             stmt = stmt.where(Workflow.active == True)  # noqa: E712
+        if domain:
+            stmt = stmt.where(Workflow.domain == domain)
         return list(self.db.execute(stmt).scalars())
 
     def get_workflow(self, workflow_id: str) -> Optional[Workflow]:
         return self.db.get(Workflow, workflow_id)
 
-    def create_workflow(self, name: str, prompt_template: str, category: str | None = None,
+    def create_workflow(self, name: str, prompt_template: str, domain: str = "private_equity",
+                        category: str | None = None,
                         variables_schema: dict | None = None, retrieval_spec: list | None = None,
+                        output_schema: dict = None,
                         output_format: str = "markdown",
                         min_documents: int = 1, max_documents: int | None = None, version: int = 1,
                         description: str | None = None, user_prompt_template: str | None = None,
                         user_prompt_max_length: int | None = None) -> Workflow:
         wf = Workflow(
             name=name,
+            domain=domain,
             category=category,
             description=description,
             prompt_template=prompt_template,
@@ -36,6 +41,7 @@ class WorkflowRepository:
             user_prompt_max_length=user_prompt_max_length,
             variables_schema=json.dumps(variables_schema or {}),
             retrieval_spec_json=json.dumps(retrieval_spec) if retrieval_spec else None,
+            output_schema=json.dumps(output_schema) if output_schema else None,
             output_format=output_format,
             min_documents=min_documents,
             max_documents=max_documents,
@@ -46,6 +52,14 @@ class WorkflowRepository:
         self.db.refresh(wf)
         return wf
 
+    def delete_workflow(self, name: str) -> bool:
+        stmt = select(Workflow).where(Workflow.name == name)
+        wf = self.db.execute(stmt).scalar_one_or_none()
+        if not wf:
+            return False
+        self.db.delete(wf)
+        self.db.commit()
+        return True
     # ---- Workflow Runs ----
     def create_run(self, workflow: Workflow, user_id: str, collection_id: str | None,
                    document_ids: List[str], variables: dict, mode: str, strategy: str) -> WorkflowRun:
@@ -77,9 +91,10 @@ class WorkflowRepository:
 
     def update_run_status(self, run_id: str, status: str, error_message: str | None = None,
                           artifact_json: dict | None = None, token_usage: int | None = None,
-                          cost_usd: float | None = None, latency_ms: int | None = None, citations_count: int | None = None,
-                          citation_invalid_count: int | None = None, attempts: int | None = None,
-                          validation_errors_json: str | None = None, context_stats_json: dict | None = None):
+                          cost_usd: float | None = None, latency_ms: int | None = None, currency: str | None = None,
+                          citations_count: int | None = None, citation_invalid_count: int | None = None,
+                          attempts: int | None = None, validation_errors_json: str | None = None,
+                          context_stats_json: dict | None = None):
         run = self.db.get(WorkflowRun, run_id)
         if not run:
             return False
@@ -94,6 +109,8 @@ class WorkflowRepository:
             run.cost_usd = cost_usd
         if latency_ms is not None:
             run.latency_ms = latency_ms
+        if currency is not None:
+            run.currency = currency
         if citations_count is not None:
             run.citations_count = citations_count
         if citation_invalid_count is not None:
@@ -117,6 +134,33 @@ class WorkflowRepository:
 
     def get_run(self, run_id: str) -> Optional[WorkflowRun]:
         return self.db.get(WorkflowRun, run_id)
+
+    def update_run_metadata(self, run_id: str, metadata: dict) -> bool:
+        """
+        Update JSONB metadata fields for a workflow run.
+
+        Args:
+            run_id: Workflow run ID
+            metadata: Dict with metadata fields to update (e.g., {"section_summaries": {...}})
+
+        Returns:
+            True if successful, False if run not found
+        """
+        run = self.db.get(WorkflowRun, run_id)
+        if not run:
+            return False
+
+        # Update metadata fields (JSONB columns auto-serialize)
+        for key, value in metadata.items():
+            if hasattr(run, key):
+                setattr(run, key, value)
+            else:
+                # Log warning if field doesn't exist
+                import logging
+                logging.warning(f"WorkflowRun has no attribute '{key}', skipping metadata update")
+
+        self.db.commit()
+        return True
 
     def list_runs_for_user(self, user_id: str, limit: int = 50, offset: int = 0) -> List[WorkflowRun]:
         """List workflow runs for a user with pagination.

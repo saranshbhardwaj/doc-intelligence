@@ -1,65 +1,104 @@
 // src/components/results/sections/ActionButtons.jsx
-import { Download, Printer } from "lucide-react";
+import { Download, Printer, FileSpreadsheet, FileText, FileDown, MessageSquare } from "lucide-react";
+import { Button } from "../../ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  DropdownMenuSeparator,
+} from "../../ui/dropdown-menu";
 import { exportToExcel } from "../../../utils/excelExport/index";
+import { exportExtractionAsWord } from "../../../utils/exportExtraction";
 
 export default function ActionButtons({ onFeedbackClick, data, metadata }) {
-  const handleExportExcel = async () => {
+  const handleExport = async (format) => {
     try {
-      await exportToExcel(data, metadata);
+      if (format === 'excel') {
+        await exportToExcel(data, metadata);
+        console.log('✅ Exported as Excel');
+      } else if (format === 'word') {
+        await exportExtractionAsWord(data, metadata);
+        console.log('✅ Exported as Word');
+      } else if (format === 'pdf') {
+        // PDF export via print dialog
+        window.print();
+        console.log('✅ Print dialog opened for PDF');
+      }
     } catch (error) {
-      console.error("Failed to export to Excel:", error);
-      alert("Failed to export to Excel. Please try again.");
+      console.error(`Failed to export as ${format}:`, error);
+      alert(`Export failed: ${error.message || 'Please try again'}`);
     }
   };
 
-  const handlePrint = () => {
-    window.print();
-  };
-
   return (
-    <div className="bg-card rounded-xl shadow-md p-4 flex flex-wrap justify-between items-center gap-3">
+    <div className="bg-card rounded-xl border border-border p-4 flex flex-wrap justify-between items-center gap-3">
       <div className="flex flex-wrap gap-3">
-        {/* Export to Excel */}
-        <button
-          onClick={handleExportExcel}
-          className="flex items-center gap-2 px-4 py-2 bg-success text-foreground rounded-lg hover:bg-success/90 transition-colors font-semibold shadow-sm"
-        >
-          <Download className="w-4 h-4" />
-          Export to Excel
-        </button>
+        {/* Export Dropdown Menu */}
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="default" size="default" className="font-semibold">
+              <Download className="w-4 h-4 mr-2" />
+              Export
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="start" className="w-56">
+            <DropdownMenuItem onClick={() => handleExport('excel')}>
+              <FileSpreadsheet className="w-4 h-4 mr-3 text-success" />
+              <div className="flex flex-col">
+                <span className="font-medium">Excel Workbook</span>
+                <span className="text-xs text-muted-foreground">
+                  Multi-sheet analysis (.xlsx)
+                </span>
+              </div>
+            </DropdownMenuItem>
 
-        {/* Print Report */}
-        <button
-          onClick={handlePrint}
-          className="flex items-center gap-2 px-4 py-2 bg-primary text-foreground rounded-lg hover:bg-primary/90 transition-colors font-semibold shadow-sm"
-        >
-          <Printer className="w-4 h-4" />
-          Print Report
-        </button>
+            <DropdownMenuItem onClick={() => handleExport('word')}>
+              <FileDown className="w-4 h-4 mr-3 text-primary" />
+              <div className="flex flex-col">
+                <span className="font-medium">Word Document</span>
+                <span className="text-xs text-muted-foreground">
+                  Professional report (.docx)
+                </span>
+              </div>
+            </DropdownMenuItem>
 
-        {/* You can add Share button here if needed */}
+            <DropdownMenuSeparator />
+
+            <DropdownMenuItem onClick={() => handleExport('pdf')}>
+              <FileText className="w-4 h-4 mr-3 text-destructive" />
+              <div className="flex flex-col">
+                <span className="font-medium">PDF (Print)</span>
+                <span className="text-xs text-muted-foreground">
+                  Save as PDF via browser
+                </span>
+              </div>
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+
+        {/* Print Button */}
+        <Button
+          variant="outline"
+          size="default"
+          onClick={() => window.print()}
+          className="font-semibold"
+        >
+          <Printer className="w-4 h-4 mr-2" />
+          Print
+        </Button>
       </div>
 
-      {/* Feedback button */}
-      <button
+      {/* Feedback Button */}
+      <Button
+        variant="outline"
+        size="default"
         onClick={onFeedbackClick}
-        className="flex items-center gap-2 px-4 py-2 bg-muted text-foreground rounded-lg hover:bg-muted/90 transition-colors font-semibold shadow-sm"
+        className="font-semibold"
       >
-        <svg
-          className="w-4 h-4"
-          fill="none"
-          stroke="currentColor"
-          viewBox="0 0 24 24"
-        >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2}
-            d="M7 8h10M7 12h4m1 8l-4-4H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-3l-4 4z"
-          />
-        </svg>
+        <MessageSquare className="w-4 h-4 mr-2" />
         Give Feedback
-      </button>
+      </Button>
     </div>
   );
 }

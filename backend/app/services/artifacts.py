@@ -6,8 +6,9 @@ Responsibilities:
 - Load full artifact JSON given a pointer-or-inline object
 """
 from __future__ import annotations
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 import json
+import re
 from datetime import datetime
 
 from app.config import settings
@@ -24,17 +25,36 @@ def _now_ts() -> str:
     return datetime.utcnow().isoformat()
 
 
-def persist_artifact(run_id: str, artifact: Dict[str, Any]) -> Dict[str, Any]:
-    """Persist artifact to storage (if enabled) and return pointer JSON for DB.
+def persist_artifact(
+    run_id: str,
+    artifact: Dict[str, Any],
+    workflow_name: Optional[str] = None,
+    created_at: Optional[datetime] = None
+) -> Dict[str, Any]:
+    """Persist artifact with human-readable, browsable key structure.
 
-    If storage disabled, returns the original artifact dict (inline store in DB).
+    Key pattern: workflow-artifacts/{workflow_name}/{YYYY}/{MM}/{DD}/{run_id}_{timestamp}.json
+
+    Example: workflow-artifacts/investment-memo/2024/12/04/0913bdf9_20241204_173915.json
+
+    Args:
+        run_id: Workflow run ID
+        artifact: Artifact data to persist
+        workflow_name: Workflow name (for hierarchical organization)
+        created_at: Creation timestamp (defaults to now)
+
+    Returns:
+        Pointer dict (if R2) or inline artifact (if storage disabled)
+
     Pointer structure (R2):
     {
         "backend": "r2",
         "bucket": <bucket>,
-        "key": "artifacts/<run_id>/artifact.json",
+        "key": "workflow-artifacts/{workflow}/{YYYY}/{MM}/{DD}/{run_id}_{timestamp}.json",
         "size_bytes": <int>,
-        "created_at": <iso8601>
+        "created_at": <iso8601>,
+        "workflow_name": <str>,
+        "short_run_id": <first 8 chars of run_id>
     }
     """
     timer = ARTIFACT_PERSIST_SECONDS.time()
@@ -42,30 +62,67 @@ def persist_artifact(run_id: str, artifact: Dict[str, Any]) -> Dict[str, Any]:
         if settings.exports_use_r2 and get_r2_storage is not None:
             try:
                 storage = get_r2_storage()
-                key = f"workflow-artifacts/{run_id}/artifact.json"
+
+                # Build hierarchical, human-readable key
+                now = created_at or datetime.utcnow()
+                timestamp = now.strftime("%Y%m%d_%H%M%S")
+
+                # Sanitize workflow name for use in path
+                if not workflow_name:
+                    logger.warning(f"workflow_name is None/empty for run_id {run_id}, using 'unknown'")
+                safe_workflow_name = (workflow_name or "unknown").lower()
+                safe_workflow_name = re.sub(r'[^a-z0-9-]', '-', safe_workflow_name)
+
+                logger.debug(f"R2 key generation: workflow_name='{workflow_name}' -> safe_workflow_name='{safe_workflow_name}'")
+
+                # Hierarchical structure: workflow-artifacts/{name}/{YYYY}/{MM}/{DD}/{runid}_{timestamp}.json
+                key = (
+                    f"workflow-artifacts/"
+                    f"{safe_workflow_name}/"
+                    f"{now.year}/"
+                    f"{now.month:02d}/"
+                    f"{now.day:02d}/"
+                    f"{run_id[:8]}_{timestamp}.json"
+                )
+
                 data = json.dumps(artifact, ensure_ascii=False).encode("utf-8")
                 storage.store_bytes(key, data, "application/json")
+
                 pointer = {
                     "backend": "r2",
                     "bucket": settings.r2_bucket,
                     "key": key,
                     "size_bytes": len(data),
                     "created_at": _now_ts(),
+                    "workflow_name": workflow_name,
+                    "short_run_id": run_id[:8],
                 }
-                logger.info("Artifact persisted to R2", extra={"run_id": run_id, "key": key, "size": len(data)})
+
+                logger.info(
+                    "Artifact persisted to R2",
+                    extra={
+                        "run_id": run_id,
+                        "key": key,
+                        "size": len(data),
+                        "workflow": workflow_name,
+                    }
+                )
                 return pointer
+
             except Exception:
                 ARTIFACT_PERSIST_FAILURES.inc()
-                logger.exception("Artifact persistence to R2 failed — storing inline in DB", extra={"run_id": run_id})
+                logger.exception(
+                    "Artifact persistence to R2 failed — storing inline in DB",
+                    extra={"run_id": run_id}
+                )
                 return artifact
+        # storage disabled -> inline
         return artifact
     finally:
         try:
             timer.__exit__(None, None, None)
         except Exception:
             pass
-    # storage disabled -> inline
-    return artifact
 
 
 def load_artifact(pointer_or_inline: Dict[str, Any]) -> Dict[str, Any]:
