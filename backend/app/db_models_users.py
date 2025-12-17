@@ -12,6 +12,7 @@ class User(Base):
     id = Column(String(36), primary_key=True)  # Clerk user ID
     email = Column(String(255), unique=True, nullable=False, index=True)
     tier = Column(String(20), default="free")  # free, standard, pro, admin
+    vertical = Column(String(50), default="private_equity", nullable=False, index=True)  # Vertical/domain
 
     # Usage tracking
     total_pages_processed = Column(Integer, default=0)
