@@ -1,16 +1,9 @@
-# backend/app/services/parsers/__init__.py
-"""Document parser implementations"""
-from .base import DocumentParser, ParserOutput, ParserType
-from .pymupdf_parser import PyMuPDFParser
-from .parser_factory import ParserFactory
-from .google_documentai_parser import GoogleDocumentAIParser
+"""PDF Parsers - DEPRECATED.
 
-__all__ = [
-    "DocumentParser",
-    "ParserOutput",
-    "ParserType",
-    "PyMuPDFParser",
-    "ParserFactory",
-    "GoogleDocumentAIParser",
-    "AzureDocumentIntelligenceParser",
-]
+⚠️ BACKWARD COMPATIBILITY SHIM ⚠️
+Moved to: app.core.parsers
+
+Update imports:
+    from app.core.parsers import ParserFactory
+"""
+from app.core.parsers import *

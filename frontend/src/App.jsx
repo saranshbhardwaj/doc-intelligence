@@ -17,6 +17,9 @@ import NotFound from "./pages/NotFound";
 import AppNotFound from "./components/layout/AppNotFound";
 import RequireAuth from "./components/common/RequireAuth";
 
+// Import vertical routes
+import { peRoutes, reRoutes } from "./routes/verticalRoutes";
+
 const queryClient = new QueryClient();
 
 export default function App() {
@@ -57,6 +60,17 @@ export default function App() {
               path="/app/extractions/:id"
               element={<ExtractionDetailPage />}
             />
+
+            {/* Vertical-specific routes */}
+            {/* Private Equity routes */}
+            {peRoutes.map((route, index) => (
+              <Route key={`pe-${index}`} path={`/app${route.path}`} element={route.element} />
+            ))}
+
+            {/* Real Estate routes */}
+            {reRoutes.map((route, index) => (
+              <Route key={`re-${index}`} path={`/app${route.path}`} element={route.element} />
+            ))}
 
             {/* Catch-all for anything under /app that didn't match above */}
             <Route path="/app/*" element={<AppNotFound />} />

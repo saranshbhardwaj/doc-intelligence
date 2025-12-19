@@ -1,12 +1,14 @@
-"""Extraction module - CIM extraction with summarization and table metrics.
+"""Extraction module - DEPRECATED.
 
-This module contains all extraction-specific logic:
-- Prompts (CIM extraction, batch summarization)
-- Pipeline (extraction orchestration)
-- Helpers (extraction utilities)
+⚠️ BACKWARD COMPATIBILITY SHIM ⚠️
+This module has been moved to: app.verticals.private_equity.extraction
+
+This file re-exports from the new location to maintain backward compatibility.
+Please update your imports to use the new location:
+    from app.verticals.private_equity.extraction import ...
 """
 
-from app.services.extractions.prompts import (
+from app.verticals.private_equity.extraction.prompts import (
     CIM_EXTRACTION_SYSTEM_PROMPT,
     BATCH_SUMMARY_PROMPT_TEMPLATE,
     create_extraction_prompt,

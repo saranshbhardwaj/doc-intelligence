@@ -60,3 +60,8 @@ export {
   listTemplates,
   deleteRun,
 } from "./workflows";
+
+// Vertical-specific APIs
+export * as peWorkflows from './pe-workflows';
+export * as peExtraction from './pe-extraction';
+export * as reTemplates from './re-templates';

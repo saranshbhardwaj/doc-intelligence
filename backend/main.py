@@ -6,6 +6,10 @@ from app.api import extractions, feedback, health, cache, jobs, users, chat, wor
 from app.core.middleware import setup_middleware
 from fastapi import FastAPI
 
+# Import vertical routers
+from app.verticals.private_equity.api.router import router as pe_router
+from app.verticals.real_estate.api.router import router as re_router
+
 
 app = FastAPI(
     title="Doc Intelligence API",
@@ -17,7 +21,7 @@ app = FastAPI(
 # Setup middleware
 setup_middleware(app)
 
-# Register API routes
+# Register legacy API routes (shared/backwards compatibility)
 app.include_router(extractions.router, tags=["extraction"])  # Unified endpoint (handles both sync and async)
 app.include_router(chat.router)  # Chat Mode endpoints
 app.include_router(workflows.router, tags=["workflows"])
@@ -27,6 +31,10 @@ app.include_router(feedback.router, tags=["feedback"])
 app.include_router(cache.router, prefix="/api/cache", tags=["cache"])
 app.include_router(health.router, tags=["health"])
 app.include_router(metrics.router, tags=["metrics"])  # /metrics for Prometheus
+
+# Register vertical-specific API routes
+app.include_router(pe_router, prefix="/api/v1")  # Private Equity: /api/v1/pe/*
+app.include_router(re_router, prefix="/api/v1")  # Real Estate: /api/v1/re/*
 
 # ---------- Run ----------
 

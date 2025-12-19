@@ -1,11 +1,9 @@
-# backend/app/services/rag/__init__.py
+"""RAG Retrieval - DEPRECATED.
+
+⚠️ BACKWARD COMPATIBILITY SHIM ⚠️
+Moved to: app.core.rag
+
+Update imports:
+    from app.core.rag import *
 """
-RAG (Retrieval-Augmented Generation) module for Chat Mode.
-
-Main components:
-- RAGService: Real-time chat with vector similarity search
-"""
-
-from app.services.rag.rag_service import RAGService
-
-__all__ = ["RAGService"]
+from app.core.rag import *
