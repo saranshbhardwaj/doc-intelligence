@@ -1,7 +1,8 @@
 {
   "permissions": {
     "allow": [
-      "Bash(npm install:*)"
+      "Bash(npm install:*)",
+      "Bash(docker exec docint-api python -c:*)"
     ],
     "deny": [],
     "ask": []

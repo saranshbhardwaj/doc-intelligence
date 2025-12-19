@@ -5,17 +5,15 @@ Routes: /api/v1/pe/*
 """
 from fastapi import APIRouter
 
-# Import routers from sub-modules (to be created)
-# from .workflows import router as workflows_router
-# from .extraction import router as extraction_router
-# from .comparison import router as comparison_router
+# Import routers from sub-modules
+from .workflows import router as workflows_router
+from .extraction import router as extraction_router
 
 router = APIRouter(prefix="/pe", tags=["private_equity"])
 
-# Include sub-routers (uncomment as modules are created)
-# router.include_router(workflows_router)
-# router.include_router(extraction_router)
-# router.include_router(comparison_router)
+# Include sub-routers
+router.include_router(workflows_router)
+router.include_router(extraction_router)
 
 
 @router.get("/health")

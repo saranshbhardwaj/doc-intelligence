@@ -1,5 +1,9 @@
-"""Chat services module."""
+"""Chat Service - DEPRECATED.
 
-from app.services.chat.llm_service import ChatLLMService
+⚠️ BACKWARD COMPATIBILITY SHIM ⚠️
+Moved to: app.core.chat
 
-__all__ = ["ChatLLMService"]
+Update imports:
+    from app.core.chat import *
+"""
+from app.core.chat import *

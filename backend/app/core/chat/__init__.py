@@ -1,1 +1,5 @@
-"""Shared chat engine and free-form Q&A."""
+"""Chat services module."""
+
+from app.core.chat.llm_service import ChatLLMService
+
+__all__ = ["ChatLLMService"]
