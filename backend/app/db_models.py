@@ -103,20 +103,22 @@ class JobState(Base):
     """
     Track real-time job progress through processing pipeline.
 
-    Supports Extract Mode, Chat Mode, and Workflow Mode:
+    Supports Extract Mode, Chat Mode, Workflow Mode, and Template Fill Mode:
     - Extract Mode: extraction_id is set
     - Chat Mode: document_id is set (for chat indexing)
     - Workflow Mode: workflow_run_id is set
+    - Template Fill Mode: template_fill_run_id is set
 
     A CHECK constraint ensures exactly one foreign key is set (XOR logic).
     """
     __tablename__ = "job_states"
     __table_args__ = (
-        # Ensure exactly ONE of extraction_id, document_id, workflow_run_id is set
+        # Ensure exactly ONE of extraction_id, document_id, workflow_run_id, template_fill_run_id is set
         CheckConstraint(
-            '((extraction_id IS NOT NULL AND document_id IS NULL AND workflow_run_id IS NULL) OR '
-            '(extraction_id IS NULL AND document_id IS NOT NULL AND workflow_run_id IS NULL) OR '
-            '(extraction_id IS NULL AND document_id IS NULL AND workflow_run_id IS NOT NULL))',
+            '((extraction_id IS NOT NULL AND document_id IS NULL AND workflow_run_id IS NULL AND template_fill_run_id IS NULL) OR '
+            '(extraction_id IS NULL AND document_id IS NOT NULL AND workflow_run_id IS NULL AND template_fill_run_id IS NULL) OR '
+            '(extraction_id IS NULL AND document_id IS NULL AND workflow_run_id IS NOT NULL AND template_fill_run_id IS NULL) OR '
+            '(extraction_id IS NULL AND document_id IS NULL AND workflow_run_id IS NULL AND template_fill_run_id IS NOT NULL))',
             name='job_states_entity_exactly_one_fk_check'
         ),
         Index("idx_job_states_job_id", "job_id"),
@@ -124,6 +126,7 @@ class JobState(Base):
         Index("idx_job_states_extraction_id", "extraction_id"),
         Index("idx_job_states_document_id", "document_id"),
         Index("idx_job_states_workflow_run_id", "workflow_run_id"),
+        Index("idx_job_states_template_fill_run_id", "template_fill_run_id"),
     )
 
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
@@ -133,6 +136,7 @@ class JobState(Base):
     extraction_id = Column(String(36), ForeignKey("extractions.id", ondelete="CASCADE"), nullable=True)
     document_id = Column(String(36), ForeignKey("documents.id", ondelete="CASCADE"), nullable=True)
     workflow_run_id = Column(String(36), ForeignKey("workflow_runs.id", ondelete="CASCADE"), nullable=True)
+    template_fill_run_id = Column(String(36), ForeignKey("template_fill_runs.id", ondelete="CASCADE"), nullable=True)
 
     # Current status
     status = Column(String(20), default="queued")  # queued, parsing, chunking, embedding, storing, completed, failed
@@ -151,6 +155,12 @@ class JobState(Base):
     context_completed = Column(Boolean, default=False)
     artifact_completed = Column(Boolean, default=False)
     validation_completed = Column(Boolean, default=False)
+
+    # Template fill-specific stage flags
+    field_detection_completed = Column(Boolean, default=False)
+    auto_mapping_completed = Column(Boolean, default=False)
+    data_extraction_completed = Column(Boolean, default=False)
+    excel_filling_completed = Column(Boolean, default=False)
 
     # File paths for cached intermediate results (for resume capability)
     parsed_output_path = Column(String(500), nullable=True)
@@ -171,3 +181,11 @@ class JobState(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     completed_at = Column(DateTime(timezone=True), nullable=True)
+
+    # Relationships
+    template_fill_run = relationship("TemplateFillRun", back_populates="job_states")
+
+
+# Import template models to ensure they're registered with SQLAlchemy when JobState is used
+# This prevents "failed to locate a name" errors in the worker
+from app.db_models_templates import TemplateFillRun  # noqa: F401, E402

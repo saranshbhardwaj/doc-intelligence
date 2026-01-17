@@ -12,6 +12,7 @@ import { createExtractionSlice } from "./slices/extractionSlice";
 import { createUserSlice } from "./slices/userSlice";
 import { createChatSlice } from "./slices/chatSlice";
 import { createWorkflowDraftSlice } from "./slices/workflowDraftSlice";
+import { createTemplateFillSlice } from "./slices/templateFillSlice";
 
 /**
  * Main store combining all slices
@@ -23,6 +24,7 @@ export const useStore = create(
       ...createUserSlice(...args),
       ...createChatSlice(...args),
       ...createWorkflowDraftSlice(...args),
+      ...createTemplateFillSlice(...args),
     }),
     {
       name: "sand-cloud-storage", // localStorage key
@@ -55,6 +57,11 @@ export const useStore = create(
             // Don't persist: isProcessing, progress, cleanup, message, error
           },
         },
+        // Persist template fill state for reconnection
+        templateFill: {
+          fillRunId: state.templateFill?.fillRunId ?? null,
+          // Don't persist: fillRun, pdfUrl, pdfUrlExpiry, selectedText, isLoading, isSaving, error, pdfRefreshTimer
+        },
       }),
       // Merge persisted slice keys into current state instead of overwriting
       // so that non-persisted defaults (e.g. progress structure) remain intact.
@@ -79,6 +86,10 @@ export const useStore = create(
               ...current.chat.indexing,
               ...(persisted.chat?.indexing || {}),
             },
+          },
+          templateFill: {
+            ...current.templateFill,
+            ...persisted.templateFill,
           },
         };
       },
@@ -191,6 +202,26 @@ export const useWorkflowDraftActions = () =>
       reconnectWorkflowExecution: state.reconnectWorkflowExecution,
       cancelWorkflowExecution: state.cancelWorkflowExecution,
       resetWorkflowExecution: state.resetWorkflowExecution,
+    }))
+  );
+
+// Template Fill selectors
+export const useTemplateFill = () => useStore((state) => state.templateFill);
+export const useTemplateFillActions = () =>
+  useStore(
+    useShallow((state) => ({
+      loadFillRun: state.loadFillRun,
+      loadPdfUrl: state.loadPdfUrl,
+      setSelectedText: state.setSelectedText,
+      updateFieldData: state.updateFieldData,
+      updateMappings: state.updateMappings,
+      continueProcessing: state.continueProcessing,
+      resetTemplateFill: state.resetTemplateFill,
+      clearTemplateFillError: state.clearTemplateFillError,
+      registerPdfPopout: state.registerPdfPopout,
+      registerExcelPopout: state.registerExcelPopout,
+      navigatePdfToPage: state.navigatePdfToPage,
+      cleanupPopouts: state.cleanupPopouts,
     }))
   );
 

@@ -2,6 +2,7 @@
 """Document upload and management endpoints."""
 
 import os
+import shutil
 import uuid
 import hashlib
 from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
@@ -128,25 +129,31 @@ async def upload_document(
     existing_doc = doc_repo.get_by_hash(content_hash)
     reuse_mode = existing_doc is not None and existing_doc.is_ready()
 
-    # Save file to disk
-    upload_dir = os.path.join("uploads", "chat", collection_id)
-    os.makedirs(upload_dir, exist_ok=True)
+    # Initialize storage backend
+    from app.core.storage.storage_factory import get_storage_backend
+    storage = get_storage_backend()
 
     safe_filename = os.path.basename(file.filename)
-    file_path = os.path.join(upload_dir, f"{uuid.uuid4()}_{safe_filename}")
+
+    # Generate unique temp ID for temp file
+    temp_id = str(uuid.uuid4())
+
+    # Save to temp file first (needed for storage upload)
+    temp_path = os.path.join("/tmp", f"upload_{temp_id}_{safe_filename}")
+    file_path = None  # Will be set after storage upload
 
     document = None
     collection_doc = None
     job_repo = JobRepository()
 
     try:
-        # Save file
+        # Save to temp file
         try:
-            with open(file_path, "wb") as f:
+            with open(temp_path, "wb") as f:
                 f.write(file_bytes)
         except IOError as e:
-            logger.error(f"Failed to write file to disk: {e}")
-            raise HTTPException(status_code=500, detail="Failed to save file to disk")
+            logger.error(f"Failed to write file to temp: {e}")
+            raise HTTPException(status_code=500, detail="Failed to save file temporarily")
 
         if reuse_mode and existing_doc:
             # REUSE MODE: Document already processed
@@ -192,11 +199,11 @@ async def upload_document(
 
         else:
             # NEW DOCUMENT MODE: Create and process
-            # Create canonical document first
+            # Create canonical document FIRST to get its ID
             document = doc_repo.create_document(
                 user_id=user.id,
                 filename=safe_filename,
-                file_path=file_path,
+                file_path="",  # Will be updated after upload
                 file_size_bytes=len(file_bytes),
                 content_hash=content_hash,
                 page_count=0,  # Will be updated during parsing
@@ -205,6 +212,47 @@ async def upload_document(
 
             if not document:
                 raise HTTPException(status_code=500, detail="Failed to create document record")
+
+            # Upload to storage using document's ID (ensures ID match)
+            file_path = None
+            try:
+                # Generate storage key: documents/{user_id}/{document.id}.pdf
+                storage_key = f"documents/{user.id}/{document.id}.pdf"
+                storage.upload(temp_path, storage_key)
+                file_path = storage_key  # Store storage key (not local path)
+
+                logger.info(
+                    f"Uploaded document to {storage.get_storage_type()} storage",
+                    extra={"storage_key": storage_key}
+                )
+
+            except Exception as e:
+                logger.error(f"Storage upload failed: {e}", exc_info=True)
+
+                # Fallback to local filesystem if R2 fails
+                try:
+                    upload_dir = os.path.join("uploads", "chat", collection_id)
+                    os.makedirs(upload_dir, exist_ok=True)
+                    fallback_path = os.path.join(upload_dir, f"{document.id}_{safe_filename}")
+
+                    shutil.move(temp_path, fallback_path)
+                    file_path = fallback_path
+
+                    logger.warning(
+                        f"Fell back to local storage: {fallback_path}",
+                        extra={"original_error": str(e)}
+                    )
+                except Exception as fallback_error:
+                    # Both R2 and local storage failed - rollback document creation
+                    logger.error(f"Local storage fallback also failed: {fallback_error}", exc_info=True)
+                    doc_repo.delete_document(document.id)
+                    raise HTTPException(
+                        status_code=500,
+                        detail="Failed to store document file (both R2 and local storage failed)"
+                    )
+
+            # Update document with file_path
+            doc_repo.update_file_path(document.id, file_path)
 
             # Create collection link
             collection_doc = collection_repo.link_document_to_collection(
@@ -299,6 +347,97 @@ async def upload_document(
         raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
 
 
+@router.get("/documents/{document_id}/download")
+async def download_document(
+    document_id: str,
+    user: User = Depends(get_current_user)
+):
+    """
+    Get presigned URL for PDF download/viewing.
+
+    For R2-stored PDFs: Returns presigned URL (valid 2 hours)
+    For local files: Streams file directly (backward compatibility)
+
+    Args:
+        document_id: Document ID (UUID format)
+        user: Authenticated user
+
+    Returns:
+        {
+            "url": "https://...",  # Presigned URL for R2, or relative path for local
+            "expires_in": 7200,  # Seconds until URL expires (R2 only)
+            "storage_backend": "r2" | "local"
+        }
+
+    Raises:
+        HTTPException 403: User doesn't own the document
+        HTTPException 404: Document not found or file missing
+    """
+    from fastapi.responses import FileResponse
+    from app.core.storage.storage_factory import get_storage_backend, is_legacy_path
+
+    # Get document and verify ownership
+    db = SessionLocal()
+    try:
+        document = db.query(Document).filter(Document.id == document_id).first()
+
+        if not document:
+            raise HTTPException(status_code=404, detail="Document not found")
+
+        # Verify user owns this document
+        if document.user_id != user.id:
+            raise HTTPException(
+                status_code=403,
+                detail="You don't have permission to access this document"
+            )
+
+        file_path = document.file_path
+
+        if not file_path:
+            raise HTTPException(status_code=404, detail="Document file path not found")
+
+    finally:
+        db.close()
+
+    try:
+        storage = get_storage_backend()
+
+        # Check if it's a legacy local path or new storage key
+        if is_legacy_path(file_path):
+            # Legacy local file - stream directly
+            if not os.path.exists(file_path):
+                raise HTTPException(status_code=404, detail="Document file not found on disk")
+
+            return FileResponse(
+                path=file_path,
+                media_type="application/pdf",
+                filename=document.filename
+            )
+
+        else:
+            # Generate presigned URL from storage (R2)
+            try:
+                presigned_url = storage.generate_presigned_url(file_path, expiry_seconds=7200)
+                storage_type = storage.get_storage_type()
+
+                return {
+                    "url": presigned_url,
+                    "expires_in": 7200,
+                    "storage_backend": storage_type
+                }
+            except FileNotFoundError:
+                raise HTTPException(status_code=404, detail="Document file not found in storage")
+            except Exception as e:
+                logger.error(f"Failed to generate presigned URL: {e}", exc_info=True)
+                raise HTTPException(status_code=500, detail="Failed to generate presigned URL")
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Failed to generate download URL: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to generate download URL")
+
+
 @router.delete("/documents/{document_id}")
 async def delete_document(
     document_id: str,
@@ -352,13 +491,25 @@ async def delete_document(
     if not success:
         raise HTTPException(status_code=500, detail="Failed to delete document")
 
-    # Delete physical file if it exists
-    if file_path and os.path.exists(file_path):
+    # Delete physical file from storage (R2 or local)
+    if file_path:
         try:
-            os.remove(file_path)
-            logger.info(f"Deleted physical file", extra={"document_id": document_id, "file_path": file_path})
+            from app.core.storage.storage_factory import get_storage_backend, is_legacy_path
+            storage = get_storage_backend()
+
+            # Check if it's a legacy local path or new storage key
+            if is_legacy_path(file_path):
+                # Legacy local file - delete directly
+                if os.path.exists(file_path):
+                    os.remove(file_path)
+                    logger.info(f"Deleted legacy local file", extra={"document_id": document_id, "file_path": file_path})
+            else:
+                # New storage key (R2 or structured local) - use storage backend
+                storage.delete(file_path)
+                logger.info(f"Deleted file from {storage.get_storage_type()} storage", extra={"document_id": document_id, "storage_key": file_path})
+
         except Exception as e:
-            logger.warning(f"Failed to delete physical file: {e}")
+            logger.warning(f"Failed to delete physical file: {e}", extra={"file_path": file_path})
 
     logger.info(
         f"Document deleted",

@@ -3,7 +3,6 @@
 from typing import Optional, Dict
 from .base import DocumentParser
 from .pymupdf_parser import PyMuPDFParser
-from .google_documentai_parser import GoogleDocumentAIParser
 from .azure_document_intelligence_parser import AzureDocumentIntelligenceParser
 from app.config import settings
 from app.utils.logging import logger
@@ -112,14 +111,14 @@ class ParserFactory:
         if parser_name == "pymupdf":
             return PyMuPDFParser()
 
-        elif parser_name == "google_documentai" or parser_name == "documentai":
-            return GoogleDocumentAIParser(
-                project_id=None,      # Fallback to env
-                location=None,        # Fallback to env
-                processor_id=None,    # Fallback to env
-                gcs_bucket=None,      # Fallback to env
-                timeout_seconds=settings.document_ai_timeout_seconds
-            )
+        # elif parser_name == "google_documentai" or parser_name == "documentai":
+        #     return GoogleDocumentAIParser(
+        #         project_id=None,      # Fallback to env
+        #         location=None,        # Fallback to env
+        #         processor_id=None,    # Fallback to env
+        #         gcs_bucket=None,      # Fallback to env
+        #         timeout_seconds=settings.document_ai_timeout_seconds
+        #     )
         elif parser_name in ("azure_document_intelligence", "azure_doc_intelligence", "azure_docai"):
             return AzureDocumentIntelligenceParser(
                 endpoint=settings.azure_doc_intelligence_endpoint or None,

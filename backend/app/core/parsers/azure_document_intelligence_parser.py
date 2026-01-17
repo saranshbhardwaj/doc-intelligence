@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from typing import List, Optional, Dict
 
 from azure.ai.documentintelligence import DocumentIntelligenceClient
-from azure.ai.documentintelligence.models import AnalyzeResult
+from azure.ai.documentintelligence.models import AnalyzeResult, DocumentAnalysisFeature
 from azure.ai.documentintelligence.models import AnalyzeDocumentRequest
 from azure.core.credentials import AzureKeyCredential
 from azure.core.exceptions import AzureError
@@ -131,7 +131,12 @@ class AzureDocumentIntelligenceParser(DocumentParser):
             poller = None
             try:
                 # Prefer positional invocation to avoid signature mismatch issues.
-                poller = self.client.begin_analyze_document(self.model_name, body=analyze_request)
+                # Add KEY_VALUE_PAIRS feature to extract form-like key-value pairs
+                poller = self.client.begin_analyze_document(
+                    self.model_name,
+                    body=analyze_request,
+                    features=[DocumentAnalysisFeature.KEY_VALUE_PAIRS]
+                )
             except TypeError as te:
                 # Retry using raw bytes (older/alternate signature accepting the document directly)
                 logger.warning(
@@ -139,7 +144,11 @@ class AzureDocumentIntelligenceParser(DocumentParser):
                     extra={"error": str(te)}
                 )
                 try:
-                    poller = self.client.begin_analyze_document(self.model_name, pdf_bytes)
+                    poller = self.client.begin_analyze_document(
+                        self.model_name,
+                        pdf_bytes,
+                        features=[DocumentAnalysisFeature.KEY_VALUE_PAIRS]
+                    )
                 except Exception as e:
                     raise RuntimeError(f"parse_error: Azure begin_analyze_document failed after fallback: {e}") from e
             except AzureError as ae:
@@ -216,6 +225,35 @@ class AzureDocumentIntelligenceParser(DocumentParser):
             except Exception:
                 pass
 
+            # Extract key-value pairs from Azure DI
+            key_value_pairs = []
+            try:
+                for kv in getattr(result, "key_value_pairs", []) or []:
+                    # Extract key
+                    key_content = kv.key.content if kv.key else None
+                    if not key_content:
+                        continue
+
+                    # Extract value (may be None)
+                    value_content = kv.value.content if kv.value else None
+
+                    # Get page number from key's bounding region
+                    page_num = None
+                    if kv.key and kv.key.bounding_regions:
+                        page_num = kv.key.bounding_regions[0].page_number
+
+                    key_value_pairs.append({
+                        "key": key_content,
+                        "value": value_content,
+                        "confidence": getattr(kv, "confidence", 1.0),
+                        "page_number": page_num,
+                    })
+
+                logger.info(f"Extracted {len(key_value_pairs)} key-value pairs from Azure DI")
+            except Exception as e:
+                logger.warning(f"Failed to extract key-value pairs: {e}")
+                # Continue without KV pairs if extraction fails
+
             metadata = {
                 "model_name": self.model_name,
                 "char_count": len(full_text),
@@ -230,6 +268,9 @@ class AzureDocumentIntelligenceParser(DocumentParser):
                 ],
                 "tables": tables_meta,
                 "total_tables": len(tables_meta),
+                # Key-value pairs extracted from Azure DI
+                "key_value_pairs": key_value_pairs,
+                "total_key_value_pairs": len(key_value_pairs),
                 # Store per-page data for chunking (includes text, narrative, and tables)
                 "pages_data": [
                     {

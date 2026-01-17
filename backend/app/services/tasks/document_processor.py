@@ -10,6 +10,8 @@ from __future__ import annotations
 from typing import Dict, Any
 import json
 import asyncio
+import os
+from pathlib import Path
 
 from celery import shared_task, chain
 from sqlalchemy.sql import func
@@ -26,6 +28,7 @@ from app.utils.logging import logger
 from app.utils.pdf_utils import detect_pdf_type
 from app.utils.file_utils import save_raw_text, save_chunks
 from app.config import settings
+from app.core.storage.storage_factory import get_storage_backend
 
 
 def _get_db_session():
@@ -63,6 +66,8 @@ def parse_document_for_indexing_task(self, payload: Dict[str, Any]) -> Dict[str,
     tracker = JobProgressTracker(db, job_id)
     doc_repo = DocumentRepository()
 
+    local_file_path = None  # Track if we downloaded from storage
+
     try:
         tracker.update_progress(
             status="parsing",
@@ -70,6 +75,19 @@ def parse_document_for_indexing_task(self, payload: Dict[str, Any]) -> Dict[str,
             progress_percent=5,
             message="Parsing document..."
         )
+
+        # Download from storage if needed (file_path is storage key, not local path)
+        if not Path(file_path).exists():
+            storage = get_storage_backend()
+            local_file_path = f"/tmp/doc_{document_id}_{filename}"
+
+            logger.info(
+                f"Downloading document from storage",
+                extra={"storage_key": file_path, "local_path": local_file_path}
+            )
+
+            storage.download(file_path, local_file_path)
+            file_path = local_file_path  # Use local path for processing
 
         # Detect PDF type
         pdf_type = detect_pdf_type(file_path)
@@ -133,6 +151,20 @@ def parse_document_for_indexing_task(self, payload: Dict[str, Any]) -> Dict[str,
         )
         raise
     finally:
+        # Cleanup: Delete temporary local file if we downloaded from storage
+        if local_file_path and os.path.exists(local_file_path):
+            try:
+                os.remove(local_file_path)
+                logger.info(
+                    f"Cleaned up temporary file",
+                    extra={"local_path": local_file_path}
+                )
+            except Exception as cleanup_error:
+                logger.warning(
+                    f"Failed to cleanup temporary file: {cleanup_error}",
+                    extra={"local_path": local_file_path}
+                )
+
         db.close()
 
 
@@ -444,7 +476,11 @@ def store_vectors_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                 "figure_id", "figure_caption", "has_figures", "content_type",
                 # Citation metadata fields
                 "document_filename", "document_title", "page_label",
-                "first_sentence", "content_summary", "bbox", "source_url"
+                "first_sentence", "content_summary", "bbox", "source_url",
+                # Key-value pairs and table data for template filling
+                "key_value_pairs", "total_kv_pairs",  # Azure DI KV pairs
+                "column_headers", "table_data", "table_name",  # Table metadata
+                "chunk_type", "source_parser"  # Additional metadata
             ]
 
             # Build chunk_metadata dict (only include fields that exist)

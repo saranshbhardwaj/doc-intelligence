@@ -108,7 +108,8 @@ class DocumentRepository:
         parser_used: Optional[str] = None,
         processing_time_ms: Optional[int] = None,
         cost_usd: Optional[float] = None,
-        error_message: Optional[str] = None
+        error_message: Optional[str] = None,
+        file_path: Optional[str] = None
     ) -> bool:
         """Update document metadata."""
         with self._get_session() as db:
@@ -137,6 +138,8 @@ class DocumentRepository:
                     doc.cost_usd = cost_usd
                 if error_message is not None:
                     doc.error_message = error_message
+                if file_path is not None:
+                    doc.file_path = file_path
 
                 db.commit()
                 return True
@@ -165,6 +168,13 @@ class DocumentRepository:
             page_count=page_count,
             processing_time_ms=processing_time_ms,
             parser_used=parser_used
+        )
+
+    def update_file_path(self, document_id: str, file_path: str) -> bool:
+        """Update document file path."""
+        return self.update_document(
+            document_id=document_id,
+            file_path=file_path
         )
 
     def mark_failed(self, document_id: str, error_message: str) -> bool:

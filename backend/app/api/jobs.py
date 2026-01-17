@@ -155,9 +155,25 @@ async def stream_job_progress(job_id: str, token: Optional[str] = Query(None)):
             entity_type = "document"
         finally:
             db.close()
+
+    elif job.template_fill_run_id:
+        # Template Fill Mode: verify through template fill run
+        from app.repositories.template_repository import TemplateRepository
+        from app.database import SessionLocal
+        db = SessionLocal()
+        try:
+            template_repo = TemplateRepository(db)
+            fill_run = template_repo.get_fill_run(job.template_fill_run_id)
+            if not fill_run:
+                raise HTTPException(status_code=404, detail=f"Template fill run not found for job {job_id}")
+            entity_owner_id = fill_run.user_id
+            entity_type = "template_fill"
+        finally:
+            db.close()
+
     else:
         # No entity associated with job (should never happen due to DB constraints)
-        logger.error(f"[SSE] Job {job_id} has no associated entity (extraction_id, workflow_run_id, or document_id)",
+        logger.error(f"[SSE] Job {job_id} has no associated entity (extraction_id, workflow_run_id, document_id, or template_fill_run_id)",
                     extra={"job_id": job_id})
         raise HTTPException(status_code=404, detail=f"Job {job_id} has no associated entity")
 
@@ -207,12 +223,46 @@ async def stream_job_progress(job_id: str, token: Optional[str] = Query(None)):
             return
 
         if job.status == "completed":
-            yield ServerSentEvent(data=json.dumps({
-                'message': job.message or 'Extraction completed successfully',
-                'extraction_id': job.extraction_id
-            }), event="complete")
+            complete_data = {
+                'message': job.message or 'Job completed successfully',
+            }
+            # Include the relevant entity ID based on job type
+            if job.extraction_id:
+                complete_data['extraction_id'] = job.extraction_id
+            if job.workflow_run_id:
+                complete_data['run_id'] = job.workflow_run_id
+            if job.template_fill_run_id:
+                complete_data['fill_run_id'] = job.template_fill_run_id
+            if job.document_id:
+                complete_data['document_id'] = job.document_id
+
+            yield ServerSentEvent(data=json.dumps(complete_data), event="complete")
             yield ServerSentEvent(data=json.dumps({'reason': 'completed', 'job_id': job_id}), event="end")
             return
+
+        # Template fill specific: Handle awaiting_review status
+        # This occurs after auto-mapping completes and user needs to review
+        if job.status in ("mapped", "awaiting_review"):
+            # Check if this is a template fill job
+            if job.template_fill_run_id:
+                from app.repositories.template_repository import TemplateRepository
+                from app.database import SessionLocal
+                db = SessionLocal()
+                try:
+                    template_repo = TemplateRepository(db)
+                    fill_run = template_repo.get_fill_run(job.template_fill_run_id)
+                    if fill_run and fill_run.status == "awaiting_review":
+                        # Auto-mapping is complete, user needs to review
+                        yield ServerSentEvent(data=json.dumps({
+                            'message': job.message or 'Mapping complete - ready for review',
+                            'fill_run_id': job.template_fill_run_id,
+                            'status': 'awaiting_review'
+                        }), event="complete")
+                        yield ServerSentEvent(data=json.dumps({'reason': 'awaiting_review', 'job_id': job_id}), event="end")
+                        return
+                finally:
+                    db.close()
+
         if job.status == "failed":
             yield ServerSentEvent(data=json.dumps({
                 'stage': job.error_stage,
@@ -354,6 +404,21 @@ async def get_job_status(job_id: str, user: User = Depends(get_current_user)):
             entity_owner_id = doc.user_id
         finally:
             db.close()
+
+    elif job.template_fill_run_id:
+        # Template Fill Mode: verify through template fill run
+        from app.repositories.template_repository import TemplateRepository
+        from app.database import SessionLocal
+        db = SessionLocal()
+        try:
+            template_repo = TemplateRepository(db)
+            fill_run = template_repo.get_fill_run(job.template_fill_run_id)
+            if not fill_run:
+                raise HTTPException(status_code=404, detail="Template fill run not found")
+            entity_owner_id = fill_run.user_id
+        finally:
+            db.close()
+
     else:
         raise HTTPException(status_code=404, detail="Job has no associated entity")
 
@@ -364,6 +429,9 @@ async def get_job_status(job_id: str, user: User = Depends(get_current_user)):
     return {
         "job_id": job.id,
         "extraction_id": job.extraction_id,
+        "workflow_run_id": job.workflow_run_id,
+        "document_id": job.document_id,
+        "template_fill_run_id": job.template_fill_run_id,
         "status": job.status,
         "current_stage": job.current_stage,
         "progress_percent": job.progress_percent,
@@ -373,6 +441,11 @@ async def get_job_status(job_id: str, user: User = Depends(get_current_user)):
         "chunking_completed": job.chunking_completed,
         "summarizing_completed": job.summarizing_completed,
         "extracting_completed": job.extracting_completed,
+        # Template fill specific flags
+        "field_detection_completed": job.field_detection_completed,
+        "auto_mapping_completed": job.auto_mapping_completed,
+        "data_extraction_completed": job.data_extraction_completed,
+        "excel_filling_completed": job.excel_filling_completed,
         "error": {
             "stage": job.error_stage,
             "message": job.error_message,
@@ -434,6 +507,21 @@ async def retry_job(job_id: str, user: User = Depends(get_current_user)):
             entity_owner_id = doc.user_id
         finally:
             db.close()
+
+    elif job.template_fill_run_id:
+        # Template Fill Mode: verify through template fill run
+        from app.repositories.template_repository import TemplateRepository
+        from app.database import SessionLocal
+        db = SessionLocal()
+        try:
+            template_repo = TemplateRepository(db)
+            fill_run = template_repo.get_fill_run(job.template_fill_run_id)
+            if not fill_run:
+                raise HTTPException(status_code=404, detail="Template fill run not found")
+            entity_owner_id = fill_run.user_id
+        finally:
+            db.close()
+
     else:
         raise HTTPException(status_code=404, detail="Job has no associated entity")
 

@@ -39,6 +39,7 @@ pypandoc==1.16.2
 markdown==3.4.4
 pandas==2.2.3
 xlsxwriter==3.1.2
+openpyxl==3.1.5  # Excel template reading/writing with formula preservation
 prometheus-client==0.18.0
 boto3==1.35.54
 pytz==2024.2

@@ -211,7 +211,7 @@ class Settings(BaseSettings):
     analytics_dir: Path = log_dir / "analytics" 
     
     # CORS
-    cors_origins: list[str] = ["http://localhost:5173"]
+    cors_origins: list[str] = ["http://localhost:5173", "http://localhost:5174"]
     @field_validator("cors_origins", mode="before")
     def parse_cors_origins(cls, v):
         if isinstance(v, str):
@@ -234,6 +234,15 @@ class Settings(BaseSettings):
     r2_bucket: str = ""
     r2_endpoint_url: str = ""  # e.g. https://<accountid>.r2.cloudflarestorage.com
     r2_presign_expiry: int = 3600  # seconds for signed URL validity
+
+    # ===== DOCUMENT STORAGE SETTINGS =====
+    # Use R2 for document (PDF/Excel) storage instead of local filesystem
+    use_r2_for_documents: bool = True  # Toggle R2 for document uploads
+    documents_presign_expiry: int = 7200  # 2 hours (longer than exports for PDF viewing during template fill)
+
+    # Storage backend type (used by storage_factory)
+    # Options: "r2" or "local" - automatically determined by use_r2_for_documents
+    storage_backend: str = "r2"  # Auto-set based on use_r2_for_documents
 
     # ===== WORKFLOW BUDGET SETTINGS =====
     # Maximum tokens and cost per workflow run (to prevent runaway costs)
