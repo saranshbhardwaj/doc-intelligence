@@ -67,7 +67,7 @@ export default function REDashboard() {
           </Link>
 
           <Link
-            to="/re/templates"
+            to="/app/re/templates"
             className="p-6 bg-card rounded-lg border border-border hover:border-primary/50 hover:bg-accent/5 transition-all"
           >
             <div className="flex items-center gap-4">
@@ -81,7 +81,7 @@ export default function REDashboard() {
                   Excel Templates
                 </h3>
                 <p className="text-sm text-muted-foreground">
-                  Manage templates (Coming Soon)
+                  Upload and manage templates
                 </p>
               </div>
             </div>
@@ -115,11 +115,11 @@ export default function REDashboard() {
                 </span>
               </div>
               <div className="flex items-start gap-2">
-                <svg className="w-5 h-5 text-warning mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                <svg className="w-5 h-5 text-success mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 13l4 4L19 7" />
                 </svg>
                 <span className="text-sm text-foreground">
-                  Excel template filling (Coming Soon)
+                  Automatically fill Excel templates with PDF data
                 </span>
               </div>
             </div>
@@ -157,7 +157,7 @@ export default function REDashboard() {
                 </div>
               </li>
               <li className="flex items-start gap-3">
-                <span className="flex-shrink-0 w-6 h-6 bg-muted text-muted-foreground rounded-full flex items-center justify-center text-sm font-semibold">
+                <span className="flex-shrink-0 w-6 h-6 bg-primary text-primary-foreground rounded-full flex items-center justify-center text-sm font-semibold">
                   3
                 </span>
                 <div>
@@ -165,7 +165,7 @@ export default function REDashboard() {
                     Fill Templates
                   </h4>
                   <p className="text-sm text-muted-foreground mt-0.5">
-                    Upload Excel templates and automatically fill them (Coming Soon)
+                    Upload Excel templates and automatically fill them with PDF data
                   </p>
                 </div>
               </li>

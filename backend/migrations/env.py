@@ -22,6 +22,7 @@ try:
     import app.db_models_chat  # noqa: F401
     import app.db_models_documents  # noqa: F401
     import app.db_models_workflows  # noqa: F401
+    import app.db_models_templates  # noqa: F401
 except ModuleNotFoundError:
     # Fallback: explicitly add container root and current working directory
     ROOT_CANDIDATES = [Path('/app'), Path.cwd()]

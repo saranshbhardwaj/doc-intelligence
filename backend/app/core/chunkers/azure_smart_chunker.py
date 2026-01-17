@@ -123,15 +123,20 @@ class AzureSmartChunker(DocumentChunker):
         table_chunks = self._create_table_chunks(enhanced_pages, narrative_chunks)
         logger.info(f"Created {len(table_chunks)} table chunks")
 
+        # Step 3.5: Create key-value chunks from Azure DI
+        kv_pairs = metadata.get("key_value_pairs", [])
+        kv_chunks = self._create_key_value_chunks(kv_pairs, len(narrative_chunks) + len(table_chunks))
+        logger.info(f"Created {len(kv_chunks)} key-value chunks from {len(kv_pairs)} pairs")
+
         # Step 4: Combine and link chunks
-        all_chunks = narrative_chunks + table_chunks
+        all_chunks = narrative_chunks + table_chunks + kv_chunks
 
         # Update sibling relationships
         self._update_sibling_relationships(all_chunks)
 
         logger.info(
             f"Smart chunking complete: {len(all_chunks)} total chunks "
-            f"({len(narrative_chunks)} narrative, {len(table_chunks)} tables)"
+            f"({len(narrative_chunks)} narrative, {len(table_chunks)} tables, {len(kv_chunks)} key-value)"
         )
 
         return ChunkingOutput(
@@ -144,6 +149,8 @@ class AzureSmartChunker(DocumentChunker):
                 "total_sections": len(section_groups),
                 "total_narrative_chunks": len(narrative_chunks),
                 "total_table_chunks": len(table_chunks),
+                "total_kv_chunks": len(kv_chunks),
+                "total_kv_pairs": len(kv_pairs),
                 "continuation_chunks": sum(
                     1 for c in narrative_chunks
                     if c.metadata.get("is_continuation")
@@ -591,6 +598,77 @@ class AzureSmartChunker(DocumentChunker):
                     preceding_narrative.metadata["linked_table_ids"] = linked_tables
 
         return table_chunks
+
+    def _create_key_value_chunks(
+        self,
+        kv_pairs: List[Dict],
+        start_index: int
+    ) -> List[Chunk]:
+        """
+        Create chunks from Azure DI key-value pairs.
+
+        Groups KV pairs by page range (max 100 pairs per chunk) for scalability.
+        Each chunk is embedded for RAG while storing structured data for template filling.
+
+        Args:
+            kv_pairs: List of key-value pairs from Azure DI
+            start_index: Starting chunk index (after narrative + table chunks)
+
+        Returns:
+            List of key-value chunks
+        """
+        if not kv_pairs:
+            return []
+
+        kv_chunks = []
+        MAX_KV_PAIRS_PER_CHUNK = 100
+
+        # Group KV pairs by page ranges
+        for i in range(0, len(kv_pairs), MAX_KV_PAIRS_PER_CHUNK):
+            chunk_kv_pairs = kv_pairs[i:i + MAX_KV_PAIRS_PER_CHUNK]
+
+            # Build searchable text (concatenated KV pairs for RAG)
+            text_lines = []
+            for kv in chunk_kv_pairs:
+                key = kv.get("key", "")
+                value = kv.get("value", "")
+                if key and value:
+                    text_lines.append(f"{key}: {value}")
+                elif key:
+                    text_lines.append(f"{key}:")
+
+            chunk_text = "\n".join(text_lines)
+
+            # Determine page range
+            pages = [kv.get("page_number") for kv in chunk_kv_pairs if kv.get("page_number")]
+            page_range = [min(pages), max(pages)] if pages else [1, 1]
+
+            # Build metadata
+            chunk_metadata = {
+                "page_number": page_range[0],
+                "section_type": "key_value_pairs",
+                "is_tabular": False,
+                "char_count": len(chunk_text),
+                "token_count": estimate_tokens(chunk_text),
+                "chunk_type": "key_value",
+                "page_range": page_range,
+                "key_value_pairs": chunk_kv_pairs,  # Structured data for template filling
+                "total_kv_pairs": len(chunk_kv_pairs),
+                "source_parser": "azure_document_intelligence",
+            }
+
+            # Create chunk
+            chunk = Chunk(
+                chunk_id=generate_chunk_id(f"kv_chunk", start_index + len(kv_chunks), "kv"),
+                text=chunk_text,  # Searchable text for RAG
+                narrative_text="",
+                tables=[],
+                metadata=chunk_metadata
+            )
+
+            kv_chunks.append(chunk)
+
+        return kv_chunks
 
     def _update_sibling_relationships(self, chunks: List[Chunk]) -> None:
         """

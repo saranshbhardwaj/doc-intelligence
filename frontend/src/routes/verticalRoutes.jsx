@@ -9,7 +9,9 @@
  * DO NOT duplicate existing functionality - use links to main routes instead.
  */
 import { PEDashboard } from '../verticals/private_equity/pages';
-import { REDashboard } from '../verticals/real_estate/pages';
+import { REDashboard, TemplateFillPage, TemplatesPage } from '../verticals/real_estate/pages';
+import PDFPopoutPage from '../verticals/real_estate/pages/PDFPopoutPage';
+import ExcelPopoutPage from '../verticals/real_estate/pages/ExcelPopoutPage';
 
 // Routes for Private Equity vertical
 export const peRoutes = [
@@ -27,15 +29,22 @@ export const reRoutes = [
     path: '/re',
     element: <REDashboard />,
   },
-  // TODO: Add RE-specific routes when implemented:
-  // {
-  //   path: '/re/templates',
-  //   element: <RETemplatesPage />,
-  // },
-  // {
-  //   path: '/re/fills',
-  //   element: <RETemplateFillsPage />,
-  // },
+  {
+    path: '/re/templates',
+    element: <TemplatesPage />,
+  },
+  {
+    path: '/re/fills/:fillRunId',
+    element: <TemplateFillPage />,
+  },
+  {
+    path: '/re/fills/:fillRunId/pdf-popout',
+    element: <PDFPopoutPage />,
+  },
+  {
+    path: '/re/fills/:fillRunId/excel-popout',
+    element: <ExcelPopoutPage />,
+  },
 ];
 
 export const verticalRoutes = [...peRoutes, ...reRoutes];

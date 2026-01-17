@@ -16,16 +16,11 @@ export const VERTICAL_CONFIGS = {
       'comparison', // Future
     ],
     navigationItems: [
-      { label: 'Library', path: '/pe/library', icon: 'book' },
-      { label: 'Chat', path: '/pe/chat', icon: 'message-circle' },
-      { label: 'Workflows', path: '/pe/workflows', icon: 'flow' },
-      { label: 'Extraction', path: '/pe/extraction', icon: 'zap' },
-      {
-        label: 'Comparison',
-        path: '/pe/comparison',
-        icon: 'git-compare',
-        comingSoon: true,
-      },
+      { label: 'Dashboard', path: '/pe', icon: 'dashboard' },
+      { label: 'Library', path: '/library', icon: 'book' },
+      { label: 'Chat', path: '/chat', icon: 'message-circle' },
+      { label: 'Workflows', path: '/workflows', icon: 'flow' },
+      { label: 'Extract', path: '/extract', icon: 'zap' },
     ],
     theme: {
       primary: '#1a365d',
@@ -43,10 +38,10 @@ export const VERTICAL_CONFIGS = {
       'template_filling',
     ],
     navigationItems: [
-      { label: 'Library', path: '/re/library', icon: 'book' },
-      { label: 'Chat', path: '/re/chat', icon: 'message-circle' },
+      { label: 'Dashboard', path: '/re', icon: 'dashboard' },
       { label: 'Templates', path: '/re/templates', icon: 'file-spreadsheet' },
-      { label: 'Fills', path: '/re/fills', icon: 'table' },
+      { label: 'Library', path: '/library', icon: 'book' },
+      { label: 'Chat', path: '/chat', icon: 'message-circle' },
     ],
     theme: {
       primary: '#2d5016',
