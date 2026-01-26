@@ -42,6 +42,10 @@ export const createTemplateFillSlice = (set, get) => ({
     pdfPopoutWindow: null,
     excelPopoutWindow: null,
 
+    // Excel workbook cache (to avoid reloading on tab switches)
+    cachedWorkbook: null,
+    cachedWorkbookTemplateId: null, // Track which template this cache belongs to
+
     // Loading and error states
     isLoading: false,
     isSaving: false,
@@ -55,12 +59,11 @@ export const createTemplateFillSlice = (set, get) => ({
    */
   loadFillRun: async (fillRunId, getToken, options = {}) => {
     const { silent = false, skipPdf = false } = options;
-    console.log('📊 Loading fill run:', fillRunId, silent ? '(silent)' : '', skipPdf ? '(skip PDF)' : '');
 
     const prevState = get().templateFill;
     const isNewRun = prevState.fillRunId !== fillRunId;
 
-    // If switching runs, clear anything that could be stale (PDF URL, selection, timers, old fillRun)
+    // If switching runs, clear anything that could be stale (PDF URL, selection, timers, old fillRun, cached workbook)
     if (isNewRun && prevState.pdfRefreshTimer) {
       clearTimeout(prevState.pdfRefreshTimer);
     }
@@ -78,6 +81,8 @@ export const createTemplateFillSlice = (set, get) => ({
               pdfUrlExpiry: null,
               pdfRefreshTimer: null,
               selectedText: null,
+              cachedWorkbook: null,
+              cachedWorkbookTemplateId: null,
             }
           : null),
         fillRunId,
@@ -89,7 +94,6 @@ export const createTemplateFillSlice = (set, get) => ({
     try {
       // Fetch fill run data
       const fillRunData = await getFillRunStatus(getToken, fillRunId);
-      console.log('✅ Fill run loaded:', fillRunData);
 
       set((state) => ({
         templateFill: {
@@ -104,9 +108,7 @@ export const createTemplateFillSlice = (set, get) => ({
       const shouldLoadPdf = !skipPdf && (isNewRun || !prevState.pdfUrl);
 
       if (shouldLoadPdf) {
-        console.log('📄 Checking document_id:', fillRunData.document_id);
         if (fillRunData.document_id) {
-          console.log('📄 Loading PDF for document:', fillRunData.document_id);
           await get().loadPdfUrl(fillRunData.document_id, getToken);
         } else {
           console.warn('⚠️ No document_id found in fill run');
@@ -142,11 +144,9 @@ export const createTemplateFillSlice = (set, get) => ({
    * Load PDF presigned URL and set up auto-refresh
    */
   loadPdfUrl: async (documentId, getToken) => {
-    console.log('📄 Loading PDF URL for document:', documentId);
 
     try {
       const urlData = await getDocumentDownloadUrl(getToken, documentId);
-      console.log('📄 PDF URL response:', urlData);
 
       if (urlData.url) {
         const expiry = Date.now() + urlData.expires_in * 1000;
@@ -161,8 +161,6 @@ export const createTemplateFillSlice = (set, get) => ({
 
         // Set up auto-refresh timer (10 minutes before expiry)
         get().schedulePdfRefresh(documentId, getToken, urlData.expires_in);
-
-        console.log('✅ PDF URL loaded, expires at:', new Date(expiry));
       } else {
         console.error('❌ No URL in response:', urlData);
 
@@ -205,7 +203,6 @@ export const createTemplateFillSlice = (set, get) => ({
 
     if (refreshTime > 0) {
       const timer = setTimeout(async () => {
-        console.log('🔄 Auto-refreshing PDF URL...');
         await get().loadPdfUrl(documentId, getToken);
       }, refreshTime);
 
@@ -234,7 +231,6 @@ export const createTemplateFillSlice = (set, get) => ({
    * Update extracted data (for manual edits or paste from PDF)
    */
   updateFieldData: async (fillRunId, extractedData, getToken) => {
-    console.log('💾 Updating field data for fill run:', fillRunId);
 
     set((state) => ({
       templateFill: {
@@ -258,8 +254,6 @@ export const createTemplateFillSlice = (set, get) => ({
           isSaving: false,
         },
       }));
-
-      console.log('✅ Field data updated');
     } catch (err) {
       console.error('❌ Failed to update field data:', err);
       set((state) => ({
@@ -277,7 +271,6 @@ export const createTemplateFillSlice = (set, get) => ({
    * Update field mappings
    */
   updateMappings: async (fillRunId, mappings, getToken) => {
-    console.log('🗺️ Updating mappings for fill run:', fillRunId);
 
     set((state) => ({
       templateFill: {
@@ -316,8 +309,6 @@ export const createTemplateFillSlice = (set, get) => ({
           isSaving: false,
         },
       }));
-
-      console.log('✅ Mappings updated');
     } catch (err) {
       console.error('❌ Failed to update mappings:', err);
       set((state) => ({
@@ -335,7 +326,6 @@ export const createTemplateFillSlice = (set, get) => ({
    * Continue fill run after reviewing mappings
    */
   continueProcessing: async (fillRunId, getToken) => {
-    console.log('▶️ Continuing fill run:', fillRunId);
 
     set((state) => ({
       templateFill: {
@@ -351,7 +341,6 @@ export const createTemplateFillSlice = (set, get) => ({
       // Reload fill run to get updated status
       await get().loadFillRun(fillRunId, getToken);
 
-      console.log('✅ Fill run continued');
       return response;
     } catch (err) {
       console.error('❌ Failed to continue fill run:', err);
@@ -364,6 +353,43 @@ export const createTemplateFillSlice = (set, get) => ({
       }));
       throw err;
     }
+  },
+
+  /**
+   * Cache parsed Excel workbook to avoid reloading on tab switches
+   */
+  cacheExcelWorkbook: (workbook, templateId) => {
+    set((state) => ({
+      templateFill: {
+        ...state.templateFill,
+        cachedWorkbook: workbook,
+        cachedWorkbookTemplateId: templateId,
+      },
+    }));
+  },
+
+  /**
+   * Get cached Excel workbook if it exists and matches current template
+   */
+  getCachedExcelWorkbook: (templateId) => {
+    const { cachedWorkbook, cachedWorkbookTemplateId } = get().templateFill;
+    if (cachedWorkbook && cachedWorkbookTemplateId === templateId) {
+      return cachedWorkbook;
+    }
+    return null;
+  },
+
+  /**
+   * Clear cached workbook
+   */
+  clearCachedExcelWorkbook: () => {
+    set((state) => ({
+      templateFill: {
+        ...state.templateFill,
+        cachedWorkbook: null,
+        cachedWorkbookTemplateId: null,
+      },
+    }));
   },
 
   /**
@@ -390,6 +416,8 @@ export const createTemplateFillSlice = (set, get) => ({
         selectedText: null,
         pdfPopoutWindow: null,
         excelPopoutWindow: null,
+        cachedWorkbook: null,
+        cachedWorkbookTemplateId: null,
         isLoading: false,
         isSaving: false,
         error: null,
@@ -413,7 +441,6 @@ export const createTemplateFillSlice = (set, get) => ({
    * Register PDF pop-out window
    */
   registerPdfPopout: (windowRef) => {
-    console.log('📺 Registering PDF pop-out window');
     set((state) => ({
       templateFill: {
         ...state.templateFill,
@@ -426,7 +453,6 @@ export const createTemplateFillSlice = (set, get) => ({
    * Register Excel pop-out window
    */
   registerExcelPopout: (windowRef) => {
-    console.log('📊 Registering Excel pop-out window');
     set((state) => ({
       templateFill: {
         ...state.templateFill,
@@ -439,7 +465,6 @@ export const createTemplateFillSlice = (set, get) => ({
    * Navigate PDF to page in all windows (main + pop-outs)
    */
   navigatePdfToPage: (pageNumber) => {
-    console.log('🔄 Navigating PDF to page', pageNumber, 'across all windows');
 
     const { pdfPopoutWindow } = get().templateFill;
 

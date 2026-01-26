@@ -667,7 +667,6 @@ export const createChatSlice = (set, get) => ({
     /**
      * Clear current session and messages
      */
-    console.log("Starting new chat - clearing session and messages");
     set((state) => ({
       chat: {
         ...state.chat,
@@ -838,8 +837,6 @@ export const createChatSlice = (set, get) => ({
       return;
     }
 
-    console.log("🔄 Reconnecting to document indexing:", { jobId, documentId });
-
     try {
       const cleanup = await streamJobProgress(jobId, getToken, {
         onProgress: (data) => {
@@ -856,7 +853,6 @@ export const createChatSlice = (set, get) => ({
 
           // If job not found, clear state
           if (errorData?.type === "not_found") {
-            console.log("🗑️ Job not found - clearing indexing state");
             get().resetIndexing();
             return;
           }

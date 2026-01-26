@@ -1,0 +1,185 @@
+# Real Estate Investment Model Template - Version 1
+# This schema defines critical fields with known locations in the Excel template
+# Format: Define fingerprint cells for identification, then critical fields with their PDF aliases
+
+schema_id: "re_investment_v1"
+version: "1.0"
+name: "RE Investment Model"
+description: "Standard real estate investment analysis model with 21 sheets"
+
+# Fingerprint cells - used to identify this template (check 3-5 unique cells)
+fingerprint:
+  - sheet: "DASHBOARD"
+    cell: "B6"
+    expected_value: "Unit Count"
+  - sheet: "DASHBOARD"
+    cell: "B7"
+    expected_value: "Year Built"
+  - sheet: "DASHBOARD"
+    cell: "I3"
+    expected_value: "PURCHASE"
+
+# Critical fields - define 50-100 most important fields
+# Fields not defined here will be handled by generic analyzer + LLM
+fields:
+  # --- DASHBOARD SHEET - Property Info ---
+
+  - id: "property_name"
+    sheet: "DASHBOARD"
+    label_cell: "B4"        # Cell containing the label
+    value_cell: "C4"        # Cell where the value should be filled
+    data_type: "text"
+    pdf_aliases:            # What to look for in PDF (case-insensitive)
+      - "Property Name"
+      - "Property"
+      - "Building Name"
+      - "Asset Name"
+
+  - id: "property_address"
+    sheet: "DASHBOARD"
+    label_cell: "B5"
+    value_cell: "C5"
+    data_type: "text"
+    pdf_aliases:
+      - "Property Address"
+      - "Address"
+      - "Location"
+      - "Street Address"
+
+  - id: "unit_count"
+    sheet: "DASHBOARD"
+    label_cell: "B6"
+    value_cell: "C6"
+    data_type: "number"
+    pdf_aliases:
+      - "Units"
+      - "Unit Count"
+      - "Total Units"
+      - "# Units"
+      - "Number of Units"
+
+  - id: "year_built"
+    sheet: "DASHBOARD"
+    label_cell: "B7"
+    value_cell: "C7"
+    data_type: "number"
+    pdf_aliases:
+      - "Year Built"
+      - "Built"
+      - "Construction Year"
+      - "Yr Built"
+
+  # --- DASHBOARD SHEET - Purchase Section ---
+
+  - id: "purchase_price"
+    sheet: "DASHBOARD"
+    label_cell: "I4"
+    value_cell: "J4"
+    data_type: "currency"
+    pdf_aliases:
+      - "Purchase Price"
+      - "Asking Price"
+      - "Listing Price"
+      - "Sale Price"
+      - "Offer Price"
+      - "Price"
+
+  - id: "down_payment_pct"
+    sheet: "DASHBOARD"
+    label_cell: "I5"
+    value_cell: "J5"
+    data_type: "percentage"
+    pdf_aliases:
+      - "Down Payment"
+      - "Down Payment %"
+      - "Equity %"
+      - "Equity Contribution"
+      - "DP%"
+
+  - id: "interest_rate"
+    sheet: "DASHBOARD"
+    label_cell: "I6"
+    value_cell: "J6"
+    data_type: "percentage"
+    pdf_aliases:
+      - "Interest Rate"
+      - "Rate"
+      - "Loan Rate"
+      - "Mortgage Rate"
+      - "Note Rate"
+
+  - id: "io_period"
+    sheet: "DASHBOARD"
+    label_cell: "I7"
+    value_cell: "J7"
+    data_type: "number"
+    pdf_aliases:
+      - "I/O Period"
+      - "I/O Mos"
+      - "Interest Only Period"
+      - "IO Months"
+      - "Interest-Only"
+
+  - id: "amortization"
+    sheet: "DASHBOARD"
+    label_cell: "I8"
+    value_cell: "J8"
+    data_type: "number"
+    pdf_aliases:
+      - "Amortization"
+      - "Amort"
+      - "Amort Period"
+      - "Amortization Period"
+      - "Amort (Mos)"
+
+  # --- Add more critical fields below ---
+  # TODO: Fill in remaining critical fields (~40-90 more)
+  #
+  # Examples of other important fields to define:
+  # - NOI
+  # - Cap Rate
+  # - Square Feet
+  # - Occupancy
+  # - Gross Income
+  # - Operating Expenses
+  # - Cash-on-Cash Return
+  # - IRR
+  # - LP/GP splits
+  # - Preferred Return
+  # etc.
+
+# Tables with dynamic rows (rent roll, operating statement, etc.)
+tables:
+  - id: "rent_roll"
+    sheet: "RENT ROLL"
+    header_row: 5
+    data_start_row: 6
+    row_identifier_column: "A"  # Column with unit numbers/identifiers
+    columns:
+      - excel_column: "A"
+        header: "Unit"
+        data_type: "text"
+        pdf_aliases:
+          - "Unit Number"
+          - "Unit"
+          - "Unit #"
+
+      - excel_column: "B"
+        header: "Sq Ft"
+        data_type: "number"
+        pdf_aliases:
+          - "Square Feet"
+          - "SF"
+          - "Sq Ft"
+          - "Size"
+
+      - excel_column: "C"
+        header: "Rent"
+        data_type: "currency"
+        pdf_aliases:
+          - "Monthly Rent"
+          - "Rent"
+          - "Current Rent"
+          - "In-Place Rent"
+
+  # TODO: Add more tables (operating statement, etc.)

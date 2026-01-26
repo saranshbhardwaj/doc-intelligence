@@ -29,7 +29,6 @@ export default function ExcelPopoutPage() {
 
   // Handle citation clicks - navigate PDF pop-out
   function handleCitationClick(pageNumber) {
-    console.log('📊 Excel Pop-out: Citation clicked, navigating to page', pageNumber);
 
     // Try to find PDF pop-out window
     // Check if we have a reference to it
@@ -55,7 +54,6 @@ export default function ExcelPopoutPage() {
     function handleMessage(event) {
       // Register PDF pop-out window when it announces itself
       if (event.data.type === 'PDF_POPOUT_READY') {
-        console.log('📊 Excel Pop-out: PDF pop-out registered');
         pdfPopoutRef.current = event.source;
       }
     }

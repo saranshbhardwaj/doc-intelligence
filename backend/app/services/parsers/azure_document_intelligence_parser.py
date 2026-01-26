@@ -647,11 +647,21 @@ class AzureDocumentIntelligenceParser(DocumentParser):
 
             table_row_count = getattr(table, 'row_count', 0) or len(cells_by_row)
 
+            # Extract bounding regions for PDF highlighting
+            table_bounding_regions = []
+            for br in getattr(table, "bounding_regions", []) or []:
+                if br:
+                    table_bounding_regions.append({
+                        "page_number": getattr(br, "page_number", None),
+                        "polygon": getattr(br, "polygon", [])
+                    })
+
             table_data = {
                 "table_id": len(tables_by_page.get(page_num, [])),
                 "text": "\n".join(table_text_lines),
                 "row_count": table_row_count,
                 "column_count": table_col_count,
+                "bounding_regions": table_bounding_regions,
             }
 
             tables_by_page.setdefault(page_num, []).append(table_data)

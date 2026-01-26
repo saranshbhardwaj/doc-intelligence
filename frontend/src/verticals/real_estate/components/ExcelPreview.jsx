@@ -25,14 +25,6 @@ export default function ExcelPreview({
 
   const mappings = fieldMapping?.mappings || [];
 
-  // Debug logging
-  useEffect(() => {
-    console.log('📊 ExcelPreview - templateId:', templateId);
-    console.log('📊 ExcelPreview - fieldMapping:', fieldMapping);
-    console.log('📊 ExcelPreview - mappings:', mappings);
-    console.log('📊 ExcelPreview - extractedData:', extractedData);
-  }, [templateId, fieldMapping, extractedData]);
-
   useEffect(() => {
     loadTemplate();
   }, [templateId]);
@@ -49,10 +41,7 @@ export default function ExcelPreview({
       setLoading(true);
       setError(null);
 
-      console.log('📊 Loading template schema for:', templateId);
       const data = await getRETemplate(getToken, templateId);
-      console.log('📊 Template schema loaded:', data);
-      console.log('📊 Template sheets:', data?.schema_metadata?.sheets);
       setTemplate(data);
     } catch (err) {
       console.error('❌ Failed to load template:', err);

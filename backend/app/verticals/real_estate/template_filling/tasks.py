@@ -33,6 +33,7 @@ from app.utils.costs import compute_llm_cost
 from app.utils.logging import logger
 from app.verticals.real_estate.template_filling.excel_handler import ExcelHandler
 from app.verticals.real_estate.template_filling.llm_service import TemplateFillLLMService
+from app.verticals.real_estate.template_filling.excel.mapping_coordinator import coordinator as mapping_coordinator
 
 
 def _get_db_session() -> Session:
@@ -300,7 +301,7 @@ def detect_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                 # Infer field type from value
                 field_type = _infer_field_type(value)
 
-                detected_fields.append({
+                field_data = {
                     "id": f"kv_{field_id_counter}",
                     "name": key,
                     "type": field_type,
@@ -309,7 +310,19 @@ def detect_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                     "citations": [citation],
                     "description": f"Key-value field from page {kv_page_number}",
                     "source": "key_value_pairs"
-                })
+                }
+
+                # FIXED: Extract bbox from the INDIVIDUAL KV pair (not chunk-level merged bbox)
+                kv_bbox = kv.get("bbox")
+                if kv_bbox:
+                    field_data["bbox"] = kv_bbox
+
+                # DEBUG: Log first field's bbox
+                if field_id_counter == 1:
+                    logger.info(f"[FIELD_DETECTION] First KV field: '{key}', "
+                              f"page={kv_page_number}, has bbox: {kv_bbox is not None}, bbox={kv_bbox}")
+
+                detected_fields.append(field_data)
                 field_id_counter += 1
 
         # ========================================================================
@@ -319,6 +332,8 @@ def detect_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
             table_name = metadata.get("table_name", "")
             column_headers = metadata.get("column_headers", [])
             citation = f"[D1:p{chunk.page_number}]"
+            # Extract bbox from chunk metadata for PDF highlighting
+            chunk_bbox = metadata.get("bbox")
 
             for col_header in column_headers:
                 if not col_header or col_header.lower() in ["", "none", "n/a"]:
@@ -339,19 +354,41 @@ def detect_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                     except (ValueError, IndexError):
                         pass
 
-                detected_fields.append({
+                field_data = {
                     "id": f"tbl_{field_id_counter}",
                     "name": col_header,
                     "type": field_type,
                     "sample_value": sample_value,
+                    # NOTE: Hardcoded confidence for table columns.
+                    # Unlike key-value pairs (which get per-pair confidence from Azure DI),
+                    # Azure DI does NOT provide per-column/per-cell confidence for tables.
+                    # Future: Could calculate from table structure quality metrics.
                     "confidence": 0.9,
                     "citations": [citation],
                     "description": f"Column from table '{table_name}' on page {chunk.page_number}",
                     "source": "table"
-                })
+                }
+
+                # Include bbox for PDF highlighting if available
+                if chunk_bbox:
+                    field_data["bbox"] = chunk_bbox
+
+                # DEBUG: Log first table field's bbox
+                if len([f for f in detected_fields if f.get("source") == "table"]) == 0:
+                    logger.info(f"[FIELD_DETECTION] First table field: '{col_header}', "
+                              f"page={chunk.page_number}, has bbox: {chunk_bbox is not None}, bbox={chunk_bbox}")
+
+                detected_fields.append(field_data)
                 field_id_counter += 1
 
         elapsed_ms = int((time.time() - start_time) * 1000)
+
+        # DEBUG: Count fields with bbox
+        fields_with_bbox = sum(1 for f in detected_fields if "bbox" in f)
+        kv_fields_with_bbox = sum(1 for f in detected_fields if f.get("source") == "key_value_pairs" and "bbox" in f)
+        table_fields_with_bbox = sum(1 for f in detected_fields if f.get("source") == "table" and "bbox" in f)
+        logger.info(f"[FIELD_DETECTION] Summary: {len(detected_fields)} total fields, "
+                  f"{fields_with_bbox} with bbox ({kv_fields_with_bbox} KV + {table_fields_with_bbox} table)")
 
         # Build detection result in same format as LLM would return
         detection_result = {
@@ -418,7 +455,12 @@ def detect_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
 @shared_task(bind=True)
 def auto_map_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Auto-map PDF fields to Excel cells using LLM.
+    Auto-map PDF fields to Excel cells using schema-first, then LLM fallback.
+
+    Workflow:
+    1. Try schema-based mapping (deterministic, instant)
+    2. Fall back to generic + LLM for unmapped cells
+    3. Merge results (schema takes priority)
 
     Args:
         payload: {
@@ -426,7 +468,9 @@ def auto_map_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
             "template_id": str,
             "detection_result": dict,
             "job_id": str,
-            "status": str (optional, "failed" if previous task failed)
+            "status": str (optional, "failed" if previous task failed),
+            "use_schema_only": bool (optional, default False - skip generic if True),
+            "skip_schema": bool (optional, default False - skip schema if True)
         }
 
     Returns:
@@ -442,6 +486,10 @@ def auto_map_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
     detection_result = payload["detection_result"]
     job_id = payload["job_id"]
 
+    # Config flags (read from settings if not in payload)
+    use_schema_only = payload.get("use_schema_only", settings.excel_schema_only)
+    skip_schema = payload.get("skip_schema", settings.excel_skip_schema)
+
     db = _get_db_session()
     repo = TemplateRepository(db)
     tracker = JobProgressTracker(db, job_id)
@@ -456,62 +504,142 @@ def auto_map_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
             message="Mapping PDF fields to Excel cells"
         )
 
-        # Get template schema
+        # Get template
         template = repo.get_template(template_id)
-        if not template or not template.schema_metadata:
-            raise ValueError(f"Template schema not found: {template_id}")
+        if not template:
+            raise ValueError(f"Template not found: {template_id}")
 
         excel_schema = template.schema_metadata
+        if not excel_schema:
+            raise ValueError(f"Template schema not found: {template_id}")
 
-        # Initialize LLM service
-        llm_service = TemplateFillLLMService()
+        pdf_fields = detection_result.get("fields", [])
+        schema_mappings = []
+        generic_mappings = []
 
-        # Progress callback for batch processing
-        def on_batch_complete(batch_num, total_batches, batch_mappings):
-            """Report progress after each batch is mapped."""
-            # Progress from 50% (start) to 80% (end of mapping)
-            batch_progress = 50 + int((batch_num / total_batches) * 30)
-            tracker.update_progress(
-                status="mapping",
-                current_stage="auto_mapping",
-                progress_percent=batch_progress,
-                message=f"Mapping fields (batch {batch_num}/{total_batches})..."
+        # === STEP 1: Try schema-based mapping (unless skipped) ===
+        if not skip_schema:
+            try:
+                from openpyxl import load_workbook
+
+                # Download template file temporarily
+                storage = get_storage_backend()
+                template_path = storage.download_to_temp(template.file_path)
+
+                # Load workbook for fingerprint check
+                workbook = load_workbook(template_path, data_only=False)
+
+                # Identify template
+                schema_id = mapping_coordinator.identify_template(workbook)
+
+                if schema_id:
+                    logger.info(f"✓ Template identified as: {schema_id}")
+
+                    # Create schema mappings (deterministic, instant)
+                    schema_mappings = mapping_coordinator.create_schema_mappings(schema_id, pdf_fields)
+
+                    logger.info(f"Schema mapping: {len(schema_mappings)} fields mapped (confidence=1.0)")
+
+                    # Log unmapped schema fields (diagnostics)
+                    try:
+                        from app.verticals.real_estate.template_filling.excel.schema_based import SchemaMapper
+
+                        schema = mapping_coordinator.schema_loader.load_schema(schema_id)
+                        if schema:
+                            mapper = SchemaMapper(schema)
+                            unmapped_field_ids = mapper.get_unmapped_schema_fields(schema_mappings)
+                            if unmapped_field_ids:
+                                logger.warning(
+                                    f"Schema fields without PDF data ({len(unmapped_field_ids)}): "
+                                    f"{', '.join(unmapped_field_ids[:10])}"
+                                    f"{'...' if len(unmapped_field_ids) > 10 else ''}"
+                                )
+                    except Exception as e:
+                        logger.debug(f"Could not check unmapped schema fields: {e}")
+
+                    tracker.update_progress(
+                        status="mapping",
+                        current_stage="auto_mapping",
+                        progress_percent=55,
+                        message=f"Schema mapped {len(schema_mappings)} critical fields"
+                    )
+                else:
+                    logger.info("Template not recognized by schema system - will use generic analyzer")
+
+                # Clean up temp file
+                Path(template_path).unlink(missing_ok=True)
+
+            except Exception as e:
+                logger.warning(f"Schema mapping failed (will fall back to generic): {e}")
+                schema_mappings = []
+
+        # === STEP 2: Generic + LLM mapping for remaining cells (unless schema-only mode) ===
+        if not use_schema_only:
+            # Get cells already mapped by schema
+            schema_mapped_cells = mapping_coordinator.get_schema_mapped_cells(schema_mappings)
+
+            # Filter Excel schema to exclude schema-mapped cells
+            filtered_excel_schema = mapping_coordinator.filter_generic_schema(
+                excel_schema,
+                schema_mapped_cells
             )
-            logger.info(f"Batch {batch_num}/{total_batches} mapped: {len(batch_mappings)} fields")
 
-        # Auto-map fields (LLM call 2) with batching and progress tracking
-        start_time = time.time()
-        mapping_result = asyncio.run(
-            llm_service.auto_map_fields(
-                pdf_fields=detection_result.get("fields", []),
-                excel_schema=excel_schema,
-                on_batch_complete=on_batch_complete
-            )
+            # Only run LLM if there are unmapped cells
+            if filtered_excel_schema:
+                # Initialize LLM service
+                llm_service = TemplateFillLLMService()
+
+                # Progress callback for batch processing
+                def on_batch_complete(batch_num, total_batches, batch_mappings):
+                    """Report progress after each batch is mapped."""
+                    # Progress from 60% (start) to 80% (end of mapping)
+                    batch_progress = 60 + int((batch_num / total_batches) * 20)
+                    tracker.update_progress(
+                        status="mapping",
+                        current_stage="auto_mapping",
+                        progress_percent=batch_progress,
+                        message=f"Mapping remaining fields (batch {batch_num}/{total_batches})..."
+                    )
+                    logger.info(f"Batch {batch_num}/{total_batches} mapped: {len(batch_mappings)} fields")
+
+                # Auto-map fields (LLM call) with batching and progress tracking
+                start_time = time.time()
+                mapping_result = asyncio.run(
+                    llm_service.auto_map_fields(
+                        pdf_fields=pdf_fields,
+                        excel_schema=filtered_excel_schema,
+                        on_batch_complete=on_batch_complete
+                    )
+                )
+                elapsed_ms = int((time.time() - start_time) * 1000)
+
+                generic_mappings = mapping_result.get("mappings") or []
+
+                logger.info(f"Generic mapping: {len(generic_mappings)} additional fields mapped")
+            else:
+                logger.info("All cells mapped by schema - skipping generic mapping")
+                elapsed_ms = 0
+        else:
+            logger.info("Schema-only mode - skipping generic mapping")
+            elapsed_ms = 0
+
+        # === STEP 3: Merge mappings (schema takes priority) ===
+        raw_mappings = mapping_coordinator.merge_mappings(schema_mappings, generic_mappings)
+
+        # Log mapping source breakdown
+        schema_count = sum(1 for m in raw_mappings if m.get("source") == "schema")
+        generic_count = len(raw_mappings) - schema_count
+
+        logger.info(
+            f"Mapping sources: {schema_count} schema (100% accurate), "
+            f"{generic_count} generic (LLM)"
         )
-        elapsed_ms = int((time.time() - start_time) * 1000)
 
-        # Update fill run with mappings
-        # IMPORTANT: The UI treats a PDF field as mapped if there exists *any* mapping for its pdf_field_id.
-        # Enforce 1 mapping per pdf_field_id (keep highest confidence) so counts and UI can't drift.
-        raw_mappings = mapping_result.get("mappings") or []
-        best_by_field_id: dict[str, dict] = {}
-        for m in raw_mappings:
-            field_id = m.get("pdf_field_id")
-            if not field_id:
-                continue
-
-            current_best = best_by_field_id.get(field_id)
-            current_best_conf = float((current_best or {}).get("confidence") or 0)
-            candidate_conf = float(m.get("confidence") or 0)
-            if current_best is None or candidate_conf > current_best_conf:
-                best_by_field_id[field_id] = m
-
-        mappings_dedup_by_field = list(best_by_field_id.values())
-
-        # ALSO deduplicate by Excel cell to avoid multiple PDF fields mapped to same cell
-        # This prevents visual confusion in the UI where only one overlay shows but counts are off
+        # Deduplicate by Excel cell only - one cell should have one source
+        # (Keep highest confidence mapping if multiple PDF fields map to the same cell)
+        # NOTE: Schema mappings already have confidence=1.0, so they will win ties
         best_by_cell: dict[str, dict] = {}
-        for m in mappings_dedup_by_field:
+        for m in raw_mappings:
             excel_sheet = m.get("excel_sheet", "")
             excel_cell = m.get("excel_cell", "")
             if not excel_sheet or not excel_cell:
@@ -528,16 +656,25 @@ def auto_map_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         mappings = list(best_by_cell.values())
         total_mapped_fields = len(mappings)
 
+        # Count unique PDF fields that have at least one mapping
+        unique_pdf_fields_mapped = len(set(m.get("pdf_field_id") for m in mappings if m.get("pdf_field_id")))
+
         # Log deduplication stats
         logger.info(
             f"Mapping deduplication: {len(raw_mappings)} raw → "
-            f"{len(mappings_dedup_by_field)} after field dedup → "
-            f"{len(mappings)} after cell dedup"
+            f"{len(mappings)} after cell dedup "
+            f"({unique_pdf_fields_mapped} unique PDF fields mapped to {len(mappings)} Excel cells) "
+            f"[{schema_count} schema + {len(mappings) - schema_count} generic]"
         )
 
-        # Keep mapping_result internally consistent for logging/UI consumers
-        mapping_result["mappings"] = mappings
-        mapping_result["total_mapped"] = total_mapped_fields
+        # Build mapping_result for logging/UI consumers
+        mapping_result = {
+            "mappings": mappings,
+            "total_mapped": total_mapped_fields,
+            "schema_mapped_count": schema_count,
+            "generic_mapped_count": len(mappings) - schema_count,
+            "high_confidence_count": sum(1 for m in mappings if m.get("confidence", 0) >= 0.85)
+        }
 
         field_mapping = {
             "pdf_fields": detection_result.get("fields", []),
@@ -557,14 +694,23 @@ def auto_map_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
 
         db.close()
 
-        logger.info(f"Auto-mapping complete: {total_mapped_fields} fields mapped")
+        logger.info(
+            f"Auto-mapping complete: {len(mappings)} Excel cells mapped "
+            f"(from {unique_pdf_fields_mapped} unique PDF fields) - "
+            f"{schema_count} via schema (100% accurate), {len(mappings) - schema_count} via LLM"
+        )
+
+        # Build user-friendly message
+        if schema_count > 0:
+            status_msg = f"Mapped {len(mappings)} cells ({schema_count} schema, {len(mappings) - schema_count} LLM)"
+        else:
+            status_msg = f"Mapped {len(mappings)} cells ({mapping_result.get('high_confidence_count', 0)} high confidence)"
 
         tracker.update_progress(
             status="awaiting_review",
             current_stage="auto_mapping",
             progress_percent=60,
-            message=f"Mapped {total_mapped_fields} fields "
-                    f"({mapping_result.get('high_confidence_count', 0)} high confidence)"
+            message=status_msg
         )
 
         payload["mapping_result"] = mapping_result
@@ -654,30 +800,63 @@ def fill_excel_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         # Prepare output path WITH CORRECT EXTENSION
         output_local_path = f"/tmp/filled_{fill_run_id}{file_ext}"
 
-        # Get extracted_data - prioritize user edits, fallback to Azure DI sample values
-        # Phase 5 (LLM extraction) has been removed - we use sample_value directly from pdf_fields
-        extracted_data = fill_run.extracted_data or {}
+        # Get extracted_data in clean nested schema format
+        # Schema: {
+        #   "llm_extracted": {field_id: {...}, ...},
+        #   "manual_edits": {sheet_name: {cell_address: {...}, ...}, ...}
+        # }
+        extracted_data = fill_run.extracted_data or {"llm_extracted": {}, "manual_edits": {}}
 
-        if extracted_data:
-            # User has manually edited some values via the UI
-            logger.info(f"Using existing extracted_data with {len(extracted_data)} field values (user may have edited)")
+        llm_extracted = extracted_data.get("llm_extracted", {})
+        manual_edits = extracted_data.get("manual_edits", {})
+
+        # Validate manual_edits structure (protect against data corruption)
+        if not isinstance(manual_edits, dict):
+            logger.warning(f"manual_edits is not a dict (type: {type(manual_edits)}), resetting to empty dict")
+            manual_edits = {}
         else:
-            # Build extracted_data from Azure DI sample values (no LLM extraction needed!)
-            logger.info("Building extracted_data from Azure DI sample values")
-            extracted_data = {}
-            for pdf_field in field_mapping.get('pdf_fields', []):
-                field_id = pdf_field.get('id')
-                sample_value = pdf_field.get('sample_value')
+            # Ensure all sheet values are dicts (clean up corrupted entries)
+            cleaned_manual_edits = {}
+            for sheet_name, cells in manual_edits.items():
+                if isinstance(cells, dict):
+                    cleaned_manual_edits[sheet_name] = cells
+                else:
+                    logger.warning(f"Skipping corrupted manual_edits entry: {sheet_name} (type: {type(cells)})")
+            manual_edits = cleaned_manual_edits
 
-                if field_id and sample_value:
-                    extracted_data[field_id] = {
-                        'value': sample_value,  # From Azure DI!
-                        'confidence': pdf_field.get('confidence', 0.95),
-                        'citations': pdf_field.get('citations', []),
-                        'user_edited': False
-                    }
+        # Add LLM auto-mapped values as fallback (matches UI getCellValue)
+        pdf_fields = field_mapping.get('pdf_fields', [])
+        for pdf_field in pdf_fields:
+            field_id = pdf_field.get('id')
+            auto_mapped_value = pdf_field.get('sample_value')
 
-            logger.info(f"Built extracted_data from {len(extracted_data)} PDF fields with sample values")
+            # Only add if not already in llm_extracted (user edits take precedence)
+            if field_id and field_id not in llm_extracted and auto_mapped_value:
+                field_entry = {
+                    'value': auto_mapped_value,
+                    'confidence': pdf_field.get('confidence', 0.95),
+                    'citations': pdf_field.get('citations', []),
+                    'user_edited': False
+                }
+                # Include bbox for PDF highlighting if available
+                if 'bbox' in pdf_field:
+                    field_entry['bbox'] = pdf_field['bbox']
+
+                llm_extracted[field_id] = field_entry
+
+        user_edited_count = sum(len(cells) for cells in manual_edits.values())
+        auto_mapped_count = len(llm_extracted) - sum(1 for data in llm_extracted.values() if data.get('user_edited'))
+
+        # Prepare clean extracted_data for filling
+        extracted_data = {
+            "llm_extracted": llm_extracted,
+            "manual_edits": manual_edits
+        }
+
+        logger.info(
+            f"Prepared extracted_data for filling: {user_edited_count} user-edited + "
+            f"{auto_mapped_count} LLM auto-mapped = {len(llm_extracted)} total"
+        )
 
         # Initialize Excel handler
         handler = ExcelHandler()
@@ -718,12 +897,10 @@ def fill_excel_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
             f"Excel filling complete: {fill_summary['total_cells_filled']} cells filled"
         )
 
-        tracker.update_progress(
-            status="completed",
-            current_stage="excel_filling",
-            progress_percent=100,
-            message=f"Excel filled successfully: {fill_summary['total_cells_filled']} cells"
-        )
+        # Use mark_completed() to send proper SSE termination events ("complete" + "end")
+        # NOT just update_progress() which only sends "progress" event
+        # This ensures the SSE stream terminates properly and UI receives completion signal
+        tracker.mark_completed()
 
         payload["artifact"] = artifact
         payload["fill_summary"] = fill_summary
@@ -739,10 +916,13 @@ def fill_excel_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
             error_message=str(e)
         )
 
-        tracker.update_progress(
-            status="failed",
-            current_stage="excel_filling",
-            message=f"Excel filling failed: {str(e)}"
+        # Use mark_error() to send proper SSE termination events ("error" + "end")
+        # NOT just update_progress() which only sends "progress" event
+        tracker.mark_error(
+            error_stage="excel_filling",
+            error_message=str(e),
+            error_type="fill_error",
+            is_retryable=False
         )
 
         db.close()

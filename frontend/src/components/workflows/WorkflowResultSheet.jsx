@@ -87,7 +87,6 @@ export default function WorkflowResultSheet({ open, onOpenChange, runId }) {
       // Handle Word export locally
       if (format === "word") {
         await exportWorkflowAsWord(artifact, run);
-        console.log("✅ Exported as Word document");
       } else {
         // PDF and Excel use backend export
         const res = await exportRun(getToken, runId, format, "url");

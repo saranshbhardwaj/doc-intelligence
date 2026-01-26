@@ -74,7 +74,6 @@ export const createExtractionSlice = (set, get) => ({
     getToken,
     { limit = 50, offset = 0, status = null } = {}
   ) => {
-    console.log("📡 fetchExtractionHistory called", { limit, offset, status });
     set((state) => ({
       extractionHistory: {
         ...state.extractionHistory,
@@ -88,7 +87,6 @@ export const createExtractionSlice = (set, get) => ({
         offset,
         status,
       });
-      console.log("📦 API Response:", response);
       set((state) => ({
         extractionHistory: {
           ...state.extractionHistory,
@@ -98,7 +96,6 @@ export const createExtractionSlice = (set, get) => ({
           error: null,
         },
       }));
-      console.log("✅ State updated with items:", response.items?.length);
       return response;
     } catch (err) {
       console.error("❌ Error fetching history:", err);
@@ -132,7 +129,6 @@ export const createExtractionSlice = (set, get) => ({
 
     try {
       const response = await uploadDocument(file, getToken, context);
-      console.log("📤 Upload response:", response);
 
       // Handle cache hit or duplicate document (no async processing needed)
       if (response.from_cache || response.from_history) {
@@ -168,12 +164,9 @@ export const createExtractionSlice = (set, get) => ({
         },
       }));
 
-      console.log("🚀 Starting SSE stream for job:", jobId);
-
       // Start SSE stream
       const cleanup = await streamProgress(jobId, getToken, {
         onProgress: (data) => {
-          console.log("📊 Progress update:", data);
           setProgress({
             status: data.status,
             percent: data.progress_percent,
@@ -188,7 +181,6 @@ export const createExtractionSlice = (set, get) => ({
           });
         },
         onComplete: async () => {
-          console.log("✅ Extraction completed");
           setProgress({
             status: "completed",
             percent: 100,
@@ -221,7 +213,6 @@ export const createExtractionSlice = (set, get) => ({
           setProcessing(false);
         },
         onEnd: async (data) => {
-          console.log("🏁 SSE stream ended:", data);
           if (data?.reason === "completed") {
             // Do not auto-load full result; just refresh history list
             try {
@@ -274,7 +265,6 @@ export const createExtractionSlice = (set, get) => ({
 
     try {
       const response = await extractFromDocument(documentId, getToken, context);
-      console.log("📄 Library extract response:", response);
 
       if (response.from_history) {
         // Historical duplicate
@@ -381,7 +371,6 @@ export const createExtractionSlice = (set, get) => ({
 
     try {
       const response = await extractTempDocument(file, getToken, context);
-      console.log("🧪 Temp extract response:", response);
 
       if (response.from_history) {
         setResult(response);
@@ -490,8 +479,6 @@ export const createExtractionSlice = (set, get) => ({
         },
       }));
 
-      console.log("🔄 Starting retry with job:", jobId);
-
       // Start SSE stream for retry
       const cleanup = await streamProgress(jobId, getToken, {
         onProgress: (data) => {
@@ -572,8 +559,6 @@ export const createExtractionSlice = (set, get) => ({
       console.log("❌ No active extraction to reconnect");
       return;
     }
-
-    console.log("🔄 Reconnecting to extraction:", jobId);
     setProcessing(true);
 
     try {
@@ -615,7 +600,6 @@ export const createExtractionSlice = (set, get) => ({
           // If job not found (e.g., deleted), clear extraction state entirely
           const errorType = typeof errorData === 'object' ? errorData?.type : null;
           if (errorType === 'not_found') {
-            console.log('🗑️ Extraction job not found - clearing state');
             get().resetExtraction();
             return;
           }

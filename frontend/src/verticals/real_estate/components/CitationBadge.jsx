@@ -27,7 +27,8 @@ export function CitationBadge({
   citation,
   onClick,
   className,
-  sourceText = null
+  sourceText = null,
+  bbox = null  // Optional bbox for PDF highlighting: { page, x0, y0, x1, y1 }
 }) {
   const pageNumber = parseCitationPage(citation);
   const displayText = pageNumber ? `Page ${pageNumber}` : citation;
@@ -35,7 +36,12 @@ export function CitationBadge({
   const handleClick = (e) => {
     e.stopPropagation();
     if (onClick && pageNumber) {
-      onClick(pageNumber);
+      // Pass bbox if available, otherwise just page number
+      if (bbox) {
+        onClick(bbox);
+      } else {
+        onClick(pageNumber);
+      }
     }
   };
 
@@ -73,6 +79,8 @@ export function CitationBadges({
   if (!citations || citations.length === 0) return null;
 
   const citationArray = Array.isArray(citations) ? citations : [citations];
+  // Extract bbox from field data if available
+  const bbox = extractedData?.bbox || null;
 
   return (
     <div className={cn("flex items-center flex-wrap gap-1.5", className)}>
@@ -82,6 +90,7 @@ export function CitationBadges({
           citation={citation}
           onClick={onCitationClick}
           sourceText={extractedData?.source_text}
+          bbox={bbox}
         />
       ))}
     </div>

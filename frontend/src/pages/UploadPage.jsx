@@ -81,7 +81,6 @@ export default function UploadPage() {
   // Reconnect to active extraction on mount (Zustand persistence handles this)
   useEffect(() => {
     if (isProcessing && getToken) {
-      console.log("🔄 Reconnecting to active extraction from persisted state");
       reconnectExtraction(getToken);
     }
   }, []); // Run once on mount
@@ -96,7 +95,6 @@ export default function UploadPage() {
       // Fetch the extraction result
       fetchExtractionResult(extractionId, getToken)
         .then((extractionData) => {
-          console.log("Loaded past extraction:", extractionData);
           setResult(extractionData);
         })
         .catch((err) => {

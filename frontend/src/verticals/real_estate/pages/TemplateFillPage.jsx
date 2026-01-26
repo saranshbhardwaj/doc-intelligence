@@ -55,6 +55,7 @@ export default function TemplateFillPage() {
   const { getToken } = useAuth();
   const [currentPage, setCurrentPage] = useState(1);
   const [activeTab, setActiveTab] = useState('excel');
+  const [highlightBbox, setHighlightBbox] = useState(null); // For PDF highlighting
 
   // Progress tracking state
   const [jobProgress, setJobProgress] = useState(0);
@@ -82,7 +83,6 @@ export default function TemplateFillPage() {
 
   // Load fill run data on mount
   useEffect(() => {
-    console.log('🔄 Loading fill run:', fillRunId);
     loadFillRun(fillRunId, getToken);
 
     // Cleanup on unmount
@@ -99,17 +99,14 @@ export default function TemplateFillPage() {
 
       switch (type) {
         case 'PDF_POPOUT_READY':
-          console.log('📺 Main: PDF pop-out registered');
           registerPdfPopout(event.source);
           break;
 
         case 'EXCEL_POPOUT_READY':
-          console.log('📊 Main: Excel pop-out registered');
           registerExcelPopout(event.source);
           break;
 
         case 'NAVIGATE_PDF_TO_PAGE':
-          console.log('🔄 Main: Forwarding page navigation to PDF pop-out:', page);
           navigatePdfToPage(page);
           // Also update local state
           setCurrentPage(page);
@@ -134,7 +131,8 @@ export default function TemplateFillPage() {
 
     if (isTerminal) {
       // Set final UI state for terminal statuses
-      if (fillRun.status === 'completed') {
+      if (fillRun.status === 'completed' && fillRun.artifact) {
+        // Only consider truly complete if artifact is available
         setJobStatus('completed');
         setJobProgress(100);
         setJobMessage('Template fill completed');
@@ -147,6 +145,13 @@ export default function TemplateFillPage() {
         setJobProgress(100);
         setJobMessage('Ready for review');
       }
+      // If status is 'completed' but no artifact yet, keep processing overlay visible
+      if (fillRun.status === 'completed' && !fillRun.artifact) {
+        // Don't return - let SSE reconnect or continue polling
+        setJobStatus('processing');
+        setJobMessage('Finalizing download...');
+        return;
+      }
       return;
     }
 
@@ -155,13 +160,11 @@ export default function TemplateFillPage() {
     // SSE will fetch initial state and then stream updates
 
     // Connect to SSE stream
-    console.log('📡 Connecting to SSE for fill run:', fillRunId, 'Current status:', fillRun.status);
     setJobStatus('processing');
 
     let cleanup;
     streamTemplateFillProgress(fillRunId, getToken, {
       onProgress: (data) => {
-        console.log('📊 Progress update:', data);
         setJobProgress(data.progress_percent || 0);
         setJobMessage(data.message || 'Processing...');
 
@@ -169,27 +172,29 @@ export default function TemplateFillPage() {
         // This handles the case where backend sends progress events with terminal status
         // instead of a separate "complete" event
         if (data.status === 'awaiting_review' || data.status === 'completed') {
-          console.log('🎯 Terminal status detected in progress event:', data.status);
-          setJobStatus('idle'); // Clear progress overlay
-          // Reload to get final state
+          // Don't clear progress overlay yet - wait for store to update with artifact
+          // Reload to get final state (including artifact if completed)
           setTimeout(async () => {
             await loadFillRun(fillRunId, getToken, { silent: true, skipPdf: true });
-          }, 500);
+            // Only clear progress after loadFillRun completes
+            setJobStatus('idle');
+          }, 100);
         } else if (data.status === 'failed') {
           console.log('❌ Failed status detected in progress event');
           setJobStatus('failed');
         }
       },
       onComplete: async (data) => {
-        console.log('✅ Fill run complete:', data);
-        setJobStatus('idle');
         setJobProgress(100);
         setJobMessage('Complete');
-        // Wait a moment for backend to finish updating database, then reload
+        // Wait for backend to finish updating database, then reload
         // This ensures we get the final status and artifact data
+        // Don't clear progress overlay until artifact is loaded
         setTimeout(async () => {
           await loadFillRun(fillRunId, getToken, { silent: true, skipPdf: true });
-        }, 500);
+          // Only clear progress after loadFillRun completes
+          setJobStatus('idle');
+        }, 100);
       },
       onError: (error) => {
         console.error('❌ Fill run error:', error);
@@ -199,7 +204,6 @@ export default function TemplateFillPage() {
         loadFillRun(fillRunId, getToken, { silent: true, skipPdf: true });
       },
       onEnd: (data) => {
-        console.log('🔌 SSE stream ended:', data);
       },
     }).then((cleanupFn) => {
       cleanup = cleanupFn;
@@ -211,44 +215,36 @@ export default function TemplateFillPage() {
     };
   }, [fillRun?.status, fillRunId]);
 
-  // Debug: Log state changes
-  useEffect(() => {
-    console.log('📄 pdfUrl state:', pdfUrl);
-  }, [pdfUrl]);
-
-  useEffect(() => {
-    console.log('📊 fillRun state:', fillRun);
-    console.log('📊 fillRun.document_id:', fillRun?.document_id);
-    console.log('📊 fillRun.template_id:', fillRun?.template_id);
-    console.log('📊 fillRun.field_mapping:', fillRun?.field_mapping);
-    console.log('📊 fillRun.extracted_data:', fillRun?.extracted_data);
-  }, [fillRun]);
-
   function handleTextSelect(selection) {
     setSelectedText(selection);
   }
 
-  // Citation click handler - navigate to PDF page
-  function handleCitationClick(pageNumber) {
-    console.log('📍 Citation clicked - Navigating to page:', pageNumber, 'from current page:', currentPage);
-    setCurrentPage(pageNumber);
-    // Sync to pop-out windows
-    navigatePdfToPage(pageNumber);
+  // Citation click handler - navigate to PDF page with optional bbox highlighting
+  function handleCitationClick(pageNumberOrBbox) {
+    // Support both old (page number only) and new (bbox object) formats
+    if (typeof pageNumberOrBbox === 'number') {
+      // Legacy: just a page number
+      setCurrentPage(pageNumberOrBbox);
+      setHighlightBbox(null);
+      navigatePdfToPage(pageNumberOrBbox);
+    } else if (pageNumberOrBbox?.page) {
+      // New: bbox object with { page, x0, y0, x1, y1 }
+      setCurrentPage(pageNumberOrBbox.page);
+      setHighlightBbox(pageNumberOrBbox);
+      navigatePdfToPage(pageNumberOrBbox.page);
+    }
+  }
+
+  // Clear highlight when user clicks on it
+  function handleHighlightClick() {
+    setHighlightBbox(null);
   }
 
   async function handleContinue() {
     if (fillRun.status === 'completed') {
       // Download the filled Excel file
       try {
-        console.log('📥 Downloading filled Excel file...');
         const blob = await downloadFilledExcel(getToken, fillRunId);
-
-        // Debug: Check blob type and size
-        console.log('📦 Blob received:', {
-          type: blob.type,
-          size: blob.size,
-          constructor: blob.constructor.name
-        });
 
         // Verify blob is valid
         if (blob.size === 0) {
@@ -275,8 +271,6 @@ export default function TemplateFillPage() {
           window.URL.revokeObjectURL(url);
           document.body.removeChild(a);
         }, 100);
-
-        console.log('✅ Download initiated');
       } catch (err) {
         console.error('❌ Failed to download Excel file:', err);
         alert(`Failed to download Excel file: ${err.message}`);
@@ -289,13 +283,16 @@ export default function TemplateFillPage() {
         setJobMessage('Filling Excel template...');
 
         const result = await continueFillRun(getToken, fillRunId);
-        console.log('Continue fill result:', result);
 
-        // Reload fill run silently to get updated status (SSE will handle progress tracking)
-        await loadFillRun(fillRunId, getToken, { silent: true, skipPdf: true });
+        // Wait a moment for backend to start processing, then reload
+        // This allows the fill_run status to update from 'awaiting_review' to 'processing'
+        // which will trigger the SSE effect to connect and stream progress updates
+        setTimeout(async () => {
+          await loadFillRun(fillRunId, getToken, { silent: true, skipPdf: true });
+        }, 200);
 
-        // Reset job status since SSE will take over tracking
-        setJobStatus('idle');
+        // Don't reset jobStatus here - let SSE manage it via the progress effect
+        // The progress overlay will stay visible until a terminal status is reached
       } catch (err) {
         console.error('Failed to continue fill run:', err);
         setJobStatus('failed');
@@ -465,7 +462,7 @@ export default function TemplateFillPage() {
                     </Badge>
                   )}
                 </div>
-                {fillRun.status === 'completed' ? (
+                {fillRun.status === 'completed' && fillRun.artifact ? (
                   <Button
                     size="sm"
                     onClick={handleContinue}
@@ -539,6 +536,8 @@ export default function TemplateFillPage() {
                     pdfUrl={pdfUrl}
                     onTextSelect={handleTextSelect}
                     defaultPage={currentPage}
+                    highlightBbox={highlightBbox}
+                    onHighlightClick={handleHighlightClick}
                   />
                 ) : (
                   <div className="flex items-center justify-center h-full">

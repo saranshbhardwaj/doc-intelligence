@@ -174,7 +174,6 @@ export const createWorkflowDraftSlice = (set, get) => ({
    * @param {Function} cleanup - Optional SSE cleanup function
    */
   startWorkflowExecution: (jobId, runId, cleanup = null) => {
-    console.log("🚀 Starting workflow execution tracking:", { jobId, runId });
     set((state) => ({
       workflowDraft: {
         ...state.workflowDraft,
@@ -257,11 +256,9 @@ export const createWorkflowDraftSlice = (set, get) => ({
     const { jobId, runId } = get().workflowDraft.execution;
 
     if (!jobId || !runId) {
-      console.log("❌ No active workflow to reconnect");
       return;
     }
 
-    console.log("🔄 Reconnecting to workflow execution:", { jobId, runId });
 
     try {
       const cleanup = await streamWorkflowProgress(jobId, getToken, {
@@ -281,7 +278,6 @@ export const createWorkflowDraftSlice = (set, get) => ({
           const errorType =
             typeof errorData === "object" ? errorData?.type : null;
           if (errorType === "not_found") {
-            console.log("🗑️ Job not found - clearing execution state");
             get().resetWorkflowExecution();
             return;
           }
@@ -320,8 +316,6 @@ export const createWorkflowDraftSlice = (set, get) => ({
     if (cleanup) {
       cleanup();
     }
-
-    console.log("🛑 Workflow execution canceled");
     set((state) => ({
       workflowDraft: {
         ...state.workflowDraft,
@@ -344,7 +338,6 @@ export const createWorkflowDraftSlice = (set, get) => ({
       cleanup();
     }
 
-    console.log("🔄 Resetting workflow execution state");
     set((state) => ({
       workflowDraft: {
         ...state.workflowDraft,

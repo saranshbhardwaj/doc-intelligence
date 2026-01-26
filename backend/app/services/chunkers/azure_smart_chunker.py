@@ -291,6 +291,17 @@ class AzureSmartChunker(DocumentChunker):
 
         builder.set_page_range(section.page_range[0], section.page_range[1])
 
+        # Extract bounding box from section paragraphs for PDF highlighting
+        bbox = self._calculate_section_bbox(section)
+        if bbox:
+            builder.set_bbox(
+                page=bbox["page"],
+                x0=bbox["x0"],
+                y0=bbox["y0"],
+                x1=bbox["x1"],
+                y1=bbox["y1"]
+            )
+
         chunk_metadata = builder.build()
 
         # Create chunk - merge chunk_metadata into base metadata
@@ -554,6 +565,17 @@ class AzureSmartChunker(DocumentChunker):
                     column_count=table_data.get("column_count")
                 )
 
+                # Extract table bounding box for PDF highlighting
+                table_bbox = self._extract_table_bbox(table_data)
+                if table_bbox:
+                    builder.set_bbox(
+                        page=page_num,
+                        x0=table_bbox["x0"],
+                        y0=table_bbox["y0"],
+                        x1=table_bbox["x1"],
+                        y1=table_bbox["y1"]
+                    )
+
                 if preceding_narrative:
                     builder.link_to_narrative(preceding_narrative.chunk_id)
 
@@ -686,6 +708,100 @@ class AzureSmartChunker(DocumentChunker):
         """Estimate total tokens in a section."""
         total_chars = sum(len(p.get("content", "")) for p in paragraphs)
         return estimate_tokens(" " * total_chars)  # Rough estimate
+
+    def _calculate_section_bbox(self, section: SectionGroup) -> Optional[Dict]:
+        """
+        Calculate bounding box for a section from its paragraph bounding regions.
+
+        Strategy:
+        - Collect all bounding_regions from section paragraphs
+        - Convert polygons to bbox coordinates (x0, y0, x1, y1)
+        - Merge into single bbox covering the entire section
+
+        Args:
+            section: SectionGroup with paragraphs containing bounding_regions
+
+        Returns:
+            Dict with {page, x0, y0, x1, y1} or None if no bounding regions
+        """
+        all_bboxes = []
+
+        for para in section.paragraphs:
+            bounding_regions = para.get("bounding_regions", [])
+
+            for br in bounding_regions:
+                polygon = br.get("polygon", [])
+                page_num = br.get("page_number")
+
+                if len(polygon) == 8 and page_num:
+                    # Convert polygon to bbox
+                    bbox = self._polygon_to_bbox(polygon)
+                    bbox["page"] = page_num
+                    all_bboxes.append(bbox)
+
+        if not all_bboxes:
+            return None
+
+        # Merge all bboxes (use first page if multi-page section)
+        primary_page = section.page_range[0]
+        page_bboxes = [b for b in all_bboxes if b["page"] == primary_page]
+
+        if not page_bboxes:
+            return None
+
+        # Calculate bounding box covering all paragraphs on primary page
+        return {
+            "page": primary_page,
+            "x0": min(b["x0"] for b in page_bboxes),
+            "y0": min(b["y0"] for b in page_bboxes),
+            "x1": max(b["x1"] for b in page_bboxes),
+            "y1": max(b["y1"] for b in page_bboxes)
+        }
+
+    def _polygon_to_bbox(self, polygon: List[float]) -> Dict:
+        """
+        Convert 8-point polygon to rectangular bounding box.
+
+        Args:
+            polygon: List of 8 floats [x1, y1, x2, y2, x3, y3, x4, y4]
+
+        Returns:
+            Dict with {x0, y0, x1, y1} representing min/max coordinates
+        """
+        x_coords = [polygon[i] for i in range(0, 8, 2)]  # [x1, x2, x3, x4]
+        y_coords = [polygon[i] for i in range(1, 8, 2)]  # [y1, y2, y3, y4]
+
+        return {
+            "x0": min(x_coords),  # Left edge
+            "y0": min(y_coords),  # Top edge
+            "x1": max(x_coords),  # Right edge
+            "y1": max(y_coords)   # Bottom edge
+        }
+
+    def _extract_table_bbox(self, table_data: Dict) -> Optional[Dict]:
+        """
+        Extract bounding box from table data.
+
+        Args:
+            table_data: Table data from enhanced_pages
+
+        Returns:
+            Dict with {x0, y0, x1, y1} or None
+        """
+        # Check if table has bounding_regions (after parser enhancement)
+        bounding_regions = table_data.get("bounding_regions", [])
+
+        if not bounding_regions:
+            return None
+
+        # Convert first bounding region to bbox
+        br = bounding_regions[0]
+        polygon = br.get("polygon", [])
+
+        if len(polygon) == 8:
+            return self._polygon_to_bbox(polygon)
+
+        return None
 
     @property
     def name(self) -> str:

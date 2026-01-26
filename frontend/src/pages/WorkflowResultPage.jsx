@@ -101,7 +101,6 @@ export default function WorkflowResultPage() {
       execution.runId === runId &&
       (run.status === "running" || run.status === "queued")
     ) {
-      console.log("🔄 Reconnecting to workflow execution on result page");
       reconnectWorkflowExecution(getToken);
     }
 
@@ -119,7 +118,6 @@ export default function WorkflowResultPage() {
       // Handle Word export locally
       if (format === "word") {
         await exportWorkflowAsWord(artifact, run);
-        console.log("✅ Exported as Word document");
       } else {
         // PDF and Excel use backend export
         const res = await exportRun(getToken, runId, format, "url");

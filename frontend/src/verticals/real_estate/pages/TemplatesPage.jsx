@@ -86,12 +86,6 @@ export default function TemplatesPage() {
     loadData(true);
   }, [activeTab]);
 
-  // Debug: Log fillRuns state changes
-  useEffect(() => {
-    console.log('📊 fillRuns state updated:', fillRuns);
-    console.log('📊 fillRuns length:', fillRuns.length);
-  }, [fillRuns]);
-
   async function loadData(reset = false) {
     try {
       setLoading(true);
@@ -99,21 +93,15 @@ export default function TemplatesPage() {
 
       if (activeTab === 'templates') {
         const data = await listRETemplates(getToken);
-        console.log('📋 Templates loaded:', data);
         setTemplates(data || []);
       } else {
         const offset = reset ? 0 : fillRunsOffset;
-        console.log('📊 Loading fill runs with offset:', offset);
         const data = await listFillRuns(getToken, 20, offset);
-        console.log('📊 Fill runs response:', data);
-        console.log('📊 Fill runs length:', data?.length);
 
         if (reset) {
-          console.log('📊 Setting fill runs (reset):', data);
           setFillRuns(data || []);
           setFillRunsOffset(20);
         } else {
-          console.log('📊 Appending fill runs');
           setFillRuns(prev => [...prev, ...(data || [])]);
           setFillRunsOffset(prev => prev + 20);
         }
@@ -150,7 +138,6 @@ export default function TemplatesPage() {
 
       // Upload template
       const uploadedTemplate = await uploadRETemplate(getToken, file, metadata);
-      console.log('📤 Template uploaded:', uploadedTemplate.id);
 
       // Poll until template analysis is complete
       // This will wait for schema_metadata to be populated by the background task
@@ -174,7 +161,6 @@ export default function TemplatesPage() {
     try {
       // Fetch usage stats from backend
       const usage = await getTemplateUsage(getToken, templateId);
-      console.log('📊 Template usage:', usage);
       setTemplateUsage(usage);
     } catch (err) {
       console.error('Failed to check template usage:', err);
@@ -190,11 +176,10 @@ export default function TemplatesPage() {
     try {
       setIsDeleting(true);
       const result = await deleteRETemplate(getToken, templateToDelete.id);
-      console.log('✅ Template deleted:', result);
 
       // Show success message if fill runs were affected
       if (result.affected_fill_runs > 0) {
-        console.log(`⚠️ ${result.affected_fill_runs} fill run(s) affected`);
+        alert(`⚠️ ${result.affected_fill_runs} fill run(s) affected`);
       }
 
       await loadData();

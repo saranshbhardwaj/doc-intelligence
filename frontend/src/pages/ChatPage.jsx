@@ -139,10 +139,8 @@ export default function ChatPage() {
       // Export based on selected format
       if (format === "word") {
         await exportAsWord(exportData);
-        console.log("✅ Exported as Word document");
       } else {
         await exportAsMarkdown(exportData);
-        console.log("✅ Exported as Markdown");
       }
     } catch (error) {
       console.error("Failed to export session:", error);

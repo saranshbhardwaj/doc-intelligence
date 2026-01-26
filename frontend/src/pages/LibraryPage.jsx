@@ -139,7 +139,6 @@ export default function LibraryPage() {
   // Reconnect to active document indexing on mount (for page refresh support)
   useEffect(() => {
     if (indexing.jobId && indexing.documentId) {
-      console.log("🔄 Reconnecting to document indexing on mount");
       reconnectIndexing(getToken);
     }
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
@@ -225,7 +224,6 @@ export default function LibraryPage() {
             getToken,
             response.job_id,
             (progressData) => {
-              console.log("Indexing progress:", progressData);
 
               // Update Zustand store
               updateIndexingProgress(progressData);
@@ -248,7 +246,6 @@ export default function LibraryPage() {
               );
             },
             (completeData) => {
-              console.log("Indexing complete:", completeData);
 
               // Update store
               completeIndexing();

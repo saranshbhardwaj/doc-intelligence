@@ -237,19 +237,48 @@ class AzureDocumentIntelligenceParser(DocumentParser):
                     # Extract value (may be None)
                     value_content = kv.value.content if kv.value else None
 
-                    # Get page number from key's bounding region
+                    # Get page number and bounding regions from BOTH key AND value
                     page_num = None
+                    bounding_regions = []
+
+                    # Extract from key
                     if kv.key and kv.key.bounding_regions:
                         page_num = kv.key.bounding_regions[0].page_number
+                        for br in kv.key.bounding_regions:
+                            if br:
+                                bounding_regions.append({
+                                    "page_number": getattr(br, "page_number", None),
+                                    "polygon": getattr(br, "polygon", [])
+                                })
 
-                    key_value_pairs.append({
+                    # Extract from value (merge with key regions)
+                    if kv.value and kv.value.bounding_regions:
+                        if not page_num:  # Use value's page if key had no page
+                            page_num = kv.value.bounding_regions[0].page_number
+                        for br in kv.value.bounding_regions:
+                            if br:
+                                bounding_regions.append({
+                                    "page_number": getattr(br, "page_number", None),
+                                    "polygon": getattr(br, "polygon", [])
+                                })
+
+                    kv_data = {
                         "key": key_content,
                         "value": value_content,
                         "confidence": getattr(kv, "confidence", 1.0),
                         "page_number": page_num,
-                    })
+                        "bounding_regions": bounding_regions,  # Contains both key + value regions
+                    }
+                    key_value_pairs.append(kv_data)
 
-                logger.info(f"Extracted {len(key_value_pairs)} key-value pairs from Azure DI")
+                    # DEBUG: Log first KV pair's bbox data
+                    if len(key_value_pairs) == 1:
+                        logger.info(f"[PARSER] First KV pair: '{key_content}' = '{value_content}', "
+                                  f"page={page_num}, bounding_regions count={len(bounding_regions)}")
+                        if bounding_regions:
+                            logger.info(f"[PARSER] First bounding region: {bounding_regions[0]}")
+
+                logger.info(f"[PARSER] Extracted {len(key_value_pairs)} key-value pairs from Azure DI")
             except Exception as e:
                 logger.warning(f"Failed to extract key-value pairs: {e}")
                 # Continue without KV pairs if extraction fails
@@ -688,12 +717,29 @@ class AzureDocumentIntelligenceParser(DocumentParser):
 
             table_row_count = getattr(table, 'row_count', 0) or len(cells_by_row)
 
+            # Extract bounding regions for PDF highlighting
+            table_bounding_regions = []
+            for br in getattr(table, "bounding_regions", []) or []:
+                if br:
+                    table_bounding_regions.append({
+                        "page_number": getattr(br, "page_number", None),
+                        "polygon": getattr(br, "polygon", [])
+                    })
+
             table_data = {
                 "table_id": len(tables_by_page.get(page_num, [])),
                 "text": "\n".join(table_text_lines),
                 "row_count": table_row_count,
                 "column_count": table_col_count,
+                "bounding_regions": table_bounding_regions,
             }
+
+            # DEBUG: Log first table's bbox data
+            if len(tables_by_page.get(page_num, [])) == 0:
+                logger.info(f"[PARSER] First table on page {page_num}: {table_row_count}x{table_col_count}, "
+                          f"bounding_regions count={len(table_bounding_regions)}")
+                if table_bounding_regions:
+                    logger.info(f"[PARSER] First table bounding region: {table_bounding_regions[0]}")
 
             tables_by_page.setdefault(page_num, []).append(table_data)
 

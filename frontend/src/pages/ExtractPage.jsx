@@ -178,7 +178,6 @@ export default function ExtractPage() {
   };
 
   const handleDeleteExtraction = (extractionId) => {
-    console.log("🗑️ Extraction deleted:", extractionId);
     fetchExtractionHistory(getToken);
   };
 

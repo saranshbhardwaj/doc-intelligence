@@ -222,6 +222,9 @@ export const useTemplateFillActions = () =>
       registerExcelPopout: state.registerExcelPopout,
       navigatePdfToPage: state.navigatePdfToPage,
       cleanupPopouts: state.cleanupPopouts,
+      cacheExcelWorkbook: state.cacheExcelWorkbook,
+      getCachedExcelWorkbook: state.getCachedExcelWorkbook,
+      clearCachedExcelWorkbook: state.clearCachedExcelWorkbook,
     }))
   );
 

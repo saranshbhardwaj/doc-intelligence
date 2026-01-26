@@ -56,7 +56,6 @@ export async function waitForTemplateAnalysis(getToken, templateId, maxWaitMs = 
 
     // Check if schema_metadata exists and has data
     if (template.schema_metadata && Object.keys(template.schema_metadata).length > 0) {
-      console.log('✅ Template analysis complete:', templateId);
       return template;
     }
 
