@@ -561,6 +561,17 @@ class AzureSmartChunker(DocumentChunker):
                     column_count=table_data.get("column_count")
                 )
 
+                # Extract table bounding box for PDF highlighting
+                table_bbox = self._extract_table_bbox(table_data)
+                if table_bbox:
+                    builder.set_bbox(
+                        page=page_num,
+                        x0=table_bbox["x0"],
+                        y0=table_bbox["y0"],
+                        x1=table_bbox["x1"],
+                        y1=table_bbox["y1"]
+                    )
+
                 if preceding_narrative:
                     builder.link_to_narrative(preceding_narrative.chunk_id)
 
@@ -588,6 +599,11 @@ class AzureSmartChunker(DocumentChunker):
                     tables=[table_data],
                     metadata=base_metadata
                 )
+
+                # DEBUG: Log first table chunk's bbox
+                if table_counter == 1:
+                    logger.info(f"[CHUNKER] First table chunk on page {page_num}, "
+                              f"has bbox: {'bbox' in base_metadata}, bbox={base_metadata.get('bbox')}")
 
                 table_chunks.append(chunk)
 
@@ -627,9 +643,22 @@ class AzureSmartChunker(DocumentChunker):
         for i in range(0, len(kv_pairs), MAX_KV_PAIRS_PER_CHUNK):
             chunk_kv_pairs = kv_pairs[i:i + MAX_KV_PAIRS_PER_CHUNK]
 
+            # Calculate individual bbox for each KV pair and add to KV data
+            enriched_kv_pairs = []
+            for kv in chunk_kv_pairs:
+                # Calculate bbox from bounding_regions
+                kv_bbox = self._calculate_single_kv_bbox(kv)
+
+                # Create enriched KV pair with bbox
+                enriched_kv = dict(kv)  # Copy all original fields
+                if kv_bbox:
+                    enriched_kv["bbox"] = kv_bbox  # Add individual bbox for this KV pair
+
+                enriched_kv_pairs.append(enriched_kv)
+
             # Build searchable text (concatenated KV pairs for RAG)
             text_lines = []
-            for kv in chunk_kv_pairs:
+            for kv in enriched_kv_pairs:
                 key = kv.get("key", "")
                 value = kv.get("value", "")
                 if key and value:
@@ -640,7 +669,7 @@ class AzureSmartChunker(DocumentChunker):
             chunk_text = "\n".join(text_lines)
 
             # Determine page range
-            pages = [kv.get("page_number") for kv in chunk_kv_pairs if kv.get("page_number")]
+            pages = [kv.get("page_number") for kv in enriched_kv_pairs if kv.get("page_number")]
             page_range = [min(pages), max(pages)] if pages else [1, 1]
 
             # Build metadata
@@ -652,10 +681,19 @@ class AzureSmartChunker(DocumentChunker):
                 "token_count": estimate_tokens(chunk_text),
                 "chunk_type": "key_value",
                 "page_range": page_range,
-                "key_value_pairs": chunk_kv_pairs,  # Structured data for template filling
-                "total_kv_pairs": len(chunk_kv_pairs),
+                "key_value_pairs": enriched_kv_pairs,  # NOW includes individual bbox for each KV
+                "total_kv_pairs": len(enriched_kv_pairs),
                 "source_parser": "azure_document_intelligence",
             }
+
+            # DEBUG: Log first KV pair's bbox in chunk
+            if i == 0 and enriched_kv_pairs:
+                first_kv = enriched_kv_pairs[0]
+                logger.info(f"[CHUNKER] First KV pair in chunk: '{first_kv.get('key')}', "
+                          f"has bbox: {'bbox' in first_kv}, bbox={first_kv.get('bbox')}")
+
+            # NOTE: We no longer store a single merged chunk-level bbox
+            # Each KV pair now has its own individual bbox
 
             # Create chunk
             chunk = Chunk(
@@ -764,6 +802,145 @@ class AzureSmartChunker(DocumentChunker):
         """Estimate total tokens in a section."""
         total_chars = sum(len(p.get("content", "")) for p in paragraphs)
         return estimate_tokens(" " * total_chars)  # Rough estimate
+
+    def _polygon_to_bbox(self, polygon: List[float]) -> Dict:
+        """
+        Convert 8-point polygon to rectangular bounding box.
+
+        Args:
+            polygon: List of 8 floats [x1, y1, x2, y2, x3, y3, x4, y4]
+
+        Returns:
+            Dict with {x0, y0, x1, y1} representing min/max coordinates
+        """
+        x_coords = [polygon[i] for i in range(0, 8, 2)]  # [x1, x2, x3, x4]
+        y_coords = [polygon[i] for i in range(1, 8, 2)]  # [y1, y2, y3, y4]
+
+        return {
+            "x0": min(x_coords),  # Left edge
+            "y0": min(y_coords),  # Top edge
+            "x1": max(x_coords),  # Right edge
+            "y1": max(y_coords)   # Bottom edge
+        }
+
+    def _calculate_single_kv_bbox(self, kv: Dict) -> Optional[Dict]:
+        """
+        Calculate bounding box for a SINGLE key-value pair from its bounding regions.
+
+        This merges the bounding regions from both the key and value into one bbox.
+
+        Args:
+            kv: Single key-value pair with bounding_regions
+
+        Returns:
+            Dict with {page, x0, y0, x1, y1} or None if no bounding regions
+        """
+        bounding_regions = kv.get("bounding_regions", [])
+        page_num = kv.get("page_number")
+
+        if not bounding_regions or not page_num:
+            return None
+
+        all_bboxes = []
+
+        for br in bounding_regions:
+            polygon = br.get("polygon", [])
+            br_page = br.get("page_number")
+
+            # Only use bounding regions from the same page as the KV pair
+            if len(polygon) == 8 and br_page == page_num:
+                bbox = self._polygon_to_bbox(polygon)
+                all_bboxes.append(bbox)
+
+        if not all_bboxes:
+            return None
+
+        # Merge all bboxes (key + value regions) for this KV pair
+        return {
+            "page": page_num,
+            "x0": min(b["x0"] for b in all_bboxes),
+            "y0": min(b["y0"] for b in all_bboxes),
+            "x1": max(b["x1"] for b in all_bboxes),
+            "y1": max(b["y1"] for b in all_bboxes)
+        }
+
+    def _calculate_kv_chunk_bbox(self, kv_pairs: List[Dict]) -> Optional[Dict]:
+        """
+        Calculate bounding box for a key-value chunk from KV pair bounding regions.
+
+        Strategy:
+        - Collect all bounding_regions from KV pairs
+        - Convert polygons to bbox coordinates (x0, y0, x1, y1)
+        - Merge into single bbox covering the entire chunk
+
+        Args:
+            kv_pairs: List of key-value pairs with bounding_regions
+
+        Returns:
+            Dict with {page, x0, y0, x1, y1} or None if no bounding regions
+        """
+        all_bboxes = []
+
+        for kv in kv_pairs:
+            bounding_regions = kv.get("bounding_regions", [])
+
+            for br in bounding_regions:
+                polygon = br.get("polygon", [])
+                page_num = br.get("page_number")
+
+                if len(polygon) == 8 and page_num:
+                    # Convert polygon to bbox
+                    bbox = self._polygon_to_bbox(polygon)
+                    bbox["page"] = page_num
+                    all_bboxes.append(bbox)
+
+        if not all_bboxes:
+            return None
+
+        # Use the page of the first KV pair (chunks are same-page or consecutive)
+        primary_page = kv_pairs[0].get("page_number")
+        if not primary_page:
+            return None
+
+        # Filter bboxes for the primary page
+        page_bboxes = [b for b in all_bboxes if b["page"] == primary_page]
+
+        if not page_bboxes:
+            return None
+
+        # Calculate bounding box covering all KV pairs on primary page
+        return {
+            "page": primary_page,
+            "x0": min(b["x0"] for b in page_bboxes),
+            "y0": min(b["y0"] for b in page_bboxes),
+            "x1": max(b["x1"] for b in page_bboxes),
+            "y1": max(b["y1"] for b in page_bboxes)
+        }
+
+    def _extract_table_bbox(self, table_data: Dict) -> Optional[Dict]:
+        """
+        Extract bounding box from table data.
+
+        Args:
+            table_data: Table data from enhanced_pages
+
+        Returns:
+            Dict with {x0, y0, x1, y1} or None
+        """
+        # Check if table has bounding_regions (after parser enhancement)
+        bounding_regions = table_data.get("bounding_regions", [])
+
+        if not bounding_regions:
+            return None
+
+        # Convert first bounding region to bbox
+        br = bounding_regions[0]
+        polygon = br.get("polygon", [])
+
+        if len(polygon) == 8:
+            return self._polygon_to_bbox(polygon)
+
+        return None
 
     @property
     def name(self) -> str:

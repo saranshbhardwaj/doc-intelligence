@@ -35,6 +35,12 @@ class Settings(BaseSettings):
     # Full extraction scalability limits
     max_pages_per_extraction: int = 150  # Max document size for full extraction (larger docs should use workflows)
 
+    # ===== EXCEL TEMPLATE MAPPING CONFIGURATION =====
+    # Schema-based mapping system for known Excel templates
+    excel_schema_only: bool = False  # If True, only use schema (skip generic analyzer)
+    excel_skip_schema: bool = False  # If True, skip schema (use generic analyzer only)
+    # Default (both False) = Hybrid mode: schema first, generic fallback
+
     # ===== PARSER CONFIGURATION =====
     # Which parser to use for each tier + PDF type combination
     parser_free_digital: str = "pymupdf"

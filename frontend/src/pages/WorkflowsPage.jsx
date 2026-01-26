@@ -86,9 +86,6 @@ export default function WorkflowsPage() {
           getRunArtifact(getToken, runId),
         ]);
 
-        console.log("📦 Run data received:", runData);
-        console.log("📄 Artifact data received:", artifactData);
-
         // Check if artifact exists
         if (!artifactData) {
           throw new Error(
@@ -97,7 +94,6 @@ export default function WorkflowsPage() {
         }
 
         await exportWorkflowAsWord(artifactData, runData);
-        console.log("✅ Exported as Word document");
       } else {
         // PDF uses backend export
         const res = await exportRun(getToken, runId, format, "url");

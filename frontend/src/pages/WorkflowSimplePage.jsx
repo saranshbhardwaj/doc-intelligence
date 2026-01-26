@@ -56,7 +56,6 @@ export default function WorkflowSimplePage() {
 
     // Reconnect to active workflow execution if exists
     if (execution && execution.jobId && execution.runId) {
-      console.log("🔄 Reconnecting to active workflow execution on mount");
       reconnectWorkflowExecution(getToken);
     }
 
@@ -138,7 +137,6 @@ export default function WorkflowSimplePage() {
     }
 
     try {
-      console.log("🚀 Starting workflow...");
       const token = await getToken();
 
       // Prepare payload
@@ -158,16 +156,13 @@ export default function WorkflowSimplePage() {
       );
 
       const { id: runId, job_id: jobId } = response.data;
-      console.log("✅ Workflow run created:", { runId, jobId });
 
       // Connect to SSE stream for progress updates
       const cleanup = await streamWorkflowProgress(jobId, getToken, {
         onProgress: (progressData) => {
-          console.log("📊 Progress update:", progressData);
           updateWorkflowProgress(progressData);
         },
         onComplete: (data) => {
-          console.log("🎉 Workflow completed:", data);
           completeWorkflowExecution();
           // Refresh runs list to show new result
           fetchInitialData();

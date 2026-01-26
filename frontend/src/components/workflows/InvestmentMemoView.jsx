@@ -20,8 +20,6 @@ import NextStepsCard from "./NextStepsCard";
 import WorkflowMetricsDashboard from "./WorkflowMetricsDashboard";
 
 export default function InvestmentMemoView({ artifact, run }) {
-  // Debug logging
-  console.log("InvestmentMemoView rendered", { artifact, run });
 
   if (!artifact || !artifact.artifact) {
     console.warn("No artifact or artifact.artifact found", { artifact });
@@ -33,7 +31,6 @@ export default function InvestmentMemoView({ artifact, run }) {
   }
 
   const data = artifact.artifact.parsed || artifact.artifact;
-  console.log("Parsed data:", data);
 
   const currency = data.currency || run.currency || "USD";
 

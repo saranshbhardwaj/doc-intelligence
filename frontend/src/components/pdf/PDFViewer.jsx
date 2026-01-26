@@ -3,27 +3,43 @@
  * Displays PDF documents with pagination, zoom controls, and text selection
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { Document, Page, pdfjs } from 'react-pdf';
 import 'react-pdf/dist/Page/AnnotationLayer.css';
 import 'react-pdf/dist/Page/TextLayer.css';
 import { ZoomIn, ZoomOut, ChevronLeft, ChevronRight } from 'lucide-react';
 import { Button } from '../ui/button';
-import { cn } from '@/lib/utils';
+import HighlightOverlay from './HighlightOverlay';
 
 // Configure PDF.js worker
 pdfjs.GlobalWorkerOptions.workerSrc = `//unpkg.com/pdfjs-dist@${pdfjs.version}/build/pdf.worker.min.mjs`;
 
-export default function PDFViewer({ pdfUrl, onTextSelect, defaultPage = 1 }) {
+export default function PDFViewer({
+  pdfUrl,
+  onTextSelect,
+  defaultPage = 1,
+  highlightBbox = null,  // { page, x0, y0, x1, y1 } for highlighting
+  onHighlightClick       // Callback when highlight is clicked
+}) {
   const [numPages, setNumPages] = useState(null);
   const [pageNumber, setPageNumber] = useState(defaultPage);
   const [scale, setScale] = useState(1.0);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [pageWidth, setPageWidth] = useState(null);
+  const [pageHeight, setPageHeight] = useState(null);
+  const pageRef = useRef(null);
 
   useEffect(() => {
     setPageNumber(defaultPage);
   }, [defaultPage]);
+
+  // Navigate to page when highlight changes
+  useEffect(() => {
+    if (highlightBbox && highlightBbox.page !== pageNumber) {
+      setPageNumber(highlightBbox.page);
+    }
+  }, [highlightBbox]);
 
   // Reset state when PDF URL changes
   useEffect(() => {
@@ -49,11 +65,17 @@ export default function PDFViewer({ pdfUrl, onTextSelect, defaultPage = 1 }) {
     const selection = window.getSelection();
     const text = selection.toString().trim();
 
-    if (text && onTextSelect) {
-      onTextSelect({
-        text,
-        page: pageNumber,
-      });
+    if (onTextSelect) {
+      if (text) {
+        // User selected text - pass selection data
+        onTextSelect({
+          text,
+          page: pageNumber,
+        });
+      } else {
+        // User clicked without selecting text - clear selection
+        onTextSelect(null);
+      }
     }
   }
 
@@ -71,6 +93,21 @@ export default function PDFViewer({ pdfUrl, onTextSelect, defaultPage = 1 }) {
 
   function zoomOut() {
     setScale((prev) => Math.max(prev - 0.1, 0.5));
+  }
+
+  function onPageLoadSuccess(page) {
+    // Get page dimensions for coordinate transformation
+    const { width, height } = page.originalWidth
+      ? { width: page.originalWidth, height: page.originalHeight }
+      : page;
+    setPageWidth(width);
+    setPageHeight(height);
+  }
+
+  function handleHighlightClick() {
+    if (onHighlightClick) {
+      onHighlightClick();
+    }
   }
 
   if (error) {
@@ -162,14 +199,28 @@ export default function PDFViewer({ pdfUrl, onTextSelect, defaultPage = 1 }) {
               </div>
             }
           >
-            <Page
-              pageNumber={pageNumber}
-              scale={scale}
-              renderTextLayer={true}
-              renderAnnotationLayer={true}
-              onMouseUp={handleTextSelection}
-              className="shadow-md bg-card"
-            />
+            <div ref={pageRef} className="relative">
+              <Page
+                pageNumber={pageNumber}
+                scale={scale}
+                renderTextLayer={true}
+                renderAnnotationLayer={true}
+                onMouseUp={handleTextSelection}
+                onLoadSuccess={onPageLoadSuccess}
+                className="shadow-md bg-card"
+              />
+
+              {/* Highlight overlay - shown when citation is clicked */}
+              {highlightBbox && highlightBbox.page === pageNumber && pageWidth && pageHeight && (
+                <HighlightOverlay
+                  bbox={highlightBbox}
+                  pageWidth={pageWidth}
+                  pageHeight={pageHeight}
+                  scale={scale}
+                  onClick={handleHighlightClick}
+                />
+              )}
+            </div>
           </Document>
         </div>
       </div>

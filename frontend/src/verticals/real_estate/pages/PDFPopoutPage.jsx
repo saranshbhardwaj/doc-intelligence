@@ -31,7 +31,6 @@ export default function PDFPopoutPage() {
     function handleMessage(event) {
       // Security: In production, validate event.origin
       if (event.data.type === 'NAVIGATE_TO_PAGE') {
-        console.log('📄 PDF Pop-out: Navigating to page', event.data.page);
         setCurrentPage(event.data.page);
       }
     }

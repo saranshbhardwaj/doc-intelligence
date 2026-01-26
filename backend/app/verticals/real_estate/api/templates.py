@@ -721,24 +721,37 @@ async def update_extracted_data(
     """
     Update extracted data for a fill run.
 
-    This endpoint allows users to manually edit extracted field values,
-    for example after copying text from the PDF viewer.
+    This endpoint allows users to manually edit extracted field values and unmapped cells.
 
     Args:
         fill_run_id: Fill run ID
-        extracted_data: Updated extracted data dictionary
+        extracted_data: Updated extracted data dictionary (clean nested schema)
         user: Authenticated user
         db: Database session
 
-    Request Body:
+    Request Body (Clean Nested Schema):
         {
-            "f1": {
-                "value": "Manually edited value",
-                "confidence": 1.0,
-                "user_edited": true,
-                "source_page": 3
+            "llm_extracted": {
+                "f1": {
+                    "value": "Manually edited value",
+                    "confidence": 1.0,
+                    "user_edited": true,
+                    "citations": ["[D1:p2]"]
+                },
+                ...
             },
-            ...
+            "manual_edits": {
+                "Sheet1": {
+                    "A1": {
+                        "value": "Custom value",
+                        "confidence": 1.0,
+                        "user_edited": true,
+                        "citations": []
+                    },
+                    ...
+                },
+                ...
+            }
         }
 
     Returns:
@@ -757,15 +770,42 @@ async def update_extracted_data(
         if not fill_run or fill_run.user_id != user.id:
             raise HTTPException(status_code=404, detail="Fill run not found")
 
-        # Mark all updated fields as user_edited
-        for field_id, field_data in extracted_data.items():
-            if "user_edited" not in field_data:
-                field_data["user_edited"] = True
+        # Handle clean nested schema format
+        # Expected format: {"llm_extracted": {...}, "manual_edits": {...}}
+        if "llm_extracted" in extracted_data or "manual_edits" in extracted_data:
+            # New clean nested schema
+            llm_extracted = extracted_data.get("llm_extracted", {})
+            manual_edits = extracted_data.get("manual_edits", {})
+
+            # Mark all LLM extracted fields as user_edited if modified
+            for field_id, field_data in llm_extracted.items():
+                if isinstance(field_data, dict) and "user_edited" not in field_data:
+                    field_data["user_edited"] = True
+
+            # Mark all manual edit cells as user_edited
+            for sheet_name, cells in manual_edits.items():
+                if isinstance(cells, dict):
+                    for cell_address, cell_data in cells.items():
+                        if isinstance(cell_data, dict) and "user_edited" not in cell_data:
+                            cell_data["user_edited"] = True
+
+            # Count total fields
+            total_fields = len(llm_extracted)
+            for cells in manual_edits.values():
+                if isinstance(cells, dict):
+                    total_fields += len(cells)
+
+        else:
+            # Legacy flat schema: {field_id: {value, confidence, ...}, ...}
+            for field_id, field_data in extracted_data.items():
+                if isinstance(field_data, dict) and "user_edited" not in field_data:
+                    field_data["user_edited"] = True
+            total_fields = len(extracted_data)
 
         # Prepare updates
         updates = {
             "extracted_data": extracted_data,
-            "total_fields_filled": len(extracted_data),
+            "total_fields_filled": total_fields,
         }
 
         # If fill run is already completed, reset to awaiting_review
