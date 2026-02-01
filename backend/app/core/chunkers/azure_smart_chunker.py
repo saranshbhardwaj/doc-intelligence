@@ -298,6 +298,17 @@ class AzureSmartChunker(DocumentChunker):
 
         builder.set_page_range(section.page_range[0], section.page_range[1])
 
+        # Calculate and set bbox from paragraph bounding regions for PDF highlighting
+        para_bbox = self._calculate_paragraph_bbox(section.paragraphs)
+        if para_bbox:
+            builder.set_bbox(
+                page=para_bbox["page"],
+                x0=para_bbox["x0"],
+                y0=para_bbox["y0"],
+                x1=para_bbox["x1"],
+                y1=para_bbox["y1"]
+            )
+
         chunk_metadata = builder.build()
 
         # Create chunk - merge chunk_metadata into base metadata
@@ -915,6 +926,55 @@ class AzureSmartChunker(DocumentChunker):
             "y0": min(b["y0"] for b in page_bboxes),
             "x1": max(b["x1"] for b in page_bboxes),
             "y1": max(b["y1"] for b in page_bboxes)
+        }
+
+    def _calculate_paragraph_bbox(self, paragraphs: List[Dict]) -> Optional[Dict]:
+        """
+        Calculate bounding box for narrative paragraphs from their bounding regions.
+
+        Strategy:
+        - Collect all bounding_regions from paragraphs
+        - Convert polygons to bbox coordinates (x0, y0, x1, y1)
+        - Merge into single bbox covering the first page only (for PDF highlighting)
+
+        Args:
+            paragraphs: List of paragraph dicts with bounding_regions
+
+        Returns:
+            Dict with {page, x0, y0, x1, y1} or None if no bounding regions
+        """
+        all_bboxes = []
+        first_page = None
+
+        for para in paragraphs:
+            bounding_regions = para.get("bounding_regions", [])
+
+            for br in bounding_regions:
+                polygon = br.get("polygon", [])
+                page_num = br.get("page_number")
+
+                if not polygon or len(polygon) < 8 or not page_num:
+                    continue
+
+                # Track first page for the overall bbox
+                if first_page is None:
+                    first_page = page_num
+
+                # Only include bboxes from the first page (for highlighting)
+                if page_num == first_page:
+                    bbox = self._polygon_to_bbox(polygon)
+                    all_bboxes.append(bbox)
+
+        if not all_bboxes or first_page is None:
+            return None
+
+        # Merge all bboxes into one covering the entire paragraph group on first page
+        return {
+            "page": first_page,
+            "x0": min(b["x0"] for b in all_bboxes),
+            "y0": min(b["y0"] for b in all_bboxes),
+            "x1": max(b["x1"] for b in all_bboxes),
+            "y1": max(b["y1"] for b in all_bboxes)
         }
 
     def _extract_table_bbox(self, table_data: Dict) -> Optional[Dict]:

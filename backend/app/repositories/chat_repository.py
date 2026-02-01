@@ -96,7 +96,8 @@ class ChatRepository:
         num_chunks_retrieved: Optional[int] = None,
         model_used: Optional[str] = None,
         tokens_used: Optional[int] = None,
-        cost_usd: Optional[float] = None
+        cost_usd: Optional[float] = None,
+        comparison_metadata: Optional[str] = None
     ) -> Optional[ChatMessage]:
         """Save a chat message (user or assistant).
 
@@ -111,6 +112,7 @@ class ChatRepository:
             model_used: LLM model used (for assistant messages)
             tokens_used: Tokens consumed
             cost_usd: Cost in USD
+            comparison_metadata: JSON serialized ComparisonContext (for comparison queries)
 
         Returns:
             ChatMessage object if successful, None on error
@@ -127,7 +129,8 @@ class ChatRepository:
                     num_chunks_retrieved=num_chunks_retrieved,
                     model_used=model_used,
                     tokens_used=tokens_used,
-                    cost_usd=cost_usd
+                    cost_usd=cost_usd,
+                    comparison_metadata=comparison_metadata
                 )
                 db.add(message)
                 db.commit()

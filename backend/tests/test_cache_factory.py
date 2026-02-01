@@ -1,7 +1,7 @@
 import tempfile
 from pathlib import Path
 
-from app.services.cache import create_cache, DocumentCache
+from app.core.cache import create_cache, DocumentCache
 
 
 def test_create_cache_file(tmp_path: Path):

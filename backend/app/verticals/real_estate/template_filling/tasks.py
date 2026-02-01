@@ -21,10 +21,8 @@ from sqlalchemy.orm import Session
 
 from app.config import settings
 from app.database import SessionLocal
-from app.db_models import JobState
-from app.db_models_chat import DocumentChunk
-from app.db_models_documents import Document
-from app.db_models_templates import ExcelTemplate, TemplateFillRun
+from app.repositories.document_repository import DocumentRepository
+from app.repositories.job_repository import JobRepository
 from app.repositories.template_repository import TemplateRepository
 from app.services.artifacts import persist_artifact
 from app.services.job_tracker import JobProgressTracker
@@ -239,17 +237,13 @@ def detect_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         )
 
         # Get document
-        document = db.query(Document).filter(Document.id == document_id).first()
+        document_repo = DocumentRepository()
+        document = document_repo.get_by_id(document_id)
         if not document:
             raise ValueError(f"Document not found: {document_id}")
 
         # Get KV and table chunks from document
-        chunks = (
-            db.query(DocumentChunk)
-            .filter(DocumentChunk.document_id == document_id)
-            .order_by(DocumentChunk.chunk_index)
-            .all()
-        )
+        chunks = document_repo.get_chunks_for_document(document_id)
 
         if not chunks:
             raise ValueError(f"No chunks found for document {document_id}. Document may not be fully processed.")
@@ -985,15 +979,16 @@ def start_fill_run_chain(
 
         # Create JobState for progress tracking (linked to fill run)
         job_id = fill_run_id  # Use fill_run_id as job tracking ID
-        job_state = JobState(
-            job_id=job_id,
+        job_repo = JobRepository()
+        job_state = job_repo.create_job(
             template_fill_run_id=fill_run_id,
             status="queued",
             current_stage="initialization",
             progress_percent=5,
+            job_id=job_id
         )
-        db.add(job_state)
-        db.commit()
+        if not job_state:
+            raise ValueError("Failed to create job state for fill run")
 
         db.close()
 

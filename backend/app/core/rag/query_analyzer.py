@@ -59,10 +59,26 @@ class QueryAnalyzer:
         "therefore", "consequently", "impact", "effect", "influence"
     }
 
+    # Keywords indicating comparison intent
+    COMPARISON_KEYWORDS: Set[str] = {
+        # Direct comparison
+        "compare", "comparison", "versus", "vs", "vs.", "compared",
+        "difference", "differences", "differ", "different",
+
+        # Implicit comparison
+        "which is better", "which is worse", "which has",
+        "contrast", "contrasted", "contrasting",
+        "similarities", "similar", "similarity",
+        "pros and cons", "advantages", "disadvantages",
+        "better", "worse", "stronger", "weaker",
+        "higher", "lower", "more", "less"
+    }
+
     def __init__(self):
         """Initialize query analyzer"""
         self.table_keywords = self.TABLE_KEYWORDS
         self.narrative_keywords = self.NARRATIVE_KEYWORDS
+        self.comparison_keywords = self.COMPARISON_KEYWORDS
 
     def analyze(self, query: str) -> Dict:
         """
@@ -96,6 +112,11 @@ class QueryAnalyzer:
         question_words = {"what", "why", "how", "when", "where", "who"}
         has_question_word = bool(words & question_words)
 
+        # Check for comparison indicators
+        comparison_matches = words & self.comparison_keywords
+        # Also check for multi-word phrases
+        is_comparison = len(comparison_matches) > 0 or self._check_comparison_phrases(query_lower)
+
         # Determine preference based on matches
         table_score = len(table_matches) + (1 if has_numbers else 0)
         narrative_score = len(narrative_matches) + (1 if has_question_word else 0)
@@ -118,7 +139,7 @@ class QueryAnalyzer:
             prefer_tables = False
             prefer_narrative = True
             table_boost = 1.0  # Neutral for tables (can provide supporting evidence)
-            narrative_boost = 1.1  # 10% boost for narrative (has explanations)
+            narrative_boost = 1.0  # Neutral for narrative
             query_type = "narrative_query"
         else:
             # Neutral: no clear preference
@@ -137,16 +158,34 @@ class QueryAnalyzer:
             "matched_table_keywords": list(table_matches),
             "matched_narrative_keywords": list(narrative_matches),
             "has_numbers": has_numbers,
-            "has_question_word": has_question_word
+            "has_question_word": has_question_word,
+            # Comparison fields
+            "is_comparison": is_comparison,
+            "matched_comparison_keywords": list(comparison_matches)
         }
 
         logger.debug(
-            f"Query analysis: type={query_type}, "
+            f"Query analysis: type={query_type}, is_comparison={is_comparison}, "
             f"table_boost={table_boost}, narrative_boost={narrative_boost}",
             extra={"query": query[:50], "analysis": result}
         )
 
         return result
+
+    def _check_comparison_phrases(self, query_lower: str) -> bool:
+        """Check for multi-word comparison phrases"""
+        comparison_phrases = [
+            "which is better",
+            "which is worse",
+            "which has",
+            "pros and cons",
+            "between these",
+            "between the",
+            "difference between",
+            "compare these",
+            "compare the"
+        ]
+        return any(phrase in query_lower for phrase in comparison_phrases)
 
     def add_table_keyword(self, keyword: str) -> None:
         """Add custom table keyword (for domain-specific terms)"""

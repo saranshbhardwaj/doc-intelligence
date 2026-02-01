@@ -1,5 +1,24 @@
 # backend/main.py
 import os
+import sys
+
+# Debug configuration - attach debugpy if DEBUG is truthy
+def _is_debug_enabled() -> bool:
+    return os.getenv("DEBUG", "").strip().lower() in {"1", "true", "yes", "y", "on"}
+
+def _should_wait_for_debugger() -> bool:
+    return os.getenv("DEBUG_WAIT", "").strip().lower() in {"1", "true", "yes", "y", "on"}
+
+if _is_debug_enabled():
+    try:
+        import debugpy
+        debugpy.listen(("0.0.0.0", 5678))
+        print("⏸️  Debugger listening on 0.0.0.0:5678", file=sys.stderr)
+        if _should_wait_for_debugger():
+            print("⏳ Waiting for debugger to attach...", file=sys.stderr)
+            debugpy.wait_for_client()
+    except Exception as e:
+        print(f"Failed to initialize debugpy: {e}", file=sys.stderr)
 
 from app.core.lifespan import lifespan
 from app.api import extractions, feedback, health, cache, jobs, users, chat, workflows, metrics

@@ -58,6 +58,16 @@ export default {
           DEFAULT: "hsl(var(--warning))",
           foreground: "hsl(var(--foreground))",
         },
+        doc: {
+          a: "hsl(var(--doc-a))",
+          b: "hsl(var(--doc-b))",
+          c: "hsl(var(--doc-c))",
+        },
+        similarity: {
+          high: "hsl(var(--similarity-high))",
+          mid: "hsl(var(--similarity-mid))",
+          low: "hsl(var(--similarity-low))",
+        },
       },
       keyframes: {
         "accordion-down": {
@@ -128,7 +138,14 @@ export default {
         "message-glow": "message-glow 0.6s ease-out",
         "chip-fade-in": "chip-fade-in 0.2s ease-out",
       },
+      boxShadow: {
+        panel:
+          "0 1px 0 0 hsl(var(--border)), 0 12px 32px -24px hsl(var(--foreground) / 0.35)",
+      },
     },
   },
-  plugins: [require("tailwindcss-animate")],
+  plugins: [
+    require("tailwindcss-animate"),
+    require("@tailwindcss/typography"),
+  ],
 };

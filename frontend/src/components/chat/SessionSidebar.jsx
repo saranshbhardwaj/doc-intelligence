@@ -13,7 +13,7 @@
  */
 
 import { useState, useMemo } from "react";
-import { Plus, MessageSquare, FileText, Trash2, Search } from "lucide-react";
+import { Plus, MessageSquare, FileText, Trash2, Search, ChevronLeft, ChevronRight } from "lucide-react";
 import { Button } from "../ui/button";
 import { Card } from "../ui/card";
 import { Input } from "../ui/input";
@@ -37,6 +37,8 @@ export default function SessionSidebar({
   onNewChat,
   onSelectSession,
   onDeleteSession,
+  isCollapsed = false,
+  onToggleCollapse,
 }) {
   const [searchQuery, setSearchQuery] = useState("");
 
@@ -49,25 +51,42 @@ export default function SessionSidebar({
     );
   }, [sessions, searchQuery]);
 
+  // If collapsed, return null (sidebar width is 0 in parent)
+  if (isCollapsed) {
+    return null;
+  }
+
   return (
-    <Card className="p-4 h-full flex flex-col">
-      {/* Header with New Chat Button */}
-      <div className="mb-3">
-        <Button onClick={onNewChat} className="w-full h-10" size="default">
+    <Card className="p-3 h-full flex flex-col">
+      {/* Header with Collapse Button and New Chat Button */}
+      <div className="mb-2 space-y-2">
+        <div className="flex items-center justify-between">
+          <h2 className="font-semibold text-sm text-foreground">Sessions</h2>
+          <Button
+            variant="ghost"
+            size="icon"
+            onClick={onToggleCollapse}
+            className="h-7 w-7"
+            title="Collapse sidebar"
+          >
+            <ChevronLeft className="h-4 w-4" />
+          </Button>
+        </div>
+        <Button onClick={onNewChat} className="w-full h-9" size="default">
           <Plus className="w-4 h-4 mr-2" />
           New Chat
         </Button>
       </div>
 
       {/* Search */}
-      <div className="mb-3">
+      <div className="mb-2">
         <div className="relative">
           <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
           <Input
             placeholder="Search sessions..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-8 h-9 text-sm"
+            className="pl-8 h-8 text-sm"
           />
         </div>
         {searchQuery && (
@@ -96,7 +115,7 @@ export default function SessionSidebar({
             </p>
           </div>
         ) : (
-          <div className="p-2 space-y-1">
+          <div className="p-1 space-y-1">
             {filteredSessions.map((session) => {
               const isActive = currentSession?.id === session.id;
               const documentCount = session.document_count || 0;
@@ -112,7 +131,7 @@ export default function SessionSidebar({
                 >
                   <button
                     onClick={() => onSelectSession(session.id)}
-                    className="w-full text-left p-2.5 pr-10 rounded-lg"
+                    className="w-full text-left p-2 pr-9 rounded-lg"
                   >
                     {/* Session Title */}
                     <div

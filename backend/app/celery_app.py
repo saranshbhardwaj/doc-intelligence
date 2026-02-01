@@ -5,6 +5,27 @@ Loads broker/backend from settings. Import this in worker startup and tasks.
 Run worker locally:
   celery -A app.celery_app.celery_app worker --loglevel=info --pool=solo
 """
+import os
+import sys
+
+# Debug configuration - attach debugpy if DEBUG is truthy
+def _is_debug_enabled() -> bool:
+    return os.getenv("DEBUG", "").strip().lower() in {"1", "true", "yes", "y", "on"}
+
+def _should_wait_for_debugger() -> bool:
+    return os.getenv("DEBUG_WAIT", "").strip().lower() in {"1", "true", "yes", "y", "on"}
+
+if _is_debug_enabled():
+    try:
+        import debugpy
+        debugpy.listen(("0.0.0.0", 5679))
+        print("⏸️  Celery worker debugger listening on 0.0.0.0:5679", file=sys.stderr)
+        if _should_wait_for_debugger():
+            print("⏳ Waiting for debugger to attach (Celery)...", file=sys.stderr)
+            debugpy.wait_for_client()
+    except Exception as e:
+        print(f"Failed to initialize debugpy for Celery: {e}", file=sys.stderr)
+
 from celery import Celery
 from app.config import settings
 
@@ -40,9 +61,10 @@ except Exception:
 
 # Tasks are organized in app/services/tasks/ and app/verticals/
 try:
-    import app.services.tasks.document_processor  # noqa: F401 - Document indexing pipeline tasks
-    import app.services.tasks.workflows  # noqa: F401 - Workflow execution pipeline tasks
-    import app.verticals.real_estate.template_filling.tasks  # noqa: F401 - RE template filling tasks
+        import app.services.tasks.document_processor  # noqa: F401 - Document indexing pipeline tasks
+        import app.verticals.private_equity.extraction.tasks  # noqa: F401 - PE extraction pipeline tasks
+        import app.verticals.private_equity.workflows.tasks  # noqa: F401 - PE workflow execution pipeline tasks
+        import app.verticals.real_estate.template_filling.tasks  # noqa: F401 - RE template filling tasks
 except Exception:
     # Avoid hard failure if tasks module temporarily missing; log later after logging init.
     pass

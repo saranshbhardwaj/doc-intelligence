@@ -13,6 +13,7 @@ from app.utils.logging import logger
 from app.auth import get_current_user
 from app.repositories.job_repository import JobRepository
 from app.repositories.extraction_repository import ExtractionRepository
+from app.repositories.document_repository import DocumentRepository
 from clerk_backend_api import Clerk
 from clerk_backend_api.security.types import AuthenticateRequestOptions
 from app.config import settings
@@ -130,46 +131,29 @@ async def stream_job_progress(job_id: str, token: Optional[str] = Query(None)):
     elif job.workflow_run_id:
         # Workflow Mode: verify through workflow run
         from app.repositories.workflow_repository import WorkflowRepository
-        from app.database import SessionLocal
-        db = SessionLocal()
-        try:
-            workflow_repo = WorkflowRepository(db)
-            run = workflow_repo.get_run(job.workflow_run_id)
-            if not run:
-                raise HTTPException(status_code=404, detail=f"Workflow run not found for job {job_id}")
-            entity_owner_id = run.user_id
-            entity_type = "workflow"
-        finally:
-            db.close()
+        run = WorkflowRepository.get_run_by_id(job.workflow_run_id)
+        if not run:
+            raise HTTPException(status_code=404, detail=f"Workflow run not found for job {job_id}")
+        entity_owner_id = run.user_id
+        entity_type = "workflow"
 
     elif job.document_id:
         # Chat Mode: verify through document
-        from app.db_models_documents import Document
-        from app.database import SessionLocal
-        db = SessionLocal()
-        try:
-            doc = db.query(Document).filter(Document.id == job.document_id).first()
-            if not doc:
-                raise HTTPException(status_code=404, detail=f"Document not found for job {job_id}")
-            entity_owner_id = doc.user_id
-            entity_type = "document"
-        finally:
-            db.close()
+        doc_repo = DocumentRepository()
+        doc = doc_repo.get_by_id(job.document_id)
+        if not doc:
+            raise HTTPException(status_code=404, detail=f"Document not found for job {job_id}")
+        entity_owner_id = doc.user_id
+        entity_type = "document"
 
     elif job.template_fill_run_id:
         # Template Fill Mode: verify through template fill run
         from app.repositories.template_repository import TemplateRepository
-        from app.database import SessionLocal
-        db = SessionLocal()
-        try:
-            template_repo = TemplateRepository(db)
-            fill_run = template_repo.get_fill_run(job.template_fill_run_id)
-            if not fill_run:
-                raise HTTPException(status_code=404, detail=f"Template fill run not found for job {job_id}")
-            entity_owner_id = fill_run.user_id
-            entity_type = "template_fill"
-        finally:
-            db.close()
+        fill_run = TemplateRepository.get_fill_run_by_id(job.template_fill_run_id)
+        if not fill_run:
+            raise HTTPException(status_code=404, detail=f"Template fill run not found for job {job_id}")
+        entity_owner_id = fill_run.user_id
+        entity_type = "template_fill"
 
     else:
         # No entity associated with job (should never happen due to DB constraints)
@@ -246,22 +230,16 @@ async def stream_job_progress(job_id: str, token: Optional[str] = Query(None)):
             # Check if this is a template fill job
             if job.template_fill_run_id:
                 from app.repositories.template_repository import TemplateRepository
-                from app.database import SessionLocal
-                db = SessionLocal()
-                try:
-                    template_repo = TemplateRepository(db)
-                    fill_run = template_repo.get_fill_run(job.template_fill_run_id)
-                    if fill_run and fill_run.status == "awaiting_review":
-                        # Auto-mapping is complete, user needs to review
-                        yield ServerSentEvent(data=json.dumps({
-                            'message': job.message or 'Mapping complete - ready for review',
-                            'fill_run_id': job.template_fill_run_id,
-                            'status': 'awaiting_review'
-                        }), event="complete")
-                        yield ServerSentEvent(data=json.dumps({'reason': 'awaiting_review', 'job_id': job_id}), event="end")
-                        return
-                finally:
-                    db.close()
+                fill_run = TemplateRepository.get_fill_run_by_id(job.template_fill_run_id)
+                if fill_run and fill_run.status == "awaiting_review":
+                    # Auto-mapping is complete, user needs to review
+                    yield ServerSentEvent(data=json.dumps({
+                        'message': job.message or 'Mapping complete - ready for review',
+                        'fill_run_id': job.template_fill_run_id,
+                        'status': 'awaiting_review'
+                    }), event="complete")
+                    yield ServerSentEvent(data=json.dumps({'reason': 'awaiting_review', 'job_id': job_id}), event="end")
+                    return
 
         if job.status == "failed":
             yield ServerSentEvent(data=json.dumps({
@@ -382,42 +360,25 @@ async def get_job_status(job_id: str, user: User = Depends(get_current_user)):
 
     elif job.workflow_run_id:
         from app.repositories.workflow_repository import WorkflowRepository
-        from app.database import SessionLocal
-        db = SessionLocal()
-        try:
-            workflow_repo = WorkflowRepository(db)
-            run = workflow_repo.get_run(job.workflow_run_id)
-            if not run:
-                raise HTTPException(status_code=404, detail="Workflow run not found")
-            entity_owner_id = run.user_id
-        finally:
-            db.close()
+        run = WorkflowRepository.get_run_by_id(job.workflow_run_id)
+        if not run:
+            raise HTTPException(status_code=404, detail="Workflow run not found")
+        entity_owner_id = run.user_id
 
     elif job.document_id:
-        from app.db_models_documents import Document
-        from app.database import SessionLocal
-        db = SessionLocal()
-        try:
-            doc = db.query(Document).filter(Document.id == job.document_id).first()
-            if not doc:
-                raise HTTPException(status_code=404, detail="Document not found")
-            entity_owner_id = doc.user_id
-        finally:
-            db.close()
+        doc_repo = DocumentRepository()
+        doc = doc_repo.get_by_id(job.document_id)
+        if not doc:
+            raise HTTPException(status_code=404, detail="Document not found")
+        entity_owner_id = doc.user_id
 
     elif job.template_fill_run_id:
         # Template Fill Mode: verify through template fill run
         from app.repositories.template_repository import TemplateRepository
-        from app.database import SessionLocal
-        db = SessionLocal()
-        try:
-            template_repo = TemplateRepository(db)
-            fill_run = template_repo.get_fill_run(job.template_fill_run_id)
-            if not fill_run:
-                raise HTTPException(status_code=404, detail="Template fill run not found")
-            entity_owner_id = fill_run.user_id
-        finally:
-            db.close()
+        fill_run = TemplateRepository.get_fill_run_by_id(job.template_fill_run_id)
+        if not fill_run:
+            raise HTTPException(status_code=404, detail="Template fill run not found")
+        entity_owner_id = fill_run.user_id
 
     else:
         raise HTTPException(status_code=404, detail="Job has no associated entity")
@@ -485,42 +446,25 @@ async def retry_job(job_id: str, user: User = Depends(get_current_user)):
 
     elif job.workflow_run_id:
         from app.repositories.workflow_repository import WorkflowRepository
-        from app.database import SessionLocal
-        db = SessionLocal()
-        try:
-            workflow_repo = WorkflowRepository(db)
-            run = workflow_repo.get_run(job.workflow_run_id)
-            if not run:
-                raise HTTPException(status_code=404, detail="Workflow run not found")
-            entity_owner_id = run.user_id
-        finally:
-            db.close()
+        run = WorkflowRepository.get_run_by_id(job.workflow_run_id)
+        if not run:
+            raise HTTPException(status_code=404, detail="Workflow run not found")
+        entity_owner_id = run.user_id
 
     elif job.document_id:
-        from app.db_models_documents import Document
-        from app.database import SessionLocal
-        db = SessionLocal()
-        try:
-            doc = db.query(Document).filter(Document.id == job.document_id).first()
-            if not doc:
-                raise HTTPException(status_code=404, detail="Document not found")
-            entity_owner_id = doc.user_id
-        finally:
-            db.close()
+        doc_repo = DocumentRepository()
+        doc = doc_repo.get_by_id(job.document_id)
+        if not doc:
+            raise HTTPException(status_code=404, detail="Document not found")
+        entity_owner_id = doc.user_id
 
     elif job.template_fill_run_id:
         # Template Fill Mode: verify through template fill run
         from app.repositories.template_repository import TemplateRepository
-        from app.database import SessionLocal
-        db = SessionLocal()
-        try:
-            template_repo = TemplateRepository(db)
-            fill_run = template_repo.get_fill_run(job.template_fill_run_id)
-            if not fill_run:
-                raise HTTPException(status_code=404, detail="Template fill run not found")
-            entity_owner_id = fill_run.user_id
-        finally:
-            db.close()
+        fill_run = TemplateRepository.get_fill_run_by_id(job.template_fill_run_id)
+        if not fill_run:
+            raise HTTPException(status_code=404, detail="Template fill run not found")
+        entity_owner_id = fill_run.user_id
 
     else:
         raise HTTPException(status_code=404, detail="Job has no associated entity")

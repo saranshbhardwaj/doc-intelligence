@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 from app.auth import get_current_user
 from app.db_models_users import User
 from app.database import get_db
-from app.services.rag import RAGService
+from app.core.rag import RAGService
 from app.repositories.session_repository import SessionRepository
 from app.repositories.rag_repository import RAGRepository
 from app.utils.logging import logger
@@ -146,9 +146,15 @@ async def chat_with_session(
         logger.info(f"[Chat SSE] Sending session event", extra={"session_id": session_id})
         yield f"event: session\ndata: {json.dumps({'session_id': session_id})}\n\n"
 
+        # Send thinking event to show progress feedback
+        logger.info(f"[Chat SSE] Sending thinking event", extra={"session_id": session_id})
+        yield f"event: thinking\ndata: {json.dumps({'message': 'Analyzing documents...'})}\n\n"
+
         # Stream response chunks from RAG
         try:
             chunk_count = 0
+            comparison_context_sent = False
+
             async for chunk in rag_service.chat(
                 session_id=session_id,
                 collection_id=None,  # Sessions are independent of collections
@@ -157,6 +163,13 @@ async def chat_with_session(
                 num_chunks=num_chunks,
                 document_ids=document_ids  # Use session's documents
             ):
+                # Send comparison context before first chunk (if available)
+                if not comparison_context_sent and rag_service.last_comparison_context:
+                    logger.info(f"[Chat SSE] Sending comparison context", extra={"session_id": session_id})
+                    yield f"event: comparison_context\ndata: {json.dumps(rag_service.last_comparison_context)}\n\n"
+                    comparison_context_sent = True
+                    # Don't clear yet - needed for message saving after streaming completes
+
                 chunk_count += 1
                 logger.debug(f"[Chat SSE] Sending chunk #{chunk_count}", extra={"session_id": session_id})
                 yield f"event: chunk\ndata: {json.dumps({'chunk': chunk})}\n\n"

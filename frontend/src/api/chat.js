@@ -148,7 +148,7 @@ export function sendChatMessage(
   numChunks = 5,
   callbacks = {}
 ) {
-  const { onSession, onChunk, onComplete, onError } = callbacks;
+  const { onSession, onChunk, onComplete, onError, onComparisonContext, onThinking } = callbacks;
 
   getToken().then((token) => {
     const formData = new FormData();
@@ -202,6 +202,14 @@ export function sendChatMessage(
             if (eventType === "session" && eventData) {
               const data = JSON.parse(eventData);
               onSession?.(data.session_id);
+            } else if (eventType === "thinking" && eventData) {
+              // Handle thinking event for progress feedback
+              const data = JSON.parse(eventData);
+              onThinking?.(data);
+            } else if (eventType === "comparison_context" && eventData) {
+              // Handle comparison context from backend
+              const data = JSON.parse(eventData);
+              onComparisonContext?.(data);
             } else if (eventType === "chunk" && eventData) {
               const data = JSON.parse(eventData);
               onChunk?.(data.chunk);

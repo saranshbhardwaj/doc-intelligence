@@ -10,7 +10,7 @@ import { persist, createJSONStorage } from "zustand/middleware";
 import { useShallow } from "zustand/react/shallow";
 import { createExtractionSlice } from "./slices/extractionSlice";
 import { createUserSlice } from "./slices/userSlice";
-import { createChatSlice } from "./slices/chatSlice";
+import { createChatSlice } from "./slices/chat/chatSlice";
 import { createWorkflowDraftSlice } from "./slices/workflowDraftSlice";
 import { createTemplateFillSlice } from "./slices/templateFillSlice";
 
@@ -48,13 +48,22 @@ export const useStore = create(
             runId: state.workflowDraft.execution.runId ?? null,
           },
         },
-        // Persist document indexing state for reconnection
+        // Persist document indexing jobs for reconnection
         chat: {
-          indexing: {
-            jobId: state.chat?.indexing?.jobId ?? null,
-            documentId: state.chat?.indexing?.documentId ?? null,
-            collectionId: state.chat?.indexing?.collectionId ?? null,
-            // Don't persist: isProcessing, progress, cleanup, message, error
+          indexingJobs: Object.fromEntries(
+            Object.entries(state.chat?.indexingJobs || {}).map(([docId, job]) => [
+              docId,
+              {
+                jobId: job.jobId,
+                documentId: job.documentId,
+                collectionId: job.collectionId,
+                // Don't persist: isProcessing, progress, cleanup, message, error
+              },
+            ])
+          ),
+          // Persist comparison UI preferences (NOT context - too large!)
+          comparisonUI: {
+            viewMode: state.chat?.comparison?.viewMode || 'cards',
           },
         },
         // Persist template fill state for reconnection
@@ -82,9 +91,14 @@ export const useStore = create(
           },
           chat: {
             ...current.chat,
-            indexing: {
-              ...current.chat.indexing,
-              ...(persisted.chat?.indexing || {}),
+            indexingJobs: {
+              ...current.chat.indexingJobs,
+              ...(persisted.chat?.indexingJobs || {}),
+            },
+            // Restore comparison UI preferences
+            comparison: {
+              ...current.chat.comparison,
+              viewMode: persisted.chat?.comparisonUI?.viewMode || current.chat.comparison.viewMode,
             },
           },
           templateFill: {
@@ -172,14 +186,33 @@ export const useChatActions = () =>
       updateIndexingProgress: state.updateIndexingProgress,
       completeIndexing: state.completeIndexing,
       failIndexing: state.failIndexing,
-      reconnectIndexing: state.reconnectIndexing,
-      resetIndexing: state.resetIndexing,
+      reconnectAllIndexingJobs: state.reconnectAllIndexingJobs,
+      clearIndexingJob: state.clearIndexingJob,
+      clearAllIndexingJobs: state.clearAllIndexingJobs,
+      // Comparison mode actions
+      setComparisonContext: state.setComparisonContext,
+      clearComparison: state.clearComparison,
+      setComparisonViewMode: state.setComparisonViewMode,
+      toggleComparisonTopic: state.toggleComparisonTopic,
+      // PDF viewer actions
+      highlightChunk: state.highlightChunk,
+      clearHighlight: state.clearHighlight,
+      setActivePdfDocument: state.setActivePdfDocument,
+      loadPdfUrlForDocument: state.loadPdfUrlForDocument,
+      clearPdfUrlCache: state.clearPdfUrlCache,
       // Legacy (deprecated)
       toggleDocumentSelection: state.toggleDocumentSelection,
       toggleSelectAll: state.toggleSelectAll,
       setSelectedDocuments: state.setSelectedDocuments,
     }))
   );
+
+// Comparison selectors
+export const useComparison = () =>
+  useStore((state) => state.chat.comparison);
+
+export const usePdfViewer = () =>
+  useStore((state) => state.chat.pdfViewer);
 
 // Workflow Draft selectors
 export const useWorkflowDraft = () => useStore((state) => state.workflowDraft);

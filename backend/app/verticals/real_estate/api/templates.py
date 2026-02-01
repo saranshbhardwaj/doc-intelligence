@@ -19,8 +19,9 @@ from sqlalchemy.orm import Session
 
 from app.auth import get_current_user
 from app.database import get_db
-from app.db_models import JobState
 from app.db_models_users import User
+from app.repositories.document_repository import DocumentRepository
+from app.repositories.job_repository import JobRepository
 from app.repositories.template_repository import TemplateRepository
 from app.core.storage.storage_factory import get_storage_backend
 from app.utils.logging import logger
@@ -295,8 +296,6 @@ async def list_fills(
     logger.info(f"Listing fill runs (limit={limit}, offset={offset})", extra={"user_id": user.id})
 
     try:
-        from app.db_models_documents import Document
-
         repo = TemplateRepository(db)
         fill_runs = repo.list_user_fill_runs(user_id=user.id, limit=limit, offset=offset)
 
@@ -304,8 +303,9 @@ async def list_fills(
         document_ids = [fr.document_id for fr in fill_runs if fr.document_id]
         documents_map = {}
         if document_ids:
-            documents = db.query(Document).filter(Document.id.in_(document_ids)).all()
-            documents_map = {doc.id: doc for doc in documents}
+            document_repo = DocumentRepository()
+            documents = document_repo.get_doc_metadata_by_ids(document_ids)
+            documents_map = {doc["id"]: doc for doc in documents}
 
         # Build response with template and document metadata
         result = []
@@ -323,9 +323,9 @@ async def list_fills(
             if fill_run.document_id and fill_run.document_id in documents_map:
                 doc = documents_map[fill_run.document_id]
                 document_metadata = {
-                    "filename": doc.filename,
-                    "page_count": doc.page_count,
-                    "file_size_bytes": doc.file_size_bytes,
+                    "filename": doc.get("filename"),
+                    "page_count": doc.get("page_count"),
+                    "file_size_bytes": doc.get("file_size_bytes"),
                 }
 
             result.append(FillRunListItem(
@@ -566,9 +566,6 @@ async def get_fill_status(
     logger.info(f"Getting fill run status: {fill_run_id}", extra={"user_id": user.id})
 
     try:
-        from app.db_models_documents import Document
-        from app.repositories.document_repository import DocumentRepository
-
         repo = TemplateRepository(db)
         fill_run = repo.get_fill_run(fill_run_id)
 
@@ -582,7 +579,8 @@ async def get_fill_status(
         # Fetch document metadata for PDF viewer
         document_metadata = None
         if fill_run.document_id:
-            document = db.query(Document).filter(Document.id == fill_run.document_id).first()
+            document_repo = DocumentRepository()
+            document = document_repo.get_by_id(fill_run.document_id)
 
             if document:
                 document_metadata = {
@@ -872,15 +870,16 @@ async def continue_fill(
 
         # Create new job for continuation tracking
         job_id = generate_id()
-        job = JobState(
-            job_id=job_id,
+        job_repo = JobRepository()
+        job = job_repo.create_job(
+            template_fill_run_id=fill_run_id,
             status="extracting",
             current_stage="data_extraction",
             progress_percent=70,
-            template_fill_run_id=fill_run_id,
+            job_id=job_id
         )
-        db.add(job)
-        db.commit()
+        if not job:
+            raise HTTPException(status_code=500, detail="Failed to create job for fill run")
 
         # Continue async pipeline
         continue_fill_run_chain.delay(

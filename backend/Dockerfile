@@ -44,5 +44,5 @@ EXPOSE 8000
 # Health command (optional)
 HEALTHCHECK --interval=120s --timeout=5s CMD curl -f http://localhost:8000/api/health || exit 1
 
-# Run uvicorn by default
-CMD ["python", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Run uvicorn by default (disable frozen modules to improve breakpoint reliability)
+CMD ["python", "-Xfrozen_modules=off", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

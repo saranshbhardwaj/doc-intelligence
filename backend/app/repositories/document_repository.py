@@ -6,7 +6,7 @@ from sqlalchemy.exc import SQLAlchemyError, IntegrityError
 from sqlalchemy import select, func
 from app.database import SessionLocal
 from app.db_models_documents import Document
-from app.db_models_chat import DocumentChunk, SessionDocument, ChatSession
+from app.db_models_chat import DocumentChunk, SessionDocument, ChatSession, CollectionDocument, Collection
 from app.db_models import Extraction
 from app.db_models_workflows import WorkflowRun
 from app.utils.logging import logger
@@ -251,6 +251,164 @@ class DocumentRepository:
                     extra={"document_id": document_id, "error": str(e)}
                 )
                 return 0
+
+    def get_chunks_for_document(self, document_id: str, order_by_index: bool = True) -> List[DocumentChunk]:
+        """Get all chunks for a document, optionally ordered by chunk_index."""
+        with self._get_session() as db:
+            try:
+                query = db.query(DocumentChunk).filter(
+                    DocumentChunk.document_id == document_id
+                )
+                if order_by_index:
+                    query = query.order_by(DocumentChunk.chunk_index.asc())
+                return query.all()
+            except SQLAlchemyError as e:
+                logger.error(
+                    "Failed to get chunks for document",
+                    extra={"document_id": document_id, "error": str(e)}
+                )
+                return []
+
+    def get_completed_document_ids_for_collection(self, collection_id: str) -> List[str]:
+        """Get completed document IDs for a collection."""
+        with self._get_session() as db:
+            try:
+                result = db.query(Document.id).join(
+                    CollectionDocument, Document.id == CollectionDocument.document_id
+                ).filter(
+                    CollectionDocument.collection_id == collection_id,
+                    Document.status == "completed"
+                ).all()
+                return [r[0] for r in result]
+            except SQLAlchemyError as e:
+                logger.error(
+                    "Failed to list documents for collection",
+                    extra={"collection_id": collection_id, "error": str(e)}
+                )
+                return []
+
+    def get_document_ids_with_embeddings(self, document_ids: List[str]) -> List[str]:
+        """Return document IDs that have at least one embedding."""
+        if not document_ids:
+            return []
+        with self._get_session() as db:
+            try:
+                docs_with_embeddings = db.query(Document.id).join(
+                    DocumentChunk, Document.id == DocumentChunk.document_id
+                ).filter(
+                    Document.id.in_(document_ids),
+                    DocumentChunk.embedding.isnot(None)
+                ).distinct().all()
+                return [r[0] for r in docs_with_embeddings]
+            except SQLAlchemyError as e:
+                logger.error(
+                    "Failed to list documents with embeddings",
+                    extra={"document_ids_count": len(document_ids), "error": str(e)}
+                )
+                return []
+
+    def get_doc_info_by_ids(self, document_ids: List[str]) -> List[Dict[str, str]]:
+        """Return minimal document info for a list of IDs."""
+        if not document_ids:
+            return []
+        with self._get_session() as db:
+            try:
+                stmt = select(Document.id, Document.filename).where(Document.id.in_(document_ids))
+                result = db.execute(stmt).all()
+                return [{"id": str(row.id), "filename": row.filename} for row in result]
+            except SQLAlchemyError as e:
+                logger.error(
+                    "Failed to load document info",
+                    extra={"document_ids_count": len(document_ids), "error": str(e)}
+                )
+                return []
+
+    def get_doc_metadata_by_ids(self, document_ids: List[str]) -> List[Dict[str, Optional[str]]]:
+        """Return document metadata for a list of IDs."""
+        if not document_ids:
+            return []
+        with self._get_session() as db:
+            try:
+                stmt = select(
+                    Document.id,
+                    Document.filename,
+                    Document.page_count,
+                    Document.file_size_bytes
+                ).where(Document.id.in_(document_ids))
+                result = db.execute(stmt).all()
+                return [
+                    {
+                        "id": str(row.id),
+                        "filename": row.filename,
+                        "page_count": row.page_count,
+                        "file_size_bytes": row.file_size_bytes,
+                    }
+                    for row in result
+                ]
+            except SQLAlchemyError as e:
+                logger.error(
+                    "Failed to load document metadata",
+                    extra={"document_ids_count": len(document_ids), "error": str(e)}
+                )
+                return []
+
+    def list_available_documents_for_user(
+        self,
+        user_id: str,
+        collection_id: Optional[str] = None,
+    ) -> List[Dict]:
+        """List completed documents available for workflows with chunk/embedding counts."""
+        with self._get_session() as db:
+            try:
+                query = db.query(
+                    Document.id,
+                    Document.filename,
+                    Document.page_count,
+                    Document.status,
+                    Document.created_at,
+                    func.count(DocumentChunk.id.distinct()).label("chunk_count"),
+                    func.count(DocumentChunk.embedding).label("embeddings_count"),
+                ).join(
+                    CollectionDocument, Document.id == CollectionDocument.document_id
+                ).join(
+                    Collection, CollectionDocument.collection_id == Collection.id
+                ).outerjoin(
+                    DocumentChunk, Document.id == DocumentChunk.document_id
+                ).filter(
+                    Collection.user_id == user_id,
+                    Document.status == "completed",
+                )
+
+                if collection_id:
+                    query = query.filter(Collection.id == collection_id)
+
+                query = query.group_by(
+                    Document.id,
+                    Document.filename,
+                    Document.page_count,
+                    Document.status,
+                    Document.created_at,
+                ).order_by(Document.created_at.desc())
+
+                results = query.all()
+                return [
+                    {
+                        "id": r.id,
+                        "filename": r.filename,
+                        "page_count": r.page_count,
+                        "status": r.status,
+                        "created_at": r.created_at,
+                        "chunk_count": int(r.chunk_count or 0),
+                        "embeddings_count": int(r.embeddings_count or 0),
+                    }
+                    for r in results
+                ]
+            except SQLAlchemyError as e:
+                logger.error(
+                    "Failed to list available documents",
+                    extra={"user_id": user_id, "collection_id": collection_id, "error": str(e)}
+                )
+                return []
 
     def get_document_usage(self, document_id: str, user_id: str) -> Optional[Dict]:
         """
