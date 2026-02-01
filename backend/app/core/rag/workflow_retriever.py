@@ -82,8 +82,7 @@ class WorkflowRetriever:
         """
         queries = section_spec.get("queries", [])
         prefer_tables = section_spec.get("prefer_tables", False)
-        # max_chunks = 2 
-        section_spec.get("max_chunks", 20)
+        max_chunks = section_spec.get("max_chunks", 20)
         section_key = section_spec.get("key", "unknown")
 
         if not queries:
