@@ -1,0 +1,1309 @@
+/**
+ * Chat Slice for Zustand Store
+ *
+ * Session-centric architecture:
+ * - Collections are folders for browsing documents
+ * - Sessions are independent and maintain their own document selection
+ * - Chat happens within sessions, not directly with collections
+ */
+
+import * as chatApi from "../../api/chat";
+import { getDocumentDownloadUrl } from "../../api/documents";
+import { streamJobProgress } from "../../api/sse-utils";
+
+/**
+ * Get safe error message from error object
+ * (Normalized errors from apiErrorHandler have .message)
+ */
+const getErrorMessage = (error) => {
+  return error?.message || "An unexpected error occurred";
+};
+
+export const createChatSlice = (set, get) => ({
+  chat: {
+    // Collections (for document browsing only)
+    collections: [],
+    collectionsLoading: false,
+    collectionsError: null,
+
+    // Current collection (for document browsing)
+    currentCollection: null,
+    collectionLoading: false,
+    collectionError: null,
+
+    // Document indexing jobs (Map: documentId -> job state)
+    // Supports multiple simultaneous document uploads/indexing
+    indexingJobs: {},  // { documentId: { jobId, collectionId, progress_percent, current_stage, message, error, cleanup, isProcessing } }
+
+    // Current session (with documents)
+    currentSession: null, // { id, title, description, documents: [{id, name, added_at}, ...] }
+    messages: [],
+    isStreaming: false,
+    isThinking: false, // True when backend is processing before streaming starts
+    streamingMessage: "",
+    chatError: null,
+
+    // Comparison mode state
+    comparison: {
+      isActive: false,
+      context: null,  // ComparisonContext from backend
+      selectedPairIndex: null,
+      viewMode: 'cards',  // 'cards' | 'table' | 'sideBySide'
+      expandedTopics: [],
+    },
+
+    // Multi-document PDF viewer state (active document pattern)
+    pdfViewer: {
+      activeDocumentId: null,  // Currently displayed document
+      urlCache: {},  // Map: documentId -> { url, expiry }
+      highlightBbox: null,  // { page, x0, y0, x1, y1, docId }
+      isLoadingUrl: false,  // Loading state for URL fetching
+    },
+
+    // Sessions list
+    sessions: [],
+    sessionsLoading: false,
+  },
+
+  /**
+   * Collections Actions
+   */
+
+  fetchCollections: async (getToken) => {
+    set((state) => ({
+      chat: {
+        ...state.chat,
+        collectionsLoading: true,
+        collectionsError: null,
+      },
+    }));
+
+    try {
+      const data = await chatApi.listCollections(getToken);
+      set((state) => ({
+        chat: {
+          ...state.chat,
+          collections: data.collections,
+          collectionsLoading: false,
+        },
+      }));
+    } catch (error) {
+      console.error("Failed to fetch collections:", error);
+      set((state) => ({
+        chat: {
+          ...state.chat,
+          collectionsLoading: false,
+          collectionsError: getErrorMessage(error),
+        },
+      }));
+    }
+  },
+
+  createCollection: async (getToken, { name, description }) => {
+    try {
+      const collection = await chatApi.createCollection(getToken, {
+        name,
+        description,
+      });
+
+      // Add to collections list
+      set((state) => ({
+        chat: {
+          ...state.chat,
+          collections: [collection, ...state.chat.collections],
+        },
+      }));
+
+      return collection;
+    } catch (error) {
+      console.error("Failed to create collection:", error);
+      throw error;
+    }
+  },
+
+  selectCollection: async (getToken, collectionId) => {
+    set((state) => ({
+      chat: {
+        ...state.chat,
+        collectionLoading: true,
+        collectionError: null,
+      },
+    }));
+
+    try {
+      const collection = await chatApi.getCollection(getToken, collectionId);
+
+      set((state) => ({
+        chat: {
+          ...state.chat,
+          currentCollection: collection,
+          collectionLoading: false,
+        },
+      }));
+    } catch (error) {
+      console.error("Failed to select collection:", error);
+      set((state) => ({
+        chat: {
+          ...state.chat,
+          collectionLoading: false,
+          collectionError: getErrorMessage(error),
+        },
+      }));
+    }
+  },
+
+  deleteCollection: async (getToken, collectionId) => {
+    try {
+      await chatApi.deleteCollection(getToken, collectionId);
+
+      // Remove from collections list
+      set((state) => ({
+        chat: {
+          ...state.chat,
+          collections: state.chat.collections.filter(
+            (c) => c.id !== collectionId
+          ),
+          currentCollection:
+            state.chat.currentCollection?.id === collectionId
+              ? null
+              : state.chat.currentCollection,
+        },
+      }));
+    } catch (error) {
+      console.error("Failed to delete collection:", error);
+      throw error;
+    }
+  },
+
+  /**
+   * Document Upload Actions
+   */
+
+  uploadDocumentToCollection: async (getToken, collectionId, file) => {
+    set((state) => ({
+      chat: {
+        ...state.chat,
+        uploadStatus: "uploading",
+        uploadProgress: 0,
+        uploadError: null,
+      },
+    }));
+
+    try {
+      // Upload file
+      const data = await chatApi.uploadDocument(
+        getToken,
+        collectionId,
+        file,
+        (percent) => {
+          set((state) => ({
+            chat: { ...state.chat, uploadProgress: percent },
+          }));
+        }
+      );
+
+      // Start listening to indexing progress
+      set((state) => ({
+        chat: {
+          ...state.chat,
+          uploadStatus: "indexing",
+          uploadProgress: 0,
+          currentJobId: data.job_id,
+        },
+      }));
+
+      // Connect to SSE for indexing progress
+      chatApi.connectToIndexingProgress(
+        getToken,
+        data.job_id,
+        (progressData) => {
+          set((state) => ({
+            chat: {
+              ...state.chat,
+              uploadProgress: progressData.progress_percent || 0,
+            },
+          }));
+        },
+        () => {
+          set((state) => ({
+            chat: {
+              ...state.chat,
+              uploadStatus: "completed",
+              uploadProgress: 100,
+              currentJobId: null,
+            },
+          }));
+
+          // Refresh current collection to show new document
+          if (get().chat.currentCollection?.id === collectionId) {
+            get().selectCollection(getToken, collectionId);
+          }
+        },
+        (error) => {
+          console.error("Indexing progress error:", error);
+          set((state) => ({
+            chat: {
+              ...state.chat,
+              uploadStatus: "failed",
+              uploadError: getErrorMessage(error),
+              currentJobId: null,
+            },
+          }));
+        }
+      );
+    } catch (error) {
+      console.error("Failed to upload document:", error);
+      set((state) => ({
+        chat: {
+          ...state.chat,
+          uploadStatus: "failed",
+          uploadError: getErrorMessage(error),
+        },
+      }));
+    }
+  },
+
+  deleteDocument: async (getToken, documentId) => {
+    try {
+      await chatApi.deleteDocument(getToken, documentId);
+
+      // Refresh current collection to update document list
+      const currentCollection = get().chat.currentCollection;
+      if (currentCollection) {
+        await get().selectCollection(getToken, currentCollection.id);
+      }
+    } catch (error) {
+      console.error("Failed to delete document:", error);
+      set((state) => ({
+        chat: {
+          ...state.chat,
+          uploadError: getErrorMessage(error),
+        },
+      }));
+    }
+  },
+
+  removeDocumentFromCollection: async (getToken, collectionId, documentId) => {
+    try {
+      await chatApi.removeDocumentFromCollection(getToken, collectionId, documentId);
+
+      // Refresh current collection to update document list
+      await get().selectCollection(getToken, collectionId);
+    } catch (error) {
+      console.error("Failed to remove document from collection:", error);
+      set((state) => ({
+        chat: {
+          ...state.chat,
+          uploadError: getErrorMessage(error),
+        },
+      }));
+    }
+  },
+
+  resetUploadStatus: () => {
+    set((state) => ({
+      chat: {
+        ...state.chat,
+        uploadStatus: null,
+        uploadProgress: 0,
+        uploadError: null,
+        currentJobId: null,
+      },
+    }));
+  },
+
+  /**
+   * Session Actions (NEW - Session-centric)
+   */
+
+  createNewSession: async (getToken, { title, documentIds }) => {
+    /**
+     * Create new chat session with documents
+     *
+     * Input:
+     *   - title: string (optional)
+     *   - documentIds: string[] (optional)
+     *
+     * Output:
+     *   Updates currentSession and messages
+     */
+    try {
+      const session = await chatApi.createSession(getToken, {
+        title: title || "New Chat",
+        description: null,
+        documentIds: documentIds || [],
+      });
+
+      set((state) => ({
+        chat: {
+          ...state.chat,
+          currentSession: session,
+          messages: [],
+          chatError: null,
+        },
+      }));
+
+      // Add to sessions list
+      set((state) => ({
+        chat: {
+          ...state.chat,
+          sessions: [session, ...state.chat.sessions],
+        },
+      }));
+
+      return session;
+    } catch (error) {
+      console.error("Failed to create session:", error);
+      set((state) => ({
+        chat: {
+          ...state.chat,
+          chatError: getErrorMessage(error),
+        },
+      }));
+      throw error;
+    }
+  },
+
+  loadSession: async (getToken, sessionId) => {
+    /**
+     * Load existing session with messages and documents
+     *
+     * Input:
+     *   - sessionId: string
+     *
+     * Output:
+     *   Updates currentSession and messages
+     */
+    try {
+      // Get session with documents
+      const session = await chatApi.getSession(getToken, sessionId);
+
+      // Get messages
+      const historyData = await chatApi.getChatHistory(getToken, sessionId);
+
+      // Check for comparison context in last assistant message
+      const lastAssistant = historyData.messages
+        .filter((m) => m.role === "assistant")
+        .pop();
+
+      const comparisonContext =
+        lastAssistant?.comparison_metadata || null;
+
+      set((state) => ({
+        chat: {
+          ...state.chat,
+          currentSession: session,
+          messages: historyData.messages,
+          chatError: null,
+          // Restore comparison context if present, otherwise reset
+          comparison: comparisonContext
+            ? {
+                isActive: true,
+                context: comparisonContext,
+                viewMode: state.chat.comparison?.viewMode || "cards",
+                selectedPairIndex: null,
+                expandedTopics: [],
+              }
+            : {
+                isActive: false,
+                context: null,
+                viewMode: state.chat.comparison?.viewMode || "cards",
+                selectedPairIndex: null,
+                expandedTopics: [],
+              },
+        },
+      }));
+    } catch (error) {
+      console.error("Failed to load session:", error);
+      set((state) => ({
+        chat: {
+          ...state.chat,
+          chatError: getErrorMessage(error),
+        },
+      }));
+    }
+  },
+
+  addDocumentsToCurrentSession: async (getToken, documentIds) => {
+    /**
+     * Add documents to current session
+     *
+     * Input:
+     *   - documentIds: string[]
+     *
+     * Output:
+     *   Updates currentSession.documents AND sessions array
+     */
+    const sessionId = get().chat.currentSession?.id;
+    if (!sessionId) {
+      console.error("No active session");
+      return;
+    }
+
+    try {
+      await chatApi.addDocumentsToSession(getToken, sessionId, documentIds);
+
+      // Reload session to get updated documents list
+      const updatedSession = await chatApi.getSession(getToken, sessionId);
+
+      set((state) => ({
+        chat: {
+          ...state.chat,
+          currentSession: updatedSession,
+          // IMPORTANT: Also update the session in the sessions array
+          sessions: state.chat.sessions.map((s) =>
+            s.id === sessionId
+              ? {
+                  ...s,
+                  documents: updatedSession.documents,
+                  document_count: updatedSession.documents.length  // UPDATE COUNT
+                }
+              : s
+          ),
+        },
+      }));
+    } catch (error) {
+      console.error("Failed to add documents to session:", error);
+      set((state) => ({
+        chat: {
+          ...state.chat,
+          chatError: getErrorMessage(error),
+        },
+      }));
+    }
+  },
+
+  removeDocumentFromCurrentSession: async (getToken, documentId) => {
+    /**
+     * Remove document from current session
+     *
+     * Input:
+     *   - documentId: string
+     *
+     * Output:
+     *   Updates currentSession.documents AND sessions array
+     */
+    const sessionId = get().chat.currentSession?.id;
+    if (!sessionId) {
+      console.error("No active session");
+      return;
+    }
+
+    try {
+      await chatApi.removeDocumentFromSession(getToken, sessionId, documentId);
+
+      // Update local state - remove document from both currentSession and sessions array
+      set((state) => {
+        const updatedDocuments = state.chat.currentSession.documents.filter(
+          (doc) => doc.id !== documentId
+        );
+
+        return {
+          chat: {
+            ...state.chat,
+            currentSession: {
+              ...state.chat.currentSession,
+              documents: updatedDocuments,
+              document_count: updatedDocuments.length  // UPDATE COUNT
+            },
+            // IMPORTANT: Also update the session in the sessions array
+            sessions: state.chat.sessions.map((s) =>
+              s.id === sessionId
+                ? {
+                    ...s,
+                    documents: updatedDocuments,
+                    document_count: updatedDocuments.length  // UPDATE COUNT
+                  }
+                : s
+            ),
+          },
+        };
+      });
+    } catch (error) {
+      console.error("Failed to remove document from session:", error);
+      set((state) => ({
+        chat: {
+          ...state.chat,
+          chatError: getErrorMessage(error),
+        },
+      }));
+    }
+  },
+
+  updateSessionTitle: async (getToken, sessionId, title) => {
+    /**
+     * Update session title
+     *
+     * Input:
+     *   - sessionId: string
+     *   - title: string
+     *
+     * Output:
+     *   Updates currentSession.title AND sessions array
+     */
+    try {
+      await chatApi.updateSession(getToken, sessionId, { title });
+
+      // Update local state - both currentSession and sessions array
+      set((state) => ({
+        chat: {
+          ...state.chat,
+          currentSession: {
+            ...state.chat.currentSession,
+            title,
+          },
+          // IMPORTANT: Also update the session in the sessions array
+          sessions: state.chat.sessions.map((s) =>
+            s.id === sessionId ? { ...s, title } : s
+          ),
+        },
+      }));
+    } catch (error) {
+      console.error("Failed to update session title:", error);
+      set((state) => ({
+        chat: {
+          ...state.chat,
+          chatError: getErrorMessage(error),
+        },
+      }));
+    }
+  },
+
+  /**
+   * Chat Actions (UPDATED - Session-centric)
+   */
+
+  sendMessage: async (getToken, message, numChunks = 5) => {
+    /**
+     * Send message in current session
+     *
+     * Input:
+     *   - message: string
+     *   - numChunks: number (optional)
+     *
+     * Uses: currentSession.id from state
+     * Output: Streams response via SSE
+     */
+    const sessionId = get().chat.currentSession?.id;
+    if (!sessionId) {
+      console.error("No active session");
+      set((state) => ({
+        chat: {
+          ...state.chat,
+          chatError: "No active session. Please create a session first.",
+        },
+      }));
+      return;
+    }
+
+    // Add user message immediately
+    const userMessage = {
+      role: "user",
+      content: message,
+      created_at: new Date().toISOString(),
+    };
+
+    set((state) => ({
+      chat: {
+        ...state.chat,
+        messages: [...state.chat.messages, userMessage],
+        isStreaming: true,
+        streamingMessage: "",
+        chatError: null,
+        comparison: {
+          isActive: false,
+          context: null,
+          viewMode: state.chat.comparison?.viewMode || "cards",
+          selectedPairIndex: null,
+          expandedTopics: [],
+        },
+      },
+    }));
+
+    // Send to API with streaming
+    chatApi.sendChatMessage(
+      getToken,
+      sessionId,
+      message,
+      numChunks,
+      {
+        onSession: (returnedSessionId) => {
+          // Session ID confirmed (should match)
+          console.log("Session confirmed:", returnedSessionId);
+        },
+        onThinking: (data) => {
+          // Handle thinking event for progress feedback
+          console.log("Backend is thinking:", data);
+          set((state) => ({
+            chat: { ...state.chat, isThinking: true },
+          }));
+        },
+        onComparisonContext: (context) => {
+          // Handle comparison context from backend
+          console.log("Received comparison context:", context);
+          set((state) => ({
+            chat: {
+              ...state.chat,
+              comparison: {
+                isActive: true,
+                context: context,
+                selectedPairIndex: null,
+                viewMode: 'cards',
+                expandedTopics: [],
+              },
+            },
+          }));
+        },
+        onChunk: (chunk) => {
+          // Append to streaming message
+          // First chunk means LLM started, clear thinking indicator
+          set((state) => ({
+            chat: {
+              ...state.chat,
+              isThinking: false, // Clear thinking when streaming starts
+              streamingMessage: state.chat.streamingMessage + chunk,
+            },
+          }));
+        },
+        onComplete: () => {
+          // Add complete assistant message
+          const streamingMessage = get().chat.streamingMessage;
+          const comparisonState = get().chat.comparison;
+          const assistantMessage = {
+            role: "assistant",
+            content: streamingMessage,
+            created_at: new Date().toISOString(),
+            ...(comparisonState?.isActive && comparisonState?.context
+              ? { comparison_metadata: comparisonState.context }
+              : {}),
+          };
+
+          set((state) => ({
+            chat: {
+              ...state.chat,
+              messages: [...state.chat.messages, assistantMessage],
+              isStreaming: false,
+              streamingMessage: "",
+            },
+          }));
+
+          // Refresh sessions list
+          get().fetchSessions(getToken);
+        },
+        onError: (error) => {
+          console.error("Chat streaming error:", error);
+          set((state) => ({
+            chat: {
+              ...state.chat,
+              isStreaming: false,
+              streamingMessage: "",
+              chatError: getErrorMessage(error),
+            },
+          }));
+        },
+      }
+    );
+  },
+
+  loadChatHistory: async (getToken, sessionId) => {
+    /**
+     * Load chat history (DEPRECATED - use loadSession instead)
+     *
+     * Kept for backwards compatibility
+     */
+    try {
+      const data = await chatApi.getChatHistory(getToken, sessionId);
+      set((state) => ({
+        chat: {
+          ...state.chat,
+          currentSession: {
+            id: data.session_id,
+          },
+          messages: data.messages,
+        },
+      }));
+    } catch (error) {
+      console.error("Failed to load chat history:", error);
+      set((state) => ({
+        chat: {
+          ...state.chat,
+          chatError: getErrorMessage(error),
+        },
+      }));
+    }
+  },
+
+  startNewChat: () => {
+    /**
+     * Clear current session and messages
+     */
+    set((state) => ({
+      chat: {
+        ...state.chat,
+        currentSession: null,
+        messages: [],
+        isStreaming: false,
+        streamingMessage: "",
+        chatError: null,
+      },
+    }));
+  },
+
+  /**
+   * Sessions Actions (UPDATED - User-centric)
+   */
+
+  fetchSessions: async (getToken, options = {}) => {
+    /**
+     * Fetch all user sessions (not collection-specific)
+     *
+     * Input:
+     *   - options: { limit: number, offset: number }
+     *
+     * Output:
+     *   Updates sessions list
+     */
+    set((state) => ({
+      chat: {
+        ...state.chat,
+        sessionsLoading: true,
+      },
+    }));
+
+    try {
+      const data = await chatApi.listSessions(getToken, options);
+      set((state) => ({
+        chat: {
+          ...state.chat,
+          sessions: data,
+          sessionsLoading: false,
+        },
+      }));
+    } catch (error) {
+      console.error("Failed to fetch sessions:", error);
+      set((state) => ({
+        chat: {
+          ...state.chat,
+          sessionsLoading: false,
+        },
+      }));
+    }
+  },
+
+  deleteSession: async (getToken, sessionId) => {
+    try {
+      await chatApi.deleteSession(getToken, sessionId);
+
+      // Remove from sessions list
+      set((state) => ({
+        chat: {
+          ...state.chat,
+          sessions: state.chat.sessions.filter((s) => s.id !== sessionId),
+          currentSession:
+            state.chat.currentSession?.id === sessionId
+              ? null
+              : state.chat.currentSession,
+          messages:
+            state.chat.currentSession?.id === sessionId
+              ? []
+              : state.chat.messages,
+        },
+      }));
+    } catch (error) {
+      console.error("Failed to delete session:", error);
+      throw error;
+    }
+  },
+
+  /**
+   * Export Actions
+   */
+
+  exportSession: async (getToken, sessionId) => {
+    try {
+      const data = await chatApi.exportSession(getToken, sessionId);
+      return data;
+    } catch (error) {
+      console.error("Failed to export session:", error);
+      throw error;
+    }
+  },
+
+  /**
+   * Document Indexing Actions
+   * (Similar to workflow execution pattern)
+   */
+
+  // Start document indexing (called after upload)
+  startDocumentIndexing: (jobId, documentId, collectionId, cleanup) => {
+    set((state) => ({
+      chat: {
+        ...state.chat,
+        indexingJobs: {
+          ...state.chat.indexingJobs,
+          [documentId]: {
+            jobId,
+            documentId,
+            collectionId,
+            isProcessing: true,
+            progress_percent: 0,
+            current_stage: "uploading",
+            message: "Starting indexing...",
+            error: null,
+            cleanup,
+          },
+        },
+      },
+    }));
+  },
+
+  // Update indexing progress (called by SSE handler)
+  updateIndexingProgress: (documentId, progressData) => {
+    set((state) => {
+      const existingJob = state.chat.indexingJobs[documentId];
+      if (!existingJob) {
+        console.warn(`No indexing job found for document ${documentId}`);
+        return state;
+      }
+
+      return {
+        chat: {
+          ...state.chat,
+          indexingJobs: {
+            ...state.chat.indexingJobs,
+            [documentId]: {
+              ...existingJob,
+              progress_percent: progressData.progress_percent || 0,
+              current_stage: progressData.current_stage,
+              message: progressData.message,
+            },
+          },
+        },
+      };
+    });
+  },
+
+  // Complete indexing for a specific document
+  completeIndexing: (documentId) => {
+    set((state) => {
+      const job = state.chat.indexingJobs[documentId];
+
+      // Call cleanup function if exists
+      if (job?.cleanup) {
+        job.cleanup();
+      }
+
+      // Remove from map
+      const { [documentId]: _, ...remainingJobs } = state.chat.indexingJobs;
+
+      return {
+        chat: {
+          ...state.chat,
+          indexingJobs: remainingJobs,
+        },
+      };
+    });
+  },
+
+  // Fail indexing for a specific document
+  failIndexing: (documentId, errorMessage) => {
+    set((state) => {
+      const existingJob = state.chat.indexingJobs[documentId];
+      if (!existingJob) {
+        console.warn(`No indexing job found for document ${documentId}`);
+        return state;
+      }
+
+      return {
+        chat: {
+          ...state.chat,
+          indexingJobs: {
+            ...state.chat.indexingJobs,
+            [documentId]: {
+              ...existingJob,
+              isProcessing: false,
+              error: errorMessage,
+            },
+          },
+        },
+      };
+    });
+  },
+
+  // Reconnect to all active indexing jobs (called on mount)
+  reconnectAllIndexingJobs: async (getToken) => {
+    const { indexingJobs } = get().chat;
+
+    if (!indexingJobs || Object.keys(indexingJobs).length === 0) {
+      console.log("❌ No active indexing jobs to reconnect");
+      return;
+    }
+
+    // Reconnect to all active jobs in parallel
+    const reconnectPromises = Object.entries(indexingJobs).map(
+      async ([docId, job]) => {
+        if (!job.jobId || job.cleanup) {
+          return; // Skip if no jobId or already connected
+        }
+
+        try {
+          console.log(`🔄 Reconnecting to indexing job for document ${docId}...`);
+
+          const cleanup = await streamJobProgress(job.jobId, getToken, {
+            onProgress: (data) => {
+              get().updateIndexingProgress(docId, data);
+            },
+            onComplete: () => {
+              get().completeIndexing(docId);
+            },
+            onError: (errorData) => {
+              const errorMsg =
+                typeof errorData === "string"
+                  ? errorData
+                  : errorData?.message || "Indexing failed";
+
+              // If job not found, clear state silently
+              if (errorData?.type === "not_found") {
+                console.log(`ℹ️ Job ${job.jobId} not found, clearing state`);
+                get().clearIndexingJob(docId);
+                return;
+              }
+
+              // If connection error during reconnection, clear state silently
+              // (job might have completed while page was closed)
+              if (errorData?.type === "connection_error") {
+                console.log(`⚠️ Connection error during reconnect for ${docId}, clearing state`);
+                get().clearIndexingJob(docId);
+                return;
+              }
+
+              get().failIndexing(docId, errorMsg);
+            },
+            onEnd: (data) => {
+              console.log(`🏁 Indexing SSE stream ended for ${docId}:`, data?.reason);
+            },
+          });
+
+          // Update cleanup function
+          set((state) => ({
+            chat: {
+              ...state.chat,
+              indexingJobs: {
+                ...state.chat.indexingJobs,
+                [docId]: {
+                  ...state.chat.indexingJobs[docId],
+                  cleanup,
+                  isProcessing: true,
+                },
+              },
+            },
+          }));
+        } catch (err) {
+          console.error(`Reconnection failed for document ${docId}:`, err);
+          get().failIndexing(docId, "Failed to reconnect");
+        }
+      }
+    );
+
+    await Promise.allSettled(reconnectPromises);
+  },
+
+  // Clear a specific indexing job
+  clearIndexingJob: (documentId) => {
+    set((state) => {
+      const job = state.chat.indexingJobs[documentId];
+
+      // Call cleanup function if exists
+      if (job?.cleanup) {
+        job.cleanup();
+      }
+
+      // Remove from map
+      const { [documentId]: _, ...remainingJobs } = state.chat.indexingJobs;
+
+      return {
+        chat: {
+          ...state.chat,
+          indexingJobs: remainingJobs,
+        },
+      };
+    });
+  },
+
+  // Clear all indexing jobs
+  clearAllIndexingJobs: () => {
+    set((state) => {
+      // Call cleanup on all jobs
+      Object.values(state.chat.indexingJobs).forEach((job) => {
+        if (job.cleanup) {
+          job.cleanup();
+        }
+      });
+
+      return {
+        chat: {
+          ...state.chat,
+          indexingJobs: {},
+        },
+      };
+    });
+  },
+
+  /**
+   * Comparison Mode Actions
+   */
+
+  setComparisonContext: (context) => {
+    set((state) => ({
+      chat: {
+        ...state.chat,
+        comparison: {
+          ...state.chat.comparison,
+          isActive: !!context,
+          context: context,
+        },
+      },
+    }));
+  },
+
+  clearComparison: () => {
+    set((state) => ({
+      chat: {
+        ...state.chat,
+        comparison: {
+          isActive: false,
+          context: null,
+          selectedPairIndex: null,
+          viewMode: 'cards',
+          expandedTopics: [],
+        },
+      },
+    }));
+  },
+
+  setComparisonViewMode: (viewMode) => {
+    set((state) => ({
+      chat: {
+        ...state.chat,
+        comparison: {
+          ...state.chat.comparison,
+          viewMode: viewMode,
+        },
+      },
+    }));
+  },
+
+  toggleComparisonTopic: (topic) => {
+    set((state) => {
+      const currentTopics = state.chat.comparison.expandedTopics;
+      const newTopics = currentTopics.includes(topic)
+        ? currentTopics.filter((t) => t !== topic)
+        : [...currentTopics, topic];
+
+      return {
+        chat: {
+          ...state.chat,
+          comparison: {
+            ...state.chat.comparison,
+            expandedTopics: newTopics,
+          },
+        },
+      };
+    });
+  },
+
+  /**
+   * PDF Viewer Actions (Active Document Pattern with URL Caching)
+   */
+
+  /**
+   * Highlight a chunk in the PDF and auto-switch to that document
+   * @param {Object} bbox - { page, x0, y0, x1, y1, docId }
+   */
+  highlightChunk: async (bbox, getToken) => {
+    const { docId } = bbox;
+
+    // Set highlight immediately
+    set((state) => ({
+      chat: {
+        ...state.chat,
+        pdfViewer: {
+          ...state.chat.pdfViewer,
+          highlightBbox: bbox,
+        },
+      },
+    }));
+
+    // Auto-switch active document if docId is provided
+    if (docId) {
+      await get().setActivePdfDocument(docId, getToken);
+    }
+  },
+
+  /**
+   * Clear the current highlight
+   */
+  clearHighlight: () => {
+    set((state) => ({
+      chat: {
+        ...state.chat,
+        pdfViewer: {
+          ...state.chat.pdfViewer,
+          highlightBbox: null,
+        },
+      },
+    }));
+  },
+
+  /**
+   * Set active PDF document (with lazy URL loading)
+   * Loads PDF URL from backend if not already cached
+   * @param {string} documentId - Document ID to make active
+   * @param {Function} getToken - Clerk auth token getter
+   */
+  setActivePdfDocument: async (documentId, getToken) => {
+    if (!documentId) return;
+
+    const { urlCache } = get().chat.pdfViewer;
+    const cached = urlCache[documentId];
+    const now = Date.now();
+
+    // Check if URL is cached and not expired
+    if (cached && cached.expiry > now) {
+      // URL is valid, just switch active document
+      set((state) => ({
+        chat: {
+          ...state.chat,
+          pdfViewer: {
+            ...state.chat.pdfViewer,
+            activeDocumentId: documentId,
+          },
+        },
+      }));
+      return;
+    }
+
+    // Need to load URL - set loading state
+    set((state) => ({
+      chat: {
+        ...state.chat,
+        pdfViewer: {
+          ...state.chat.pdfViewer,
+          activeDocumentId: documentId,
+          isLoadingUrl: true,
+        },
+      },
+    }));
+
+    try {
+      // Fetch presigned URL from backend
+      const urlData = await getDocumentDownloadUrl(getToken, documentId);
+
+      if (urlData.url) {
+        const expiry = now + urlData.expires_in * 1000;
+
+        // Update cache and clear loading
+        set((state) => ({
+          chat: {
+            ...state.chat,
+            pdfViewer: {
+              ...state.chat.pdfViewer,
+              urlCache: {
+                ...state.chat.pdfViewer.urlCache,
+                [documentId]: { url: urlData.url, expiry },
+              },
+              isLoadingUrl: false,
+            },
+          },
+        }));
+
+        console.log(`✅ Loaded PDF URL for document ${documentId}`);
+      } else {
+        console.error(`❌ No URL in response for document ${documentId}`);
+        set((state) => ({
+          chat: {
+            ...state.chat,
+            pdfViewer: {
+              ...state.chat.pdfViewer,
+              isLoadingUrl: false,
+            },
+          },
+        }));
+      }
+    } catch (error) {
+      console.error(`❌ Failed to load PDF URL for document ${documentId}:`, error);
+      set((state) => ({
+        chat: {
+          ...state.chat,
+          pdfViewer: {
+            ...state.chat.pdfViewer,
+            isLoadingUrl: false,
+          },
+        },
+      }));
+    }
+  },
+
+  /**
+   * Load PDF URL for a specific document (without switching active)
+   * Useful for preloading URLs for ComparisonPanel
+   * @param {string} documentId - Document ID to load URL for
+   * @param {Function} getToken - Clerk auth token getter
+   * @returns {Promise<string|null>} The PDF URL or null if failed
+   */
+  loadPdfUrlForDocument: async (documentId, getToken) => {
+    const { urlCache } = get().chat.pdfViewer;
+    const cached = urlCache[documentId];
+    const now = Date.now();
+
+    // Return cached URL if valid
+    if (cached && cached.expiry > now) {
+      return cached.url;
+    }
+
+    try {
+      const urlData = await getDocumentDownloadUrl(getToken, documentId);
+
+      if (urlData.url) {
+        const expiry = now + urlData.expires_in * 1000;
+
+        // Update cache
+        set((state) => ({
+          chat: {
+            ...state.chat,
+            pdfViewer: {
+              ...state.chat.pdfViewer,
+              urlCache: {
+                ...state.chat.pdfViewer.urlCache,
+                [documentId]: { url: urlData.url, expiry },
+              },
+            },
+          },
+        }));
+
+        return urlData.url;
+      }
+    } catch (error) {
+      console.error(`Failed to load PDF URL for ${documentId}:`, error);
+    }
+
+    return null;
+  },
+
+  /**
+   * Clear PDF URL cache (useful when session changes)
+   */
+  clearPdfUrlCache: () => {
+    set((state) => ({
+      chat: {
+        ...state.chat,
+        pdfViewer: {
+          ...state.chat.pdfViewer,
+          activeDocumentId: null,
+          urlCache: {},
+          highlightBbox: null,
+        },
+      },
+    }));
+  },
+});

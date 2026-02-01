@@ -1,19 +1,17 @@
 """API endpoints for workflow templates and workflow runs."""
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from sqlalchemy import func, select
 from typing import List, Optional
 import json
 
 from app.database import get_db
 from app.repositories.workflow_repository import WorkflowRepository
 from app.db_models_workflows import Workflow, WorkflowRun
-from app.db_models_chat import CollectionDocument, DocumentChunk, Collection
-from app.db_models_documents import Document
+from app.repositories.document_repository import DocumentRepository
 from app.auth import get_current_user
 from app.db_models_users import User
 from app.utils.logging import logger
-from app.services.tasks.workflows import start_workflow_chain
+from app.verticals.private_equity.workflows.tasks import start_workflow_chain
 from app.schemas.workflows import (
     WorkflowTemplateListItem,
     WorkflowTemplateDetail,
@@ -169,13 +167,8 @@ def create_workflow_run(payload: CreateWorkflowRunRequest, user: User = Depends(
         doc_ids = payload.document_ids
     elif payload.collection_id:
         # Load completed documents from collection (query canonical Document table)
-        result = db.query(Document.id).join(
-            CollectionDocument, Document.id == CollectionDocument.document_id
-        ).filter(
-            CollectionDocument.collection_id == payload.collection_id,
-            Document.status == "completed"
-        ).all()
-        doc_ids = [r[0] for r in result]
+        doc_repo = DocumentRepository()
+        doc_ids = doc_repo.get_completed_document_ids_for_collection(payload.collection_id)
     else:
         raise HTTPException(status_code=400, detail="Either document_ids or collection_id must be provided")
 
@@ -186,15 +179,9 @@ def create_workflow_run(payload: CreateWorkflowRunRequest, user: User = Depends(
 
     # Validate documents exist and have embeddings
     if len(doc_ids) > 1:
-        from app.db_models_chat import DocumentChunk
         # Query canonical Document table and check for embeddings
-        docs_with_embeddings = db.query(Document.id).join(
-            DocumentChunk, Document.id == DocumentChunk.document_id
-        ).filter(
-            Document.id.in_(doc_ids),
-            DocumentChunk.embedding.isnot(None)
-        ).distinct().all()
-        docs_with_embeddings_ids = {r[0] for r in docs_with_embeddings}
+        doc_repo = DocumentRepository()
+        docs_with_embeddings_ids = set(doc_repo.get_document_ids_with_embeddings(doc_ids))
         missing_embeddings = set(doc_ids) - docs_with_embeddings_ids
         if missing_embeddings:
             raise HTTPException(
@@ -400,65 +387,34 @@ def list_workflow_runs(
 @router.get("/documents", response_model=List[DocumentSummary])
 def list_available_documents(
     user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
     collection_id: Optional[str] = None,
 ):
     """List documents available for workflows (from user's collections)."""
     logger.info("Listing available documents for workflows", extra={"user_id": user.id, "collection_id": collection_id})
-    # Query canonical Document table, joining through CollectionDocument to filter by user's collections
-    query = db.query(
-        Document.id,
-        Document.filename,
-        Document.page_count,
-        Document.status,
-        Document.created_at,
-        func.count(DocumentChunk.id.distinct()).label("chunk_count"),
-        func.count(DocumentChunk.embedding).label("embeddings_count")
-    ).join(
-        CollectionDocument, Document.id == CollectionDocument.document_id
-    ).join(
-        Collection, CollectionDocument.collection_id == Collection.id
-    ).outerjoin(
-        DocumentChunk, Document.id == DocumentChunk.document_id
-    ).filter(
-        Collection.user_id == user.id,
-        Document.status == "completed"
-    )
+    doc_repo = DocumentRepository()
+    results = doc_repo.list_available_documents_for_user(user.id, collection_id)
 
-    if collection_id:
-        query = query.filter(Collection.id == collection_id)
-
-    query = query.group_by(
-        Document.id,
-        Document.filename,
-        Document.page_count,
-        Document.status,
-        Document.created_at
-    ).order_by(Document.created_at.desc())
-
-    results = query.all()
-    
     for r in results:
         logger.info(
             "document chunk/embedding counts",
             extra={
                 "user_id": user.id,
                 "collection_id": collection_id,
-                "document_id": r.id,
-                "document_name": getattr(r, "filename", None),
-                "chunk_count": int(r.chunk_count or 0),
-                "embeddings_count": int(r.embeddings_count or 0),
+                "document_id": r["id"],
+                "document_name": r.get("filename"),
+                "chunk_count": r.get("chunk_count", 0),
+                "embeddings_count": r.get("embeddings_count", 0),
             },
         )
 
     return [
         DocumentSummary(
-            id=r.id,
-            filename=r.filename,
-            page_count=r.page_count,
-            status=r.status,
-            has_embeddings=r.chunk_count > 0 and r.embeddings_count > 0,
-            created_at=r.created_at,
+            id=r["id"],
+            filename=r.get("filename"),
+            page_count=r.get("page_count"),
+            status=r.get("status"),
+            has_embeddings=r.get("chunk_count", 0) > 0 and r.get("embeddings_count", 0) > 0,
+            created_at=r.get("created_at"),
         )
         for r in results
     ]
@@ -578,7 +534,7 @@ def export_workflow_run(
         EXPORT_BYTES_TOTAL,
     )
     from app.config import settings
-    from app.services.storage.cloudflare_r2 import get_r2_storage
+    from app.core.storage.cloudflare_r2 import get_r2_storage
 
     logger.info("Export workflow run", extra={
         "run_id": run_id,
@@ -807,7 +763,7 @@ def rerun_workflow(
     })
 
     # Kick off workflow chain
-    from app.services.tasks.workflows import start_workflow_chain
+    from app.verticals.private_equity.workflows.tasks import start_workflow_chain
     start_workflow_chain(run.id, job_id, custom_prompt=payload.custom_prompt)
 
     # Return response

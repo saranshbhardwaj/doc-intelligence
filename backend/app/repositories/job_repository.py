@@ -57,6 +57,7 @@ class JobRepository:
         extraction_id: Optional[str] = None,
         document_id: Optional[str] = None,
         workflow_run_id: Optional[str] = None,
+        template_fill_run_id: Optional[str] = None,
         status: str = "queued",
         current_stage: str = "queued",
         progress_percent: int = 0,
@@ -83,16 +84,17 @@ class JobRepository:
         Returns:
             JobState object if successful, None on error
         """
-        if not extraction_id and not document_id and not workflow_run_id:
-            logger.error("Must provide one of extraction_id, document_id, or workflow_run_id")
+        if not extraction_id and not document_id and not workflow_run_id and not template_fill_run_id:
+            logger.error("Must provide one of extraction_id, document_id, workflow_run_id, or template_fill_run_id")
             return None
         # Ensure caller does not set more than one (business rule; DB constraint will also enforce)
-        provided = [v for v in [extraction_id, document_id, workflow_run_id] if v]
+        provided = [v for v in [extraction_id, document_id, workflow_run_id, template_fill_run_id] if v]
         if len(provided) != 1:
-            logger.error("Exactly one of extraction_id, document_id, workflow_run_id must be provided", extra={
+            logger.error("Exactly one of extraction_id, document_id, workflow_run_id, template_fill_run_id must be provided", extra={
                 "extraction_id": extraction_id,
                 "document_id": document_id,
-                "workflow_run_id": workflow_run_id
+                "workflow_run_id": workflow_run_id,
+                "template_fill_run_id": template_fill_run_id
             })
             return None
 
@@ -107,6 +109,7 @@ class JobRepository:
                     extraction_id=extraction_id,
                     document_id=document_id,
                     workflow_run_id=workflow_run_id,
+                    template_fill_run_id=template_fill_run_id,
                     status=status,
                     current_stage=current_stage,
                     progress_percent=progress_percent,
@@ -330,6 +333,55 @@ class JobRepository:
             progress_percent=progress_percent,
             message=message
         )
+
+    def reset_for_retry(
+        self,
+        job_id: str,
+        message: str = "Queued for retry (extracting stage)"
+    ) -> bool:
+        """Reset a job back to queued state for retry.
+
+        Clears error fields and marks job as retryable.
+
+        Args:
+            job_id: Job tracking ID
+            message: Status message for retry queueing
+
+        Returns:
+            True if successful, False otherwise
+        """
+        with self._get_session() as db:
+            try:
+                job = db.query(JobState).filter(JobState.job_id == job_id).first()
+                if not job:
+                    logger.warning(
+                        "Job not found for retry reset",
+                        extra={"job_id": job_id}
+                    )
+                    return False
+
+                job.status = "queued"
+                job.current_stage = "queued"
+                job.progress_percent = 0
+                job.message = message
+                job.error_stage = None
+                job.error_message = None
+                job.error_type = None
+                job.is_retryable = True
+
+                db.commit()
+                logger.info(
+                    "Reset job state for retry",
+                    extra={"job_id": job_id}
+                )
+                return True
+            except SQLAlchemyError as e:
+                db.rollback()
+                logger.error(
+                    "Failed to reset job state for retry",
+                    extra={"job_id": job_id, "error": str(e)}
+                )
+                return False
 
     def mark_completed(
         self,

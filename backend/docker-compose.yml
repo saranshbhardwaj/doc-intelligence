@@ -32,9 +32,13 @@ services:
       DATABASE_URL: postgresql+psycopg://docint:docint@db:5432/docint
       HOME: /app
       HF_HOME: /app/.cache/huggingface
+      DEBUG: "true"  # Enable debugpy
+      PYDEVD_DISABLE_FILE_VALIDATION: "1"
+      # DEBUG_WAIT: "true"  # Uncomment to wait for debugger attach before serving
   # TRANSFORMERS_CACHE is deprecated; use HF_HOME instead
     ports:
       - "8000:8000"
+      - "5678:5678"  # Debug port for API
     depends_on:
       db:
         condition: service_healthy  # Wait for DB to be ready
@@ -57,9 +61,14 @@ services:
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/0
       DATABASE_URL: postgresql+psycopg://docint:docint@db:5432/docint
+      DEBUG: "true"  # Enable debugpy
+      PYDEVD_DISABLE_FILE_VALIDATION: "1"
+      # DEBUG_WAIT: "true"  # Uncomment to wait for debugger attach before processing tasks
     depends_on:
       - redis
       - db
+    ports:
+      - "5679:5679"  # Debug port for Celery worker
     volumes:
       - ./:/worker  # Bind mount for consistency (tasks, migrations if needed)
       - uploads_data:/shared_uploads  # Access same uploaded PDF files as api

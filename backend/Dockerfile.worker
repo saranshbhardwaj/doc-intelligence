@@ -29,4 +29,5 @@ USER appuser
 
 # Command to start celery worker; --pool=solo (single process). Remove --pool to enable multiprocessing.
 # Example for multi-process: celery -A app.celery_app.celery_app worker --loglevel=info --concurrency=4
-CMD ["celery", "-A", "app.celery_app.celery_app", "worker", "--loglevel=info", "--pool=solo"]
+# Use python -Xfrozen_modules=off for more reliable breakpoints.
+CMD ["python", "-Xfrozen_modules=off", "-m", "celery", "-A", "app.celery_app.celery_app", "worker", "--loglevel=info", "--pool=solo"]

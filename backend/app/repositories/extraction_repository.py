@@ -9,6 +9,7 @@ Pattern:
 - Makes testing easier with repository mocking
 """
 from datetime import datetime
+import uuid
 from typing import Optional, List
 from contextlib import contextmanager
 from typing import Generator
@@ -779,6 +780,50 @@ class ExtractionRepository:
                 logger.error(
                     f"Failed to update extraction artifact: {e}",
                     extra={"extraction_id": extraction_id, "error": str(e)}
+                )
+                db.rollback()
+                return False
+
+    def create_usage_log(
+        self,
+        user_id: str,
+        extraction_id: Optional[str],
+        pages_processed: int,
+        operation_type: str = "extraction",
+        cost_usd: float = 0.0,
+        filename: Optional[str] = None
+    ) -> bool:
+        """Create a usage log entry.
+
+        Args:
+            user_id: User ID
+            extraction_id: Related extraction ID (optional)
+            pages_processed: Number of pages processed
+            operation_type: Operation type (extraction, parsing, etc.)
+            cost_usd: Cost in USD
+            filename: Optional filename for display
+
+        Returns:
+            True if created, False otherwise
+        """
+        with self._get_session() as db:
+            try:
+                usage_log = UsageLog(
+                    id=str(uuid.uuid4()),
+                    user_id=user_id,
+                    extraction_id=extraction_id,
+                    pages_processed=pages_processed,
+                    operation_type=operation_type,
+                    cost_usd=cost_usd,
+                    filename=filename
+                )
+                db.add(usage_log)
+                db.commit()
+                return True
+            except SQLAlchemyError as e:
+                logger.error(
+                    f"Failed to create usage log: {e}",
+                    extra={"user_id": user_id, "extraction_id": extraction_id}
                 )
                 db.rollback()
                 return False

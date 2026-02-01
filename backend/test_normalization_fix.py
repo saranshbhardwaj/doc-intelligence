@@ -11,8 +11,8 @@ from pathlib import Path
 # Add backend to path
 sys.path.insert(0, str(Path(__file__).parent))
 
-from app.services.workflows.normalization import normalize_workflow_output
-from app.services.workflows.validator import validate_output
+from app.verticals.private_equity.workflows.normalization import normalize_workflow_output
+from app.verticals.private_equity.workflows.validator import validate_output
 
 # The raw LLM output that was failing
 RAW_LLM_OUTPUT = {

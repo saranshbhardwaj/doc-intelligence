@@ -1,8 +1,10 @@
 """Repository for workflow templates and workflow runs."""
 from typing import Optional, List
+from contextlib import contextmanager
 from sqlalchemy.orm import Session
 from sqlalchemy import select
 from app.db_models_workflows import Workflow, WorkflowRun
+from app.database import SessionLocal
 import json
 from app.utils.id_generator import generate_id
 
@@ -10,6 +12,23 @@ from app.utils.id_generator import generate_id
 class WorkflowRepository:
     def __init__(self, db: Session):
         self.db = db
+
+    @contextmanager
+    def _get_session(self):
+        db = SessionLocal()
+        try:
+            yield db
+        finally:
+            db.close()
+
+    @classmethod
+    def get_run_by_id(cls, run_id: str) -> Optional[WorkflowRun]:
+        """Fetch a WorkflowRun by ID using an internal session."""
+        repo = cls(SessionLocal())
+        try:
+            return repo.db.get(WorkflowRun, run_id)
+        finally:
+            repo.db.close()
 
     # ---- Workflows ----
     def list_workflows(self, active_only: bool = True, domain: str | None = None) -> List[Workflow]:

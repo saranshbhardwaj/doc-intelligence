@@ -7,6 +7,8 @@ from typing import Dict, List, Optional
 from sqlalchemy import and_, desc, or_
 from sqlalchemy.orm import Session
 
+from app.database import SessionLocal
+
 from app.core.storage.storage_factory import get_storage_backend
 from app.db_models_templates import ExcelTemplate, TemplateFillRun
 from app.utils.logging import logger
@@ -268,6 +270,16 @@ class TemplateRepository:
     def get_fill_run(self, fill_run_id: str) -> Optional[TemplateFillRun]:
         """Get fill run by ID."""
         return self.db.query(TemplateFillRun).filter(TemplateFillRun.id == fill_run_id).first()
+
+    @classmethod
+    def get_fill_run_by_id(cls, fill_run_id: str) -> Optional[TemplateFillRun]:
+        """Fetch a fill run by ID using an internal session."""
+        db = SessionLocal()
+        try:
+            repo = cls(db)
+            return repo.get_fill_run(fill_run_id)
+        finally:
+            db.close()
 
     def update_fill_run(self, fill_run_id: str, **kwargs) -> Optional[TemplateFillRun]:
         """Update fill run fields."""

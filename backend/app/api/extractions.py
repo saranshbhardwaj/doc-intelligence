@@ -35,12 +35,16 @@ from app.repositories.extraction_repository import ExtractionRepository
 from app.repositories.document_repository import DocumentRepository
 
 # Orchestration service
-from app.services.tasks import start_extraction_chain
-from app.services.tasks.extractions import start_extraction_from_chunks_chain
+from celery import chain
+from app.verticals.private_equity.extraction.tasks import start_extraction_chain
+from app.verticals.private_equity.extraction.tasks import (
+    start_extraction_from_chunks_chain,
+    extract_structured_task,
+    store_extraction_result_task,
+)
 from app.services.artifacts import load_extraction_artifact, delete_artifact
 from app.utils.id_generator import generate_id
 from app.db_models_chat import DocumentChunk
-from app.database import SessionLocal
 from app.models import ExtractionListItem, PaginatedExtractionResponse
 import tempfile
 
@@ -925,40 +929,42 @@ async def retry_extraction(
     if not job.combined_context_path:
         raise HTTPException(status_code=400, detail="Cannot retry – combined context missing (pipeline did not reach summarizing stage)")
 
-    # Reset job state for retry (direct session update to clear error fields)
-    from app.database import SessionLocal
-    db = SessionLocal()
-    try:
-        job_db = db.query(type(job)).filter(type(job).job_id == job.job_id).first()
-        if job_db:
-            job_db.status = "queued"
-            job_db.current_stage = "queued"
-            job_db.progress_percent = 0
-            job_db.message = "Queued for retry (extracting stage)"
-            # Clear error fields
-            job_db.error_stage = None
-            job_db.error_message = None
-            job_db.error_type = None
-            job_db.is_retryable = True
-            db.commit()
-        else:
-            raise HTTPException(status_code=404, detail="Job state disappeared before retry")
-    finally:
-        db.close()
+    # Reset job state for retry via repository (clears error fields)
+    reset_ok = job_repo.reset_for_retry(job.job_id)
+    if not reset_ok:
+        raise HTTPException(status_code=404, detail="Job state disappeared before retry")
 
     # Update extraction status back to processing so history reflects active retry
     extraction_repo.update_status(extraction_id, status="processing")
 
-    # Kick off async retry from extraction stage
-    import asyncio as _asyncio
-    _asyncio.create_task(
-        retry_document_async(
-            job_id=job.job_id,
-            extraction_id=extraction_id,
-            resume_stage="extracting",
-            resume_data_path=job.combined_context_path
+    # Kick off async retry from extraction stage (use combined context)
+    try:
+        with open(job.combined_context_path, "r", encoding="utf-8") as f:
+            combined_context = f.read()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to load combined context: {e}")
+
+    payload = {
+        "job_id": job.job_id,
+        "extraction_id": extraction_id,
+        "user_id": extraction.user_id,
+        "filename": extraction.filename or "document",
+        "context": extraction.context,
+        "combined_context": combined_context,
+        "combined_context_path": job.combined_context_path,
+        "mode": "extraction",
+    }
+
+    if settings.use_celery:
+        retry_chain = chain(
+            extract_structured_task.s(payload),
+            store_extraction_result_task.s()
         )
-    )
+        retry_chain.apply_async()
+    else:
+        # Fallback: run synchronously in-process (not recommended for large jobs)
+        extract_result = extract_structured_task(payload)
+        store_extraction_result_task(extract_result)
 
     return {
         "success": True,

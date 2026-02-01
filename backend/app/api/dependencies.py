@@ -2,7 +2,7 @@
 from fastapi import Request
 # from app.services.llm_client import LLMClient
 from app.services.document_processor import DocumentProcessor
-from app.services.cache import create_cache
+from app.core.cache import create_cache
 from app.services.analytics import SimpleAnalytics
 from app.repositories import ExtractionRepository
 from app.config import settings

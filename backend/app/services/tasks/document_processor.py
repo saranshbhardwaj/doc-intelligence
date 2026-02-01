@@ -18,9 +18,9 @@ from sqlalchemy.sql import func
 
 from app.database import get_db
 from app.services.job_tracker import JobProgressTracker
-from app.services.embeddings import get_embedding_provider
-from app.services.parsers import ParserFactory
-from app.services.chunkers import ChunkerFactory
+from app.core.embeddings import get_embedding_provider
+from app.core.parsers import ParserFactory
+from app.core.chunkers import ChunkerFactory
 from app.repositories.collection_repository import CollectionRepository
 from app.repositories.document_repository import DocumentRepository
 from app.db_models_chat import DocumentChunk

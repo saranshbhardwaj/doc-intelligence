@@ -442,6 +442,8 @@ async def get_chat_history(
         }
     )
 
+    import json
+
     return {
         "session_id": session.id,
         "messages": [
@@ -451,7 +453,8 @@ async def get_chat_history(
                 "message_index": msg.message_index,
                 "created_at": msg.created_at.isoformat() if msg.created_at else None,
                 "source_chunks": msg.source_chunks,
-                "num_chunks_retrieved": msg.num_chunks_retrieved
+                "num_chunks_retrieved": msg.num_chunks_retrieved,
+                "comparison_metadata": json.loads(msg.comparison_metadata) if msg.comparison_metadata else None
             }
             for msg in messages
         ],

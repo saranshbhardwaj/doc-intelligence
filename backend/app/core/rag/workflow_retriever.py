@@ -82,7 +82,8 @@ class WorkflowRetriever:
         """
         queries = section_spec.get("queries", [])
         prefer_tables = section_spec.get("prefer_tables", False)
-        max_chunks = section_spec.get("max_chunks", 20)
+        # max_chunks = 2 
+        section_spec.get("max_chunks", 20)
         section_key = section_spec.get("key", "unknown")
 
         if not queries:
@@ -97,14 +98,19 @@ class WorkflowRetriever:
         # Step 1: Collect candidates from all queries
         all_candidates = {}  # chunk_id -> chunk_dict
 
+        # Adaptive candidate sizing: favor tables for data-heavy sections
+        # query_top_k = 2 # TODO: changed to 2 for testing
+        query_top_k = 12 if prefer_tables else 10
+
         for query in queries:
             try:
                 # Hybrid retrieval for this query
                 candidates = self.hybrid_retriever.retrieve(
                     query=query,
                     collection_id=None,  # Use document_ids filter instead
-                    top_k=10,  # Get 10 per query
-                    document_ids=document_ids
+                    top_k=query_top_k,  # Adaptive per section
+                    document_ids=document_ids,
+                    min_semantic_similarity=settings.rag_workflow_semantic_similarity_floor
                 )
 
                 # Merge into all_candidates (keep best hybrid_score)

@@ -12,12 +12,12 @@ Import the pipeline starter functions:
 """
 
 # Import pipeline entry points
-from app.services.tasks.extractions import start_extraction_chain
+from app.verticals.private_equity.extraction.tasks import start_extraction_chain
 from app.services.tasks.document_processor import start_document_indexing_chain
-from app.services.tasks.workflows import start_workflow_chain
+from app.verticals.private_equity.workflows.tasks import start_workflow_chain
 
 # Import individual tasks (for testing or manual invocation)
-from app.services.tasks.extractions import (
+from app.verticals.private_equity.extraction.tasks import (
     parse_document_task,
     chunk_document_task,
     summarize_context_task,
@@ -27,7 +27,7 @@ from app.services.tasks.document_processor import (
     embed_chunks_task,
     store_vectors_task,
 )
-from app.services.tasks.workflows import (
+from app.verticals.private_equity.workflows.tasks import (
     prepare_context_task,
     generate_artifact_task,
 )

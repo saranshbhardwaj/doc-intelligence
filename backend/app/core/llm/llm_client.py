@@ -11,7 +11,7 @@ from typing import Dict
 from fastapi import HTTPException
 
 from app.config import settings
-from app.services.extractions.prompts import (
+from app.verticals.private_equity.extraction.prompts import (
     CIM_EXTRACTION_SYSTEM_PROMPT,
     create_extraction_prompt,
 )
@@ -44,9 +44,9 @@ class LLMClient:
         self.timeout_seconds = timeout_seconds
 
         # Cheap LLM (for summarization)
-        self.cheap_model = settings.cheap_llm_model
-        self.cheap_max_tokens = settings.cheap_llm_max_tokens
-        self.cheap_timeout_seconds = settings.cheap_llm_timeout_seconds
+        self.cheap_model = settings.synthesis_llm_model
+        self.cheap_max_tokens = settings.synthesis_llm_max_tokens
+        self.cheap_timeout_seconds = settings.synthesis_llm_timeout_seconds
     
     async def extract_structured_data(
         self,

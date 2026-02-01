@@ -12,12 +12,15 @@ Chunks exceeding this limit are truncated for scoring only.
 Original chunks are preserved and returned to caller.
 """
 
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, TYPE_CHECKING
 import logging
 from sentence_transformers import CrossEncoder
 from app.config import settings
 from app.core.rag.metadata_booster import MetadataBooster
 from app.utils.token_utils import count_tokens, truncate_to_token_limit
+
+if TYPE_CHECKING:
+    from app.core.rag.query_understanding import QueryUnderstanding, QueryType
 
 logger = logging.getLogger(__name__)
 
@@ -73,11 +76,32 @@ class Reranker:
             logger.error(f"Failed to load cross-encoder model {self.model_name}: {e}", exc_info=True)
             raise
 
+    @staticmethod
+    def _map_query_type_for_metadata_boost(query_understanding: 'QueryUnderstanding') -> str:
+        """
+        Map QueryUnderstanding.query_type to metadata booster's expected query_type.
+
+        Args:
+            query_understanding: QueryUnderstanding object
+
+        Returns:
+            One of: "data_query", "narrative_query", "generic_query"
+        """
+        from app.core.rag.query_understanding import QueryType
+
+        if query_understanding.query_type == QueryType.DATA_EXTRACTION:
+            return "data_query"
+        elif query_understanding.query_type in (QueryType.SUMMARIZATION, QueryType.ENTITY_LOOKUP):
+            return "narrative_query"
+        else:
+            # GENERAL_QA, COMPARISON, or unknown
+            return "generic_query"
+
     def rerank(
         self,
         query: str,
         chunks: List[Dict],
-        query_analysis: Dict,
+        query_understanding: Optional['QueryUnderstanding'] = None,
         top_k: Optional[int] = None
     ) -> List[Dict]:
         """
@@ -86,7 +110,7 @@ class Reranker:
         Args:
             query: User's search query
             chunks: List of chunk dicts from hybrid retrieval
-            query_analysis: Query analysis from QueryAnalyzer (for metadata boosting)
+            query_understanding: Optional QueryUnderstanding for metadata boosting
             top_k: Number of top chunks to return (default: return all, sorted)
 
         Returns:
@@ -96,11 +120,16 @@ class Reranker:
             logger.warning("No chunks provided for re-ranking")
             return []
 
+        # Determine query type for logging
+        query_type_str = "generic_query"
+        if query_understanding:
+            query_type_str = self._map_query_type_for_metadata_boost(query_understanding)
+
         logger.debug(
             f"Re-ranking {len(chunks)} chunks",
             extra={
                 "query": query[:50],
-                "query_type": query_analysis.get("query_type")
+                "query_type": query_type_str
             }
         )
 
@@ -138,9 +167,11 @@ class Reranker:
 
             # Step 4: Optionally apply metadata boosting (gentle nudge)
             if self.apply_metadata_boost:
+                # Pass QueryUnderstanding directly if available, otherwise use basic dict
+                boost_input = query_understanding if query_understanding else {"query_type": query_type_str}
                 chunks = self.metadata_booster.apply_boost(
                     chunks,
-                    query_analysis,
+                    boost_input,
                     score_field="rerank_score"
                 )
                 logger.debug("Applied metadata boosting to rerank scores")
@@ -157,7 +188,7 @@ class Reranker:
                 extra={
                     "top_score": ranked_chunks[0]["rerank_score"] if ranked_chunks else 0,
                     "query": query[:50],
-                    "query_type": query_analysis.get("query_type")
+                    "query_type": query_type_str
                 }
             )
 

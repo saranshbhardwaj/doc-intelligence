@@ -13,15 +13,14 @@ Extraction-specific tasks:
 """
 from __future__ import annotations
 import asyncio
-import uuid
 from typing import Dict, Any
 
 from celery import shared_task, chain
 
 from app.config import settings
 from app.database import get_db
-from app.services.parsers import ParserFactory
-from app.services.chunkers import ChunkerFactory
+from app.core.parsers import ParserFactory
+from app.core.chunkers import ChunkerFactory
 from app.services.llm_client import LLMClient
 from app.verticals.private_equity.extraction.llm_service import ExtractionLLMService
 from app.services.job_tracker import JobProgressTracker
@@ -38,6 +37,7 @@ from app.utils.normalization import _normalize_llm_output
 from app.services.risk_detector import detect_red_flags
 from app.models import ExtractedData
 from app.repositories.extraction_repository import ExtractionRepository
+from app.repositories.document_repository import DocumentRepository
 from app.repositories.user_repository import UserRepository
 from app.utils.logging import logger
 
@@ -53,10 +53,10 @@ def _load_file_bytes(path: str) -> bytes:
 
 _DEF_LLMC = lambda: LLMClient(
     api_key=settings.anthropic_api_key,
-    model=settings.cheap_llm_model,
-    max_tokens=settings.cheap_llm_max_tokens,
+    model=settings.synthesis_llm_model,
+    max_tokens=settings.synthesis_llm_max_tokens,
     max_input_chars=settings.llm_max_input_chars,
-    timeout_seconds=settings.llm_timeout_seconds,
+    timeout_seconds=settings.synthesis_llm_timeout_seconds,
 )
 
 
@@ -95,7 +95,6 @@ def parse_document_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
     tracker = JobProgressTracker(db, job_id)
     repo = ExtractionRepository()
 
-    from app.db_models_users import User
     from PyPDF2 import PdfReader
 
     try:
@@ -282,7 +281,7 @@ def chunk_document_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         po = payload["parser_output"]
 
         # Minimal ParserOutput reconstruction
-        from app.services.parsers.base import ParserOutput
+        from app.core.parsers.base import ParserOutput
         parser_output = ParserOutput(
             text=po["text"],
             page_count=po["page_count"],
@@ -475,9 +474,6 @@ def extract_structured_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
     repo = ExtractionRepository()
     llm_client = _DEF_LLMC()
 
-    from app.db_models_users import User, UsageLog
-    from sqlalchemy.exc import SQLAlchemyError
-
     try:
         user_repo = UserRepository()
         user = user_repo.get_user(user_id)
@@ -486,9 +482,8 @@ def extract_structured_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
             repo.mark_failed(extraction_id, "User not found")
             return {"status": "failed", "error": "User not found", "extraction_id": extraction_id}
 
-        # Re-query extraction within THIS task's session to avoid detached instance issues
-        from app.db_models import Extraction as ExtractionModel
-        extraction = db.query(ExtractionModel).filter(ExtractionModel.id == extraction_id).first()
+        # Re-query extraction via repository to avoid detached instance issues
+        extraction = repo.get_extraction(extraction_id)
 
         # --- EXTRACTION LOGIC ---
         tracker.update_progress(status="extracting", current_stage="extracting", progress_percent=70, message="Extracting structured data this can take a while...")
@@ -544,32 +539,34 @@ def extract_structured_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
             )
 
             if success:
-                # Create usage log entry
-                usage_log = UsageLog(
-                    id=str(uuid.uuid4()),
+                cost_usd = extraction.cost_usd if extraction and extraction.cost_usd else 0.0
+                log_created = repo.create_usage_log(
                     user_id=user_id,
                     extraction_id=extraction_id,
                     pages_processed=0,
                     operation_type="extraction",
-                    cost_usd=extraction.cost_usd if extraction and extraction.cost_usd else 0.0,
+                    cost_usd=cost_usd
                 )
-                db.add(usage_log)
-                db.commit()
-                logger.debug(f"Updated user usage: 0 pages", extra={
-                    "user_id": user_id,
-                    "extraction_id": extraction_id
-                })
+                if log_created:
+                    logger.debug(f"Updated user usage: 0 pages", extra={
+                        "user_id": user_id,
+                        "extraction_id": extraction_id
+                    })
+                else:
+                    logger.warning("Failed to create usage log via repository", extra={
+                        "user_id": user_id,
+                        "extraction_id": extraction_id
+                    })
             else:
-                logger.warning(f"Failed to update user page usage via repository", extra={
+                logger.warning("Failed to update user page usage via repository", extra={
                     "user_id": user_id,
                     "extraction_id": extraction_id
                 })
-        except SQLAlchemyError as e:
+        except Exception as e:
             logger.error(f"Failed to update usage or log: {e}", extra={
                 "user_id": user_id,
                 "extraction_id": extraction_id
             })
-            db.rollback()
 
         # Cache result
         try:
@@ -747,11 +744,9 @@ def start_extraction_from_chunks_task(self, payload: Dict[str, Any]) -> Dict[str
             message="Loading document chunks..."
         )
 
-        # Load chunks from DocumentChunk table
-        from app.db_models_chat import DocumentChunk
-        chunks = db.query(DocumentChunk).filter(
-            DocumentChunk.document_id == document_id
-        ).order_by(DocumentChunk.chunk_index).all()
+        # Load chunks from repository
+        document_repo = DocumentRepository()
+        chunks = document_repo.get_chunks_for_document(document_id)
 
         if not chunks:
             raise Exception("No chunks found for document - document may not be indexed yet")

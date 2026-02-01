@@ -31,18 +31,18 @@ import {
 import { useChat, useChatActions } from "../store";
 
 export default function LibraryPage() {
-  const { getToken } = useAuth();
+  const { getToken, isLoaded, isSignedIn } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
 
   // Zustand store for document indexing
-  const { indexing } = useChat();
+  const { indexingJobs } = useChat();
   const {
     startDocumentIndexing,
     updateIndexingProgress,
     completeIndexing,
     failIndexing,
-    reconnectIndexing,
-    resetIndexing,
+    reconnectAllIndexingJobs,
+    clearIndexingJob,
   } = useChatActions();
 
   // Collections state
@@ -136,12 +136,18 @@ export default function LibraryPage() {
     }
   }, [selectedCollection, fetchDocuments]);
 
-  // Reconnect to active document indexing on mount (for page refresh support)
+  // Reconnect to all active document indexing jobs on mount (for page refresh support)
+  // Wait for Clerk auth to be ready before reconnecting
   useEffect(() => {
-    if (indexing.jobId && indexing.documentId) {
-      reconnectIndexing(getToken);
+    if (!isLoaded || !isSignedIn) {
+      return; // Wait for auth to be ready
     }
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+    if (indexingJobs && Object.keys(indexingJobs).length > 0) {
+      console.log("📡 Clerk auth ready, reconnecting to indexing jobs...");
+      reconnectAllIndexingJobs(getToken);
+    }
+  }, [isLoaded, isSignedIn]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Handlers
   const handleSelectCollection = (collection) => {
@@ -194,7 +200,8 @@ export default function LibraryPage() {
       return;
     }
 
-    for (const file of files) {
+    // Start all uploads in parallel
+    const uploadPromises = files.map(async (file) => {
       try {
         const targetCollectionId = uploadCollection;
 
@@ -225,8 +232,8 @@ export default function LibraryPage() {
             response.job_id,
             (progressData) => {
 
-              // Update Zustand store
-              updateIndexingProgress(progressData);
+              // Update Zustand store for specific document
+              updateIndexingProgress(response.document_id, progressData);
 
               // Update local documents state for UI
               setDocuments((prev) =>
@@ -247,21 +254,21 @@ export default function LibraryPage() {
             },
             (completeData) => {
 
-              // Update store
-              completeIndexing();
+              // Update store - mark specific document as complete
+              completeIndexing(response.document_id);
 
               // Refresh documents
               fetchDocuments(targetCollectionId);
               fetchCollections();
 
-              // Reset indexing state after short delay
-              setTimeout(() => resetIndexing(), 1000);
+              // Clear from store after short delay
+              setTimeout(() => clearIndexingJob(response.document_id), 1000);
             },
             (error) => {
               console.error("Indexing error:", error);
 
-              // Update store
-              failIndexing(error.message);
+              // Update store - mark specific document as failed
+              failIndexing(response.document_id, error.message);
 
               // Update local UI
               setDocuments((prev) =>
@@ -299,7 +306,10 @@ export default function LibraryPage() {
         console.error(`Failed to upload ${file.name}:`, error);
         alert(`Failed to upload ${file.name}`);
       }
-    }
+    });
+
+    // Wait for all uploads to initiate (not complete)
+    await Promise.allSettled(uploadPromises);
   };
 
   const handleDeleteDocument = async (docId, docFilename) => {

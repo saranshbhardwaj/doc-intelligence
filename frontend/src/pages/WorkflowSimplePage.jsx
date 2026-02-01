@@ -409,7 +409,7 @@ export default function WorkflowSimplePage() {
                 <div className="mt-4 p-4 bg-primary/5 rounded-lg border border-primary/20">
                   <div className="flex items-center justify-between mb-2">
                     <span className="text-sm font-medium text-foreground">
-                      {execution.message || "Processing..."}
+                      {execution.message}
                     </span>
                     <span className="text-xs text-muted-foreground">
                       {execution.progress}%

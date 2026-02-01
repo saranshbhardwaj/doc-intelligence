@@ -9,9 +9,7 @@ from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
 
 from app.auth import get_current_user
 from app.db_models_users import User
-from app.database import SessionLocal
 from app.db_models_chat import CollectionDocument
-from app.db_models_documents import Document
 from app.services.tasks import start_document_indexing_chain
 from app.repositories.collection_repository import CollectionRepository
 from app.repositories.document_repository import DocumentRepository
@@ -376,28 +374,24 @@ async def download_document(
     from fastapi.responses import FileResponse
     from app.core.storage.storage_factory import get_storage_backend, is_legacy_path
 
-    # Get document and verify ownership
-    db = SessionLocal()
-    try:
-        document = db.query(Document).filter(Document.id == document_id).first()
+    # Get document and verify ownership via repository
+    doc_repo = DocumentRepository()
+    document = doc_repo.get_by_id(document_id)
 
-        if not document:
-            raise HTTPException(status_code=404, detail="Document not found")
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found")
 
-        # Verify user owns this document
-        if document.user_id != user.id:
-            raise HTTPException(
-                status_code=403,
-                detail="You don't have permission to access this document"
-            )
+    # Verify user owns this document
+    if document.user_id != user.id:
+        raise HTTPException(
+            status_code=403,
+            detail="You don't have permission to access this document"
+        )
 
-        file_path = document.file_path
+    file_path = document.file_path
 
-        if not file_path:
-            raise HTTPException(status_code=404, detail="Document file path not found")
-
-    finally:
-        db.close()
+    if not file_path:
+        raise HTTPException(status_code=404, detail="Document file path not found")
 
     try:
         storage = get_storage_backend()
@@ -463,28 +457,23 @@ async def delete_document(
     """
     doc_repo = DocumentRepository()
 
-    # Get document and verify ownership
-    db = SessionLocal()
-    try:
-        document = db.query(Document).filter(Document.id == document_id).first()
+    # Get document and verify ownership via repository
+    document = doc_repo.get_by_id(document_id)
 
-        if not document:
-            raise HTTPException(status_code=404, detail="Document not found")
+    if not document:
+        raise HTTPException(status_code=404, detail="Document not found")
 
-        # Verify user owns this document
-        if document.user_id != user.id:
-            raise HTTPException(
-                status_code=403,
-                detail="You don't have permission to delete this document"
-            )
+    # Verify user owns this document
+    if document.user_id != user.id:
+        raise HTTPException(
+            status_code=403,
+            detail="You don't have permission to delete this document"
+        )
 
-        # Store info for response before deletion
-        filename = document.filename
-        file_path = document.file_path
-        chunk_count = document.chunk_count or 0
-
-    finally:
-        db.close()
+    # Store info for response before deletion
+    filename = document.filename
+    file_path = document.file_path
+    chunk_count = document.chunk_count or 0
 
     # Delete document (cascades to chunks, collection_documents, job_states)
     success = doc_repo.delete_document(document_id)

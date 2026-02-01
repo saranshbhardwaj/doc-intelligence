@@ -12,7 +12,9 @@
 
 import { useEffect, useState } from "react";
 import { useAuth } from "@clerk/clerk-react";
+import { ChevronRight } from "lucide-react";
 import { useChat, useChatActions } from "../store";
+import { Button } from "../components/ui/button";
 import AppLayout from "../components/layout/AppLayout";
 import SessionSidebar from "../components/chat/SessionSidebar";
 import EmptyState from "../components/chat/EmptyState";
@@ -27,6 +29,13 @@ export default function ChatPage() {
 
   const [selectedDocuments, setSelectedDocuments] = useState([]);
   const [isInitializing, setIsInitializing] = useState(true);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem("chatSidebarCollapsed") === "true";
+    } catch {
+      return false;
+    }
+  });
 
   useEffect(() => {
     // Wait for Clerk to initialize
@@ -148,6 +157,16 @@ export default function ChatPage() {
     }
   };
 
+  const toggleSidebar = () => {
+    setSidebarCollapsed((prev) => {
+      const newValue = !prev;
+      try {
+        localStorage.setItem("chatSidebarCollapsed", String(newValue));
+      } catch {}
+      return newValue;
+    });
+  };
+
   // Loading state
   if (!isLoaded) {
     return (
@@ -164,9 +183,13 @@ export default function ChatPage() {
   return (
     <AppLayout breadcrumbs={breadcrumbs}>
       {/* Full-height two-pane layout with independent scroll */}
-      <div className="h-[calc(100vh-64px)] flex gap-4">
-        {/* Left: Session Sidebar (scrollable) */}
-        <div className="w-80 flex-shrink-0 overflow-y-auto scrollbar-thin">
+      <div className="h-[calc(100vh-64px)] flex gap-4 relative">
+        {/* Left: Session Sidebar (scrollable, collapsible) */}
+        <div
+          className={`flex-shrink-0 overflow-hidden scrollbar-thin transition-all duration-300 ${
+            sidebarCollapsed ? "w-0" : "w-80"
+          }`}
+        >
           <SessionSidebar
             sessions={chat.sessions}
             currentSession={chat.currentSession}
@@ -174,8 +197,25 @@ export default function ChatPage() {
             onNewChat={handleNewChat}
             onSelectSession={handleSelectSession}
             onDeleteSession={handleDeleteSession}
+            isCollapsed={sidebarCollapsed}
+            onToggleCollapse={toggleSidebar}
           />
         </div>
+
+        {/* Expand Button (shown when sidebar is collapsed) */}
+        {sidebarCollapsed && (
+          <div className="absolute left-0 top-0 z-50">
+            <Button
+              variant="ghost"
+              size="icon"
+              onClick={toggleSidebar}
+              className="h-9 w-9 rounded-r-lg rounded-l-none bg-card border border-l-0 shadow-md hover:bg-muted hover:shadow-lg"
+              title="Expand sidebar"
+            >
+              <ChevronRight className="h-4 w-4" />
+            </Button>
+          </div>
+        )}
 
         {/* Right: Main Chat Area (scrollable pane) */}
         <div className="flex-1 min-w-0 overflow-y-auto scrollbar-chat">
@@ -199,6 +239,7 @@ export default function ChatPage() {
               currentSession={chat.currentSession}
               messages={chat.messages}
               isStreaming={chat.isStreaming}
+              isThinking={chat.isThinking}
               streamingMessage={chat.streamingMessage}
               chatError={chat.chatError}
               collections={chat.collections}

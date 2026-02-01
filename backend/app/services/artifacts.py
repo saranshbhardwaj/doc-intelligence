@@ -16,7 +16,7 @@ from app.utils.logging import logger
 from app.utils.metrics import ARTIFACT_PERSIST_SECONDS, ARTIFACT_PERSIST_FAILURES
 
 try:
-    from app.services.storage.cloudflare_r2 import get_r2_storage
+    from app.core.storage.cloudflare_r2 import get_r2_storage
 except Exception:
     get_r2_storage = None  # type: ignore
 

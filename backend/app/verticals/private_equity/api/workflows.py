@@ -14,7 +14,7 @@ from app.repositories.workflow_repository import WorkflowRepository
 from app.auth import get_current_user
 from app.db_models_users import User
 from app.utils.logging import logger
-from app.services.tasks.workflows import start_workflow_chain
+from app.verticals.private_equity.workflows.tasks import start_workflow_chain
 from app.schemas.workflows import (
     WorkflowTemplateListItem,
     WorkflowTemplateDetail,

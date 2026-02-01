@@ -158,6 +158,18 @@ class Settings(BaseSettings):
     # Final number of chunks to return after re-ranking (Phase 2)
     rag_final_top_k: int = 10
 
+    # Semantic similarity floors (raw cosine similarity) for filtering low-signal hits
+    rag_chat_semantic_similarity_floor: float = 0.12
+    rag_workflow_semantic_similarity_floor: float = 0.06
+
+    # ===== DOCUMENT COMPARISON SETTINGS =====
+    # Schema-based comparison system for multi-document analysis
+    comparison_enabled: bool = True  # Enable document comparison feature
+    comparison_similarity_threshold: float = 0.6  # Min similarity for pairing chunks (0-1)
+    comparison_chunks_per_doc: int = 10  # Chunks to retrieve per document
+    comparison_max_pairs: int = 8  # Max pairs/clusters to include in prompt
+    comparison_max_documents: int = 3  # Max number of documents to compare (2-3)
+
     # ===== RAG RE-RANKER SETTINGS =====
     # Cross-encoder re-ranking for improved relevance scoring
 

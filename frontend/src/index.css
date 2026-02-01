@@ -33,6 +33,16 @@
     --success: 145 63% 49%; /* hsl(145,63%,49%) ≈ Tailwind green-500 */
     --success-foreground: 0 0% 100%; /* white */
     --warning: 45 100% 50%; /* yellow */
+
+    /* Comparison document colors */
+    --doc-a: 221 83% 53%;           /* blue - same as primary */
+    --doc-b: 271 81% 56%;           /* purple */
+    --doc-c: 25 95% 53%;            /* orange */
+
+    /* Similarity indicators */
+    --similarity-high: 145 63% 49%;  /* green - same as success */
+    --similarity-mid: 45 100% 50%;   /* yellow - same as warning */
+    --similarity-low: 0 84% 60%;     /* red - same as destructive */
   }
 
   /* Dark theme variables */
@@ -76,6 +86,16 @@
 
     --success: 140 50% 40%; /* darker green for dark mode */
     --warning: 45 80% 45%;  /* darker yellow for dark mode */
+
+    /* Comparison document colors - dark mode */
+    --doc-a: 200 90% 46%;           /* match dark primary */
+    --doc-b: 271 70% 60%;           /* lighter purple for dark */
+    --doc-c: 25 85% 55%;            /* lighter orange for dark */
+
+    /* Similarity indicators - dark mode */
+    --similarity-high: 140 50% 40%;
+    --similarity-mid: 45 80% 45%;
+    --similarity-low: 0 72% 40%;
   }
 }
 
@@ -85,6 +105,81 @@
   }
   body {
     @apply bg-background text-foreground;
+  }
+}
+
+@layer components {
+  .comparison-header {
+    @apply flex items-start justify-between gap-4 px-6 py-4 border-b bg-background/80 backdrop-blur;
+  }
+
+  .comparison-title {
+    @apply text-lg font-semibold leading-tight;
+  }
+
+  .comparison-subtitle {
+    @apply text-xs text-muted-foreground;
+  }
+
+  .comparison-toolbar {
+    @apply flex flex-wrap items-center justify-between gap-3 px-6 py-3 border-b bg-muted/30;
+  }
+
+  .comparison-tabs {
+    @apply inline-flex rounded-lg bg-muted p-1;
+  }
+
+  .comparison-tab {
+    @apply text-xs rounded-md px-2.5 py-1 text-muted-foreground data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-sm;
+  }
+
+  .comparison-segment {
+    @apply inline-flex items-center rounded-lg bg-muted p-1;
+  }
+
+  .comparison-segment-button {
+    @apply h-7 px-3 text-xs rounded-md;
+  }
+
+  .comparison-surface {
+    @apply rounded-xl border bg-card/70 shadow-panel;
+  }
+
+  .comparison-table {
+    @apply w-full text-xs;
+  }
+
+  .comparison-table-head {
+    @apply sticky top-0 z-10 bg-background/90 backdrop-blur border-b;
+  }
+
+  .comparison-row {
+    @apply hover:bg-muted/40;
+  }
+
+  .comparison-chip {
+    @apply inline-flex items-center gap-1 rounded-full border px-2.5 py-0.5 text-xs bg-background hover:bg-muted/60 transition-colors;
+  }
+
+  .comparison-topic-chip {
+    @apply inline-flex items-center rounded-full border px-2.5 py-1 text-xs bg-background hover:bg-primary hover:text-primary-foreground transition-colors;
+  }
+
+  .comparison-doc-pill {
+    @apply inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium border;
+  }
+
+  .comparison-stat {
+    @apply inline-flex items-center gap-2 rounded-full bg-muted px-3 py-1 text-xs text-muted-foreground;
+  }
+
+  .comparison-cite {
+    @apply inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] text-muted-foreground bg-background hover:bg-muted/60 hover:text-foreground transition-colors;
+  }
+
+
+  .comparison-cite-tooltip {
+    @apply max-w-sm text-xs leading-relaxed;
   }
 }
 
