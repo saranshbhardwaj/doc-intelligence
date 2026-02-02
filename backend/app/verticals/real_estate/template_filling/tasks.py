@@ -226,6 +226,11 @@ def detect_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
     repo = TemplateRepository(db)
     tracker = JobProgressTracker(db, job_id)
 
+    fill_run = repo.get_fill_run(fill_run_id)
+    if not fill_run:
+        raise ValueError(f"Fill run not found: {fill_run_id}")
+    org_id = fill_run.org_id
+
     try:
         logger.info(f"Detecting fields for fill run: {fill_run_id}")
 
@@ -238,7 +243,7 @@ def detect_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
 
         # Get document
         document_repo = DocumentRepository()
-        document = document_repo.get_by_id(document_id)
+        document = document_repo.get_by_id(document_id, org_id)
         if not document:
             raise ValueError(f"Document not found: {document_id}")
 
@@ -971,6 +976,7 @@ def start_fill_run_chain(
         fill_run = repo.create_fill_run(
             template_id=template_id,
             document_id=document_id,
+            org_id=template.org_id,
             user_id=user_id,
             template_snapshot=template_snapshot,
         )

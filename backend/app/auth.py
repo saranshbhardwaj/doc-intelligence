@@ -13,10 +13,12 @@ import httpx
 clerk = Clerk(bearer_auth=settings.clerk_secret_key)
 
 
-def get_current_user_id(request: Request) -> str:
+def _get_auth_context(request: Request) -> tuple[str, str, dict]:
     """
     Extract and verify Clerk session token from request.
-    Returns the Clerk user ID.
+
+    Returns:
+        (user_id, org_id, payload)
     """
     # Get authorization header
     auth_header = request.headers.get("authorization")
@@ -45,20 +47,67 @@ def get_current_user_id(request: Request) -> str:
             print(f"❌ [Auth Backend] User is not signed in")
             raise HTTPException(status_code=401, detail="Not signed in")
 
+        payload = request_state.payload or {}
+
         # Extract user_id from the token payload
         # The user ID is in the 'sub' field of the JWT payload
-        user_id = request_state.payload.get('sub') if request_state.payload else None
+        user_id = payload.get('sub')
+
+        # Extract org_id from the token payload (Clerk Organizations)
+        # Clerk uses org_id in JWT for active organization
+        org_id = payload.get('org_id') or payload.get('orgId')
 
         if not user_id:
-            print(f"❌ [Auth Backend] Could not extract user_id from token payload: {request_state.payload}")
+            print(f"❌ [Auth Backend] Could not extract user_id from token payload: {payload}")
             raise HTTPException(status_code=401, detail="Could not extract user_id from token")
-        return user_id
+
+        if not org_id:
+            print(f"❌ [Auth Backend] Could not extract org_id from token payload: {payload}")
+            raise HTTPException(status_code=401, detail="Could not extract org_id from token")
+
+        return user_id, org_id, payload
 
     except HTTPException:
         raise
     except Exception as e:
         print(f"❌ [Auth Backend] Token verification failed: {str(e)}")
         raise HTTPException(status_code=401, detail=f"Invalid session token: {str(e)}")
+
+
+def get_current_user_id(request: Request) -> str:
+    """
+    Extract and verify Clerk session token from request.
+    Returns the Clerk user ID.
+    """
+    user_id, _org_id, _payload = _get_auth_context(request)
+    return user_id
+
+
+def get_current_org_role(request: Request) -> str:
+    """Extract org_role from Clerk token payload."""
+    _user_id, _org_id, payload = _get_auth_context(request)
+    org_role = payload.get("org_role") or payload.get("orgRole")
+    if not org_role:
+        raise HTTPException(status_code=403, detail="Missing org_role")
+    return str(org_role)
+
+
+def is_admin_role(role: str) -> bool:
+    """Return True if role is admin/owner."""
+    return role.lower() in {"admin", "owner"}
+
+
+def require_org_role(allowed_roles: list[str]):
+    """Dependency to enforce allowed org roles."""
+    allowed = {r.lower() for r in allowed_roles}
+
+    def _dep(request: Request) -> str:
+        role = get_current_org_role(request).lower()
+        if role not in allowed:
+            raise HTTPException(status_code=403, detail="Insufficient org_role")
+        return role
+
+    return _dep
 
 
 def get_current_user(request: Request) -> User:
@@ -68,7 +117,7 @@ def get_current_user(request: Request) -> User:
     Handles race conditions gracefully.
     """
     # First authenticate the user
-    user_id = get_current_user_id(request)
+    user_id, org_id, _payload = _get_auth_context(request)
 
     # Use repository for all database operations
     user_repo = UserRepository()
@@ -80,6 +129,7 @@ def get_current_user(request: Request) -> User:
     # Get existing user or create new one
     user = user_repo.get_or_create_user(
         user_id=user_id,
+        org_id=org_id,
         email=email,
         tier="free",
         pages_limit=100

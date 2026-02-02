@@ -38,6 +38,7 @@ class SessionRepository:
 
     def create_session(
         self,
+        org_id: str,
         user_id: str,
         title: Optional[str] = None,
         description: Optional[str] = None
@@ -58,6 +59,7 @@ class SessionRepository:
         with self._get_session() as db:
             try:
                 session = ChatSession(
+                    org_id=org_id,
                     user_id=user_id,
                     title=title or "New Chat",
                     description=description,
@@ -70,7 +72,7 @@ class SessionRepository:
 
                 logger.info(
                     "Created chat session",
-                    extra={"user_id": user_id, "session_id": session.id}
+                    extra={"user_id": user_id, "org_id": org_id, "session_id": session.id}
                 )
 
                 return session
@@ -78,7 +80,7 @@ class SessionRepository:
             except SQLAlchemyError as e:
                 logger.error(
                     f"Failed to create session: {e}",
-                    extra={"user_id": user_id, "error": str(e)}
+                    extra={"user_id": user_id, "org_id": org_id, "error": str(e)}
                 )
                 db.rollback()
                 return None
@@ -86,7 +88,8 @@ class SessionRepository:
     def get_session(
         self,
         session_id: str,
-        user_id: str
+        user_id: str,
+        org_id: str
     ) -> Optional[ChatSession]:
         """Get session by ID with ownership check.
 
@@ -106,13 +109,14 @@ class SessionRepository:
                     joinedload(ChatSession.document_links).joinedload(SessionDocument.document)
                 ).filter(
                     ChatSession.id == session_id,
-                    ChatSession.user_id == user_id
+                    ChatSession.user_id == user_id,
+                    ChatSession.org_id == org_id
                 ).first()
 
                 if not session:
                     logger.warning(
                         "Session not found or access denied",
-                        extra={"user_id": user_id, "session_id": session_id}
+                        extra={"user_id": user_id, "org_id": org_id, "session_id": session_id}
                     )
 
                 return session
@@ -120,13 +124,14 @@ class SessionRepository:
             except SQLAlchemyError as e:
                 logger.error(
                     f"Failed to get session: {e}",
-                    extra={"user_id": user_id, "session_id": session_id, "error": str(e)}
+                    extra={"user_id": user_id, "org_id": org_id, "session_id": session_id, "error": str(e)}
                 )
                 return None
 
     def list_sessions(
         self,
         user_id: str,
+        org_id: str,
         limit: int = 20,
         offset: int = 0
     ) -> Tuple[List[Tuple[ChatSession, int]], int]:
@@ -153,15 +158,19 @@ class SessionRepository:
                     SessionDocument,
                     ChatSession.id == SessionDocument.session_id
                 ).filter(
-                    ChatSession.user_id == user_id
+                    ChatSession.user_id == user_id,
+                    ChatSession.org_id == org_id
                 ).group_by(ChatSession.id).order_by(ChatSession.updated_at.desc())
 
-                total = db.query(ChatSession).filter(ChatSession.user_id == user_id).count()
+                total = db.query(ChatSession).filter(
+                    ChatSession.user_id == user_id,
+                    ChatSession.org_id == org_id
+                ).count()
                 results = query.limit(limit).offset(offset).all()
 
                 logger.info(
                     "Listed sessions with document counts",
-                    extra={"user_id": user_id, "count": len(results), "total": total}
+                    extra={"user_id": user_id, "org_id": org_id, "count": len(results), "total": total}
                 )
 
                 return results, total
@@ -169,7 +178,7 @@ class SessionRepository:
             except SQLAlchemyError as e:
                 logger.error(
                     f"Failed to list sessions: {e}",
-                    extra={"user_id": user_id, "error": str(e)}
+                    extra={"user_id": user_id, "org_id": org_id, "error": str(e)}
                 )
                 return [], 0
 
@@ -177,6 +186,7 @@ class SessionRepository:
         self,
         session_id: str,
         user_id: str,
+        org_id: str,
         title: Optional[str] = None,
         description: Optional[str] = None
     ) -> Optional[ChatSession]:
@@ -198,13 +208,14 @@ class SessionRepository:
             try:
                 session = db.query(ChatSession).filter(
                     ChatSession.id == session_id,
-                    ChatSession.user_id == user_id
+                    ChatSession.user_id == user_id,
+                    ChatSession.org_id == org_id
                 ).first()
 
                 if not session:
                     logger.warning(
                         "Session not found or access denied",
-                        extra={"user_id": user_id, "session_id": session_id}
+                        extra={"user_id": user_id, "org_id": org_id, "session_id": session_id}
                     )
                     return None
 
@@ -219,7 +230,7 @@ class SessionRepository:
 
                 logger.info(
                     "Updated session",
-                    extra={"user_id": user_id, "session_id": session_id}
+                    extra={"user_id": user_id, "org_id": org_id, "session_id": session_id}
                 )
 
                 return session
@@ -227,7 +238,7 @@ class SessionRepository:
             except SQLAlchemyError as e:
                 logger.error(
                     f"Failed to update session: {e}",
-                    extra={"user_id": user_id, "session_id": session_id, "error": str(e)}
+                    extra={"user_id": user_id, "org_id": org_id, "session_id": session_id, "error": str(e)}
                 )
                 db.rollback()
                 return None
@@ -235,7 +246,8 @@ class SessionRepository:
     def delete_session(
         self,
         session_id: str,
-        user_id: str
+        user_id: str,
+        org_id: str
     ) -> bool:
         """Delete a session (cascades to messages and document links).
 
@@ -253,13 +265,14 @@ class SessionRepository:
             try:
                 session = db.query(ChatSession).filter(
                     ChatSession.id == session_id,
-                    ChatSession.user_id == user_id
+                    ChatSession.user_id == user_id,
+                    ChatSession.org_id == org_id
                 ).first()
 
                 if not session:
                     logger.warning(
                         "Session not found or access denied",
-                        extra={"user_id": user_id, "session_id": session_id}
+                        extra={"user_id": user_id, "org_id": org_id, "session_id": session_id}
                     )
                     return False
 
@@ -268,7 +281,7 @@ class SessionRepository:
 
                 logger.info(
                     "Deleted session",
-                    extra={"user_id": user_id, "session_id": session_id}
+                    extra={"user_id": user_id, "org_id": org_id, "session_id": session_id}
                 )
 
                 return True
@@ -276,7 +289,7 @@ class SessionRepository:
             except SQLAlchemyError as e:
                 logger.error(
                     f"Failed to delete session: {e}",
-                    extra={"user_id": user_id, "session_id": session_id, "error": str(e)}
+                    extra={"user_id": user_id, "org_id": org_id, "session_id": session_id, "error": str(e)}
                 )
                 db.rollback()
                 return False
@@ -289,7 +302,8 @@ class SessionRepository:
         self,
         session_id: str,
         document_ids: List[str],
-        user_id: str
+        user_id: str,
+        org_id: str
     ) -> int:
         """Add documents to a session.
 
@@ -309,13 +323,14 @@ class SessionRepository:
                 # Verify session exists and user owns it
                 session = db.query(ChatSession).filter(
                     ChatSession.id == session_id,
-                    ChatSession.user_id == user_id
+                    ChatSession.user_id == user_id,
+                    ChatSession.org_id == org_id
                 ).first()
 
                 if not session:
                     logger.warning(
                         "Session not found or access denied",
-                        extra={"user_id": user_id, "session_id": session_id}
+                        extra={"user_id": user_id, "org_id": org_id, "session_id": session_id}
                     )
                     return 0
 
@@ -323,11 +338,14 @@ class SessionRepository:
 
                 for doc_id in document_ids:
                     # Check if document exists
-                    doc = db.query(Document).filter(Document.id == doc_id).first()
+                    doc = db.query(Document).filter(
+                        Document.id == doc_id,
+                        Document.org_id == org_id
+                    ).first()
                     if not doc:
                         logger.warning(
                             f"Document not found, skipping",
-                            extra={"user_id": user_id, "document_id": doc_id}
+                            extra={"user_id": user_id, "org_id": org_id, "document_id": doc_id}
                         )
                         continue
 
@@ -340,7 +358,7 @@ class SessionRepository:
                     if existing:
                         logger.debug(
                             "Document already in session, skipping",
-                            extra={"user_id": user_id, "session_id": session_id, "document_id": doc_id}
+                            extra={"user_id": user_id, "org_id": org_id, "session_id": session_id, "document_id": doc_id}
                         )
                         continue
 
@@ -358,6 +376,7 @@ class SessionRepository:
                     "Added documents to session",
                     extra={
                         "user_id": user_id,
+                        "org_id": org_id,
                         "session_id": session_id,
                         "documents_added": added_count
                     }
@@ -370,6 +389,7 @@ class SessionRepository:
                     f"Failed to add documents to session: {e}",
                     extra={
                         "user_id": user_id,
+                        "org_id": org_id,
                         "session_id": session_id,
                         "error": str(e)
                     }
@@ -381,7 +401,8 @@ class SessionRepository:
         self,
         session_id: str,
         document_id: str,
-        user_id: str
+        user_id: str,
+        org_id: str
     ) -> bool:
         """Remove a document from a session.
 
@@ -401,13 +422,14 @@ class SessionRepository:
                 # Verify session ownership
                 session = db.query(ChatSession).filter(
                     ChatSession.id == session_id,
-                    ChatSession.user_id == user_id
+                    ChatSession.user_id == user_id,
+                    ChatSession.org_id == org_id
                 ).first()
 
                 if not session:
                     logger.warning(
                         "Session not found or access denied",
-                        extra={"user_id": user_id, "session_id": session_id}
+                        extra={"user_id": user_id, "org_id": org_id, "session_id": session_id}
                     )
                     return False
 
@@ -422,6 +444,7 @@ class SessionRepository:
                         "Document not in session",
                         extra={
                             "user_id": user_id,
+                            "org_id": org_id,
                             "session_id": session_id,
                             "document_id": document_id
                         }
@@ -435,6 +458,7 @@ class SessionRepository:
                     "Removed document from session",
                     extra={
                         "user_id": user_id,
+                        "org_id": org_id,
                         "session_id": session_id,
                         "document_id": document_id
                     }

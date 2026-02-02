@@ -18,11 +18,13 @@ class Extraction(Base):
     __tablename__ = "extractions"
     __table_args__ = (
         Index("idx_extractions_user_id", "user_id"),
+        Index("idx_extractions_org_id", "org_id"),
         Index("idx_extractions_document_id", "document_id"),
     )
 
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     document_id = Column(String(36), ForeignKey("documents.id", ondelete="SET NULL"), nullable=True)
+    org_id = Column(String(64), nullable=False, index=True)  # Clerk org ID (tenant)
     user_id = Column(String(100), nullable=False, index=True)  # Clerk user ID
 
     # Snapshot of source document & parsing metadata (duplicated for fast access & historical audit)

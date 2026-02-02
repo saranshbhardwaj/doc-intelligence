@@ -5,9 +5,9 @@ import os
 import shutil
 import uuid
 import hashlib
-from fastapi import APIRouter, UploadFile, File, HTTPException, Depends
+from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, Request
 
-from app.auth import get_current_user
+from app.auth import get_current_user, get_current_org_role, is_admin_role
 from app.db_models_users import User
 from app.db_models_chat import CollectionDocument
 from app.services.tasks import start_document_indexing_chain
@@ -61,7 +61,7 @@ async def upload_document(
     """
     # Verify collection exists and belongs to user
     collection_repo = CollectionRepository()
-    collection = collection_repo.get_collection(collection_id, user.id)
+    collection = collection_repo.get_collection(collection_id, user.id, user.org_id)
     if not collection:
         raise HTTPException(status_code=404, detail="Collection not found")
 
@@ -124,7 +124,7 @@ async def upload_document(
 
     # Check if document already exists (global deduplication)
     doc_repo = DocumentRepository()
-    existing_doc = doc_repo.get_by_hash(content_hash)
+    existing_doc = doc_repo.get_by_hash(content_hash, user.org_id)
     reuse_mode = existing_doc is not None and existing_doc.is_ready()
 
     # Initialize storage backend
@@ -199,6 +199,7 @@ async def upload_document(
             # NEW DOCUMENT MODE: Create and process
             # Create canonical document FIRST to get its ID
             document = doc_repo.create_document(
+                org_id=user.org_id,
                 user_id=user.id,
                 filename=safe_filename,
                 file_path="",  # Will be updated after upload
@@ -376,7 +377,7 @@ async def download_document(
 
     # Get document and verify ownership via repository
     doc_repo = DocumentRepository()
-    document = doc_repo.get_by_id(document_id)
+    document = doc_repo.get_by_id(document_id, user.org_id)
 
     if not document:
         raise HTTPException(status_code=404, detail="Document not found")
@@ -435,7 +436,8 @@ async def download_document(
 @router.delete("/documents/{document_id}")
 async def delete_document(
     document_id: str,
-    user: User = Depends(get_current_user)
+    user: User = Depends(get_current_user),
+    request: Request = None
 ):
     """
     Delete a document from ALL collections (canonical deletion).
@@ -458,17 +460,19 @@ async def delete_document(
     doc_repo = DocumentRepository()
 
     # Get document and verify ownership via repository
-    document = doc_repo.get_by_id(document_id)
+    document = doc_repo.get_by_id(document_id, user.org_id)
 
     if not document:
         raise HTTPException(status_code=404, detail="Document not found")
 
-    # Verify user owns this document
+    # Owner can delete; otherwise admin role required
     if document.user_id != user.id:
-        raise HTTPException(
-            status_code=403,
-            detail="You don't have permission to delete this document"
-        )
+        role = get_current_org_role(request)
+        if not is_admin_role(role):
+            raise HTTPException(
+                status_code=403,
+                detail="You don't have permission to delete this document"
+            )
 
     # Store info for response before deletion
     filename = document.filename
@@ -563,7 +567,7 @@ async def get_document_usage(
     document_repo = DocumentRepository()
 
     # Get usage statistics
-    usage_data = document_repo.get_document_usage(document_id, user.id)
+    usage_data = document_repo.get_document_usage(document_id, user.id, user.org_id)
 
     if not usage_data:
         raise HTTPException(

@@ -69,13 +69,22 @@ async def stream_job_progress(job_id: str, token: Optional[str] = Query(None)):
             raise HTTPException(status_code=401, detail="Not signed in")
 
         # Extract user_id from the token payload ('sub' field in JWT)
-        user_id = request_state.payload.get('sub') if request_state.payload else None
+        payload = request_state.payload or {}
+        user_id = payload.get('sub')
+        org_id = payload.get('org_id') or payload.get('orgId')
 
         if not user_id:
             logger.error(f"[SSE] Could not extract user_id from token for job {job_id}", extra={"job_id": job_id})
             raise HTTPException(status_code=401, detail="Could not extract user_id from token")
 
-        logger.info(f"[SSE] Authenticated user {user_id} for job {job_id}", extra={"job_id": job_id, "user_id": user_id})
+        if not org_id:
+            logger.error(f"[SSE] Could not extract org_id from token for job {job_id}", extra={"job_id": job_id})
+            raise HTTPException(status_code=401, detail="Could not extract org_id from token")
+
+        logger.info(
+            f"[SSE] Authenticated user {user_id} for job {job_id}",
+            extra={"job_id": job_id, "user_id": user_id, "org_id": org_id}
+        )
     except HTTPException:
         raise
     except Exception as e:
@@ -118,6 +127,7 @@ async def stream_job_progress(job_id: str, token: Optional[str] = Query(None)):
     # Generic ownership verification: check which entity type this job belongs to
     # JobState supports: extraction_id, document_id, workflow_run_id (exactly one is set)
     entity_owner_id = None
+    entity_org_id = None
     entity_type = None
 
     if job.extraction_id:
@@ -126,6 +136,7 @@ async def stream_job_progress(job_id: str, token: Optional[str] = Query(None)):
         if not extraction:
             raise HTTPException(status_code=404, detail=f"Extraction not found for job {job_id}")
         entity_owner_id = extraction.user_id
+        entity_org_id = getattr(extraction, "org_id", None)
         entity_type = "extraction"
 
     elif job.workflow_run_id:
@@ -135,15 +146,17 @@ async def stream_job_progress(job_id: str, token: Optional[str] = Query(None)):
         if not run:
             raise HTTPException(status_code=404, detail=f"Workflow run not found for job {job_id}")
         entity_owner_id = run.user_id
+        entity_org_id = getattr(run, "org_id", None)
         entity_type = "workflow"
 
     elif job.document_id:
         # Chat Mode: verify through document
         doc_repo = DocumentRepository()
-        doc = doc_repo.get_by_id(job.document_id)
+        doc = doc_repo.get_by_id(job.document_id, org_id)
         if not doc:
             raise HTTPException(status_code=404, detail=f"Document not found for job {job_id}")
         entity_owner_id = doc.user_id
+        entity_org_id = getattr(doc, "org_id", None)
         entity_type = "document"
 
     elif job.template_fill_run_id:
@@ -153,6 +166,7 @@ async def stream_job_progress(job_id: str, token: Optional[str] = Query(None)):
         if not fill_run:
             raise HTTPException(status_code=404, detail=f"Template fill run not found for job {job_id}")
         entity_owner_id = fill_run.user_id
+        entity_org_id = getattr(fill_run, "org_id", None)
         entity_type = "template_fill"
 
     else:
@@ -162,10 +176,10 @@ async def stream_job_progress(job_id: str, token: Optional[str] = Query(None)):
         raise HTTPException(status_code=404, detail=f"Job {job_id} has no associated entity")
 
     # Verify ownership
-    if entity_owner_id != user_id:
+    if entity_owner_id != user_id or (entity_org_id is not None and entity_org_id != org_id):
         logger.warning(
             f"[SSE] User {user_id} attempted to access {entity_type} job {job_id} owned by {entity_owner_id}",
-            extra={"job_id": job_id, "user_id": user_id, "owner_id": entity_owner_id, "entity_type": entity_type}
+            extra={"job_id": job_id, "user_id": user_id, "org_id": org_id, "owner_id": entity_owner_id, "entity_org_id": entity_org_id, "entity_type": entity_type}
         )
         raise HTTPException(status_code=403, detail="You don't have permission to access this job")
 
@@ -344,6 +358,7 @@ async def get_job_status(job_id: str, user: User = Depends(get_current_user)):
     """Get current job status (polling alternative to SSE) - REQUIRES AUTHENTICATION"""
     job_repo = JobRepository()
     extraction_repo = ExtractionRepository()
+    org_id = user.org_id
 
     job = job_repo.get_job(job_id)
     if not job:
@@ -351,12 +366,14 @@ async def get_job_status(job_id: str, user: User = Depends(get_current_user)):
 
     # Generic ownership verification (same as SSE endpoint)
     entity_owner_id = None
+    entity_org_id = None
 
     if job.extraction_id:
         extraction = extraction_repo.get_extraction(job.extraction_id)
         if not extraction:
             raise HTTPException(status_code=404, detail="Extraction not found")
         entity_owner_id = extraction.user_id
+        entity_org_id = getattr(extraction, "org_id", None)
 
     elif job.workflow_run_id:
         from app.repositories.workflow_repository import WorkflowRepository
@@ -364,13 +381,15 @@ async def get_job_status(job_id: str, user: User = Depends(get_current_user)):
         if not run:
             raise HTTPException(status_code=404, detail="Workflow run not found")
         entity_owner_id = run.user_id
+        entity_org_id = getattr(run, "org_id", None)
 
     elif job.document_id:
         doc_repo = DocumentRepository()
-        doc = doc_repo.get_by_id(job.document_id)
+        doc = doc_repo.get_by_id(job.document_id, org_id)
         if not doc:
             raise HTTPException(status_code=404, detail="Document not found")
         entity_owner_id = doc.user_id
+        entity_org_id = getattr(doc, "org_id", None)
 
     elif job.template_fill_run_id:
         # Template Fill Mode: verify through template fill run
@@ -379,12 +398,13 @@ async def get_job_status(job_id: str, user: User = Depends(get_current_user)):
         if not fill_run:
             raise HTTPException(status_code=404, detail="Template fill run not found")
         entity_owner_id = fill_run.user_id
+        entity_org_id = getattr(fill_run, "org_id", None)
 
     else:
         raise HTTPException(status_code=404, detail="Job has no associated entity")
 
     # Verify ownership
-    if entity_owner_id != user.id:
+    if entity_owner_id != user.id or (entity_org_id is not None and entity_org_id != org_id):
         raise HTTPException(status_code=403, detail="You don't have permission to access this job")
 
     return {
@@ -429,6 +449,7 @@ async def retry_job(job_id: str, user: User = Depends(get_current_user)):
     """
     job_repo = JobRepository()
     extraction_repo = ExtractionRepository()
+    org_id = user.org_id
 
     job = job_repo.get_job(job_id)
     if not job:
@@ -436,6 +457,7 @@ async def retry_job(job_id: str, user: User = Depends(get_current_user)):
 
     # Generic ownership verification (same as SSE endpoint)
     entity_owner_id = None
+    entity_org_id = None
     extraction = None
 
     if job.extraction_id:
@@ -443,6 +465,7 @@ async def retry_job(job_id: str, user: User = Depends(get_current_user)):
         if not extraction:
             raise HTTPException(status_code=404, detail="Extraction not found")
         entity_owner_id = extraction.user_id
+        entity_org_id = getattr(extraction, "org_id", None)
 
     elif job.workflow_run_id:
         from app.repositories.workflow_repository import WorkflowRepository
@@ -450,13 +473,15 @@ async def retry_job(job_id: str, user: User = Depends(get_current_user)):
         if not run:
             raise HTTPException(status_code=404, detail="Workflow run not found")
         entity_owner_id = run.user_id
+        entity_org_id = getattr(run, "org_id", None)
 
     elif job.document_id:
         doc_repo = DocumentRepository()
-        doc = doc_repo.get_by_id(job.document_id)
+        doc = doc_repo.get_by_id(job.document_id, org_id)
         if not doc:
             raise HTTPException(status_code=404, detail="Document not found")
         entity_owner_id = doc.user_id
+        entity_org_id = getattr(doc, "org_id", None)
 
     elif job.template_fill_run_id:
         # Template Fill Mode: verify through template fill run
@@ -465,12 +490,13 @@ async def retry_job(job_id: str, user: User = Depends(get_current_user)):
         if not fill_run:
             raise HTTPException(status_code=404, detail="Template fill run not found")
         entity_owner_id = fill_run.user_id
+        entity_org_id = getattr(fill_run, "org_id", None)
 
     else:
         raise HTTPException(status_code=404, detail="Job has no associated entity")
 
     # Verify ownership
-    if entity_owner_id != user.id:
+    if entity_owner_id != user.id or (entity_org_id is not None and entity_org_id != org_id):
         raise HTTPException(status_code=403, detail="You don't have permission to retry this job")
 
     if job.status != "failed":

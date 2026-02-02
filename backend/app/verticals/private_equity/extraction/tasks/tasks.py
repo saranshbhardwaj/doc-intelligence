@@ -540,8 +540,12 @@ def extract_structured_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
 
             if success:
                 cost_usd = extraction.cost_usd if extraction and extraction.cost_usd else 0.0
+                org_id = extraction.org_id if extraction and getattr(extraction, "org_id", None) else None
+                if not org_id:
+                    raise ValueError("Missing org_id for usage log creation")
                 log_created = repo.create_usage_log(
                     user_id=user_id,
+                    org_id=org_id,
                     extraction_id=extraction_id,
                     pages_processed=0,
                     operation_type="extraction",

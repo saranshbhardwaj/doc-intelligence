@@ -2,9 +2,9 @@
 """Collection management endpoints for Chat Mode."""
 
 from typing import Optional
-from fastapi import APIRouter, Form, HTTPException, Depends, Query
+from fastapi import APIRouter, Form, HTTPException, Depends, Query, Request
 
-from app.auth import get_current_user
+from app.auth import get_current_user, get_current_org_role, is_admin_role
 from app.db_models_users import User
 from app.repositories.collection_repository import CollectionRepository
 from app.utils.logging import logger
@@ -48,6 +48,7 @@ async def create_collection(
     # Use repository for database operations
     collection_repo = CollectionRepository()
     collection = collection_repo.create_collection(
+        org_id=user.org_id,
         user_id=user.id,
         name=name,
         description=description.strip() if description else None
@@ -91,6 +92,7 @@ async def list_collections(
     collection_repo = CollectionRepository()
     collections, total = collection_repo.list_collections(
         user_id=user.id,
+        org_id=user.org_id,
         limit=limit,
         offset=offset
     )
@@ -136,7 +138,7 @@ async def get_collection(
     collection_repo = CollectionRepository()
 
     # Get collection (with ownership check)
-    collection = collection_repo.get_collection(collection_id, user.id)
+    collection = collection_repo.get_collection(collection_id, user.id, user.org_id)
     if not collection:
         raise HTTPException(status_code=404, detail="Collection not found")
 
@@ -173,7 +175,8 @@ async def get_collection(
 @router.delete("/collections/{collection_id}")
 async def delete_collection(
     collection_id: str,
-    user: User = Depends(get_current_user)
+    user: User = Depends(get_current_user),
+    request: Request = None
 ):
     """
     Delete a collection (cascades to documents, chunks, sessions).
@@ -192,11 +195,16 @@ async def delete_collection(
     collection_repo = CollectionRepository()
 
     # Edge case: Check if collection exists before attempting delete
-    collection = collection_repo.get_collection(collection_id, user.id)
+    collection = collection_repo.get_collection(collection_id, user.id, user.org_id)
     if not collection:
         raise HTTPException(status_code=404, detail="Collection not found")
 
-    success = collection_repo.delete_collection(collection_id, user.id)
+    if collection.user_id != user.id:
+        role = get_current_org_role(request)
+        if not is_admin_role(role):
+            raise HTTPException(status_code=403, detail="Not authorized to delete this collection")
+
+    success = collection_repo.delete_collection(collection_id, user.id, user.org_id)
     if not success:
         # Should not happen if the above check passed, but defensive
         raise HTTPException(status_code=500, detail="Failed to delete collection")
@@ -218,7 +226,8 @@ async def delete_collection(
 async def remove_document_from_collection(
     collection_id: str,
     document_id: str,
-    user: User = Depends(get_current_user)
+    user: User = Depends(get_current_user),
+    request: Request = None
 ):
     """
     Remove a document from a specific collection.
@@ -241,9 +250,14 @@ async def remove_document_from_collection(
     collection_repo = CollectionRepository()
 
     # Verify collection exists and belongs to user
-    collection = collection_repo.get_collection(collection_id, user.id)
+    collection = collection_repo.get_collection(collection_id, user.id, user.org_id)
     if not collection:
         raise HTTPException(status_code=404, detail="Collection not found")
+
+    if collection.user_id != user.id:
+        role = get_current_org_role(request)
+        if not is_admin_role(role):
+            raise HTTPException(status_code=403, detail="Not authorized to modify this collection")
 
     # Remove document from collection
     success = collection_repo.remove_document_from_collection(collection_id, document_id)

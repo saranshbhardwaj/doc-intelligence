@@ -149,7 +149,7 @@ def list_pe_workflow_runs(
     repo = WorkflowRepository(db)
 
     # Get all runs for user
-    all_runs = repo.list_runs_for_user(user.id, limit=limit * 2, offset=offset)  # Get more to filter
+    all_runs = repo.list_runs_for_user(user.id, user.org_id, limit=limit * 2, offset=offset)  # Get more to filter
 
     # Filter to PE workflows only
     pe_runs = [run for run in all_runs if run.workflow and run.workflow.domain == "private_equity"][:limit]

@@ -85,7 +85,7 @@ async def chat_with_session(
     rag_repo = RAGRepository(db)
 
     # Verify session exists and belongs to user (with documents eagerly loaded)
-    session = session_repo.get_session(session_id, user.id)
+    session = session_repo.get_session(session_id, user.id, user.org_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 

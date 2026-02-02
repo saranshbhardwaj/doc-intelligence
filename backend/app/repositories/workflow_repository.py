@@ -80,7 +80,7 @@ class WorkflowRepository:
         self.db.commit()
         return True
     # ---- Workflow Runs ----
-    def create_run(self, workflow: Workflow, user_id: str, collection_id: str | None,
+    def create_run(self, workflow: Workflow, user_id: str, org_id: str, collection_id: str | None,
                    document_ids: List[str], variables: dict, mode: str, strategy: str) -> WorkflowRun:
         # Create snapshot of workflow at execution time to preserve context
         workflow_snapshot = {
@@ -93,6 +93,7 @@ class WorkflowRepository:
         run = WorkflowRun(
             id=generate_id(),
             workflow_id=workflow.id,
+            org_id=org_id,
             user_id=user_id,
             collection_id=collection_id,
             document_ids=document_ids,  # JSON column auto-serializes
@@ -181,7 +182,7 @@ class WorkflowRepository:
         self.db.commit()
         return True
 
-    def list_runs_for_user(self, user_id: str, limit: int = 50, offset: int = 0) -> List[WorkflowRun]:
+    def list_runs_for_user(self, user_id: str, org_id: str, limit: int = 50, offset: int = 0) -> List[WorkflowRun]:
         """List workflow runs for a user with pagination.
 
         Args:
@@ -197,7 +198,7 @@ class WorkflowRepository:
 
         stmt = (
             select(WorkflowRun)
-            .where(WorkflowRun.user_id == user_id)
+            .where(WorkflowRun.user_id == user_id, WorkflowRun.org_id == org_id)
             .order_by(WorkflowRun.created_at.desc())
             .offset(offset)
             .limit(limit)

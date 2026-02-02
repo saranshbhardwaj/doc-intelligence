@@ -29,6 +29,7 @@ class ExcelTemplate(Base):
     id = Column(String(36), primary_key=True)
 
     # Ownership
+    org_id = Column(String(64), nullable=False, index=True)  # Clerk org ID (tenant)
     user_id = Column(String(100), nullable=False, index=True)
 
     # Template metadata
@@ -94,6 +95,7 @@ class TemplateFillRun(Base):
     # Foreign keys
     template_id = Column(String(36), ForeignKey("excel_templates.id", ondelete="SET NULL"))
     document_id = Column(String(36), ForeignKey("documents.id", ondelete="SET NULL"))
+    org_id = Column(String(64), nullable=False, index=True)  # Clerk org ID (tenant)
     user_id = Column(String(100), nullable=False, index=True)
 
     # Template snapshot (preserve context if template is deleted)
