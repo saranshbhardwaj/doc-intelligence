@@ -34,8 +34,8 @@ class PromptBuilder:
         "- Only use information from the provided document excerpts\n"
         "- If the documents don't contain relevant information, say so clearly\n"
         "- If evidence is insufficient, say so and ask a brief follow-up\n"
-        "- Cite sources using the format [D1:pN] where D1 is the document number and N is the page number\n"
-        "  Example: \"Revenue increased by 15% [D1:p5] compared to prior quarter.\"\n"
+        "- Cite sources using the format [ref:chunk_id:pN] where chunk_id is provided with each source and N is the page number\n"
+        "  Example: \"Revenue increased by 15% [ref:a1b2c3d4:p5] compared to prior quarter.\"\n"
         "- Every factual claim should include a citation\n"
         "- Be concise but thorough\n"
         "- Use bullet points for clarity when appropriate\n"
@@ -96,9 +96,13 @@ class PromptBuilder:
 
         context_sections: List[str] = []
         for i, chunk in enumerate(relevant_chunks, 1):
-            source_info = f"Source {i}: {chunk['document_id']}"
-            if chunk.get('page_number'):
-                source_info += f" (Page {chunk['page_number']})"
+            chunk_id = str(chunk.get('id', ''))[:8]  # First 8 chars of UUID
+            page = chunk.get('page_number', 1)
+
+            # Include citation hint for LLM
+            citation_hint = f"[Citation: ref:{chunk_id}:p{page}]"
+            source_info = f"Source {i}: {chunk['document_id']} (Page {page}) {citation_hint}"
+
             if chunk.get('section_heading'):
                 source_info += f" - {chunk['section_heading']}"
             context_sections.append(f"{source_info}\n{chunk['text']}\n")

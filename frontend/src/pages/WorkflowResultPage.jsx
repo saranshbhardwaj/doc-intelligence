@@ -45,6 +45,9 @@ import {
 } from "../components/ui/alert-dialog";
 import InvestmentMemoView from "../components/workflows/InvestmentMemoView";
 import { exportWorkflowAsWord } from "../utils/exportWorkflow";
+import FeedbackButton from '../components/feedback/FeedbackButton';
+import CompletionFeedbackModal from '../components/feedback/CompletionFeedbackModal';
+import { shouldPromptForFeedback } from '../utils/feedbackRules';
 
 export default function WorkflowResultPage() {
   const { runId } = useParams();
@@ -65,6 +68,7 @@ export default function WorkflowResultPage() {
   // NEW: mark orphan/legacy run (no workflow_id)
   const [isLegacy, setIsLegacy] = useState(false);
   const [registering, setRegistering] = useState(false);
+  const [showFeedbackModal, setShowFeedbackModal] = useState(false);
 
   const fetchRunDetails = useCallback(async () => {
     // Clear previous state when switching runs
@@ -111,6 +115,13 @@ export default function WorkflowResultPage() {
       }
     };
   }, [run, runId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    if (run?.status == "completed" && runId) {
+      const shouldPrompt = shouldPromptForFeedback('workflow', runId);
+      setShowFeedbackModal(shouldPrompt);
+    }
+  }, [run?.status, runId]);
 
   const handleExport = async (format) => {
     setExporting(true);
@@ -248,6 +259,20 @@ export default function WorkflowResultPage() {
 
   return (
     <AppLayout breadcrumbs={breadcrumbs}>
+
+      <FeedbackButton 
+        operationType="workflow"
+        entityId={runId}
+        entitySummary={run?.workflow?.name}
+      />
+      <CompletionFeedbackModal
+        isOpen={showFeedbackModal}
+        onClose={() => setShowFeedbackModal(false)}
+        operationType="workflow"
+        entityId={runId}
+        entitySummary={run?.workflow?.name}
+      />
+
       <div className="max-w-7xl mx-auto px-6 py-8">
         {/* Back Button */}
         <Button

@@ -303,7 +303,16 @@ def prepare_context_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                 ).order_by(DocumentChunk.chunk_index.asc()).limit(30).all()
                 context_sections.append(f"=== DOCUMENT {idx+1} ({doc_id}) SAMPLE CHUNKS ===")
                 for c in chunks:
-                    prefix = f"[D{idx+1}:p{c.page_number}]"
+                    # Use bbox page if available (physical PDF page from Azure DI)
+                    metadata = c.chunk_metadata or {}
+                    if isinstance(metadata, str):
+                        try:
+                            metadata = json.loads(metadata)
+                        except (json.JSONDecodeError, TypeError):
+                            metadata = {}
+                    bbox = metadata.get("bbox", {})
+                    page_num = bbox.get("page") if bbox else c.page_number
+                    prefix = f"[D{idx+1}:p{page_num}]"
                     context_sections.append(f"{prefix} {c.text[:1000]}")
 
         combined_context = "\n".join(context_sections)
@@ -353,9 +362,6 @@ def generate_artifact_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
     start = time.time()
 
     try:
-        # record latency for the generation phase
-        timer = WORKFLOW_LATENCY_SECONDS.time()
-        timer.__enter__()
         workflow = run.workflow
 
         # Get workflow name from snapshot (preferred) or relationship (fallback)
@@ -371,6 +377,10 @@ def generate_artifact_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                 f"Could not determine workflow name for run {run_id}",
                 extra={"run_id": run_id, "workflow_id": run.workflow_id}
             )
+
+        # record latency for the generation phase with workflow name label
+        timer = WORKFLOW_LATENCY_SECONDS.labels(workflow_name=workflow_name).time()
+        timer.__enter__()
 
         # Handle both old data (JSON strings) and new data (Python objects)
         variables_raw = run.variables
@@ -661,7 +671,13 @@ def generate_artifact_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         # Fail on hard errors
         if not custom_validation["valid"]:
             validation_errors.extend(custom_validation["errors"])
-            
+
+            # Record workflow failure metric
+            WORKFLOW_RUNS_FAILED.labels(
+                org_id=run.org_id or "unknown",
+                workflow_name=workflow_name or "unknown"
+            ).inc()
+
             # Add to artifact and fail
             repo.update_run_status(
                 run_id,
@@ -708,6 +724,9 @@ def generate_artifact_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
 
         input_tokens = usage_meta.get("input_tokens") or 0
         output_tokens = usage_meta.get("output_tokens") or 0
+        cache_read_tokens = usage_meta.get("cache_read_input_tokens") or 0
+        cache_write_tokens = usage_meta.get("cache_creation_input_tokens") or 0
+        llm_model_name = usage_meta.get("model") or model_name
         total_tokens = input_tokens + output_tokens
         cost_usd = compute_llm_cost(model_name, input_tokens, output_tokens) if total_tokens else None
 
@@ -756,9 +775,18 @@ def generate_artifact_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
             validation_errors_json=json.dumps(validation_errors),
             token_usage=total_tokens if total_tokens else None,
             cost_usd=cost_usd,
-            currency=currency
+            currency=currency,
+            input_tokens=input_tokens,
+            output_tokens=output_tokens,
+            cache_read_tokens=cache_read_tokens,
+            cache_write_tokens=cache_write_tokens,
+            model_name=llm_model_name
         )
-        WORKFLOW_RUNS_COMPLETED.inc()
+        # Record workflow completion with proper labels
+        WORKFLOW_RUNS_COMPLETED.labels(
+            org_id=run.org_id or "unknown",
+            workflow_name=workflow_name or "unknown"
+        ).inc()
         # stop timer
         try:
             timer.__exit__(None, None, None)
@@ -768,6 +796,12 @@ def generate_artifact_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         tracker.mark_completed()
         return {"status": "completed", "run_id": run_id, "job_id": job_id}
     except Exception as e:
+        # Record workflow failure metric
+        WORKFLOW_RUNS_FAILED.labels(
+            org_id=run.org_id or "unknown",
+            workflow_name=workflow_name or "unknown"
+        ).inc()
+
         # Rollback session to clear any aborted transaction before DB writes
         try:
             db.rollback()

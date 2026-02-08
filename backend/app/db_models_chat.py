@@ -61,6 +61,7 @@ class CollectionDocument(Base):
     document_id = Column(String(36), ForeignKey("documents.id", ondelete="CASCADE"), nullable=False)
 
     # Link metadata
+    file_path = Column(String(512), nullable=True)  # Original file path from upload
     added_at = Column(DateTime(timezone=True), server_default=func.now())
 
     # Relationships
@@ -260,6 +261,12 @@ class ChatSession(Base):
     # Stats
     message_count = Column(Integer, default=0)  # Cached count
 
+    # Conversation summary persistence (progressive summarization)
+    last_summary_text = Column(Text, nullable=True)  # Latest summary
+    last_summary_key_facts = Column(JSONB, nullable=True, server_default='[]')  # Important preserved facts
+    last_summarized_index = Column(Integer, nullable=True, server_default='0')  # Message index summarized up to
+    last_summary_updated_at = Column(DateTime(timezone=True), nullable=True)  # When summary was last updated
+
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 
@@ -301,8 +308,17 @@ class ChatMessage(Base):
     tokens_used = Column(Integer, nullable=True)
     cost_usd = Column(Float, nullable=True)
 
+    # Granular token tracking for observability
+    input_tokens = Column(Integer, nullable=True)
+    output_tokens = Column(Integer, nullable=True)
+    cache_read_tokens = Column(Integer, nullable=True)
+    cache_write_tokens = Column(Integer, nullable=True)
+
     # Comparison metadata (for page refresh persistence)
     comparison_metadata = Column(Text, nullable=True)  # JSON serialized ComparisonContext
+
+    # Citation metadata (for clickable citations in general chat)
+    citation_metadata = Column(Text, nullable=True)  # JSON serialized citation context
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 

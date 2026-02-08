@@ -53,6 +53,12 @@ class Extraction(Base):
     # Aggregated total cost (parser + LLM + storage, etc.)
     total_cost_usd = Column(Float, default=0.0)
 
+    # LLM token tracking for observability (separate from parser cost)
+    llm_input_tokens = Column(Integer, nullable=True)
+    llm_output_tokens = Column(Integer, nullable=True)
+    llm_model_name = Column(String(100), nullable=True)
+    llm_cost_usd = Column(Float, nullable=True)
+
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     completed_at = Column(DateTime(timezone=True), nullable=True)
 

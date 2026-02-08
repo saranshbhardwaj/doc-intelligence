@@ -17,6 +17,14 @@ from app.verticals.private_equity.extraction.prompts import (
 )
 from app.utils.logging import logger
 from app.utils.file_utils import save_raw_llm_response
+from app.utils.metrics import (
+    LLM_CACHE_HITS,
+    LLM_CACHE_MISSES,
+    LLM_REQUESTS_TOTAL,
+    LLM_TOKEN_USAGE,
+    LLM_COST_USD,
+)
+from app.utils.costs import compute_llm_cost
 
 class LLMClient:
     """Core Anthropic Claude API client.
@@ -209,6 +217,30 @@ class LLMClient:
             model_name = getattr(message, "model", self.model)
             stop_reason = getattr(message, "stop_reason", None)
 
+            # Extract cache stats for observability
+            cache_read_tokens = getattr(usage, "cache_read_input_tokens", None) if usage else None
+            cache_write_tokens = getattr(usage, "cache_creation_input_tokens", None) if usage else None
+
+            # Record Prometheus metrics
+            LLM_REQUESTS_TOTAL.labels(model=model_name).inc()
+            if input_tokens:
+                LLM_TOKEN_USAGE.labels(model=model_name, token_type="input").inc(input_tokens)
+            if output_tokens:
+                LLM_TOKEN_USAGE.labels(model=model_name, token_type="output").inc(output_tokens)
+            if cache_read_tokens:
+                LLM_TOKEN_USAGE.labels(model=model_name, token_type="cache_read").inc(cache_read_tokens)
+                LLM_CACHE_HITS.inc()
+            else:
+                LLM_CACHE_MISSES.inc()
+            if cache_write_tokens:
+                LLM_TOKEN_USAGE.labels(model=model_name, token_type="cache_write").inc(cache_write_tokens)
+
+            # Calculate and record cost
+            if input_tokens and output_tokens:
+                cost = compute_llm_cost(model_name, input_tokens, output_tokens)
+                if cost:
+                    LLM_COST_USD.labels(model=model_name).inc(cost)
+
             # Prepend the prefilled "{" to complete the JSON
             response_text = "{" + response_text
 
@@ -236,7 +268,9 @@ class LLMClient:
                 "usage": {
                     "input_tokens": input_tokens,
                     "output_tokens": output_tokens,
-                    "model": model_name
+                    "model": model_name,
+                    "cache_creation_input_tokens": cache_write_tokens,
+                    "cache_read_input_tokens": cache_read_tokens,
                 }
             }
 
@@ -355,22 +389,20 @@ class LLMClient:
                     ]
                     
                     message = await asyncio.to_thread(
-                        self.client.beta.messages.parse,
+                        self.client.messages.parse,
                         model=self.model,
                         max_tokens=self.max_tokens,
                         temperature=0.0,
-                        betas=["structured-outputs-2025-11-13"],  # ✅ Enable structured outputs
                         system=system_with_cache,
                         messages=[{"role": "user", "content": text}],
                         output_format=pydantic_model
                     )
                 else:
                     message = await asyncio.to_thread(
-                        self.client.beta.messages.parse,
+                        self.client.messages.parse,
                         model=self.model,
                         max_tokens=self.max_tokens,
                         temperature=0.0,
-                        betas=["structured-outputs-2025-11-13"],  # ✅ Enable structured outputs
                         system=system_prompt,
                         messages=[{"role": "user", "content": text}],
                         output_format=pydantic_model
@@ -398,19 +430,46 @@ class LLMClient:
         try:
             response_text = message.content[0].text.strip()
             usage = getattr(message, "usage", None)
-            
+
             # ✅ Already validated by SDK!
             parsed_output = message.parsed_output
-            
+
+            # Extract usage stats
+            input_tokens = getattr(usage, "input_tokens", None) if usage else None
+            output_tokens = getattr(usage, "output_tokens", None) if usage else None
+            cache_read_tokens = getattr(usage, "cache_read_input_tokens", None) if usage else None
+            cache_write_tokens = getattr(usage, "cache_creation_input_tokens", None) if usage else None
+            model_name = getattr(message, "model", self.model)
+
+            # Record Prometheus metrics
+            LLM_REQUESTS_TOTAL.labels(model=model_name).inc()
+            if input_tokens:
+                LLM_TOKEN_USAGE.labels(model=model_name, token_type="input").inc(input_tokens)
+            if output_tokens:
+                LLM_TOKEN_USAGE.labels(model=model_name, token_type="output").inc(output_tokens)
+            if cache_read_tokens:
+                LLM_TOKEN_USAGE.labels(model=model_name, token_type="cache_read").inc(cache_read_tokens)
+                LLM_CACHE_HITS.inc()
+            else:
+                LLM_CACHE_MISSES.inc()
+            if cache_write_tokens:
+                LLM_TOKEN_USAGE.labels(model=model_name, token_type="cache_write").inc(cache_write_tokens)
+
+            # Calculate and record cost
+            if input_tokens and output_tokens:
+                cost = compute_llm_cost(model_name, input_tokens, output_tokens)
+                if cost:
+                    LLM_COST_USD.labels(model=model_name).inc(cost)
+
             # Log cache usage if available
-            if hasattr(usage, "cache_creation_input_tokens"):
+            if cache_write_tokens or cache_read_tokens:
                 cache_stats = {
-                    "cache_creation_tokens": getattr(usage, "cache_creation_input_tokens", 0),
-                    "cache_read_tokens": getattr(usage, "cache_read_input_tokens", 0),
-                    "regular_input_tokens": getattr(usage, "input_tokens", 0),
+                    "cache_creation_tokens": cache_write_tokens or 0,
+                    "cache_read_tokens": cache_read_tokens or 0,
+                    "regular_input_tokens": input_tokens or 0,
                 }
                 logger.info("Cache usage stats", extra=cache_stats)
-            
+
             stop_reason = getattr(message, "stop_reason", None)
             
             # Warn if truncated (but JSON still valid!)

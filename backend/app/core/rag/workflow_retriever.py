@@ -198,7 +198,17 @@ class WorkflowRetriever:
         # - chunk_metadata: For future citation resolution (if chunks re-queried)
         for chunk in final_chunks:
             doc_id = chunk.get("document_id")
-            page_num = chunk.get("page_number", 0)
+            # Use bbox page if available (physical PDF page from Azure DI bounding_regions)
+            # This is more accurate than page_number which may contain document's internal numbering
+            metadata = chunk.get("chunk_metadata") or chunk.get("metadata") or {}
+            if isinstance(metadata, str):
+                import json
+                try:
+                    metadata = json.loads(metadata)
+                except (json.JSONDecodeError, TypeError):
+                    metadata = {}
+            bbox = metadata.get("bbox", {})
+            page_num = bbox.get("page") if bbox else chunk.get("page_number", 0)
             doc_index = doc_index_map.get(doc_id, 0)
             citation_token = f"[D{doc_index}:p{page_num}]"
 

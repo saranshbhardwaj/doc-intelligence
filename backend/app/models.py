@@ -2,6 +2,7 @@
 from pydantic import BaseModel, Field
 from typing import Optional, Dict, List, Any
 from datetime import datetime
+from enum import Enum
 
 # ---------- Helper small models ----------
 class Provenance(BaseModel):
@@ -235,20 +236,104 @@ class ErrorResponse(BaseModel):
     message: str
     request_id: Optional[str] = None
 
-# Feedback and analytics (same as you had but kept here for convenience)
-class FeedbackRequest(BaseModel):
-    request_id: str
-    rating: int = Field(ge=1, le=5)
-    comment: Optional[str] = Field(None, max_length=1000)
-    email: Optional[str] = Field(None, max_length=255)
-    accuracy_rating: Optional[int] = Field(None, ge=1, le=5)
-    would_pay: Optional[bool] = None
-    timestamp: datetime = Field(default_factory=datetime.now)
+# -------------------- Unified Feedback Models --------------------
+
+class OperationType(str, Enum):
+    CHAT = "chat"
+    WORKFLOW = "workflow"
+    TEMPLATE_FILL = "template_fill"
+    EXTRACTION = "extraction"
+
+
+class RatingType(str, Enum):
+    THUMBS = "thumbs"
+    STARS = "stars"
+
+
+class FeedbackCategory(str, Enum):
+    ACCURACY = "accuracy"
+    SPEED = "speed"
+    FORMAT = "format"
+    MISSING_DATA = "missing_data"
+    CITATIONS = "citations"
+    OTHER = "other"
+
+
+class ResponseStatus(str, Enum):
+    NONE = "none"
+    PENDING = "pending"
+    RESPONDED = "responded"
+
+
+class SubmitFeedbackRequest(BaseModel):
+    """Request to submit feedback for any operation type."""
+
+    # Entity reference (exactly one required)
+    chat_message_id: Optional[str] = None
+    workflow_run_id: Optional[str] = None
+    template_fill_run_id: Optional[str] = None
+    extraction_id: Optional[str] = None
+
+    # Rating
+    rating_type: RatingType = RatingType.THUMBS
+    rating_value: int = Field(..., description="Rating value: -1/1 for thumbs, 1-5 for stars")
+
+    # Optional fields
+    comment: Optional[str] = Field(None, max_length=2000)
+    feedback_category: Optional[FeedbackCategory] = None
+    tags: Optional[List[str]] = Field(default_factory=list)
+
+    # Context (optional, for detailed feedback)
+    context_snapshot: Optional[dict] = None
+
 
 class FeedbackResponse(BaseModel):
+    """Response after submitting feedback."""
     success: bool
     message: str
     feedback_id: str
+
+
+class FeedbackItem(BaseModel):
+    """Single feedback item for listing."""
+    id: str
+    org_id: str
+    user_id: str
+    operation_type: str
+    rating_type: str
+    rating_value: Optional[int]
+    comment: Optional[str]
+    feedback_category: Optional[str]
+    tags: List[str] = Field(default_factory=list)
+    requires_response: bool
+    response_status: str
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class FeedbackListResponse(BaseModel):
+    """Paginated feedback list response."""
+    items: List[FeedbackItem]
+    total: int
+    limit: int
+    offset: int
+
+
+class FeedbackStatsResponse(BaseModel):
+    """Aggregated feedback statistics."""
+    time_window_hours: int
+    total_feedback: int
+    by_operation_type: dict
+    by_rating: dict
+    average_rating: float
+    response_rate: float
+
+
+class UpdateFeedbackResponseRequest(BaseModel):
+    """Admin request to respond to feedback."""
+    response_text: str = Field(..., min_length=1, max_length=5000)
 
 class AnalyticsEvent(BaseModel):
     event_type: str

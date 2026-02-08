@@ -148,7 +148,7 @@ export function sendChatMessage(
   numChunks = 5,
   callbacks = {}
 ) {
-  const { onSession, onChunk, onComplete, onError, onComparisonContext, onThinking } = callbacks;
+  const { onSession, onChunk, onComplete, onError, onComparisonContext, onCitationContext, onThinking, onSessionWarning, onComparisonSelection } = callbacks;
 
   getToken().then((token) => {
     const formData = new FormData();
@@ -210,6 +210,18 @@ export function sendChatMessage(
               // Handle comparison context from backend
               const data = JSON.parse(eventData);
               onComparisonContext?.(data);
+            } else if (eventType === "citation_context" && eventData) {
+              // Handle citation context for general chat
+              const data = JSON.parse(eventData);
+              onCitationContext?.(data);
+            } else if (eventType === "session_warning" && eventData) {
+              // Handle session warning (long conversation)
+              const data = JSON.parse(eventData);
+              onSessionWarning?.(data);
+            } else if (eventType === "comparison_selection" && eventData) {
+              // Handle comparison document selection request
+              const data = JSON.parse(eventData);
+              onComparisonSelection?.(data);
             } else if (eventType === "chunk" && eventData) {
               const data = JSON.parse(eventData);
               onChunk?.(data.chunk);
@@ -371,4 +383,103 @@ export async function getDocumentUsage(getToken, documentId) {
   const api = createAuthenticatedApi(getToken);
   const response = await api.get(`/api/chat/documents/${documentId}/usage`);
   return response.data;
+}
+
+/**
+ * Confirm comparison with selected documents or skip to normal RAG
+ *
+ * Called after user selects documents in comparison picker or clicks "Not comparing"
+ */
+export function confirmComparison(
+  getToken,
+  sessionId,
+  documentIds,
+  originalQuery,
+  skipComparison,
+  callbacks = {}
+) {
+  const {
+    onSession,
+    onChunk,
+    onComplete,
+    onError,
+    onComparisonContext,
+    onThinking,
+  } = callbacks;
+
+  getToken().then((token) => {
+    fetch(
+      `${import.meta.env.VITE_API_URL}/api/chat/sessions/${sessionId}/chat/comparison`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          document_ids: documentIds,
+          original_query: originalQuery,
+          skip_comparison: skipComparison,
+        }),
+      }
+    )
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${await response.text()}`);
+        }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const events = buffer.split("\n\n");
+          buffer = events.pop() || "";
+
+          for (const event of events) {
+            if (!event.trim()) continue;
+
+            const lines = event.split("\n");
+            let eventType = "";
+            let eventData = "";
+
+            for (const line of lines) {
+              if (line.startsWith("event: ")) {
+                eventType = line.slice(7);
+              } else if (line.startsWith("data: ")) {
+                eventData = line.slice(6);
+              }
+            }
+
+            // Process events (same as sendChatMessage)
+            if (eventType === "session" && eventData) {
+              const data = JSON.parse(eventData);
+              onSession?.(data.session_id);
+            } else if (eventType === "thinking" && eventData) {
+              const data = JSON.parse(eventData);
+              onThinking?.(data);
+            } else if (eventType === "comparison_context" && eventData) {
+              const data = JSON.parse(eventData);
+              onComparisonContext?.(data);
+            } else if (eventType === "chunk" && eventData) {
+              const data = JSON.parse(eventData);
+              onChunk?.(data.chunk);
+            } else if (eventType === "done") {
+              onComplete?.();
+            } else if (eventType === "error" && eventData) {
+              const data = JSON.parse(eventData);
+              onError?.(new Error(data.error));
+            }
+          }
+        }
+      })
+      .catch((error) => {
+        console.error("Comparison confirmation error:", error);
+        onError?.(error);
+      });
+  });
 }

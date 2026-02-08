@@ -21,6 +21,9 @@ import { Card } from '../../../components/ui/card';
 import { Alert, AlertDescription, AlertTitle } from '../../../components/ui/alert';
 import AppLayout from '../../../components/layout/AppLayout';
 import { streamTemplateFillProgress, continueFillRun, downloadFilledExcel } from '../../../api/re-templates';
+import FeedbackButton from '../../../components/feedback/FeedbackButton';
+import CompletionFeedbackModal from '../../../components/feedback/CompletionFeedbackModal';
+import { shouldPromptForFeedback } from '../../../utils/feedbackRules';
 
 // Helper function to format status for display
 function formatStatus(status) {
@@ -56,6 +59,7 @@ export default function TemplateFillPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const [activeTab, setActiveTab] = useState('excel');
   const [highlightBbox, setHighlightBbox] = useState(null); // For PDF highlighting
+  const [showFeedbackModal, setShowFeedbackModal] = useState(false);
 
   // Progress tracking state
   const [jobProgress, setJobProgress] = useState(0);
@@ -213,6 +217,14 @@ export default function TemplateFillPage() {
     return () => {
       if (cleanup) cleanup();
     };
+  }, [fillRun?.status, fillRunId]);
+
+  // Auto-show feedback modal on completion (with frequency rules)
+  useEffect(() => {
+    if (fillRun?.status === 'completed' && fillRunId) {
+      const shouldPrompt = shouldPromptForFeedback('template_fill', fillRunId);
+      setShowFeedbackModal(shouldPrompt);
+    }
   }, [fillRun?.status, fillRunId]);
 
   function handleTextSelect(selection) {
@@ -463,14 +475,21 @@ export default function TemplateFillPage() {
                   )}
                 </div>
                 {fillRun.status === 'completed' && fillRun.artifact ? (
-                  <Button
-                    size="sm"
-                    onClick={handleContinue}
-                    className="bg-green-600 hover:bg-green-700 text-white shadow-sm"
-                  >
-                    <Download className="h-4 w-4 mr-2" />
-                    Download Excel
-                  </Button>
+                  <>
+                    <Button
+                      size="sm"
+                      onClick={handleContinue}
+                      className="bg-green-600 hover:bg-green-700 text-white shadow-sm"
+                    >
+                      <Download className="h-4 w-4 mr-2" />
+                      Download Excel
+                    </Button>
+                    <FeedbackButton
+                      operationType="template_fill"
+                      entityId={fillRunId}
+                      entitySummary={fillRun.template_snapshot?.name || 'Template Fill'}
+                    />
+                  </>
                 ) : fillRun.status === 'awaiting_review' ? (
                   <Button
                     size="sm"

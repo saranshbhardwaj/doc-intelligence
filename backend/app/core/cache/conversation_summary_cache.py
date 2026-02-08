@@ -6,7 +6,14 @@ configured; falls back to in-memory ephemeral dictionary if Redis is not availab
 
 Key design:
     cache key: chat:summary:<session_id>
-    value JSON: {"message_count": int, "summary": str, "compressed": str, "created_at": iso}
+    value JSON: {
+        "message_count": int,
+        "summary": str,
+        "compressed": str,
+        "key_facts": List[str],  # Preserved important facts
+        "last_summarized_index": int,  # Index up to which we've summarized
+        "created_at": iso
+    }
 
 Invalidation:
     - If current message_count (total messages so far) differs from cached message_count,
@@ -17,7 +24,7 @@ Note: This cache intentionally does not persist across process restarts if Redis
 """
 from __future__ import annotations
 
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from datetime import datetime
 from app.config import settings
 from app.utils.logging import logger
@@ -71,13 +78,34 @@ class ConversationSummaryCache:
             return None
         return entry
 
-    def set(self, session_id: str, message_count: int, summary: str, compressed: Optional[str] = None):
+    def set(
+        self,
+        session_id: str,
+        message_count: int,
+        summary: str,
+        compressed: Optional[str] = None,
+        key_facts: Optional[List[str]] = None,
+        last_summarized_index: Optional[int] = None
+    ):
+        """
+        Cache a conversation summary with key facts.
+
+        Args:
+            session_id: Chat session ID
+            message_count: Total message count when this summary was created
+            summary: The summary text
+            compressed: Optional compressed version of summary
+            key_facts: List of important facts to preserve across summarizations
+            last_summarized_index: Message index up to which we've summarized
+        """
         if not self.enabled:
             return
         data = {
             "message_count": message_count,
             "summary": summary,
             "compressed": compressed or summary,
+            "key_facts": key_facts or [],
+            "last_summarized_index": last_summarized_index or 0,
             "created_at": datetime.utcnow().isoformat()
         }
         if self.client:

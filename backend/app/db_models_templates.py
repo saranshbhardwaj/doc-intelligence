@@ -170,6 +170,15 @@ class TemplateFillRun(Base):
     cost_usd = Column(Float, default=0.0)
     processing_time_ms = Column(Integer)
 
+    # Granular token tracking for observability
+    input_tokens = Column(Integer, nullable=True)
+    output_tokens = Column(Integer, nullable=True)
+    cache_read_tokens = Column(Integer, nullable=True)
+    cache_write_tokens = Column(Integer, nullable=True)
+    model_name = Column(String(100), nullable=True)
+    llm_batches_count = Column(Integer, nullable=True)  # Number of LLM batches for field mapping
+    cache_hit_rate = Column(Float, nullable=True)  # Percentage of cache hits (0.0-1.0)
+
     # Error handling
     error_stage = Column(String(50))
     error_message = Column(Text)

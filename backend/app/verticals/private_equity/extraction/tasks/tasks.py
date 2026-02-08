@@ -13,6 +13,7 @@ Extraction-specific tasks:
 """
 from __future__ import annotations
 import asyncio
+import time
 from typing import Dict, Any
 
 from celery import shared_task, chain
@@ -40,6 +41,8 @@ from app.repositories.extraction_repository import ExtractionRepository
 from app.repositories.document_repository import DocumentRepository
 from app.repositories.user_repository import UserRepository
 from app.utils.logging import logger
+from app.utils.metrics_recorder import record_extraction_completed, record_extraction_failed
+from app.utils.metrics import EXTRACTION_LATENCY_SECONDS
 
 
 def _get_db_session():
@@ -469,6 +472,10 @@ def extract_structured_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
     context = payload.get("context")
     user_id = payload.get("user_id")
 
+    # Start latency timer
+    start_time = time.monotonic()
+    org_id = None
+
     db = _get_db_session()
     tracker = JobProgressTracker(db, job_id)
     repo = ExtractionRepository()
@@ -484,6 +491,7 @@ def extract_structured_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
 
         # Re-query extraction via repository to avoid detached instance issues
         extraction = repo.get_extraction(extraction_id)
+        org_id = extraction.org_id if extraction else None
 
         # --- EXTRACTION LOGIC ---
         tracker.update_progress(status="extracting", current_stage="extracting", progress_percent=70, message="Extracting structured data this can take a while...")
@@ -527,6 +535,16 @@ def extract_structured_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         save_parsed_result(extraction_id, normalized_payload, filename)
         repo.mark_completed(extraction_id)
         tracker.mark_completed()
+
+        # Record metrics
+        record_extraction_completed(org_id=extraction.org_id if extraction else None)
+
+        # Record latency
+        latency = time.monotonic() - start_time
+        try:
+            EXTRACTION_LATENCY_SECONDS.labels(org_id=org_id or "unknown").observe(latency)
+        except Exception as e:
+            logger.warning(f"Failed to record extraction latency: {e}", exc_info=True)
 
         # --- UPDATE USAGE AND LOG ---
         try:
@@ -596,6 +614,16 @@ def extract_structured_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
     except Exception as e:
         tracker.mark_error(error_stage="extracting", error_message=str(e), error_type="llm_error", is_retryable=True)
         repo.mark_failed(extraction_id, str(e)[:500])
+        # Record metrics
+        record_extraction_failed(org_id=extraction.org_id if extraction else None)
+
+        # Record latency (even for failures)
+        latency = time.monotonic() - start_time
+        try:
+            EXTRACTION_LATENCY_SECONDS.labels(org_id=org_id or "unknown").observe(latency)
+        except Exception as lat_e:
+            logger.warning(f"Failed to record extraction latency: {lat_e}", exc_info=True)
+
         raise
     finally:
         db.close()
@@ -699,6 +727,13 @@ def store_extraction_result_task(self, payload: Dict[str, Any]) -> Dict[str, Any
         logger.exception(error_msg, extra={"extraction_id": extraction_id})
 
         extraction_repo.mark_extraction_failed(extraction_id, error_msg)
+        # Record metrics
+        try:
+            extraction = extraction_repo.get_extraction(extraction_id)
+            record_extraction_failed(org_id=extraction.org_id if extraction else None)
+        except Exception:
+            record_extraction_failed(org_id=None)
+
         if tracker:
             tracker.mark_error(
                 error_stage="storing",

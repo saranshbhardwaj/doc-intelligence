@@ -328,6 +328,14 @@ class TemplateRepository:
             "error_message",
             "started_at",
             "completed_at",
+            # Token tracking for observability
+            "input_tokens",
+            "output_tokens",
+            "cache_read_tokens",
+            "cache_write_tokens",
+            "model_name",
+            "llm_batches_count",
+            "cache_hit_rate",
         ]
 
         # JSONB fields that need explicit dirty tracking

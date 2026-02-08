@@ -11,7 +11,7 @@ services:
       - postgres_data:/var/lib/postgresql/data
       - ./db/init/init-pgvector.sql:/docker-entrypoint-initdb.d/init-pgvector.sql  # Enable pgvector on first start
     ports:
-      - "5432:5432"
+      - "127.0.0.1:5432:5432"  # CRITICAL: Database localhost only!
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U docint"]
       interval: 5s
@@ -34,11 +34,12 @@ services:
       HF_HOME: /app/.cache/huggingface
       DEBUG: "true"  # Enable debugpy
       PYDEVD_DISABLE_FILE_VALIDATION: "1"
+      PROMETHEUS_MULTIPROC_DIR: /tmp/prometheus_multiproc  # Shared metrics directory
       # DEBUG_WAIT: "true"  # Uncomment to wait for debugger attach before serving
   # TRANSFORMERS_CACHE is deprecated; use HF_HOME instead
     ports:
-      - "8000:8000"
-      - "5678:5678"  # Debug port for API
+      - "127.0.0.1:8000:8000"  # Localhost only - prevents external access
+      - "127.0.0.1:5678:5678"  # Debug port - localhost only
     depends_on:
       db:
         condition: service_healthy  # Wait for DB to be ready
@@ -48,6 +49,7 @@ services:
       - ./:/app  # Bind mount source for live code & generated migrations
       - uploads_data:/shared_uploads  # Shared uploaded PDFs for Celery parsing
       - logs_data:/app/logs  # Shared logs directory (optional aggregation)
+      - prometheus_multiproc:/tmp/prometheus_multiproc  # Shared Prometheus metrics
     restart: unless-stopped
   worker:
     build:
@@ -63,16 +65,18 @@ services:
       DATABASE_URL: postgresql+psycopg://docint:docint@db:5432/docint
       DEBUG: "true"  # Enable debugpy
       PYDEVD_DISABLE_FILE_VALIDATION: "1"
+      PROMETHEUS_MULTIPROC_DIR: /tmp/prometheus_multiproc  # Shared metrics directory
       # DEBUG_WAIT: "true"  # Uncomment to wait for debugger attach before processing tasks
     depends_on:
       - redis
       - db
     ports:
-      - "5679:5679"  # Debug port for Celery worker
+      - "127.0.0.1:5679:5679"  # Debug port - localhost only
     volumes:
       - ./:/worker  # Bind mount for consistency (tasks, migrations if needed)
       - uploads_data:/shared_uploads  # Access same uploaded PDF files as api
       - logs_data:/worker/logs  # Write logs to shared volume
+      - prometheus_multiproc:/tmp/prometheus_multiproc  # Shared Prometheus metrics
     healthcheck:
       test: celery -A app.celery_app.celery_app inspect ping -d celery@$HOSTNAME
       interval: 30s
@@ -86,7 +90,42 @@ services:
     volumes:
       - redis_data:/data
     ports:
-      - "6379:6379"
+      - "127.0.0.1:6379:6379"  # CRITICAL: Redis localhost only!
+    restart: unless-stopped
+  prometheus:
+    image: prom/prometheus:latest
+    container_name: docint-prometheus
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./prometheus_alerts.yml:/etc/prometheus/prometheus_alerts.yml
+      - prometheus_data:/prometheus
+    ports:
+      - "127.0.0.1:9090:9090"  # Prometheus localhost only
+    command:
+      - '--config.file=/etc/prometheus/prometheus.yml'
+      - '--storage.tsdb.path=/prometheus'
+      - '--storage.tsdb.retention.size=3GB'   # Or limit by size
+      - '--web.console.libraries=/usr/share/prometheus/console_libraries'
+      - '--web.console.templates=/usr/share/prometheus/consoles'
+    depends_on:
+      - api
+    restart: unless-stopped
+  grafana:
+    image: grafana/grafana:latest
+    container_name: docint-grafana
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=${GRAFANA_PASSWORD:-admin}
+      - GF_USERS_ALLOW_SIGN_UP=false
+      - GF_SERVER_ROOT_URL=http://localhost:3000
+    volumes:
+      - grafana_data:/var/lib/grafana
+      - ${PWD}/grafana/provisioning/datasources:/etc/grafana/provisioning/datasources
+      - ${PWD}/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards
+      - ${PWD}/grafana/dashboards:/etc/grafana/dashboards
+    ports:
+      - "127.0.0.1:3000:3000"  # Grafana localhost only
+    depends_on:
+      - prometheus
     restart: unless-stopped
 
 volumes:
@@ -94,3 +133,6 @@ volumes:
   uploads_data:
   logs_data:
   redis_data:
+  prometheus_data:
+  grafana_data:
+  prometheus_multiproc:  # Shared directory for multiprocess Prometheus metrics

@@ -515,3 +515,113 @@ class SessionRepository:
                     extra={"session_id": session_id, "error": str(e)}
                 )
                 return []
+
+    # =================================================================
+    # Summary Persistence (Progressive Summarization)
+    # =================================================================
+
+    def get_summary(
+        self,
+        session_id: str
+    ) -> Optional[dict]:
+        """Get conversation summary from database.
+
+        Args:
+            session_id: Session ID
+
+        Returns:
+            Dictionary with summary data or None if not found:
+            {
+                "summary": str,
+                "key_facts": List[str],
+                "last_summarized_index": int,
+                "updated_at": datetime
+            }
+
+        Logs:
+            session_id
+        """
+        with self._get_session() as db:
+            try:
+                session = db.query(ChatSession).filter(
+                    ChatSession.id == session_id
+                ).first()
+
+                if not session or not session.last_summary_text:
+                    return None
+
+                return {
+                    "summary": session.last_summary_text,
+                    "key_facts": session.last_summary_key_facts or [],
+                    "last_summarized_index": session.last_summarized_index or 0,
+                    "updated_at": session.last_summary_updated_at
+                }
+
+            except SQLAlchemyError as e:
+                logger.error(
+                    f"Failed to get session summary: {e}",
+                    extra={"session_id": session_id, "error": str(e)}
+                )
+                return None
+
+    def update_summary(
+        self,
+        session_id: str,
+        summary_text: str,
+        key_facts: List[str],
+        last_summarized_index: int
+    ) -> bool:
+        """Update conversation summary in database.
+
+        Args:
+            session_id: Session ID
+            summary_text: Summary text
+            key_facts: List of preserved key facts
+            last_summarized_index: Message index summarized up to
+
+        Returns:
+            True if successful
+
+        Logs:
+            session_id, summary_length, key_facts_count
+        """
+        with self._get_session() as db:
+            try:
+                session = db.query(ChatSession).filter(
+                    ChatSession.id == session_id
+                ).first()
+
+                if not session:
+                    logger.warning(
+                        "Session not found for summary update",
+                        extra={"session_id": session_id}
+                    )
+                    return False
+
+                # Update summary fields
+                session.last_summary_text = summary_text
+                session.last_summary_key_facts = key_facts
+                session.last_summarized_index = last_summarized_index
+                session.last_summary_updated_at = func.now()
+
+                db.commit()
+
+                logger.info(
+                    "Updated session summary",
+                    extra={
+                        "session_id": session_id,
+                        "summary_length": len(summary_text),
+                        "key_facts_count": len(key_facts),
+                        "last_summarized_index": last_summarized_index
+                    }
+                )
+
+                return True
+
+            except SQLAlchemyError as e:
+                logger.error(
+                    f"Failed to update session summary: {e}",
+                    extra={"session_id": session_id, "error": str(e)}
+                )
+                db.rollback()
+                return False

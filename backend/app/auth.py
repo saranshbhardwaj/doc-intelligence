@@ -7,10 +7,19 @@ from app.config import settings
 from app.db_models_users import User
 from app.repositories.user_repository import UserRepository
 import httpx
+import json
 
+try:
+    import redis
+    _redis_client = redis.Redis.from_url(settings.redis_url, decode_responses=True)
+except Exception:
+    _redis_client = None
 
 # Initialize Clerk client
 clerk = Clerk(bearer_auth=settings.clerk_secret_key)
+
+# Clerk user cache TTL (5 minutes)
+CLERK_USER_CACHE_TTL = 300
 
 
 def _get_auth_context(request: Request) -> tuple[str, str, dict]:
@@ -110,11 +119,55 @@ def require_org_role(allowed_roles: list[str]):
     return _dep
 
 
+def _get_clerk_user_email(user_id: str) -> str:
+    """
+    Get Clerk user email with Redis caching.
+
+    Cache key: clerk:user:{user_id}
+    TTL: 5 minutes (300 seconds)
+
+    Returns:
+        User's email address
+    """
+    cache_key = f"clerk:user:{user_id}"
+
+    # Try cache first
+    if _redis_client:
+        try:
+            cached = _redis_client.get(cache_key)
+            if cached:
+                # Cache hit - return email directly
+                return cached
+        except Exception as e:
+            # Redis error - log and continue to Clerk API
+            print(f"⚠️ [Auth Cache] Redis GET error: {e}")
+
+    # Cache miss or Redis unavailable - fetch from Clerk API
+    try:
+        clerk_user = clerk.users.get(user_id=user_id)
+        email = clerk_user.email_addresses[0].email_address if clerk_user.email_addresses else f"{user_id}@unknown.com"
+
+        # Cache the email for next time
+        if _redis_client:
+            try:
+                _redis_client.setex(cache_key, CLERK_USER_CACHE_TTL, email)
+            except Exception as e:
+                print(f"⚠️ [Auth Cache] Redis SET error: {e}")
+
+        return email
+    except Exception as e:
+        print(f"❌ [Auth Backend] Clerk API error: {e}")
+        # Fallback to generated email if Clerk API fails
+        return f"{user_id}@unknown.com"
+
+
 def get_current_user(request: Request) -> User:
     """
     Get or create user from database using repository pattern.
     If user doesn't exist (first login), create them.
     Handles race conditions gracefully.
+
+    Uses Redis cache to avoid repeated Clerk API calls (5min TTL).
     """
     # First authenticate the user
     user_id, org_id, _payload = _get_auth_context(request)
@@ -122,9 +175,8 @@ def get_current_user(request: Request) -> User:
     # Use repository for all database operations
     user_repo = UserRepository()
 
-    # Fetch user details from Clerk for potential creation
-    clerk_user = clerk.users.get(user_id=user_id)
-    email = clerk_user.email_addresses[0].email_address if clerk_user.email_addresses else f"{user_id}@unknown.com"
+    # Fetch user email from Clerk (with caching)
+    email = _get_clerk_user_email(user_id)
 
     # Get existing user or create new one
     user = user_repo.get_or_create_user(

@@ -241,7 +241,7 @@ class ComparisonRetriever:
             top_k=chunks_per_doc
         )
 
-        # Step 3: Expand context if async_session available (NEW)
+        # Step 3: Expand context if async_session available
         if async_session and reranked:
             try:
                 reranked = await self.context_expander.expand(

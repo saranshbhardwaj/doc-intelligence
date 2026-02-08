@@ -106,12 +106,11 @@ class TemplateFillLLMService:
         try:
             # Use Anthropic Structured Outputs (beta) - GUARANTEES valid JSON!
             message = await asyncio.to_thread(
-                self.client.beta.messages.parse,
+                self.client.messages.parse,
                 model=self.model,
                 max_tokens=self.max_tokens,
                 temperature=0.0,
                 timeout=settings.synthesis_llm_timeout_seconds,
-                betas=["structured-outputs-2025-11-13"],  # Enable structured outputs
                 messages=[{"role": "user", "content": prompt}],
                 output_format=FieldDetectionResult
             )
@@ -296,6 +295,12 @@ Each chunk has metadata in the header:
             all_mappings = []
             total_high_confidence = 0
 
+            # Track aggregated token usage across all batches
+            total_input_tokens = 0
+            total_output_tokens = 0
+            total_cache_creation_tokens = 0
+            total_cache_read_tokens = 0
+
             # Step 1: Compress full Excel schema
             compressed_schema = self._compress_excel_schema(excel_schema)
             sheets = compressed_schema.get("sheets", [])
@@ -363,26 +368,31 @@ Each chunk has metadata in the header:
 
                 # Use Anthropic Structured Outputs
                 message = await asyncio.to_thread(
-                    self.client.beta.messages.parse,
+                    self.client.messages.parse,
                     model=self.model,
                     max_tokens=settings.synthesis_llm_max_tokens,
                     temperature=0.0,
                     timeout=settings.synthesis_llm_timeout_seconds,
-                    betas=["structured-outputs-2025-11-13"],
                     system=system_arg,
                     messages=[{"role": "user", "content": user_message}],
                     output_format=AutoMappingResult
                 )
 
-                # Log actual cache usage from Anthropic
+                # Log actual cache usage from Anthropic and accumulate totals
                 usage = getattr(message, "usage", None)
                 if usage is not None:
-                    cache_creation = getattr(usage, "cache_creation_input_tokens", None)
-                    cache_read = getattr(usage, "cache_read_input_tokens", None)
-                    input_tokens = getattr(usage, "input_tokens", None)
-                    output_tokens = getattr(usage, "output_tokens", None)
+                    cache_creation = getattr(usage, "cache_creation_input_tokens", None) or 0
+                    cache_read = getattr(usage, "cache_read_input_tokens", None) or 0
+                    input_tokens = getattr(usage, "input_tokens", None) or 0
+                    output_tokens = getattr(usage, "output_tokens", None) or 0
 
-                    if cache_creation is not None or cache_read is not None:
+                    # Accumulate token totals across all batches
+                    total_input_tokens += input_tokens
+                    total_output_tokens += output_tokens
+                    total_cache_creation_tokens += cache_creation
+                    total_cache_read_tokens += cache_read
+
+                    if cache_creation > 0 or cache_read > 0:
                         logger.info(
                             f"   💾 Cache stats: creation={cache_creation:,}, read={cache_read:,}, "
                             f"input={input_tokens:,}, output={output_tokens:,}"
@@ -411,7 +421,16 @@ Each chunk has metadata in the header:
                 "mappings": all_mappings,
                 "total_mapped": len(all_mappings),
                 "total_unmapped": len(pdf_fields) - len(all_mappings),
-                "high_confidence_count": total_high_confidence
+                "high_confidence_count": total_high_confidence,
+                # Token usage data for observability
+                "usage": {
+                    "input_tokens": total_input_tokens,
+                    "output_tokens": total_output_tokens,
+                    "cache_creation_input_tokens": total_cache_creation_tokens,
+                    "cache_read_input_tokens": total_cache_read_tokens,
+                    "total_batches": total_batches,
+                    "model": self.model,
+                }
             }
 
             # Add status to all mappings
@@ -422,7 +441,9 @@ Each chunk has metadata in the header:
             logger.info(
                 f"\n✅ Auto-mapping complete: {result.get('total_mapped', 0)} total mappings across "
                 f"{total_sheets} sheets ({result.get('high_confidence_count', 0)} high confidence, "
-                f"{result.get('total_unmapped', 0)} unmapped)"
+                f"{result.get('total_unmapped', 0)} unmapped) | "
+                f"Tokens: input={total_input_tokens:,}, output={total_output_tokens:,}, "
+                f"cache_read={total_cache_read_tokens:,}"
             )
 
             return result

@@ -63,10 +63,13 @@ import { Combobox } from "../ui/combobox";
 import Spinner from "../common/Spinner";
 import { getCollection } from "../../api/chat";
 import { ComparisonMessage, StreamingComparisonContent } from "./comparison";
-import { useComparison, usePdfViewer, useChatActions } from "../../store";
+import ComparisonDocumentPicker from "./comparison/ComparisonDocumentPicker";
+import { useComparison, usePdfViewer, useChatActions, useStore } from "../../store";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import ComparisonPanel from "../comparison/ComparisonPanel";
+import ChatCitationLink from "./ChatCitationLink";
+import ChatMessageFeedback from "./ChatMessageFeedback";
 import {
   ResizablePanelGroup,
   ResizablePanel,
@@ -226,6 +229,56 @@ export default function ActiveChat({
   const comparison = useComparison();
   const pdfViewer = usePdfViewer();
   const { clearHighlight, setActivePdfDocument, clearPdfUrlCache } = useChatActions();
+  const citationContext = useStore((state) => state.chat.citationContext);
+
+  // Helper functions for processing citations in text
+  const CITATION_REGEX = /\[ref:[a-f0-9]+:p\d+\]/gi;
+
+  const renderCitationsInText = (text, context) => {
+    if (!text || !context?.citations?.length) return text;
+
+    const parts = [];
+    let lastIndex = 0;
+    const regex = new RegExp(CITATION_REGEX);
+    let match;
+
+    while ((match = regex.exec(text)) !== null) {
+      // Add text before citation
+      if (match.index > lastIndex) {
+        parts.push(text.substring(lastIndex, match.index));
+      }
+      // Add citation as interactive component
+      parts.push(
+        <ChatCitationLink
+          key={`cite-${match.index}`}
+          token={match[0]}
+          citationContext={context}
+        />
+      );
+      lastIndex = match.index + match[0].length;
+    }
+
+    // Add remaining text
+    if (lastIndex < text.length) {
+      parts.push(text.substring(lastIndex));
+    }
+
+    return parts.length > 0 ? parts : text;
+  };
+
+  const processChildrenForCitations = (children, context) => {
+    if (typeof children === "string") {
+      return renderCitationsInText(children, context);
+    }
+    if (Array.isArray(children)) {
+      return children.map((child, i) =>
+        typeof child === "string"
+          ? renderCitationsInText(child, context)
+          : child
+      );
+    }
+    return children;
+  };
 
   // Handler for opening full comparison panel
   const handleOpenComparisonPanel = () => {
@@ -659,7 +712,7 @@ export default function ActiveChat({
                   } animate-message-slide-left`}
                 >
                   <div
-                    className={`max-w-[80%] rounded-2xl px-5 py-3 ${
+                    className={`group max-w-[80%] rounded-2xl px-5 py-3 ${
                       msg.role === "user"
                         ? "bg-primary text-primary-foreground"
                         : "bg-card border border-border"
@@ -684,7 +737,26 @@ export default function ActiveChat({
                         prose-h4:text-base prose-h4:mt-4 prose-h4:mb-2
                         prose-headings:font-bold prose-headings:text-foreground
                       ">
-                        <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                        <ReactMarkdown
+                          remarkPlugins={[remarkGfm]}
+                          components={{
+                            p: ({ children }) => (
+                              <p>{processChildrenForCitations(children, msg.citation_context || citationContext)}</p>
+                            ),
+                            li: ({ children }) => (
+                              <li>{processChildrenForCitations(children, msg.citation_context || citationContext)}</li>
+                            ),
+                            td: ({ children }) => (
+                              <td>{processChildrenForCitations(children, msg.citation_context || citationContext)}</td>
+                            ),
+                            th: ({ children }) => (
+                              <th>{processChildrenForCitations(children, msg.citation_context || citationContext)}</th>
+                            ),
+                            strong: ({ children }) => (
+                              <strong>{processChildrenForCitations(children, msg.citation_context || citationContext)}</strong>
+                            ),
+                          }}
+                        >
                           {msg.content}
                         </ReactMarkdown>
                       </div>
@@ -693,10 +765,44 @@ export default function ActiveChat({
                         {msg.content}
                       </div>
                     )}
+                    {/* Feedback component for assistant messages */}
+                    {msg.role === "assistant" && msg.id && (
+                      <ChatMessageFeedback
+                        messageId={msg.id}
+                        sessionId={currentSession?.id}
+                      />
+                    )}
                   </div>
                 </div>
               );
             })}
+
+            {/* Comparison Document Picker - shown when selection needed */}
+            {comparison.selectionNeeded && (
+              <ComparisonDocumentPicker
+                documents={comparison.selectionDocuments}
+                preSelected={comparison.selectionPreSelected}
+                message={comparison.selectionMessage}
+                onConfirm={(docIds) => {
+                  actions.confirmComparisonSelection(
+                    getToken,
+                    currentSession.id,
+                    docIds,
+                    comparison.selectionQuery,
+                    false // skipComparison = false
+                  );
+                }}
+                onSkip={() => {
+                  actions.confirmComparisonSelection(
+                    getToken,
+                    currentSession.id,
+                    [],
+                    comparison.selectionQuery,
+                    true // skipComparison = true → normal RAG
+                  );
+                }}
+              />
+            )}
 
             {/* Thinking indicator - shown during processing before streaming */}
             {isThinking && (
@@ -704,7 +810,7 @@ export default function ActiveChat({
                 <div className="max-w-[80%] rounded-2xl px-5 py-3 bg-card border border-border">
                   <div className="flex items-center gap-2 text-muted-foreground">
                     <Loader2 className="h-4 w-4 animate-spin" />
-                    <span className="text-sm">Analyzing documents...</span>
+                    <span className="text-sm">Thinking...</span>
                   </div>
                 </div>
               </div>
@@ -755,7 +861,26 @@ export default function ActiveChat({
                       prose-h4:text-base prose-h4:mt-4 prose-h4:mb-2
                       prose-headings:font-bold prose-headings:text-foreground
                     ">
-                      <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                      <ReactMarkdown
+                        remarkPlugins={[remarkGfm]}
+                        components={{
+                          p: ({ children }) => (
+                            <p>{processChildrenForCitations(children, citationContext)}</p>
+                          ),
+                          li: ({ children }) => (
+                            <li>{processChildrenForCitations(children, citationContext)}</li>
+                          ),
+                          td: ({ children }) => (
+                            <td>{processChildrenForCitations(children, citationContext)}</td>
+                          ),
+                          th: ({ children }) => (
+                            <th>{processChildrenForCitations(children, citationContext)}</th>
+                          ),
+                          strong: ({ children }) => (
+                            <strong>{processChildrenForCitations(children, citationContext)}</strong>
+                          ),
+                        }}
+                      >
                         {streamingMessage}
                       </ReactMarkdown>
                     </div>

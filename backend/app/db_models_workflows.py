@@ -100,6 +100,13 @@ class WorkflowRun(Base):
     context_stats = Column(JSONB, nullable=True)  # Retrieval stats
     section_summaries = Column(JSONB, nullable=True)  # Map-reduce section summaries with citations
 
+    # Granular token tracking for observability
+    input_tokens = Column(Integer, nullable=True)
+    output_tokens = Column(Integer, nullable=True)
+    cache_read_tokens = Column(Integer, nullable=True)
+    cache_write_tokens = Column(Integer, nullable=True)
+    model_name = Column(String(100), nullable=True)
+
     version = Column(Integer, nullable=False, default=1)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())

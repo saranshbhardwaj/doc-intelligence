@@ -310,9 +310,8 @@ async def upload_document(
                 "message": "Document indexing started. Use job_id to track progress via SSE."
             }
 
-    except HTTPException:
-        raise
     except Exception as e:
+        # Cleanup on any failure (including HTTPException)
         logger.error(
             f"Upload failed, cleaning up",
             extra={
@@ -323,27 +322,33 @@ async def upload_document(
             exc_info=True
         )
 
-        # Cleanup on failure
+        # Cleanup collection link
         if collection_doc:
             try:
                 collection_repo.unlink_document_from_collection(collection_doc.id)
             except Exception as del_err:
                 logger.error(f"Failed to delete collection link during cleanup: {del_err}")
 
+        # Cleanup document (only if new, not reused)
         if document and not reuse_mode:
             try:
                 doc_repo.delete_document(document.id)
+                logger.info(f"Cleaned up orphaned document during error handling", extra={"document_id": document.id})
             except Exception as del_err:
                 logger.error(f"Failed to delete document during cleanup: {del_err}")
 
-        # Delete uploaded file
-        if os.path.exists(file_path):
+        # Cleanup uploaded file
+        if file_path and os.path.exists(file_path):
             try:
                 os.remove(file_path)
             except Exception as del_err:
                 logger.error(f"Failed to delete file during cleanup: {del_err}")
 
-        raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
+        # Re-raise original exception
+        if isinstance(e, HTTPException):
+            raise
+        else:
+            raise HTTPException(status_code=500, detail=f"Upload failed: {str(e)}")
 
 
 @router.get("/documents/{document_id}/download")

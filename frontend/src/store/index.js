@@ -13,6 +13,7 @@ import { createUserSlice } from "./slices/userSlice";
 import { createChatSlice } from "./slices/chat/chatSlice";
 import { createWorkflowDraftSlice } from "./slices/workflowDraftSlice";
 import { createTemplateFillSlice } from "./slices/templateFillSlice";
+import { createFeedbackSlice } from "./slices/feedbackSlice";
 
 /**
  * Main store combining all slices
@@ -25,6 +26,7 @@ export const useStore = create(
       ...createChatSlice(...args),
       ...createWorkflowDraftSlice(...args),
       ...createTemplateFillSlice(...args),
+      ...createFeedbackSlice(...args),
     }),
     {
       name: "sand-cloud-storage", // localStorage key
@@ -258,6 +260,21 @@ export const useTemplateFillActions = () =>
       cacheExcelWorkbook: state.cacheExcelWorkbook,
       getCachedExcelWorkbook: state.getCachedExcelWorkbook,
       clearCachedExcelWorkbook: state.clearCachedExcelWorkbook,
+    }))
+  );
+
+// Feedback selectors
+export const useFeedback = () => useStore((state) => state.feedback);
+export const useFeedbackActions = () =>
+  useStore(
+    useShallow((state) => ({
+      openFeedbackModal: state.openFeedbackModal,
+      closeFeedbackModal: state.closeFeedbackModal,
+      isFeedbackModalOpen: state.isFeedbackModalOpen,
+      submitFeedback: state.submitFeedback,
+      hasFeedbackBeenSubmitted: state.hasFeedbackBeenSubmitted,
+      setFeedbackSubmitting: state.setFeedbackSubmitting,
+      isFeedbackSubmitting: state.isFeedbackSubmitting,
     }))
   );
 
