@@ -209,7 +209,7 @@ def chunk_document_for_indexing_task(self, payload: Dict[str, Any]) -> Dict[str,
 
         # Convert parser_output dict back to ParserOutput object for chunker compatibility
         # The chunker expects an object with attributes, not a dict
-        from app.services.parsers.base import ParserOutput
+        from app.core.parsers.base import ParserOutput
         parser_output_obj = ParserOutput(
             text=parser_output["text"],
             page_count=parser_output["page_count"],

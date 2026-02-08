@@ -111,6 +111,8 @@ class Settings(BaseSettings):
     chat_answer_reserve_chars: int = 10_000
     # Cache TTL for conversation summaries (seconds). If 0 or negative, caching disabled.
     chat_summary_cache_ttl_seconds: int = 86_400
+    # Warn user after N user messages (round-trip count) - recommend new session
+    chat_max_turns_before_warning: int = 30
 
     # Celery / Task Queue
     use_celery: bool = False  # Toggle to enable Celery task pipeline
@@ -119,7 +121,7 @@ class Settings(BaseSettings):
 
     # Cache backend selection
     # If enabled, DocumentCache will use Redis instead of file-backed JSON files
-    use_redis_cache: bool = False
+    use_redis_cache: bool = True
     redis_url: str = "redis://localhost:6379/1"
 
     # Chunking Settings
@@ -153,10 +155,11 @@ class Settings(BaseSettings):
     rag_hybrid_rrf_k: int = 60
 
     # Number of candidates to retrieve from each search method before merging
-    rag_retrieval_candidates: int = 20
+    rag_retrieval_candidates: int = 18
 
     # Final number of chunks to return after re-ranking (Phase 2)
-    rag_final_top_k: int = 10
+    # Increased to 12 to provide room for context expansion
+    rag_final_top_k: int = 12
 
     # Semantic similarity floors (raw cosine similarity) for filtering low-signal hits
     rag_chat_semantic_similarity_floor: float = 0.12
@@ -188,6 +191,22 @@ class Settings(BaseSettings):
 
     # Apply metadata boosting to re-ranker scores (gentle nudge for tables/narrative)
     rag_reranker_apply_metadata_boost: bool = True
+
+    # ===== CONTEXT EXPANSION SETTINGS =====
+    # Expand retrieved chunks with related context (tables, narratives, parents)
+
+    # Enable context expansion for all query types (not just comparison)
+    rag_expansion_enabled: bool = True
+
+    # Quality gate for expansion - only expand chunks above this rerank score (0.0-1.0)
+    # Lower = more expansion, higher = only expand high-quality chunks
+    rag_expansion_rerank_floor: float = 0.4
+
+    # Score inheritance factors for expanded chunks (0.0-1.0)
+    # Lower = expanded chunks rank below original chunks
+    rag_expansion_score_narrative: float = 0.90  # Table → linked narrative
+    rag_expansion_score_table: float = 0.85      # Narrative → linked table
+    rag_expansion_score_parent: float = 0.75     # Continuation → parent
 
     # ===== RAG CHUNK COMPRESSION SETTINGS =====
     # Handle chunks that exceed re-ranker token limits

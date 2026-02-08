@@ -31,7 +31,7 @@ async def list_pe_extractions(
     """List extractions for PE vertical (user's extractions)."""
     logger.info("Listing PE extractions", extra={"user_id": user.id, "limit": limit, "offset": offset})
     repo = ExtractionRepository()
-    extractions, total = repo.list_user_extractions(user.id, limit=limit, offset=offset, status=status)
+    extractions, total = repo.list_user_extractions(user.id, user.org_id, limit=limit, offset=offset, status=status)
     result = []
     for e in extractions:
         result.append(ExtractionListItem(

@@ -12,12 +12,12 @@ from io import BytesIO
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, Request
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
-from app.auth import get_current_user
+from app.auth import get_current_user, get_current_org_role, is_admin_role
 from app.database import get_db
 from app.db_models_users import User
 from app.repositories.document_repository import DocumentRepository
@@ -196,6 +196,7 @@ async def upload_template(
 
         # Create template record FIRST to get the real ID
         template = repo.create_template(
+            org_id=user.org_id,
             user_id=user.id,
             name=template_name,
             file_path="",  # Placeholder, will update after upload
@@ -253,6 +254,7 @@ async def list_templates(
         repo = TemplateRepository(db)
         templates = repo.list_user_templates(
             user_id=user.id,
+            org_id=user.org_id,
             active_only=True,
             category=category,
         )
@@ -297,14 +299,14 @@ async def list_fills(
 
     try:
         repo = TemplateRepository(db)
-        fill_runs = repo.list_user_fill_runs(user_id=user.id, limit=limit, offset=offset)
+        fill_runs = repo.list_user_fill_runs(user_id=user.id, org_id=user.org_id, limit=limit, offset=offset)
 
         # Batch fetch documents to avoid N+1 queries
         document_ids = [fr.document_id for fr in fill_runs if fr.document_id]
         documents_map = {}
         if document_ids:
             document_repo = DocumentRepository()
-            documents = document_repo.get_doc_metadata_by_ids(document_ids)
+            documents = document_repo.get_doc_metadata_by_ids(document_ids, user.org_id)
             documents_map = {doc["id"]: doc for doc in documents}
 
         # Build response with template and document metadata
@@ -362,7 +364,7 @@ async def get_template(
 
     try:
         repo = TemplateRepository(db)
-        template = repo.get_template(template_id)
+        template = repo.get_template(template_id, user.org_id)
 
         if not template or template.user_id != user.id:
             raise HTTPException(status_code=404, detail="Template not found")
@@ -398,7 +400,7 @@ async def get_template_usage(
 
     try:
         repo = TemplateRepository(db)
-        template = repo.get_template(template_id)
+        template = repo.get_template(template_id, user.org_id)
 
         if not template or template.user_id != user.id:
             raise HTTPException(status_code=404, detail="Template not found")
@@ -420,6 +422,7 @@ async def get_template_usage(
 async def delete_template(
     template_id: str,
     user: User = Depends(get_current_user),
+    request: Request = None,
     db: Session = Depends(get_db),
 ):
     """
@@ -432,10 +435,15 @@ async def delete_template(
 
     try:
         repo = TemplateRepository(db)
-        template = repo.get_template(template_id)
+        template = repo.get_template(template_id, user.org_id)
 
-        if not template or template.user_id != user.id:
+        if not template:
             raise HTTPException(status_code=404, detail="Template not found")
+
+        if template.user_id != user.id:
+            role = get_current_org_role(request)
+            if not is_admin_role(role):
+                raise HTTPException(status_code=403, detail="Not authorized to delete this template")
 
         result = repo.delete_template(template_id)
 
@@ -465,7 +473,7 @@ async def download_template(
 
     try:
         repo = TemplateRepository(db)
-        template = repo.get_template(template_id)
+        template = repo.get_template(template_id, user.org_id)
 
         if not template or template.user_id != user.id:
             raise HTTPException(status_code=404, detail="Template not found")
@@ -530,7 +538,7 @@ async def start_fill(
         repo = TemplateRepository(db)
 
         # Verify template exists and belongs to user
-        template = repo.get_template(template_id)
+        template = repo.get_template(template_id, user.org_id)
         if not template or template.user_id != user.id:
             raise HTTPException(status_code=404, detail="Template not found")
 
@@ -567,7 +575,7 @@ async def get_fill_status(
 
     try:
         repo = TemplateRepository(db)
-        fill_run = repo.get_fill_run(fill_run_id)
+        fill_run = repo.get_fill_run(fill_run_id, user.org_id)
 
         if not fill_run or fill_run.user_id != user.id:
             raise HTTPException(status_code=404, detail="Fill run not found")
@@ -580,7 +588,7 @@ async def get_fill_status(
         document_metadata = None
         if fill_run.document_id:
             document_repo = DocumentRepository()
-            document = document_repo.get_by_id(fill_run.document_id)
+            document = document_repo.get_by_id(fill_run.document_id, user.org_id)
 
             if document:
                 document_metadata = {
@@ -635,7 +643,7 @@ async def update_mappings(
 
     try:
         repo = TemplateRepository(db)
-        fill_run = repo.get_fill_run(fill_run_id)
+        fill_run = repo.get_fill_run(fill_run_id, user.org_id)
 
         if not fill_run or fill_run.user_id != user.id:
             raise HTTPException(status_code=404, detail="Fill run not found")
@@ -693,7 +701,7 @@ async def update_mappings(
         repo.update_fill_run(fill_run_id, **updates)
 
         # Debug: Verify what was actually saved
-        saved_fill_run = repo.get_fill_run(fill_run_id)
+        saved_fill_run = repo.get_fill_run(fill_run_id, user.org_id)
         saved_mappings_count = len(saved_fill_run.field_mapping.get("mappings", [])) if saved_fill_run else 0
         logger.info(
             f"Mappings updated: {len(deduped_mappings)} total, {user_edited_count} user-edited. "
@@ -763,7 +771,7 @@ async def update_extracted_data(
 
     try:
         repo = TemplateRepository(db)
-        fill_run = repo.get_fill_run(fill_run_id)
+        fill_run = repo.get_fill_run(fill_run_id, user.org_id)
 
         if not fill_run or fill_run.user_id != user.id:
             raise HTTPException(status_code=404, detail="Fill run not found")
@@ -863,7 +871,7 @@ async def continue_fill(
 
     try:
         repo = TemplateRepository(db)
-        fill_run = repo.get_fill_run(fill_run_id)
+        fill_run = repo.get_fill_run(fill_run_id, user.org_id)
 
         if not fill_run or fill_run.user_id != user.id:
             raise HTTPException(status_code=404, detail="Fill run not found")
@@ -902,6 +910,7 @@ async def continue_fill(
 async def delete_fill_run(
     fill_run_id: str,
     user: User = Depends(get_current_user),
+    request: Request = None,
     db: Session = Depends(get_db),
 ):
     """Delete a fill run and its associated files."""
@@ -909,10 +918,15 @@ async def delete_fill_run(
 
     try:
         repo = TemplateRepository(db)
-        fill_run = repo.get_fill_run(fill_run_id)
+        fill_run = repo.get_fill_run(fill_run_id, user.org_id)
 
-        if not fill_run or fill_run.user_id != user.id:
+        if not fill_run:
             raise HTTPException(status_code=404, detail="Fill run not found")
+
+        if fill_run.user_id != user.id:
+            role = get_current_org_role(request)
+            if not is_admin_role(role):
+                raise HTTPException(status_code=403, detail="Not authorized to delete this fill run")
 
         # Delete the fill run (includes R2 cleanup via repository)
         success = repo.delete_fill_run(fill_run_id)
@@ -941,7 +955,7 @@ async def download_filled_excel(
 
     try:
         repo = TemplateRepository(db)
-        fill_run = repo.get_fill_run(fill_run_id)
+        fill_run = repo.get_fill_run(fill_run_id, user.org_id)
 
         if not fill_run or fill_run.user_id != user.id:
             raise HTTPException(status_code=404, detail="Fill run not found")

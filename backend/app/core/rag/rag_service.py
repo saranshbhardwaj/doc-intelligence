@@ -22,6 +22,7 @@ from app.core.llm.llm_client import LLMClient
 from app.core.chat.llm_service import ChatLLMService
 from app.config import settings
 from app.utils.logging import logger
+from app.utils.metrics import CHAT_LATENCY_SECONDS
 from app.core.rag.prompt_builder import PromptBuilder
 from app.core.rag.memory import ConversationMemory
 from app.core.rag.budget_enforcer import BudgetEnforcer
@@ -30,6 +31,7 @@ from app.core.rag.reranker import Reranker
 from app.core.rag.comparison_retriever import ComparisonRetriever
 from app.core.rag.query_understanding import QueryUnderstandingService, QueryType
 from app.core.rag.fact_extractor import FactExtractor
+from app.core.rag.context_expander import ContextExpander
 from app.utils.chunk_metadata import validate_and_normalize_chunks
 from app.core.rag.chat_persistence import ChatPersistence
 from app.core.rag.comparison_flow import ComparisonChatHandler
@@ -93,11 +95,17 @@ class RAGService:
         # Fact extractor (for Map-Reduce comparison flow)
         self.fact_extractor = FactExtractor()
 
+        # Context expander (for expanding chunks with related context)
+        self.context_expander = ContextExpander()
+
         # Persistence helper
         self.persistence = ChatPersistence()
 
         # Comparison context for SSE emission (set during comparison queries)
         self.last_comparison_context = None
+
+        # Citation context for SSE emission (set during general chat queries)
+        self.last_citation_context = None
 
         # Document matching helper
         self.document_matcher = DocumentMatcher(db)
@@ -160,9 +168,11 @@ class RAGService:
         collection_id: Optional[str],
         user_message: str,
         user_id: Optional[str] = None,
+        org_id: Optional[str] = None,
         num_chunks: int = 5,  # DEPRECATED: Now uses rag_final_top_k from config
         similarity_threshold: float = 0.0,  # DEPRECATED: Not used with hybrid retrieval
-        document_ids: Optional[List[str]] = None
+        document_ids: Optional[List[str]] = None,
+        force_comparison: Optional[bool] = None  # NEW: Skip detection if set (True=force comparison, False=skip comparison)
     ) -> AsyncIterator[str]:
         """
         Generate streaming chat response using RAG with hybrid retrieval + re-ranking.
@@ -181,6 +191,7 @@ class RAGService:
             num_chunks: DEPRECATED - Now uses settings.rag_final_top_k (kept for backwards compatibility)
             similarity_threshold: DEPRECATED - Not used with hybrid retrieval (kept for backwards compatibility)
             document_ids: Optional filter by specific documents (required if collection_id is None)
+            force_comparison: Skip detection if set (True=force comparison, False=skip comparison, None=auto-detect)
 
         Yields:
             Streaming response chunks from Claude
@@ -212,7 +223,7 @@ class RAGService:
         # STEP 0: History & optional summarization via memory component
         start_time = time.monotonic()
         history_messages = self.memory.load_history(session_id)
-        summary_text, recent_messages = await self.memory.maybe_summarize(session_id, history_messages, user_message)
+        summary_text, recent_messages, key_facts = await self.memory.maybe_summarize(session_id, history_messages, user_message)
 
         # STEP 0.25: Short-circuit low-signal messages (skip retrieval/rerank)
         if self._is_low_signal_message(user_message):
@@ -223,7 +234,8 @@ class RAGService:
                 user_message=user_message,
                 assistant_message=assistant_message,
                 source_chunks=[],
-                usage_data=None
+                usage_data=None,
+                org_id=org_id
             )
             self.last_comparison_context = None
             return
@@ -267,49 +279,100 @@ class RAGService:
             }
         )
 
-        # Branch to comparison flow if detected and multiple documents available
-        if understanding.query_type == QueryType.COMPARISON and document_ids and len(document_ids) >= 2 and getattr(settings, 'comparison_enabled', True):
-            # Smart document filtering using extracted entities
-            matched_ids = self.document_matcher.match_entities_to_documents(understanding.entities, doc_info)
+        # Branch to comparison flow if detected (or forced) and multiple documents available
+        should_compare = (
+            (force_comparison is True) or
+            (force_comparison is None and understanding.query_type == QueryType.COMPARISON)
+        )
 
-            # Fallback: if comparison intent but < 2 matches, use all documents
-            if len(matched_ids) < 2:
-                logger.info(
-                    "Comparison detected but insufficient doc matches, using all documents",
-                    extra={"matched": len(matched_ids), "total": len(document_ids)}
-                )
-                final_doc_ids = document_ids[:3]  # Limit to first 3
-            else:
-                final_doc_ids = matched_ids
-
+        if should_compare and document_ids and len(document_ids) >= 2 and getattr(settings, 'comparison_enabled', True) and force_comparison is not False:
             max_docs = getattr(settings, 'comparison_max_documents', 3)
 
-            # Warn if we have more documents than the limit
-            if len(final_doc_ids) > max_docs:
-                warning_msg = (
-                    f"\n⚠️ **Note:** You have {len(final_doc_ids)} documents, but I can only compare up to {max_docs} "
-                    f"at a time. Comparing the first {max_docs} documents. "
-                    f"To compare specific documents, mention them by name in your query "
-                    f"(e.g., \"compare Property A with Property B\").\n\n"
-                )
-                yield warning_msg
+            # ≤3 docs in session: proceed automatically
+            if len(document_ids) <= 3:
+                final_doc_ids = document_ids
                 logger.info(
-                    f"Limiting comparison to first {max_docs} of {len(final_doc_ids)} documents",
+                    f"Auto-proceeding with comparison (≤3 documents)",
                     extra={
                         "session_id": session_id,
-                        "total_docs": len(final_doc_ids),
-                        "max_docs": max_docs
+                        "num_docs": len(document_ids)
                     }
                 )
 
+            else:
+                # >3 docs: check if user mentioned specific documents
+                matched_ids = self.document_matcher.match_entities_to_documents(understanding.entities, doc_info)
+
+                # User mentioned 2-3 specific docs: use them directly
+                if matched_ids and len(matched_ids) >= 2 and len(matched_ids) <= 3:
+                    final_doc_ids = matched_ids
+                    logger.info(
+                        f"Auto-proceeding with user-mentioned documents (2-3 docs)",
+                        extra={
+                            "session_id": session_id,
+                            "num_docs": len(matched_ids)
+                        }
+                    )
+
+                # User mentioned >3 specific docs: ask user to select up to 3
+                elif matched_ids and len(matched_ids) > 3:
+                    logger.info(
+                        f"User mentioned {len(matched_ids)} documents, requesting selection",
+                        extra={
+                            "session_id": session_id,
+                            "mentioned_count": len(matched_ids)
+                        }
+                    )
+
+                    # Build document list from matched IDs
+                    selection_docs = [
+                        {"id": d["id"], "name": d["filename"]}
+                        for d in doc_info if d["id"] in matched_ids
+                    ]
+
+                    selection_event = {
+                        "type": "selection_needed",
+                        "documents": selection_docs,
+                        "pre_selected": matched_ids[:3],  # Pre-select first 3
+                        "original_query": user_message,
+                        "message": f"You mentioned {len(matched_ids)} documents. Please select up to 3 to compare:"
+                    }
+                    yield f"event: comparison_selection\ndata: {json.dumps(selection_event)}\n\n"
+                    return  # Wait for user selection
+
+                # No specific docs mentioned: ask user to select from all session docs
+                else:
+                    logger.info(
+                        f"No specific documents mentioned, requesting selection from all {len(document_ids)} docs",
+                        extra={
+                            "session_id": session_id,
+                            "total_docs": len(document_ids)
+                        }
+                    )
+
+                    # Build document list from all session docs
+                    selection_docs = [
+                        {"id": d["id"], "name": d["filename"]}
+                        for d in doc_info
+                    ]
+
+                    selection_event = {
+                        "type": "selection_needed",
+                        "documents": selection_docs,
+                        "pre_selected": [],  # No pre-selection
+                        "original_query": user_message,
+                        "message": "Select 2-3 documents to compare:"
+                    }
+                    yield f"event: comparison_selection\ndata: {json.dumps(selection_event)}\n\n"
+                    return  # Wait for user selection
+
             logger.info(
-                f"Comparison query detected, using comparison retrieval",
+                f"Comparison query proceeding with {len(final_doc_ids)} documents",
                 extra={
                     "user_id": user_id,
                     "session_id": session_id,
                     "num_docs": len(final_doc_ids),
-                    "entity_matches": len(matched_ids),
-                    "understanding_type": understanding.query_type.value
+                    "understanding_type": understanding.query_type.value if understanding.query_type else "forced"
                 }
             )
 
@@ -318,7 +381,7 @@ class RAGService:
                 collection_id=collection_id,
                 user_message=user_message,
                 user_id=user_id,
-                document_ids=final_doc_ids,  # Use filtered/limited IDs
+                document_ids=final_doc_ids,
                 summary_text=summary_text,
                 recent_messages=recent_messages,
                 query_understanding=understanding  # For HyDE enhancement
@@ -420,6 +483,59 @@ class RAGService:
             )
 
         # ------------------------------------------------------------------
+        # STEP 2.6: Context Expansion (all query types)
+        if relevant_chunks and settings.rag_expansion_enabled:
+            expansion_start = time.monotonic()
+
+            from app.database import AsyncSessionLocal
+
+            async with AsyncSessionLocal() as async_session:
+                # Quality gate: Only expand chunks above rerank score threshold
+                rerank_floor = settings.rag_expansion_rerank_floor
+                chunks_to_expand = [
+                    c for c in relevant_chunks
+                    if c.get('rerank_score', 0) >= rerank_floor
+                ]
+                chunks_below_floor = [
+                    c for c in relevant_chunks
+                    if c.get('rerank_score', 0) < rerank_floor
+                ]
+
+                max_expansion = self._get_max_expansion(understanding.query_type)
+
+                expanded_chunks = await self.context_expander.expand_with_batch(
+                    chunks=chunks_to_expand,  # Only expand high-quality chunks
+                    session=async_session,
+                    max_expansion_per_chunk=max_expansion,
+                    query_type=understanding.query_type
+                )
+
+                # Merge: expanded high-quality + original low-quality (no expansion)
+                relevant_chunks = expanded_chunks + chunks_below_floor
+
+                # Re-sort by score (expanded chunks have derived scores)
+                relevant_chunks = sorted(
+                    relevant_chunks,
+                    key=lambda x: x.get('rerank_score', x.get('hybrid_score', 0)),
+                    reverse=True
+                )
+
+                # Apply hard limit before budget
+                max_total = self._get_max_expanded_chunks(understanding.query_type)
+                relevant_chunks = relevant_chunks[:max_total]
+
+                expanded_count = len([c for c in relevant_chunks if c.get('_is_expanded')])
+                logger.info(
+                    "Context expansion complete",
+                    extra={
+                        "session_id": session_id,
+                        "expanded_count": expanded_count,
+                        "total_chunks": len(relevant_chunks),
+                        "expansion_ms": round((time.monotonic() - expansion_start) * 1000, 2)
+                    }
+                )
+
+        # ------------------------------------------------------------------
         # STEP 3: Budget enforcement
         budget_start = time.monotonic()
         summary_text, recent_messages, relevant_chunks = await self.budget.enforce(
@@ -440,7 +556,33 @@ class RAGService:
 
         # Cache summary if produced
         if summary_text:
-            self.memory.cache_summary(session_id, len(history_messages), summary_text)
+            # Calculate last_summarized_index (total - verbatim)
+            verbatim_count = settings.chat_verbatim_message_count
+            last_summarized_index = max(0, len(history_messages) - verbatim_count)
+
+            self.memory.cache_summary(
+                session_id,
+                len(history_messages),
+                summary_text,
+                key_facts=key_facts,
+                last_summarized_index=last_summarized_index
+            )
+
+        # ------------------------------------------------------------------
+        # STEP 3.5: Build citation context for frontend (general chat mode)
+        if relevant_chunks:
+            citation_start = time.monotonic()
+            self.last_citation_context = self._build_citation_context(relevant_chunks)
+            logger.info(
+                "Citation context built",
+                extra={
+                    "session_id": session_id,
+                    "citation_count": len(self.last_citation_context.get("citations", [])),
+                    "citation_ms": round((time.monotonic() - citation_start) * 1000, 2)
+                }
+            )
+        else:
+            self.last_citation_context = None
 
         # ------------------------------------------------------------------
         # STEP 4: Build prompt
@@ -491,21 +633,31 @@ class RAGService:
                 assistant_message=full_response,
                 source_chunks=[chunk["id"] for chunk in relevant_chunks],
                 usage_data=usage_data,
-                comparison_metadata=json.dumps(self.last_comparison_context) if self.last_comparison_context else None
+                comparison_metadata=json.dumps(self.last_comparison_context) if self.last_comparison_context else None,
+                citation_context=self.last_citation_context,
+                org_id=org_id
             )
 
+            total_latency = time.monotonic() - start_time
             logger.info(
                 "Chat response complete",
                 extra={
                     "session_id": session_id,
                     "response_length": len(full_response),
                     "llm_ms": round((time.monotonic() - llm_start) * 1000, 2),
-                    "total_ms": round((time.monotonic() - start_time) * 1000, 2)
+                    "total_ms": round(total_latency * 1000, 2)
                 }
             )
 
-            # Clear comparison context after saving to prevent leaking to next request
+            # Record chat latency metric
+            try:
+                CHAT_LATENCY_SECONDS.observe(total_latency)
+            except Exception as e:
+                logger.warning(f"Failed to record chat latency metric: {e}", exc_info=True)
+
+            # Clear comparison and citation context after saving to prevent leaking to next request
             self.last_comparison_context = None
+            self.last_citation_context = None
         except Exception as stream_error:
             logger.error(
                 f"LLM streaming failed: {stream_error}",
@@ -526,7 +678,9 @@ class RAGService:
                         assistant_message=f"{full_response}\n\n[Error: Response was interrupted due to technical issues]",
                         source_chunks=[chunk["id"] for chunk in relevant_chunks],
                         usage_data=usage_data,  # Include usage data if captured before error
-                        comparison_metadata=json.dumps(self.last_comparison_context) if self.last_comparison_context else None
+                        comparison_metadata=json.dumps(self.last_comparison_context) if self.last_comparison_context else None,
+                        citation_context=self.last_citation_context,
+                        org_id=org_id
                     )
                 except Exception as save_error:
                     logger.error(
@@ -603,5 +757,111 @@ class RAGService:
             })
 
         return chunks
+
+    def _get_max_expansion(self, query_type: QueryType) -> int:
+        """
+        Get max expansions per chunk by query type.
+
+        Args:
+            query_type: Query type for adaptive expansion
+
+        Returns:
+            Max expansions per chunk
+        """
+        return {
+            QueryType.DATA_EXTRACTION: 2,
+            QueryType.SUMMARIZATION: 1,
+            QueryType.ENTITY_LOOKUP: 1,
+            QueryType.GENERAL_QA: 1,
+            QueryType.COMPARISON: 2
+        }.get(query_type, 1)
+
+    def _get_max_expanded_chunks(self, query_type: QueryType) -> int:
+        """
+        Get hard limit on total chunks after expansion by query type.
+
+        Args:
+            query_type: Query type for adaptive limits
+
+        Returns:
+            Maximum total chunks after expansion
+        """
+        return {
+            QueryType.DATA_EXTRACTION: 24,
+            QueryType.SUMMARIZATION: 15,
+            QueryType.ENTITY_LOOKUP: 10,
+            QueryType.GENERAL_QA: 18,
+            QueryType.COMPARISON: 20
+        }.get(query_type, 18)
+
+    def _build_citation_context(self, chunks: List[Dict]) -> Dict:
+        """
+        Build citation context for frontend resolution using DocumentRepository.
+
+        Creates a mapping of chunk ID prefixes to document information,
+        enabling clickable citations in the UI with O(1) lookup.
+
+        Args:
+            chunks: List of retrieved chunks
+
+        Returns:
+            Dict with citations array and document_map
+        """
+        from app.repositories.document_repository import DocumentRepository
+
+        doc_repo = DocumentRepository()
+
+        # Collect unique document IDs
+        doc_ids = list(set(
+            chunk.get('document_id') for chunk in chunks
+            if chunk.get('document_id')
+        ))
+
+        if not doc_ids:
+            return {"citations": [], "document_map": {}}
+
+        # Batch fetch document info (1 query, not N)
+        doc_info_list = doc_repo.get_doc_info_by_ids(doc_ids)
+        doc_map = {d['id']: d for d in doc_info_list}
+
+        # Build citation entries
+        citations = []
+        for chunk in chunks:
+            chunk_id = str(chunk.get('id', ''))
+            if not chunk_id:
+                continue
+
+            doc_id = chunk.get('document_id')
+            doc_info = doc_map.get(doc_id, {})
+            metadata = chunk.get('chunk_metadata') or chunk.get('metadata') or {}
+
+            # Use bbox page if available (physical PDF page from Azure DI bounding_regions)
+            # This is more accurate than page_number column which may contain document's internal numbering
+            bbox = metadata.get('bbox', {})
+            page = bbox.get('page') if bbox else chunk.get('page_number', 1)
+
+            citations.append({
+                "ref": chunk_id[:8],  # Short reference for LLM
+                "chunk_id": chunk_id,  # Full ID for lookup
+                "document_id": doc_id,
+                "filename": doc_info.get('filename', 'Unknown'),
+                "page": page,  # Physical PDF page number
+                "section": metadata.get('section_heading', ''),
+                "bbox": bbox or None,  # For PDF highlighting (includes accurate page number)
+            })
+
+        logger.info(
+            "Built citation context",
+            extra={
+                "chunk_count": len(chunks),
+                "citation_count": len(citations),
+                "document_count": len(doc_info_list)
+            }
+        )
+
+        return {
+            "citations": citations,
+            "document_map": {d['id']: d['filename'] for d in doc_info_list}
+        }
 
     # All conversation memory & budget helpers moved to modular components.

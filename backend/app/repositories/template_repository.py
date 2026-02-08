@@ -24,6 +24,7 @@ class TemplateRepository:
 
     def create_template(
         self,
+        org_id: str,
         user_id: str,
         name: str,
         file_path: str,
@@ -37,6 +38,7 @@ class TemplateRepository:
         """Create a new Excel template."""
         template = ExcelTemplate(
             id=str(uuid.uuid4()),
+            org_id=org_id,
             user_id=user_id,
             name=name,
             description=description,
@@ -54,23 +56,30 @@ class TemplateRepository:
         self.db.commit()
         self.db.refresh(template)
 
-        logger.info(f"Created template: {template.id} ({template.name}) for user {user_id}")
+        logger.info(f"Created template: {template.id} ({template.name}) for user {user_id}", extra={"org_id": org_id})
         return template
 
-    def get_template(self, template_id: str) -> Optional[ExcelTemplate]:
-        """Get template by ID."""
-        return self.db.query(ExcelTemplate).filter(ExcelTemplate.id == template_id).first()
+    def get_template(self, template_id: str, org_id: Optional[str] = None) -> Optional[ExcelTemplate]:
+        """Get template by ID, optionally scoped to tenant."""
+        query = self.db.query(ExcelTemplate).filter(ExcelTemplate.id == template_id)
+        if org_id:
+            query = query.filter(ExcelTemplate.org_id == org_id)
+        return query.first()
 
     def list_user_templates(
         self,
         user_id: str,
+        org_id: str,
         active_only: bool = True,
         category: Optional[str] = None,
         limit: int = 100,
         offset: int = 0,
     ) -> List[ExcelTemplate]:
         """List user's templates."""
-        query = self.db.query(ExcelTemplate).filter(ExcelTemplate.user_id == user_id)
+        query = self.db.query(ExcelTemplate).filter(
+            ExcelTemplate.user_id == user_id,
+            ExcelTemplate.org_id == org_id
+        )
 
         if active_only:
             query = query.filter(ExcelTemplate.active == True)
@@ -240,6 +249,7 @@ class TemplateRepository:
         self,
         template_id: str,
         document_id: str,
+        org_id: str,
         user_id: str,
         template_snapshot: Dict,
     ) -> TemplateFillRun:
@@ -248,6 +258,7 @@ class TemplateRepository:
             id=str(uuid.uuid4()),
             template_id=template_id,
             document_id=document_id,
+            org_id=org_id,
             user_id=user_id,
             template_snapshot=template_snapshot,
             field_mapping={"pdf_fields": [], "mappings": []},
@@ -263,13 +274,17 @@ class TemplateRepository:
         self.increment_usage(template_id)
 
         logger.info(
-            f"Created fill run: {fill_run.id} (template: {template_id}, document: {document_id})"
+            f"Created fill run: {fill_run.id} (template: {template_id}, document: {document_id})",
+            extra={"org_id": org_id, "user_id": user_id}
         )
         return fill_run
 
-    def get_fill_run(self, fill_run_id: str) -> Optional[TemplateFillRun]:
-        """Get fill run by ID."""
-        return self.db.query(TemplateFillRun).filter(TemplateFillRun.id == fill_run_id).first()
+    def get_fill_run(self, fill_run_id: str, org_id: Optional[str] = None) -> Optional[TemplateFillRun]:
+        """Get fill run by ID, optionally scoped to tenant."""
+        query = self.db.query(TemplateFillRun).filter(TemplateFillRun.id == fill_run_id)
+        if org_id:
+            query = query.filter(TemplateFillRun.org_id == org_id)
+        return query.first()
 
     @classmethod
     def get_fill_run_by_id(cls, fill_run_id: str) -> Optional[TemplateFillRun]:
@@ -313,6 +328,14 @@ class TemplateRepository:
             "error_message",
             "started_at",
             "completed_at",
+            # Token tracking for observability
+            "input_tokens",
+            "output_tokens",
+            "cache_read_tokens",
+            "cache_write_tokens",
+            "model_name",
+            "llm_batches_count",
+            "cache_hit_rate",
         ]
 
         # JSONB fields that need explicit dirty tracking
@@ -334,6 +357,7 @@ class TemplateRepository:
     def list_user_fill_runs(
         self,
         user_id: str,
+        org_id: str,
         status: Optional[str] = None,
         limit: int = 50,
         offset: int = 0,
@@ -341,7 +365,10 @@ class TemplateRepository:
         """List user's fill runs with eager loading of related data."""
         from sqlalchemy.orm import joinedload
 
-        query = self.db.query(TemplateFillRun).filter(TemplateFillRun.user_id == user_id)
+        query = self.db.query(TemplateFillRun).filter(
+            TemplateFillRun.user_id == user_id,
+            TemplateFillRun.org_id == org_id
+        )
 
         if status:
             query = query.filter(TemplateFillRun.status == status)

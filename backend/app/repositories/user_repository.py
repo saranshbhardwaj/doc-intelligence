@@ -68,6 +68,7 @@ class UserRepository:
     def create_user(
         self,
         user_id: str,
+        org_id: str,
         email: str,
         tier: str = "free",
         pages_limit: int = 100,
@@ -91,6 +92,7 @@ class UserRepository:
             try:
                 user = User(
                     id=user_id,
+                    org_id=org_id,
                     email=email,
                     tier=tier,
                     pages_limit=pages_limit,
@@ -103,7 +105,7 @@ class UserRepository:
 
                 logger.info(
                     f"Created user: {user_id}",
-                    extra={"user_id": user_id, "email": email, "tier": tier}
+                    extra={"user_id": user_id, "org_id": org_id, "email": email, "tier": tier}
                 )
 
                 return user
@@ -164,6 +166,7 @@ class UserRepository:
     def get_or_create_user(
         self,
         user_id: str,
+        org_id: str,
         email: str,
         tier: str = "free",
         pages_limit: int = 100
@@ -185,6 +188,19 @@ class UserRepository:
         # Try to get existing user
         user = self.get_user(user_id)
         if user:
+            # Update org_id if changed
+            if user.org_id != org_id:
+                try:
+                    with self._get_session() as db:
+                        db_user = db.query(User).filter(User.id == user_id).first()
+                        if db_user:
+                            db_user.org_id = org_id
+                            db.commit()
+                except SQLAlchemyError as e:
+                    logger.error(
+                        "Failed to update user org_id",
+                        extra={"user_id": user_id, "org_id": org_id, "error": str(e)}
+                    )
             # Update last login and return
             self.update_last_login(user_id)
             return user
@@ -192,6 +208,7 @@ class UserRepository:
         # User doesn't exist - try to create
         user = self.create_user(
             user_id=user_id,
+            org_id=org_id,
             email=email,
             tier=tier,
             pages_limit=pages_limit,

@@ -18,11 +18,13 @@ class Extraction(Base):
     __tablename__ = "extractions"
     __table_args__ = (
         Index("idx_extractions_user_id", "user_id"),
+        Index("idx_extractions_org_id", "org_id"),
         Index("idx_extractions_document_id", "document_id"),
     )
 
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     document_id = Column(String(36), ForeignKey("documents.id", ondelete="SET NULL"), nullable=True)
+    org_id = Column(String(64), nullable=False, index=True)  # Clerk org ID (tenant)
     user_id = Column(String(100), nullable=False, index=True)  # Clerk user ID
 
     # Snapshot of source document & parsing metadata (duplicated for fast access & historical audit)
@@ -50,6 +52,12 @@ class Extraction(Base):
 
     # Aggregated total cost (parser + LLM + storage, etc.)
     total_cost_usd = Column(Float, default=0.0)
+
+    # LLM token tracking for observability (separate from parser cost)
+    llm_input_tokens = Column(Integer, nullable=True)
+    llm_output_tokens = Column(Integer, nullable=True)
+    llm_model_name = Column(String(100), nullable=True)
+    llm_cost_usd = Column(Float, nullable=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     completed_at = Column(DateTime(timezone=True), nullable=True)

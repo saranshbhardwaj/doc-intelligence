@@ -43,6 +43,9 @@ import {
 } from "../ui/alert-dialog";
 import InvestmentMemoView from "./InvestmentMemoView";
 import { exportWorkflowAsWord } from "../../utils/exportWorkflow";
+import FeedbackButton from '../feedback/FeedbackButton';
+import CompletionFeedbackModal from '../feedback/CompletionFeedbackModal';
+import { shouldPromptForFeedback } from '../../utils/feedbackRules';
 
 export default function WorkflowResultSheet({ open, onOpenChange, runId }) {
   const { getToken } = useAuth();
@@ -53,6 +56,7 @@ export default function WorkflowResultSheet({ open, onOpenChange, runId }) {
   const [exporting, setExporting] = useState(false);
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
+  const [showFeedbackModal, setShowFeedbackModal] = useState(false);
 
   const fetchRunDetails = useCallback(async () => {
     if (!runId) return;
@@ -80,6 +84,13 @@ export default function WorkflowResultSheet({ open, onOpenChange, runId }) {
       fetchRunDetails();
     }
   }, [open, runId, fetchRunDetails]);
+
+  useEffect(() => {
+  if (run?.status === "completed" && runId) {
+    const shouldPrompt = shouldPromptForFeedback('workflow', runId);
+    setShowFeedbackModal(shouldPrompt);
+  }
+}, [run?.status, runId])
 
   const handleExport = async (format) => {
     setExporting(true);
@@ -351,6 +362,15 @@ export default function WorkflowResultSheet({ open, onOpenChange, runId }) {
             </div>
           )}
         </SheetContent>
+
+        {/* Feedback Modal */}
+        <CompletionFeedbackModal
+          isOpen={showFeedbackModal}
+          onClose={() => setShowFeedbackModal(false)}
+          operationType="workflow"
+          entityId={runId}
+          entitySummary={run?.workflow?.name}
+        />
       </Sheet>
 
       {/* Delete Confirmation Dialog */}

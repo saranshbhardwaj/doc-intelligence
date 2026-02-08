@@ -97,7 +97,12 @@ class ChatRepository:
         model_used: Optional[str] = None,
         tokens_used: Optional[int] = None,
         cost_usd: Optional[float] = None,
-        comparison_metadata: Optional[str] = None
+        comparison_metadata: Optional[str] = None,
+        citation_metadata: Optional[str] = None,
+        input_tokens: Optional[int] = None,
+        output_tokens: Optional[int] = None,
+        cache_read_tokens: Optional[int] = None,
+        cache_write_tokens: Optional[int] = None
     ) -> Optional[ChatMessage]:
         """Save a chat message (user or assistant).
 
@@ -110,9 +115,14 @@ class ChatRepository:
             source_chunks: JSON array of chunk IDs used (for assistant messages)
             num_chunks_retrieved: Number of chunks retrieved
             model_used: LLM model used (for assistant messages)
-            tokens_used: Tokens consumed
+            tokens_used: Tokens consumed (legacy, total)
             cost_usd: Cost in USD
             comparison_metadata: JSON serialized ComparisonContext (for comparison queries)
+            citation_metadata: JSON serialized citation context (for clickable citations)
+            input_tokens: Granular input tokens for observability
+            output_tokens: Granular output tokens for observability
+            cache_read_tokens: Cache read tokens for observability
+            cache_write_tokens: Cache write tokens for observability
 
         Returns:
             ChatMessage object if successful, None on error
@@ -130,7 +140,12 @@ class ChatRepository:
                     model_used=model_used,
                     tokens_used=tokens_used,
                     cost_usd=cost_usd,
-                    comparison_metadata=comparison_metadata
+                    comparison_metadata=comparison_metadata,
+                    citation_metadata=citation_metadata,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    cache_read_tokens=cache_read_tokens,
+                    cache_write_tokens=cache_write_tokens
                 )
                 db.add(message)
                 db.commit()
@@ -209,6 +224,31 @@ class ChatRepository:
             except SQLAlchemyError as e:
                 logger.error(
                     f"Failed to count messages: {e}",
+                    extra={"session_id": session_id, "error": str(e)}
+                )
+                return 0
+
+    def get_user_message_count(
+        self,
+        session_id: str
+    ) -> int:
+        """Get count of user messages in a session (for session length warning).
+
+        Args:
+            session_id: Session ID
+
+        Returns:
+            Number of user messages in session
+        """
+        with self._get_session() as db:
+            try:
+                return db.query(ChatMessage).filter(
+                    ChatMessage.session_id == session_id,
+                    ChatMessage.role == "user"
+                ).count()
+            except SQLAlchemyError as e:
+                logger.error(
+                    f"Failed to count user messages: {e}",
                     extra={"session_id": session_id, "error": str(e)}
                 )
                 return 0

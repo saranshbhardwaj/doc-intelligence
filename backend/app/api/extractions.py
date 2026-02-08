@@ -21,7 +21,7 @@ from pydantic import BaseModel
 from app.api.dependencies import (
     get_client_ip, document_processor, cache, analytics
 )
-from app.auth import get_current_user
+from app.auth import get_current_user, get_current_org_role, is_admin_role
 from app.db_models_users import User
 from app.models import ExtractedData
 from app.utils.file_utils import make_file_label
@@ -68,7 +68,7 @@ async def list_user_extractions(
     """
     logger.info("Listing user extractions", extra={"user_id": user.id, "limit": limit, "offset": offset})
     repo = ExtractionRepository()
-    extractions, total = repo.list_user_extractions(user.id, limit=limit, offset=offset, status=status)
+    extractions, total = repo.list_user_extractions(user.id, user.org_id, limit=limit, offset=offset, status=status)
     result = []
     for e in extractions:
         result.append(ExtractionListItem(
@@ -164,7 +164,7 @@ async def extract_document(
     try:
         # Concurrency guard: prevent starting new extraction if one is already active
         concurrency_repo = ExtractionRepository()
-        active_extraction = concurrency_repo.get_active_processing_extraction(user.id)
+        active_extraction = concurrency_repo.get_active_processing_extraction(user.id, user.org_id)
         if active_extraction:
             raise HTTPException(status_code=409, detail="Another extraction is already in progress. Please wait for it to finish.")
 
@@ -180,6 +180,7 @@ async def extract_document(
         extraction_repo = ExtractionRepository()
         existing_extraction = extraction_repo.check_duplicate_extraction(
             user_id=user.id,
+            org_id=user.org_id,
             content_hash=content_hash
         )
 
@@ -307,6 +308,7 @@ async def extract_document(
 
             extraction = extraction_repo.create_extraction_record(
                 extraction_id=request_id,
+                org_id=user.org_id,
                 user_id=user.id,
                 user_tier=user.tier,
                 filename=file.filename,
@@ -378,6 +380,7 @@ async def extract_document(
 
         extraction = extraction_repo.create_extraction_record(
             extraction_id=request_id,
+            org_id=user.org_id,
             user_id=user.id,
             user_tier=user.tier,
             filename=file.filename,
@@ -556,7 +559,7 @@ async def extract_temp_document(
     try:
         # Concurrency guard
         concurrency_repo = ExtractionRepository()
-        active_extraction = concurrency_repo.get_active_processing_extraction(user.id)
+        active_extraction = concurrency_repo.get_active_processing_extraction(user.id, user.org_id)
         if active_extraction:
             raise HTTPException(status_code=409, detail="Another extraction is already in progress. Please wait for it to finish.")
 
@@ -579,8 +582,9 @@ async def extract_temp_document(
         document_id = generate_id()
         document_repo = DocumentRepository()
         doc = document_repo.create_document(
-            document_id=document_id,
+            org_id=user.org_id,
             user_id=user.id,
+            document_id=document_id,
             filename=file.filename,
             file_path=temp_path,
             content_hash=content_hash,
@@ -598,6 +602,7 @@ async def extract_temp_document(
         existing = extraction_repo.check_duplicate_by_content_hash(
             content_hash=content_hash,
             user_id=user.id,
+            org_id=user.org_id,
             context=context_clean
         )
 
@@ -631,6 +636,7 @@ async def extract_temp_document(
         extraction = extraction_repo.create_extraction_from_document(
             extraction_id=extraction_id,
             document_id=document_id,
+            org_id=user.org_id,
             user_id=user.id,
             context=context_clean,
             status="processing"
@@ -714,7 +720,7 @@ async def extract_from_document(
     try:
         # Verify document exists and user owns it
         document_repo = DocumentRepository()
-        doc = document_repo.get_by_id(document_id)
+        doc = document_repo.get_by_id(document_id, user.org_id)
 
         if not doc:
             raise HTTPException(status_code=404, detail="Document not found")
@@ -727,7 +733,7 @@ async def extract_from_document(
 
         # Concurrency guard
         concurrency_repo = ExtractionRepository()
-        active_extraction = concurrency_repo.get_active_processing_extraction(user.id)
+        active_extraction = concurrency_repo.get_active_processing_extraction(user.id, user.org_id)
         if active_extraction:
             raise HTTPException(status_code=409, detail="Another extraction is already in progress. Please wait for it to finish.")
 
@@ -740,6 +746,7 @@ async def extract_from_document(
         existing = extraction_repo.check_duplicate_by_document_id(
             document_id=document_id,
             user_id=user.id,
+            org_id=user.org_id,
             context=context_clean
         )
 
@@ -780,6 +787,7 @@ async def extract_from_document(
         extraction = extraction_repo.create_extraction_from_document(
             extraction_id=extraction_id,
             document_id=document_id,
+            org_id=user.org_id,
             user_id=user.id,
             context=context_clean,
             status="processing"
@@ -842,7 +850,8 @@ async def extract_from_document(
 @router.delete("/api/extractions/{extraction_id}")
 async def delete_extraction(
     extraction_id: str,
-    user: User = Depends(get_current_user)
+    user: User = Depends(get_current_user),
+    request: Request = None
 ):
     """
     Delete an extraction and its associated artifacts.
@@ -855,13 +864,15 @@ async def delete_extraction(
 
     try:
         extraction_repo = ExtractionRepository()
-        extraction = extraction_repo.get_extraction(extraction_id)
+        extraction = extraction_repo.get_extraction(extraction_id, user.org_id)
 
         if not extraction:
             raise HTTPException(status_code=404, detail="Extraction not found")
 
         if extraction.user_id != user.id:
-            raise HTTPException(status_code=403, detail="Not authorized to delete this extraction")
+            role = get_current_org_role(request)
+            if not is_admin_role(role):
+                raise HTTPException(status_code=403, detail="Not authorized to delete this extraction")
 
         # Delete artifact from R2 if exists
         if extraction.artifact:
@@ -872,7 +883,7 @@ async def delete_extraction(
                 logger.warning(f"Failed to delete artifact from R2: {e}", extra={"extraction_id": extraction_id})
 
         # Delete extraction record
-        success = extraction_repo.delete_extraction(extraction_id, user.id)
+        success = extraction_repo.delete_extraction(extraction_id, user.id, user.org_id)
 
         if not success:
             raise HTTPException(status_code=500, detail="Failed to delete extraction")
@@ -912,7 +923,7 @@ async def retry_extraction(
     extraction_repo = ExtractionRepository()
     job_repo = JobRepository()
 
-    extraction = extraction_repo.get_extraction(extraction_id)
+    extraction = extraction_repo.get_extraction(extraction_id, user.org_id)
     if not extraction:
         raise HTTPException(status_code=404, detail="Extraction not found")
     if extraction.user_id != user.id:
@@ -1009,7 +1020,7 @@ async def export_extraction(
     try:
         # Get extraction
         extraction_repo = ExtractionRepository()
-        extraction = extraction_repo.get_extraction(extraction_id)
+        extraction = extraction_repo.get_extraction(extraction_id, user.org_id)
 
         if not extraction:
             raise HTTPException(status_code=404, detail="Extraction not found")

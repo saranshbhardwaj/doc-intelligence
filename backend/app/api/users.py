@@ -1,8 +1,8 @@
 # backend/app/api/users.py
 """User profile and extraction history endpoints"""
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy.orm import Session
-from app.auth import get_current_user
+from app.auth import get_current_user, get_current_org_role, is_admin_role
 from app.db_models_users import User
 from app.repositories.extraction_repository import ExtractionRepository
 from app.utils.logging import logger
@@ -68,6 +68,7 @@ def get_user_extractions(
     extraction_repo = ExtractionRepository()
     extractions, total = extraction_repo.list_user_extractions(
         user_id=user.id,
+        org_id=user.org_id,
         limit=limit,
         offset=offset,
         status=status
@@ -102,7 +103,8 @@ def get_user_extractions(
 @router.delete("/api/extractions/{extraction_id}")
 def delete_extraction(
     extraction_id: str,
-    user: User = Depends(get_current_user)
+    user: User = Depends(get_current_user),
+    request: Request = None
 ):
     """Delete an extraction and its associated files
 
@@ -118,17 +120,19 @@ def delete_extraction(
     extraction_repo = ExtractionRepository()
 
     # Get extraction (for filename and verification)
-    extraction = extraction_repo.get_extraction(extraction_id)
+    extraction = extraction_repo.get_extraction(extraction_id, user.org_id)
 
     if not extraction:
         raise HTTPException(status_code=404, detail="Extraction not found")
 
     # Verify ownership
     if extraction.user_id != user.id:
-        raise HTTPException(
-            status_code=403,
-            detail="You don't have permission to delete this extraction"
-        )
+        role = get_current_org_role(request)
+        if not is_admin_role(role):
+            raise HTTPException(
+                status_code=403,
+                detail="You don't have permission to delete this extraction"
+            )
 
     filename = extraction.filename  # Save before deletion
 
@@ -169,7 +173,7 @@ def delete_extraction(
         # Continue with DB deletion even if file deletion fails
 
     # Delete from database using repository
-    success = extraction_repo.delete_extraction(extraction_id, user.id)
+    success = extraction_repo.delete_extraction(extraction_id, user.id, user.org_id)
 
     if not success:
         raise HTTPException(status_code=500, detail="Failed to delete extraction from database")

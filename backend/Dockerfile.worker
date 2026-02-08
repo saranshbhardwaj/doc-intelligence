@@ -14,8 +14,8 @@ RUN pip install --upgrade pip && pip install -r requirements.txt
 
 COPY . .
 
-# Ensure ownership for runtime writable paths (logs, HuggingFace cache, etc.)
-RUN mkdir -p /shared_uploads /worker/logs /worker/.cache && chown -R appuser:app /shared_uploads /worker/logs /worker /worker/.cache
+# Ensure ownership for runtime writable paths (logs, HuggingFace cache, Prometheus metrics, etc.)
+RUN mkdir -p /shared_uploads /worker/logs /worker/.cache /tmp/prometheus_multiproc && chown -R appuser:app /shared_uploads /worker/logs /worker /worker/.cache /tmp/prometheus_multiproc
 
 ENV USE_CELERY=true
 ENV CELERY_BROKER_URL=${CELERY_BROKER_URL}

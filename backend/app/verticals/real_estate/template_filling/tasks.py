@@ -29,6 +29,8 @@ from app.services.job_tracker import JobProgressTracker
 from app.core.storage.storage_factory import get_storage_backend
 from app.utils.costs import compute_llm_cost
 from app.utils.logging import logger
+from app.utils.metrics_recorder import record_template_fill_completed, record_template_fill_failed
+from app.utils.metrics import TEMPLATE_FILL_LATENCY_SECONDS
 from app.verticals.real_estate.template_filling.excel_handler import ExcelHandler
 from app.verticals.real_estate.template_filling.llm_service import TemplateFillLLMService
 from app.verticals.real_estate.template_filling.excel.mapping_coordinator import coordinator as mapping_coordinator
@@ -226,6 +228,11 @@ def detect_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
     repo = TemplateRepository(db)
     tracker = JobProgressTracker(db, job_id)
 
+    fill_run = repo.get_fill_run(fill_run_id)
+    if not fill_run:
+        raise ValueError(f"Fill run not found: {fill_run_id}")
+    org_id = fill_run.org_id
+
     try:
         logger.info(f"Detecting fields for fill run: {fill_run_id}")
 
@@ -238,7 +245,7 @@ def detect_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
 
         # Get document
         document_repo = DocumentRepository()
-        document = document_repo.get_by_id(document_id)
+        document = document_repo.get_by_id(document_id, org_id)
         if not document:
             raise ValueError(f"Document not found: {document_id}")
 
@@ -285,8 +292,10 @@ def detect_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                 key = kv.get("key", "")
                 value = kv.get("value", "")
                 confidence = kv.get("confidence", 0.95)
-                # Use the INDIVIDUAL KV pair's page number, not the chunk's aggregated page
-                kv_page_number = kv.get("page_number") or chunk.page_number
+                # Use bbox page if available (physical PDF page from Azure DI bounding_regions)
+                # This is more accurate than page_number which may contain document's internal numbering
+                kv_bbox = kv.get("bbox", {})
+                kv_page_number = kv_bbox.get("page") or kv.get("page_number") or chunk.page_number
                 citation = f"[D1:p{kv_page_number}]"
 
                 if not key:
@@ -325,9 +334,11 @@ def detect_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         for chunk, metadata in table_chunks:
             table_name = metadata.get("table_name", "")
             column_headers = metadata.get("column_headers", [])
-            citation = f"[D1:p{chunk.page_number}]"
             # Extract bbox from chunk metadata for PDF highlighting
-            chunk_bbox = metadata.get("bbox")
+            chunk_bbox = metadata.get("bbox", {})
+            # Use bbox page if available (physical PDF page from Azure DI bounding_regions)
+            table_page = chunk_bbox.get("page") if chunk_bbox else chunk.page_number
+            citation = f"[D1:p{table_page}]"
 
             for col_header in column_headers:
                 if not col_header or col_header.lower() in ["", "none", "n/a"]:
@@ -609,7 +620,27 @@ def auto_map_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
 
                 generic_mappings = mapping_result.get("mappings") or []
 
-                logger.info(f"Generic mapping: {len(generic_mappings)} additional fields mapped")
+                # Extract token usage for observability
+                usage = mapping_result.get("usage", {})
+                llm_input_tokens = usage.get("input_tokens", 0)
+                llm_output_tokens = usage.get("output_tokens", 0)
+                llm_cache_read_tokens = usage.get("cache_read_input_tokens", 0)
+                llm_cache_write_tokens = usage.get("cache_creation_input_tokens", 0)
+                llm_model = usage.get("model", settings.synthesis_llm_model)
+                llm_batches = usage.get("total_batches", 1)
+
+                # Calculate cache hit rate (percentage of input tokens read from cache)
+                total_effective_input = llm_input_tokens + llm_cache_read_tokens
+                llm_cache_hit_rate = (llm_cache_read_tokens / total_effective_input) if total_effective_input > 0 else 0.0
+
+                # Compute LLM cost
+                llm_cost = compute_llm_cost(llm_model, llm_input_tokens, llm_output_tokens) if (llm_input_tokens + llm_output_tokens) > 0 else 0.0
+
+                logger.info(
+                    f"Generic mapping: {len(generic_mappings)} additional fields mapped | "
+                    f"Tokens: input={llm_input_tokens:,}, output={llm_output_tokens:,}, "
+                    f"cache_hit_rate={llm_cache_hit_rate:.1%}, cost=${llm_cost:.4f}"
+                )
             else:
                 logger.info("All cells mapped by schema - skipping generic mapping")
                 elapsed_ms = 0
@@ -675,16 +706,31 @@ def auto_map_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
             "mappings": mappings
         }
 
-        repo.update_fill_run(
-            fill_run_id,
-            field_mapping=field_mapping,
-            total_fields_mapped=total_mapped_fields,
-            auto_mapped_count=total_mapped_fields,
-            user_edited_count=0,
-            auto_mapping_completed=True,
-            status="awaiting_review",
-            current_stage="auto_mapping",
-        )
+        # Persist token data if LLM was used
+        update_params = {
+            "field_mapping": field_mapping,
+            "total_fields_mapped": total_mapped_fields,
+            "auto_mapped_count": total_mapped_fields,
+            "user_edited_count": 0,
+            "auto_mapping_completed": True,
+            "status": "awaiting_review",
+            "current_stage": "auto_mapping",
+        }
+
+        # Add token tracking data if generic mapping was used
+        if not use_schema_only and 'llm_cost' in locals():
+            update_params.update({
+                "input_tokens": llm_input_tokens,
+                "output_tokens": llm_output_tokens,
+                "cache_read_tokens": llm_cache_read_tokens,
+                "cache_write_tokens": llm_cache_write_tokens,
+                "model_name": llm_model,
+                "llm_batches_count": llm_batches,
+                "cache_hit_rate": llm_cache_hit_rate,
+                "cost_usd": llm_cost,
+            })
+
+        repo.update_fill_run(fill_run_id, **update_params)
 
         db.close()
 
@@ -761,6 +807,10 @@ def fill_excel_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
     repo = TemplateRepository(db)
     tracker = JobProgressTracker(db, job_id)
 
+    # Start latency timer
+    start_time = time.monotonic()
+    org_id = None
+
     try:
         logger.info(f"Filling Excel for fill run: {fill_run_id}")
 
@@ -775,6 +825,8 @@ def fill_excel_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         fill_run = repo.get_fill_run(fill_run_id)
         if not fill_run:
             raise ValueError(f"Fill run not found: {fill_run_id}")
+
+        org_id = fill_run.org_id
 
         field_mapping = fill_run.field_mapping
 
@@ -885,6 +937,16 @@ def fill_excel_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
             processing_time_ms=payload.get("processing_time_ms", 0)
         )
 
+        # Record metrics
+        record_template_fill_completed(org_id=fill_run.org_id)
+
+        # Record latency
+        latency = time.monotonic() - start_time
+        try:
+            TEMPLATE_FILL_LATENCY_SECONDS.labels(org_id=org_id or "unknown").observe(latency)
+        except Exception as e:
+            logger.warning(f"Failed to record template fill latency: {e}", exc_info=True)
+
         db.close()
 
         logger.info(
@@ -909,6 +971,16 @@ def fill_excel_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
             error_stage="excel_filling",
             error_message=str(e)
         )
+
+        # Record metrics
+        record_template_fill_failed(org_id=fill_run.org_id if fill_run else None)
+
+        # Record latency (even for failures)
+        latency = time.monotonic() - start_time
+        try:
+            TEMPLATE_FILL_LATENCY_SECONDS.labels(org_id=org_id or "unknown").observe(latency)
+        except Exception as e:
+            logger.warning(f"Failed to record template fill latency: {e}", exc_info=True)
 
         # Use mark_error() to send proper SSE termination events ("error" + "end")
         # NOT just update_progress() which only sends "progress" event
@@ -971,6 +1043,7 @@ def start_fill_run_chain(
         fill_run = repo.create_fill_run(
             template_id=template_id,
             document_id=document_id,
+            org_id=template.org_id,
             user_id=user_id,
             template_snapshot=template_snapshot,
         )

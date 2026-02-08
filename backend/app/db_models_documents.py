@@ -26,7 +26,8 @@ class Document(Base):
     """
     __tablename__ = "documents"
     __table_args__ = (
-        UniqueConstraint("content_hash", name="uq_documents_content_hash"),
+        UniqueConstraint("org_id", "content_hash", name="uq_documents_org_id_content_hash"),
+        Index("idx_documents_org_id", "org_id"),
         Index("idx_documents_user_id", "user_id"),
         Index("idx_documents_content_hash", "content_hash"),
         Index("idx_documents_status", "status"),
@@ -34,6 +35,7 @@ class Document(Base):
 
     # Primary key
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    org_id = Column(String(64), nullable=False, index=True)  # Clerk org ID (tenant)
     user_id = Column(String(100), nullable=False, index=True)  # Clerk user ID
 
     # File metadata

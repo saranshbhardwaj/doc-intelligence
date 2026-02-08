@@ -5,6 +5,8 @@ from typing import List, Dict, Any, Optional
 from app.repositories.chat_repository import ChatRepository
 from app.config import settings
 from app.utils.logging import logger
+from app.utils.metrics_recorder import record_chat_message
+from app.utils.metrics import LLM_TOKEN_USAGE, LLM_CACHE_HITS, LLM_CACHE_MISSES
 
 
 class ChatPersistence:
@@ -18,7 +20,9 @@ class ChatPersistence:
         assistant_message: str,
         source_chunks: List[str],
         usage_data: Optional[Dict[str, Any]] = None,
-        comparison_metadata: Optional[str] = None
+        comparison_metadata: Optional[str] = None,
+        citation_context: Optional[Dict[str, Any]] = None,
+        org_id: Optional[str] = None
     ):
         """
         Save user message and assistant response to database.
@@ -30,6 +34,7 @@ class ChatPersistence:
             source_chunks: List of chunk IDs used for response
             usage_data: Optional token usage data from LLM API
             comparison_metadata: Optional serialized comparison context
+            citation_context: Optional citation context for frontend resolution
         """
         import json
 
@@ -54,6 +59,9 @@ class ChatPersistence:
                 retrieval_query=user_message
             )
 
+            # Record metrics
+            record_chat_message(role="user", org_id=org_id)
+
             # Edge case: Check if user message save succeeded
             if not user_msg_saved:
                 logger.error(
@@ -66,6 +74,12 @@ class ChatPersistence:
             tokens_used = None
             cost_usd = None
             model_used = settings.synthesis_llm_model
+
+            # Initialize token variables with defaults (will be overridden if usage_data provided)
+            input_tokens = 0
+            output_tokens = 0
+            cache_read_tokens = 0
+            cache_creation_tokens = 0
 
             if usage_data:
                 input_tokens = usage_data.get("input_tokens", 0) or 0
@@ -103,6 +117,25 @@ class ChatPersistence:
                     }
                 )
 
+                # Record Prometheus metrics for token usage
+                try:
+                    if input_tokens:
+                        LLM_TOKEN_USAGE.labels(model=model_used, token_type="input").inc(input_tokens)
+                    if output_tokens:
+                        LLM_TOKEN_USAGE.labels(model=model_used, token_type="output").inc(output_tokens)
+                    if cache_read_tokens:
+                        LLM_TOKEN_USAGE.labels(model=model_used, token_type="cache_read").inc(cache_read_tokens)
+                        LLM_CACHE_HITS.inc()
+                    else:
+                        LLM_CACHE_MISSES.inc()
+                    if cache_creation_tokens:
+                        LLM_TOKEN_USAGE.labels(model=model_used, token_type="cache_write").inc(cache_creation_tokens)
+                except Exception as e:
+                    logger.warning(f"Failed to record LLM token metrics: {e}", exc_info=True)
+
+            # Serialize citation context if provided
+            citation_metadata = json.dumps(citation_context) if citation_context else None
+
             # Save assistant message
             assistant_msg_saved = self.chat_repo.save_message(
                 session_id=session_id,
@@ -114,8 +147,16 @@ class ChatPersistence:
                 model_used=model_used,
                 tokens_used=tokens_used,
                 cost_usd=cost_usd,
-                comparison_metadata=comparison_metadata
+                comparison_metadata=comparison_metadata,
+                citation_metadata=citation_metadata,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                cache_read_tokens=cache_read_tokens,
+                cache_write_tokens=cache_creation_tokens
             )
+
+            # Record metrics
+            record_chat_message(role="assistant", org_id=org_id)
 
             # Edge case: Check if assistant message save succeeded
             if not assistant_msg_saved:

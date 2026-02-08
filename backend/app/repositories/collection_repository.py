@@ -53,6 +53,7 @@ class CollectionRepository:
 
     def create_collection(
         self,
+        org_id: str,
         user_id: str,
         name: str,
         description: Optional[str] = None
@@ -70,6 +71,7 @@ class CollectionRepository:
         with self._get_session() as db:
             try:
                 collection = Collection(
+                    org_id=org_id,
                     user_id=user_id,
                     name=name,
                     description=description,
@@ -82,7 +84,7 @@ class CollectionRepository:
 
                 logger.info(
                     f"Created collection: {name}",
-                    extra={"collection_id": collection.id, "user_id": user_id}
+                    extra={"collection_id": collection.id, "org_id": org_id, "user_id": user_id}
                 )
 
                 return collection
@@ -90,7 +92,7 @@ class CollectionRepository:
             except SQLAlchemyError as e:
                 logger.error(
                     f"Failed to create collection: {e}",
-                    extra={"user_id": user_id, "collection_name": name, "error": str(e)}
+                    extra={"org_id": org_id, "user_id": user_id, "collection_name": name, "error": str(e)}
                 )
                 db.rollback()
                 return None
@@ -98,7 +100,8 @@ class CollectionRepository:
     def get_collection(
         self,
         collection_id: str,
-        user_id: str
+        user_id: str,
+        org_id: str
     ) -> Optional[Collection]:
         """Get collection by ID (with user ownership check).
 
@@ -113,18 +116,20 @@ class CollectionRepository:
             try:
                 return db.query(Collection).filter(
                     Collection.id == collection_id,
-                    Collection.user_id == user_id
+                    Collection.user_id == user_id,
+                    Collection.org_id == org_id
                 ).first()
             except SQLAlchemyError as e:
                 logger.error(
                     f"Failed to get collection: {e}",
-                    extra={"collection_id": collection_id, "error": str(e)}
+                    extra={"collection_id": collection_id, "org_id": org_id, "error": str(e)}
                 )
                 return None
 
     def get_collection_by_id(
         self,
-        collection_id: str
+        collection_id: str,
+        org_id: Optional[str] = None
     ) -> Optional[Collection]:
         """Get collection by ID (without ownership check - for background tasks).
 
@@ -139,19 +144,21 @@ class CollectionRepository:
         """
         with self._get_session() as db:
             try:
-                return db.query(Collection).filter(
-                    Collection.id == collection_id
-                ).first()
+                query = db.query(Collection).filter(Collection.id == collection_id)
+                if org_id:
+                    query = query.filter(Collection.org_id == org_id)
+                return query.first()
             except SQLAlchemyError as e:
                 logger.error(
                     f"Failed to get collection by ID: {e}",
-                    extra={"collection_id": collection_id, "error": str(e)}
+                    extra={"collection_id": collection_id, "org_id": org_id, "error": str(e)}
                 )
                 return None
 
     def list_collections(
         self,
         user_id: str,
+        org_id: str,
         limit: int = 50,
         offset: int = 0
     ) -> tuple[List[Collection], int]:
@@ -168,7 +175,8 @@ class CollectionRepository:
         with self._get_session() as db:
             try:
                 query = db.query(Collection).filter(
-                    Collection.user_id == user_id
+                    Collection.user_id == user_id,
+                    Collection.org_id == org_id
                 )
 
                 total = query.count()
@@ -182,14 +190,15 @@ class CollectionRepository:
             except SQLAlchemyError as e:
                 logger.error(
                     f"Failed to list collections: {e}",
-                    extra={"user_id": user_id, "error": str(e)}
+                    extra={"user_id": user_id, "org_id": org_id, "error": str(e)}
                 )
                 return [], 0
 
     def delete_collection(
         self,
         collection_id: str,
-        user_id: str
+        user_id: str,
+        org_id: str
     ) -> bool:
         """Delete a collection (cascades to documents, chunks, sessions).
 
@@ -204,13 +213,14 @@ class CollectionRepository:
             try:
                 collection = db.query(Collection).filter(
                     Collection.id == collection_id,
-                    Collection.user_id == user_id
+                    Collection.user_id == user_id,
+                    Collection.org_id == org_id
                 ).first()
 
                 if not collection:
                     logger.warning(
                         f"Collection not found for deletion: {collection_id}",
-                        extra={"collection_id": collection_id, "user_id": user_id}
+                        extra={"collection_id": collection_id, "org_id": org_id, "user_id": user_id}
                     )
                     return False
 
@@ -219,7 +229,7 @@ class CollectionRepository:
 
                 logger.info(
                     f"Deleted collection: {collection.name}",
-                    extra={"collection_id": collection_id, "user_id": user_id}
+                    extra={"collection_id": collection_id, "org_id": org_id, "user_id": user_id}
                 )
 
                 return True
@@ -227,7 +237,7 @@ class CollectionRepository:
             except SQLAlchemyError as e:
                 logger.error(
                     f"Failed to delete collection: {e}",
-                    extra={"collection_id": collection_id, "error": str(e)}
+                    extra={"collection_id": collection_id, "org_id": org_id, "error": str(e)}
                 )
                 db.rollback()
                 return False

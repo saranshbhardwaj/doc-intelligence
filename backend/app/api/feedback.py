@@ -1,75 +1,122 @@
 # app/api/feedback.py
-from datetime import datetime
-import json
-import uuid
-from app.api.dependencies import get_client_ip
-from fastapi import APIRouter, HTTPException, Request
-from app.models import FeedbackRequest, FeedbackResponse
-from app.utils.logging import logger
-from app.utils.notifications import send_feedback_notification
-from app.config import settings
+"""User-facing feedback API endpoints.
 
-router = APIRouter()
+Allows authenticated users to submit feedback on any operation type:
+- Chat messages (thumbs up/down)
+- Workflow runs (star ratings)
+- Template fills (star ratings)
+- Extractions (star ratings)
+"""
+from fastapi import APIRouter, Depends, HTTPException, Request
+from sqlalchemy.orm import Session
+
+from app.database import get_db
+from app.auth import get_current_user
+from app.db_models_users import User
+from app.repositories.feedback_repository import FeedbackRepository
+from app.models import SubmitFeedbackRequest, FeedbackResponse
+from app.api.dependencies import get_client_ip
+from app.utils.logging import logger
+
+router = APIRouter(tags=["feedback"])
+
 
 @router.post("/api/feedback", response_model=FeedbackResponse)
-async def submit_feedback(feedback: FeedbackRequest, request: Request):
+async def submit_feedback(
+    feedback: SubmitFeedbackRequest,
+    request: Request,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
     """
-    Submit feedback on document extraction.
-    Users can rate accuracy and provide comments.
+    Submit feedback for any operation type.
+
+    Supports:
+    - Chat messages (thumbs up/down)
+    - Workflow runs (star rating)
+    - Template fills (star rating)
+    - Extractions (star rating)
+
+    Args:
+        feedback: Feedback submission data
+        request: FastAPI request object
+        user: Current authenticated user
+        db: Database session
+
+    Returns:
+        FeedbackResponse with success status and feedback ID
     """
-    feedback_id = str(uuid.uuid4())
-    client_ip = get_client_ip(request)
-    user_agent = request.headers.get("User-Agent")
-    
-    logger.info("Feedback received", extra={
-        "feedback_id": feedback_id,
-        "request_id": feedback.request_id,
-        "rating": feedback.rating,
-        "has_comment": bool(feedback.comment),
-        "client_ip": client_ip
-    })
-    
-    try:
-        # Save feedback to file
-        feedback_data = {
-            "feedback_id": feedback_id,
-            "request_id": feedback.request_id,
-            "rating": feedback.rating,
-            "accuracy_rating": feedback.accuracy_rating,
-            "would_pay": feedback.would_pay,
-            "comment": feedback.comment,
-            "email": feedback.email,
-            "client_ip": client_ip,
-            "timestamp": feedback.timestamp.isoformat(),
-            "user_agent": user_agent,
-        }
-        
-        # Create feedback directory if doesn't exist
-        settings.feedback_dir.mkdir(parents=True, exist_ok=True)
-        
-        # Save with timestamp + feedback_id
-        timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-        feedback_file = settings.feedback_dir / f"{timestamp}_{feedback_id[:8]}.json"
-        feedback_file.write_text(json.dumps(feedback_data, indent=2))
+    # Determine operation type from which entity ID is set
+    operation_type = None
+    entity_id = None
 
-        logger.info("Feedback saved", extra={"feedback_id": feedback_id})
-
-        # Send notification (Slack/email) - runs in background, won't block response
-        try:
-            await send_feedback_notification(feedback_data)
-        except Exception as e:
-            # Don't fail feedback submission if notification fails
-            logger.warning(f"Notification failed but feedback saved: {e}")
-
-        return FeedbackResponse(
-            success=True,
-            message="Thank you for your feedback! It helps us improve.",
-            feedback_id=feedback_id
+    if feedback.chat_message_id:
+        operation_type = "chat"
+        entity_id = feedback.chat_message_id
+    elif feedback.workflow_run_id:
+        operation_type = "workflow"
+        entity_id = feedback.workflow_run_id
+    elif feedback.template_fill_run_id:
+        operation_type = "template_fill"
+        entity_id = feedback.template_fill_run_id
+    elif feedback.extraction_id:
+        operation_type = "extraction"
+        entity_id = feedback.extraction_id
+    else:
+        raise HTTPException(
+            status_code=400,
+            detail="Exactly one entity reference must be provided"
         )
-        
-    except Exception as e:
-        logger.exception("Failed to save feedback", extra={"error": str(e)})
+
+    repo = FeedbackRepository()
+
+    # Validate entity exists and belongs to user's org
+    entity_valid = repo.validate_entity_access(
+        operation_type=operation_type,
+        entity_id=entity_id,
+        org_id=user.org_id
+    )
+
+    if not entity_valid:
+        raise HTTPException(
+            status_code=404,
+            detail="Entity not found or access denied"
+        )
+
+    # Create feedback
+    feedback_id = repo.create_feedback(
+        org_id=user.org_id,
+        user_id=user.id,
+        operation_type=operation_type,
+        chat_message_id=feedback.chat_message_id,
+        workflow_run_id=feedback.workflow_run_id,
+        template_fill_run_id=feedback.template_fill_run_id,
+        extraction_id=feedback.extraction_id,
+        rating_type=feedback.rating_type.value,
+        rating_value=feedback.rating_value,
+        comment=feedback.comment,
+        feedback_category=feedback.feedback_category.value if feedback.feedback_category else None,
+        tags=feedback.tags,
+        context_snapshot=feedback.context_snapshot,
+        client_ip=get_client_ip(request),
+        user_agent=request.headers.get("User-Agent"),
+    )
+
+    if not feedback_id:
         raise HTTPException(
             status_code=500,
-            detail="Failed to save feedback. Please try again."
+            detail="Failed to save feedback"
         )
+
+    logger.info("Feedback submitted", extra={
+        "feedback_id": feedback_id,
+        "operation_type": operation_type,
+        "rating_value": feedback.rating_value,
+        "org_id": user.org_id,
+    })
+
+    return FeedbackResponse(
+        success=True,
+        message="Thank you for your feedback!",
+        feedback_id=feedback_id
+    )

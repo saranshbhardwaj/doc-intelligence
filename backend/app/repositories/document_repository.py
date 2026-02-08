@@ -21,46 +21,58 @@ class DocumentRepository:
         finally:
             db.close()
 
-    def get_by_hash(self, content_hash: str) -> Optional[Document]:
-        """Get document by content hash (for deduplication)."""
+    def get_by_hash(self, content_hash: str, org_id: str) -> Optional[Document]:
+        """Get document by content hash (for deduplication) within a tenant."""
         with self._get_session() as db:
             try:
                 return db.execute(
-                    select(Document).where(Document.content_hash == content_hash)
+                    select(Document).where(
+                        Document.content_hash == content_hash,
+                        Document.org_id == org_id
+                    )
                 ).scalar_one_or_none()
             except SQLAlchemyError as e:
                 logger.error(
                     "Failed to get document by hash",
-                    extra={"hash": content_hash, "error": str(e)}
+                    extra={"hash": content_hash, "org_id": org_id, "error": str(e)}
                 )
                 return None
 
-    def get_by_id(self, document_id: str) -> Optional[Document]:
-        """Get document by ID."""
+    def get_by_id(self, document_id: str, org_id: Optional[str] = None) -> Optional[Document]:
+        """Get document by ID, optionally scoped to tenant."""
         with self._get_session() as db:
             try:
+                if org_id:
+                    return db.query(Document).filter(
+                        Document.id == document_id,
+                        Document.org_id == org_id
+                    ).first()
                 return db.get(Document, document_id)
             except SQLAlchemyError as e:
                 logger.error(
                     "Failed to get document by ID",
-                    extra={"document_id": document_id, "error": str(e)}
+                    extra={"document_id": document_id, "org_id": org_id, "error": str(e)}
                 )
                 return None
 
     def create_document(
         self,
+        org_id: str,
         user_id: str,
         filename: str,
         file_path: str,
         file_size_bytes: int,
         content_hash: str,
         page_count: int = 0,
-        status: str = "processing"
+        status: str = "processing",
+        document_id: Optional[str] = None
     ) -> Optional[Document]:
         """Create a new canonical document."""
         with self._get_session() as db:
             try:
                 doc = Document(
+                    id=document_id if document_id else None,
+                    org_id=org_id,
                     user_id=user_id,
                     filename=filename,
                     file_path=file_path,
@@ -78,6 +90,7 @@ class DocumentRepository:
                     extra={
                         "document_id": doc.id,
                         "hash": content_hash,
+                        "org_id": org_id,
                         "user_id": user_id
                     }
                 )
@@ -86,15 +99,15 @@ class DocumentRepository:
                 db.rollback()
                 logger.warning(
                     "Duplicate document hash encountered during create",
-                    extra={"hash": content_hash}
+                    extra={"hash": content_hash, "org_id": org_id}
                 )
                 # Return existing document
-                return self.get_by_hash(content_hash)
+                return self.get_by_hash(content_hash, org_id)
             except SQLAlchemyError as e:
                 db.rollback()
                 logger.error(
                     "Failed to create canonical document",
-                    extra={"hash": content_hash, "error": str(e)},
+                    extra={"hash": content_hash, "org_id": org_id, "error": str(e)},
                     exc_info=True
                 )
                 return None
@@ -269,7 +282,7 @@ class DocumentRepository:
                 )
                 return []
 
-    def get_completed_document_ids_for_collection(self, collection_id: str) -> List[str]:
+    def get_completed_document_ids_for_collection(self, collection_id: str, org_id: str) -> List[str]:
         """Get completed document IDs for a collection."""
         with self._get_session() as db:
             try:
@@ -277,17 +290,18 @@ class DocumentRepository:
                     CollectionDocument, Document.id == CollectionDocument.document_id
                 ).filter(
                     CollectionDocument.collection_id == collection_id,
-                    Document.status == "completed"
+                    Document.status == "completed",
+                    Document.org_id == org_id
                 ).all()
                 return [r[0] for r in result]
             except SQLAlchemyError as e:
                 logger.error(
                     "Failed to list documents for collection",
-                    extra={"collection_id": collection_id, "error": str(e)}
+                    extra={"collection_id": collection_id, "org_id": org_id, "error": str(e)}
                 )
                 return []
 
-    def get_document_ids_with_embeddings(self, document_ids: List[str]) -> List[str]:
+    def get_document_ids_with_embeddings(self, document_ids: List[str], org_id: str) -> List[str]:
         """Return document IDs that have at least one embedding."""
         if not document_ids:
             return []
@@ -297,33 +311,36 @@ class DocumentRepository:
                     DocumentChunk, Document.id == DocumentChunk.document_id
                 ).filter(
                     Document.id.in_(document_ids),
+                    Document.org_id == org_id,
                     DocumentChunk.embedding.isnot(None)
                 ).distinct().all()
                 return [r[0] for r in docs_with_embeddings]
             except SQLAlchemyError as e:
                 logger.error(
                     "Failed to list documents with embeddings",
-                    extra={"document_ids_count": len(document_ids), "error": str(e)}
+                    extra={"document_ids_count": len(document_ids), "org_id": org_id, "error": str(e)}
                 )
                 return []
 
-    def get_doc_info_by_ids(self, document_ids: List[str]) -> List[Dict[str, str]]:
+    def get_doc_info_by_ids(self, document_ids: List[str], org_id: Optional[str] = None) -> List[Dict[str, str]]:
         """Return minimal document info for a list of IDs."""
         if not document_ids:
             return []
         with self._get_session() as db:
             try:
                 stmt = select(Document.id, Document.filename).where(Document.id.in_(document_ids))
+                if org_id:
+                    stmt = stmt.where(Document.org_id == org_id)
                 result = db.execute(stmt).all()
                 return [{"id": str(row.id), "filename": row.filename} for row in result]
             except SQLAlchemyError as e:
                 logger.error(
                     "Failed to load document info",
-                    extra={"document_ids_count": len(document_ids), "error": str(e)}
+                    extra={"document_ids_count": len(document_ids), "org_id": org_id, "error": str(e)}
                 )
                 return []
 
-    def get_doc_metadata_by_ids(self, document_ids: List[str]) -> List[Dict[str, Optional[str]]]:
+    def get_doc_metadata_by_ids(self, document_ids: List[str], org_id: Optional[str] = None) -> List[Dict[str, Optional[str]]]:
         """Return document metadata for a list of IDs."""
         if not document_ids:
             return []
@@ -335,6 +352,8 @@ class DocumentRepository:
                     Document.page_count,
                     Document.file_size_bytes
                 ).where(Document.id.in_(document_ids))
+                if org_id:
+                    stmt = stmt.where(Document.org_id == org_id)
                 result = db.execute(stmt).all()
                 return [
                     {
@@ -355,6 +374,7 @@ class DocumentRepository:
     def list_available_documents_for_user(
         self,
         user_id: str,
+        org_id: str,
         collection_id: Optional[str] = None,
     ) -> List[Dict]:
         """List completed documents available for workflows with chunk/embedding counts."""
@@ -376,6 +396,7 @@ class DocumentRepository:
                     DocumentChunk, Document.id == DocumentChunk.document_id
                 ).filter(
                     Collection.user_id == user_id,
+                    Collection.org_id == org_id,
                     Document.status == "completed",
                 )
 
@@ -406,11 +427,11 @@ class DocumentRepository:
             except SQLAlchemyError as e:
                 logger.error(
                     "Failed to list available documents",
-                    extra={"user_id": user_id, "collection_id": collection_id, "error": str(e)}
+                    extra={"user_id": user_id, "org_id": org_id, "collection_id": collection_id, "error": str(e)}
                 )
                 return []
 
-    def get_document_usage(self, document_id: str, user_id: str) -> Optional[Dict]:
+    def get_document_usage(self, document_id: str, user_id: str, org_id: str) -> Optional[Dict]:
         """
         Get usage statistics for a document across all modes.
 
@@ -449,18 +470,21 @@ class DocumentRepository:
         with self._get_session() as db:
             try:
                 # Verify document exists and user owns it
-                document = db.get(Document, document_id)
+                document = db.query(Document).filter(
+                    Document.id == document_id,
+                    Document.org_id == org_id
+                ).first()
                 if not document:
                     logger.warning(
                         "Document not found for usage query",
-                        extra={"document_id": document_id, "user_id": user_id}
+                        extra={"document_id": document_id, "user_id": user_id, "org_id": org_id}
                     )
                     return None
 
                 if document.user_id != user_id:
                     logger.warning(
                         "User does not own document",
-                        extra={"document_id": document_id, "user_id": user_id}
+                        extra={"document_id": document_id, "user_id": user_id, "org_id": org_id}
                     )
                     return None
 
@@ -470,7 +494,8 @@ class DocumentRepository:
                     SessionDocument.session_id == ChatSession.id
                 ).filter(
                     SessionDocument.document_id == document_id,
-                    ChatSession.user_id == user_id
+                    ChatSession.user_id == user_id,
+                    ChatSession.org_id == org_id
                 ).all()
 
                 chat_sessions_list = [
@@ -485,7 +510,8 @@ class DocumentRepository:
                 # Query extractions using this document
                 extracts = db.query(Extraction).filter(
                     Extraction.document_id == document_id,
-                    Extraction.user_id == user_id
+                    Extraction.user_id == user_id,
+                    Extraction.org_id == org_id
                 ).all()
 
                 extracts_list = [
@@ -500,7 +526,8 @@ class DocumentRepository:
                 # Query workflow runs using this document
                 workflows = db.query(WorkflowRun).filter(
                     WorkflowRun.document_ids.contains([document_id]),
-                    WorkflowRun.user_id == user_id
+                    WorkflowRun.user_id == user_id,
+                    WorkflowRun.org_id == org_id
                 ).all()
 
                 workflows_list = []

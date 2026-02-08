@@ -154,6 +154,168 @@ class ChatLLMService:
             )
             return summary_text
 
+    async def extract_key_facts(self, messages: List[Dict]) -> List[str]:
+        """
+        Extract key facts from conversation messages that should never be lost.
+
+        Important facts include:
+        - Named entities (companies, people, documents, products)
+        - Numeric values (revenue, dates, percentages, metrics)
+        - Decisions made or conclusions reached
+        - User preferences or requirements expressed
+
+        Args:
+            messages: List of message dicts with "role" and "content" keys
+
+        Returns:
+            List of key fact strings (max 10 items)
+        """
+        if not messages:
+            return []
+
+        # Format conversation for fact extraction
+        joined = "\n".join([
+            f"{m['role'].title()}: {m['content']}"
+            for m in messages
+        ])
+
+        # Build fact extraction prompt
+        prompt = (
+            "Extract key facts from this conversation that must be preserved:\n"
+            "- Named entities (companies, people, documents)\n"
+            "- Numeric values (revenue, dates, percentages)\n"
+            "- Decisions made or conclusions reached\n"
+            "- User preferences expressed\n\n"
+            "Return as a bullet list with ONE fact per line. Max 10 items. "
+            "Use format: - <fact>\n\n"
+            f"Conversation:\n{joined}\n\n"
+            "Key Facts:"
+        )
+
+        logger.info(
+            f"Extracting key facts from {len(messages)} messages",
+            extra={"message_count": len(messages)}
+        )
+
+        try:
+            # Stream key facts from LLM
+            facts_text = ""
+            async for chunk in self.llm_client.stream_chat(prompt):
+                facts_text += chunk
+
+            # Parse bullet points into list
+            facts_text = facts_text.strip()
+            facts = []
+            for line in facts_text.split("\n"):
+                line = line.strip()
+                # Remove bullet markers (-, *, •, etc.)
+                if line.startswith(("- ", "* ", "• ", "· ")):
+                    fact = line[2:].strip()
+                    if fact:
+                        facts.append(fact)
+
+            # Limit to 10 facts
+            facts = facts[:10]
+
+            logger.info(
+                f"Extracted {len(facts)} key facts",
+                extra={"fact_count": len(facts)}
+            )
+            return facts
+
+        except Exception as e:
+            logger.warning(
+                f"Key fact extraction failed: {e}",
+                extra={"error": str(e)}
+            )
+            return []
+
+    async def progressive_summarize(
+        self,
+        previous_summary: str,
+        new_messages: List[Dict],
+        key_facts: List[str]
+    ) -> str:
+        """
+        Build on existing summary with new messages (progressive/rolling summarization).
+
+        Instead of re-summarizing all history, this updates the previous summary
+        with new information, preventing "summary of summary" degradation.
+
+        Args:
+            previous_summary: The existing summary text
+            new_messages: List of new message dicts since last summary
+            key_facts: List of key facts to preserve
+
+        Returns:
+            Updated summary text
+        """
+        if not new_messages:
+            return previous_summary
+
+        # Format new messages
+        joined_new = "\n".join([
+            f"{m['role'].title()}: {m['content']}"
+            for m in new_messages
+        ])
+
+        # Format key facts
+        facts_section = ""
+        if key_facts:
+            facts_section = "\n\nKEY FACTS TO PRESERVE:\n" + "\n".join([f"- {fact}" for fact in key_facts])
+
+        # Build progressive summarization prompt
+        prompt = (
+            "You are updating a conversation summary with new messages.\n\n"
+            f"PREVIOUS SUMMARY:\n{previous_summary}\n"
+            f"{facts_section}\n\n"
+            f"NEW MESSAGES:\n{joined_new}\n\n"
+            "Create an updated summary that:\n"
+            "1. Preserves important context from the previous summary\n"
+            "2. Integrates new information from recent messages\n"
+            "3. Removes redundant or superseded information\n"
+            "4. Stays under 2000 characters\n"
+            "5. Preserves all key facts listed above\n\n"
+            "Updated Summary:"
+        )
+
+        logger.info(
+            f"Progressive summarization: {len(new_messages)} new messages",
+            extra={
+                "new_message_count": len(new_messages),
+                "previous_summary_length": len(previous_summary),
+                "key_facts_count": len(key_facts)
+            }
+        )
+
+        try:
+            # Stream updated summary from LLM
+            updated_summary = ""
+            async for chunk in self.llm_client.stream_chat(prompt):
+                updated_summary += chunk
+
+            updated_summary = updated_summary.strip()
+
+            if not updated_summary:
+                logger.warning("Progressive summarization returned empty, using previous summary")
+                return previous_summary
+
+            logger.info(
+                f"Summary updated: {len(previous_summary)} → {len(updated_summary)} chars",
+                extra={
+                    "previous_length": len(previous_summary),
+                    "updated_length": len(updated_summary)
+                }
+            )
+            return updated_summary
+
+        except Exception as e:
+            logger.warning(
+                f"Progressive summarization failed, using previous summary: {e}",
+                extra={"error": str(e)}
+            )
+            return previous_summary
+
     def _heuristic_summarize(self, messages: List[Dict]) -> str:
         """
         Fallback heuristic summarization when LLM fails.

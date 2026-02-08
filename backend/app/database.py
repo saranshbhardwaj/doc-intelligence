@@ -3,6 +3,7 @@
 from sqlalchemy import create_engine, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
+from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
 from app.utils.logging import logger
 from app.config import settings
 
@@ -27,6 +28,22 @@ engine = create_engine(DATABASE_URL, connect_args=connect_args)
 # Create session factory
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 
+# Create async engine and session factory for async operations
+# Convert sync DATABASE_URL to async (postgresql -> postgresql+asyncpg, sqlite -> sqlite+aiosqlite)
+if DATABASE_URL.startswith("postgresql"):
+    ASYNC_DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://")
+elif DATABASE_URL.startswith("sqlite"):
+    ASYNC_DATABASE_URL = DATABASE_URL.replace("sqlite:///", "sqlite+aiosqlite:///")
+else:
+    ASYNC_DATABASE_URL = DATABASE_URL
+
+async_engine = create_async_engine(ASYNC_DATABASE_URL, echo=False)
+AsyncSessionLocal = async_sessionmaker(
+    async_engine,
+    class_=AsyncSession,
+    expire_on_commit=False
+)
+
 # Base class for models
 Base = declarative_base()
 
@@ -38,6 +55,12 @@ def get_db():
         yield db
     finally:
         db.close()
+
+
+async def get_async_session():
+    """Async generator to get async database session"""
+    async with AsyncSessionLocal() as session:
+        yield session
 
 
 def init_db():

@@ -50,6 +50,18 @@ const initialChatState = {
     selectedPairIndex: null,
     viewMode: "cards",
     expandedTopics: [],
+    // Document selection state (for picker)
+    selectionNeeded: false,
+    selectionDocuments: [],
+    selectionPreSelected: [],
+    selectionQuery: "",
+    selectionMessage: "",
+  },
+
+  // Citation context for resolving references in general chat
+  citationContext: {
+    citations: [],    // [{ref, chunk_id, document_id, filename, page, section, bbox}, ...]
+    document_map: {}, // {doc_id: filename}
   },
 
   // Multi-document PDF viewer state

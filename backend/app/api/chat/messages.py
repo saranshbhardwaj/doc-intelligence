@@ -8,7 +8,7 @@ Session-centric architecture:
 """
 
 from typing import Optional
-from fastapi import APIRouter, Form, HTTPException, Depends
+from fastapi import APIRouter, Form, HTTPException, Depends, Body
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
@@ -20,6 +20,7 @@ from app.repositories.session_repository import SessionRepository
 from app.repositories.rag_repository import RAGRepository
 from app.utils.logging import logger
 from app.services.service_locator import get_reranker
+from app.api.chat.schemas import ComparisonConfirmRequest
 
 router = APIRouter()
 
@@ -85,7 +86,7 @@ async def chat_with_session(
     rag_repo = RAGRepository(db)
 
     # Verify session exists and belongs to user (with documents eagerly loaded)
-    session = session_repo.get_session(session_id, user.id)
+    session = session_repo.get_session(session_id, user.id, user.org_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
@@ -150,16 +151,36 @@ async def chat_with_session(
         logger.info(f"[Chat SSE] Sending thinking event", extra={"session_id": session_id})
         yield f"event: thinking\ndata: {json.dumps({'message': 'Analyzing documents...'})}\n\n"
 
+        # Check session length and send warning if needed
+        from app.repositories.chat_repository import ChatRepository
+        from app.config import settings
+        chat_repo = ChatRepository()
+        user_message_count = chat_repo.get_user_message_count(session_id)
+
+        if user_message_count >= settings.chat_max_turns_before_warning:
+            logger.info(
+                f"[Chat SSE] Sending session warning: {user_message_count} user messages",
+                extra={"session_id": session_id, "user_message_count": user_message_count}
+            )
+            warning_data = {
+                "long_conversation": True,
+                "message_count": user_message_count,
+                "recommendation": "Consider starting a new session for best results"
+            }
+            yield f"event: session_warning\ndata: {json.dumps(warning_data)}\n\n"
+
         # Stream response chunks from RAG
         try:
             chunk_count = 0
             comparison_context_sent = False
+            citation_context_sent = False
 
             async for chunk in rag_service.chat(
                 session_id=session_id,
                 collection_id=None,  # Sessions are independent of collections
                 user_message=message,
                 user_id=user.id,
+                org_id=user.org_id,
                 num_chunks=num_chunks,
                 document_ids=document_ids  # Use session's documents
             ):
@@ -168,6 +189,19 @@ async def chat_with_session(
                     logger.info(f"[Chat SSE] Sending comparison context", extra={"session_id": session_id})
                     yield f"event: comparison_context\ndata: {json.dumps(rag_service.last_comparison_context)}\n\n"
                     comparison_context_sent = True
+                    # Don't clear yet - needed for message saving after streaming completes
+
+                # Send citation context before first chunk (if available)
+                if not citation_context_sent and rag_service.last_citation_context:
+                    logger.info(
+                        f"[Chat SSE] Sending citation context",
+                        extra={
+                            "session_id": session_id,
+                            "citation_count": len(rag_service.last_citation_context.get("citations", []))
+                        }
+                    )
+                    yield f"event: citation_context\ndata: {json.dumps(rag_service.last_citation_context)}\n\n"
+                    citation_context_sent = True
                     # Don't clear yet - needed for message saving after streaming completes
 
                 chunk_count += 1
@@ -191,6 +225,183 @@ async def chat_with_session(
 
         logger.info(
             f"[Chat SSE] ★★★ Event stream ended for session {session_id}",
+            extra={"session_id": session_id}
+        )
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+            "X-Accel-Buffering": "no",
+        }
+    )
+
+
+@router.post("/sessions/{session_id}/chat/comparison")
+async def confirm_comparison_selection(
+    session_id: str,
+    request: ComparisonConfirmRequest = Body(...),
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db)
+):
+    """
+    Confirm comparison with selected documents or skip to normal RAG.
+
+    Called after user selects documents in the comparison picker UI or clicks "Not comparing".
+
+    Flow:
+    - If skip_comparison=True: Route to normal RAG with all session documents
+    - If skip_comparison=False: Route to comparison with selected document_ids
+
+    Args:
+        session_id: Session ID (UUID format)
+        request: Comparison confirmation request with document_ids, original_query, skip_comparison
+        user: Current user
+        db: Database session (for RAGService)
+
+    Returns:
+        SSE stream with chat response
+
+    Raises:
+        HTTPException 400: Invalid input (empty query, <2 documents selected when comparing)
+        HTTPException 404: Session not found or access denied
+    """
+    # Validate original query
+    if not request.original_query or not request.original_query.strip():
+        raise HTTPException(status_code=400, detail="Original query cannot be empty")
+
+    original_query = request.original_query.strip()
+
+    # Validate document selection for comparison
+    if not request.skip_comparison:
+        if len(request.document_ids) < 2:
+            raise HTTPException(
+                status_code=400,
+                detail="At least 2 documents required for comparison"
+            )
+        if len(request.document_ids) > 3:
+            raise HTTPException(
+                status_code=400,
+                detail="Maximum 3 documents allowed for comparison"
+            )
+
+    # Use repositories
+    session_repo = SessionRepository()
+    rag_repo = RAGRepository(db)
+
+    # Verify session exists and belongs to user
+    session = session_repo.get_session(session_id, user.id, user.org_id)
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    # Extract all document IDs from session
+    all_document_ids = [link.document_id for link in session.document_links]
+
+    # Determine which documents to use
+    if request.skip_comparison:
+        # User clicked "Not comparing" - use all session documents with normal RAG
+        document_ids = all_document_ids
+        force_comparison = False
+        logger.info(
+            "User chose to skip comparison, using normal RAG",
+            extra={
+                "session_id": session_id,
+                "user_id": user.id,
+                "document_count": len(document_ids)
+            }
+        )
+    else:
+        # User selected specific documents for comparison
+        document_ids = request.document_ids
+        force_comparison = True
+
+        # Validate selected documents belong to session
+        invalid_docs = set(document_ids) - set(all_document_ids)
+        if invalid_docs:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Selected documents do not belong to session: {invalid_docs}"
+            )
+
+        logger.info(
+            "User confirmed comparison with selected documents",
+            extra={
+                "session_id": session_id,
+                "user_id": user.id,
+                "selected_document_count": len(document_ids)
+            }
+        )
+
+    # Validate documents are indexed
+    chunk_count = rag_repo.count_chunks_for_documents(document_ids)
+    if chunk_count == 0:
+        raise HTTPException(
+            status_code=400,
+            detail="Selected documents haven't been indexed yet"
+        )
+
+    # Initialize RAG service
+    reranker = get_reranker()
+    rag_service = RAGService(db, reranker=reranker)
+
+    # Stream chat response
+    async def event_generator():
+        """Stream chat response chunks as SSE events"""
+        import json
+
+        logger.info(
+            f"[Comparison Confirm SSE] Starting event stream",
+            extra={"session_id": session_id, "force_comparison": force_comparison}
+        )
+
+        # Send session_id first
+        yield f"event: session\ndata: {json.dumps({'session_id': session_id})}\n\n"
+
+        # Send thinking event
+        yield f"event: thinking\ndata: {json.dumps({'message': 'Processing your request...'})}\n\n"
+
+        # Stream response from RAG with force_comparison flag
+        try:
+            chunk_count = 0
+            comparison_context_sent = False
+
+            async for chunk in rag_service.chat(
+                session_id=session_id,
+                collection_id=None,
+                user_message=original_query,
+                user_id=user.id,
+                num_chunks=5,
+                document_ids=document_ids,
+                force_comparison=force_comparison  # Force comparison mode on/off
+            ):
+                # Send comparison context before first chunk (if comparison mode)
+                if not comparison_context_sent and rag_service.last_comparison_context:
+                    logger.info(f"[Comparison Confirm SSE] Sending comparison context")
+                    yield f"event: comparison_context\ndata: {json.dumps(rag_service.last_comparison_context)}\n\n"
+                    comparison_context_sent = True
+
+                chunk_count += 1
+                yield f"event: chunk\ndata: {json.dumps({'chunk': chunk})}\n\n"
+
+            # Send completion event
+            logger.info(
+                f"[Comparison Confirm SSE] Completed (streamed {chunk_count} chunks)",
+                extra={"session_id": session_id, "chunk_count": chunk_count}
+            )
+            yield f"event: done\ndata: {json.dumps({'status': 'completed'})}\n\n"
+
+        except Exception as e:
+            logger.error(
+                f"[Comparison Confirm SSE] Streaming error: {e}",
+                exc_info=True,
+                extra={"session_id": session_id}
+            )
+            yield f"event: error\ndata: {json.dumps({'error': str(e)})}\n\n"
+
+        logger.info(
+            f"[Comparison Confirm SSE] Event stream ended",
             extra={"session_id": session_id}
         )
 

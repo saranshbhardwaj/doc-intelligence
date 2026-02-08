@@ -58,12 +58,14 @@ class WorkflowRun(Base):
     __table_args__ = (
         Index("idx_workflow_runs_workflow_id", "workflow_id"),
         Index("idx_workflow_runs_user_id", "user_id"),
+        Index("idx_workflow_runs_org_id", "org_id"),
         Index("idx_workflow_runs_collection_id", "collection_id"),
     )
 
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     # SET NULL on delete - preserve run history even if workflow template is deleted
     workflow_id = Column(String(36), ForeignKey("workflows.id", ondelete="SET NULL"), nullable=True)
+    org_id = Column(String(64), nullable=False, index=True)  # Clerk org ID (tenant)
     user_id = Column(String(100), nullable=False)
     collection_id = Column(String(36), ForeignKey("collections.id", ondelete="SET NULL"), nullable=True)
 
@@ -97,6 +99,13 @@ class WorkflowRun(Base):
     validation_errors = Column(JSONB, nullable=True)  # List of validation errors
     context_stats = Column(JSONB, nullable=True)  # Retrieval stats
     section_summaries = Column(JSONB, nullable=True)  # Map-reduce section summaries with citations
+
+    # Granular token tracking for observability
+    input_tokens = Column(Integer, nullable=True)
+    output_tokens = Column(Integer, nullable=True)
+    cache_read_tokens = Column(Integer, nullable=True)
+    cache_write_tokens = Column(Integer, nullable=True)
+    model_name = Column(String(100), nullable=True)
 
     version = Column(Integer, nullable=False, default=1)
 

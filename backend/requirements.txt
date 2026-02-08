@@ -3,7 +3,7 @@ uvicorn[standard]==0.24.0
 python-multipart==0.0.6
 sse-starlette==3.0.3
 clerk-backend-api==3.3.1
-anthropic>=0.42.0
+anthropic>=0.77.0
 PyPDF2==3.0.1
 python-dotenv==1.0.0
 pydantic>=2.11.2
@@ -41,6 +41,7 @@ pandas==2.2.3
 xlsxwriter==3.1.2
 openpyxl==3.1.5  # Excel template reading/writing with formula preservation
 prometheus-client==0.18.0
+prometheus-fastapi-instrumentator>=7.1.0
 boto3==1.35.54
 pytz==2024.2
 debugpy==1.8.19  # For VS Code debugging

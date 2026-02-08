@@ -10,6 +10,7 @@ class User(Base):
     __tablename__ = "users"
 
     id = Column(String(36), primary_key=True)  # Clerk user ID
+    org_id = Column(String(64), nullable=False, index=True)  # Clerk org ID (tenant)
     email = Column(String(255), unique=True, nullable=False, index=True)
     tier = Column(String(20), default="free")  # free, standard, pro, admin
     vertical = Column(String(50), default="private_equity", nullable=False, index=True)  # Vertical/domain
@@ -37,6 +38,7 @@ class UsageLog(Base):
 
     id = Column(String(36), primary_key=True)
     user_id = Column(String(36), ForeignKey("users.id"), nullable=False, index=True)
+    org_id = Column(String(64), nullable=False, index=True)
     extraction_id = Column(String(36), ForeignKey("extractions.id", ondelete="SET NULL"), nullable=True)
     
     filename = Column(String(255), nullable=True)

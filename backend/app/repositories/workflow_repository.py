@@ -80,7 +80,7 @@ class WorkflowRepository:
         self.db.commit()
         return True
     # ---- Workflow Runs ----
-    def create_run(self, workflow: Workflow, user_id: str, collection_id: str | None,
+    def create_run(self, workflow: Workflow, user_id: str, org_id: str, collection_id: str | None,
                    document_ids: List[str], variables: dict, mode: str, strategy: str) -> WorkflowRun:
         # Create snapshot of workflow at execution time to preserve context
         workflow_snapshot = {
@@ -93,6 +93,7 @@ class WorkflowRepository:
         run = WorkflowRun(
             id=generate_id(),
             workflow_id=workflow.id,
+            org_id=org_id,
             user_id=user_id,
             collection_id=collection_id,
             document_ids=document_ids,  # JSON column auto-serializes
@@ -113,7 +114,10 @@ class WorkflowRepository:
                           cost_usd: float | None = None, latency_ms: int | None = None, currency: str | None = None,
                           citations_count: int | None = None, citation_invalid_count: int | None = None,
                           attempts: int | None = None, validation_errors_json: str | None = None,
-                          context_stats_json: dict | None = None):
+                          context_stats_json: dict | None = None,
+                          input_tokens: int | None = None, output_tokens: int | None = None,
+                          cache_read_tokens: int | None = None, cache_write_tokens: int | None = None,
+                          model_name: str | None = None):
         run = self.db.get(WorkflowRun, run_id)
         if not run:
             return False
@@ -142,6 +146,17 @@ class WorkflowRepository:
             run.validation_errors = json.loads(validation_errors_json) if isinstance(validation_errors_json, str) else validation_errors_json
         if context_stats_json is not None:
             run.context_stats = context_stats_json  # JSON column auto-serializes
+        # Granular token tracking for observability
+        if input_tokens is not None:
+            run.input_tokens = input_tokens
+        if output_tokens is not None:
+            run.output_tokens = output_tokens
+        if cache_read_tokens is not None:
+            run.cache_read_tokens = cache_read_tokens
+        if cache_write_tokens is not None:
+            run.cache_write_tokens = cache_write_tokens
+        if model_name is not None:
+            run.model_name = model_name
         if status == "running" and run.started_at is None:
             from datetime import datetime
             run.started_at = datetime.utcnow()
@@ -181,7 +196,7 @@ class WorkflowRepository:
         self.db.commit()
         return True
 
-    def list_runs_for_user(self, user_id: str, limit: int = 50, offset: int = 0) -> List[WorkflowRun]:
+    def list_runs_for_user(self, user_id: str, org_id: str, limit: int = 50, offset: int = 0) -> List[WorkflowRun]:
         """List workflow runs for a user with pagination.
 
         Args:
@@ -197,7 +212,7 @@ class WorkflowRepository:
 
         stmt = (
             select(WorkflowRun)
-            .where(WorkflowRun.user_id == user_id)
+            .where(WorkflowRun.user_id == user_id, WorkflowRun.org_id == org_id)
             .order_by(WorkflowRun.created_at.desc())
             .offset(offset)
             .limit(limit)

@@ -29,6 +29,7 @@ class ExcelTemplate(Base):
     id = Column(String(36), primary_key=True)
 
     # Ownership
+    org_id = Column(String(64), nullable=False, index=True)  # Clerk org ID (tenant)
     user_id = Column(String(100), nullable=False, index=True)
 
     # Template metadata
@@ -94,6 +95,7 @@ class TemplateFillRun(Base):
     # Foreign keys
     template_id = Column(String(36), ForeignKey("excel_templates.id", ondelete="SET NULL"))
     document_id = Column(String(36), ForeignKey("documents.id", ondelete="SET NULL"))
+    org_id = Column(String(64), nullable=False, index=True)  # Clerk org ID (tenant)
     user_id = Column(String(100), nullable=False, index=True)
 
     # Template snapshot (preserve context if template is deleted)
@@ -167,6 +169,15 @@ class TemplateFillRun(Base):
     # Cost tracking
     cost_usd = Column(Float, default=0.0)
     processing_time_ms = Column(Integer)
+
+    # Granular token tracking for observability
+    input_tokens = Column(Integer, nullable=True)
+    output_tokens = Column(Integer, nullable=True)
+    cache_read_tokens = Column(Integer, nullable=True)
+    cache_write_tokens = Column(Integer, nullable=True)
+    model_name = Column(String(100), nullable=True)
+    llm_batches_count = Column(Integer, nullable=True)  # Number of LLM batches for field mapping
+    cache_hit_rate = Column(Float, nullable=True)  # Percentage of cache hits (0.0-1.0)
 
     # Error handling
     error_stage = Column(String(50))
