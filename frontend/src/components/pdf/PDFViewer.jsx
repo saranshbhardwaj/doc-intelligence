@@ -68,18 +68,41 @@ export default function PDFViewer({
     setError(null);
   }, [pdfUrl]);
 
-  // Measure container width for responsive sizing
+  // Measure container width for responsive sizing using ResizeObserver
   useEffect(() => {
     const updateWidth = () => {
       if (containerRef.current) {
         // Use 90% of container width for padding
-        setContainerWidth(containerRef.current.offsetWidth * 0.9);
+        const width = containerRef.current.offsetWidth * 0.9;
+        console.log('[PDFViewer] Container width measured:', width, 'offsetWidth:', containerRef.current.offsetWidth);
+        setContainerWidth(width);
       }
     };
 
-    updateWidth();
+    // Initial measurement with slight delay to ensure container is rendered
+    const initialTimer = setTimeout(updateWidth, 50);
+
+    // Use ResizeObserver for responsive updates
+    const resizeObserver = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const width = entry.contentRect.width * 0.9;
+        console.log('[PDFViewer] ResizeObserver triggered, width:', width);
+        setContainerWidth(width);
+      }
+    });
+
+    if (containerRef.current) {
+      resizeObserver.observe(containerRef.current);
+    }
+
+    // Fallback for window resize
     window.addEventListener('resize', updateWidth);
-    return () => window.removeEventListener('resize', updateWidth);
+
+    return () => {
+      clearTimeout(initialTimer);
+      resizeObserver.disconnect();
+      window.removeEventListener('resize', updateWidth);
+    };
   }, []);
 
   // Lazy load more pages as user scrolls
@@ -233,13 +256,15 @@ export default function PDFViewer({
             }
           >
             {/* Render multiple pages */}
-            {numPages && Array.from(new Array(Math.min(loadedPages, numPages)), (el, index) => {
+            {numPages && Array.from(new Array(Math.min(loadedPages, numPages)), (_, index) => {
               const currentPage = index + 1;
+              const pageWidth = containerWidth ? containerWidth * scale : undefined;
+              console.log('[PDFViewer] Rendering page', currentPage, 'with width:', pageWidth, '(containerWidth:', containerWidth, 'scale:', scale, ')');
               return (
                 <div key={`page_${currentPage}`} data-page-number={currentPage} className="mb-4 relative">
                   <Page
                     pageNumber={currentPage}
-                    width={containerWidth ? containerWidth * scale : undefined}
+                    width={pageWidth}
                     renderTextLayer={true}
                     renderAnnotationLayer={true}
                     onMouseUp={handleTextSelection}
