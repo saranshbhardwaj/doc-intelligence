@@ -45,7 +45,6 @@ from app.verticals.private_equity.workflows.normalization import normalize_workf
 from app.utils.metrics import (
     WORKFLOW_RUNS_COMPLETED,
     WORKFLOW_RUNS_FAILED,
-    WORKFLOW_RUNS_PARTIAL,
     WORKFLOW_LATENCY_SECONDS,
 )
 from app.utils.file_utils import save_raw_llm_response
@@ -175,7 +174,7 @@ def prepare_context_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
             # ≤ 20K tokens → Direct execution (single LLM call with all sections)
             # > 20K tokens → Map-reduce execution (section summaries → synthesis)
             # use_map_reduce = True
-            use_map_reduce = total_tokens > 10000
+            use_map_reduce = total_tokens > settings.workflow_map_reduce_token_threshold
 
             logger.info(
                 f"Token budget: {total_tokens} tokens, execution_mode={'map_reduce' if use_map_reduce else 'direct'}",
@@ -258,10 +257,12 @@ def prepare_context_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                             "id": citation_token,
                             "token": citation_token,
                             "document": chunk_metadata.get("document_filename") or chunk.get("document_id", "Unknown"),
+                            "document_id": chunk.get("document_id"),
                             "page": chunk.get("page_number"),
                             "section": chunk_metadata.get("section_heading") or chunk.get("section_heading"),
                             "snippet": chunk_metadata.get("first_sentence") or (chunk.get("text", "")[:200] + "..." if len(chunk.get("text", "")) > 200 else chunk.get("text", "")),
                             "heading_hierarchy": chunk_metadata.get("heading_hierarchy", []),
+                            "bbox": chunk_metadata.get("bbox"),
                             "url": f"/api/documents/{chunk.get('document_id')}/download" if chunk.get('document_id') else None,
                         }
 
@@ -377,6 +378,16 @@ def generate_artifact_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                 f"Could not determine workflow name for run {run_id}",
                 extra={"run_id": run_id, "workflow_id": run.workflow_id}
             )
+
+        logger.info(
+            "METRICS_DEBUG: workflow_name resolved",
+            extra={
+                "run_id": run_id,
+                "workflow_name": workflow_name,
+                "snapshot_name": run.workflow_snapshot.get("name") if run.workflow_snapshot else None,
+                "workflow_obj_name": workflow.name if workflow else None,
+            }
+        )
 
         # record latency for the generation phase with workflow name label
         timer = WORKFLOW_LATENCY_SECONDS.labels(workflow_name=workflow_name).time()
@@ -512,7 +523,8 @@ def generate_artifact_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                         workflow_template=workflow,
                         variables=variables,
                         custom_prompt=custom_prompt,
-                        db=db
+                        db=db,
+                        job_id=job_id
                     )
                 )
 
@@ -674,7 +686,6 @@ def generate_artifact_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
 
             # Record workflow failure metric
             WORKFLOW_RUNS_FAILED.labels(
-                org_id=run.org_id or "unknown",
                 workflow_name=workflow_name or "unknown"
             ).inc()
 
@@ -783,8 +794,11 @@ def generate_artifact_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
             model_name=llm_model_name
         )
         # Record workflow completion with proper labels
+        logger.info(
+            "METRICS_DEBUG: incrementing WORKFLOW_RUNS_COMPLETED",
+            extra={"run_id": run_id, "workflow_name_label": workflow_name or "unknown"}
+        )
         WORKFLOW_RUNS_COMPLETED.labels(
-            org_id=run.org_id or "unknown",
             workflow_name=workflow_name or "unknown"
         ).inc()
         # stop timer
@@ -797,8 +811,11 @@ def generate_artifact_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         return {"status": "completed", "run_id": run_id, "job_id": job_id}
     except Exception as e:
         # Record workflow failure metric
+        logger.info(
+            "METRICS_DEBUG: incrementing WORKFLOW_RUNS_FAILED",
+            extra={"run_id": run_id, "workflow_name_label": workflow_name or "unknown"}
+        )
         WORKFLOW_RUNS_FAILED.labels(
-            org_id=run.org_id or "unknown",
             workflow_name=workflow_name or "unknown"
         ).inc()
 
@@ -829,6 +846,6 @@ def start_workflow_chain(run_id: str, job_id: str | None, custom_prompt: str | N
         prepare_context_task.s(payload),
         generate_artifact_task.s(),
     )
-    result = task_chain.apply_async()
-    logger.info("Workflow chain started", extra={"run_id": run_id, "task_id": result.id, "custom_prompt_provided": bool(custom_prompt)})
+    result = task_chain.apply_async(queue='critical')
+    logger.info("Workflow chain started", extra={"run_id": run_id, "task_id": result.id, "custom_prompt_provided": bool(custom_prompt), "queue": "critical"})
     return result.id

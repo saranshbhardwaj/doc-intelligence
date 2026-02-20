@@ -17,7 +17,8 @@ export const createChatPdfActions = (set, get) => ({
       },
     }));
 
-    if (docId) {
+    // Only fetch document URL if it's a different document than what's already active
+    if (docId && docId !== get().chat.pdfViewer.activeDocumentId) {
       await get().setActivePdfDocument(docId, getToken);
     }
   },

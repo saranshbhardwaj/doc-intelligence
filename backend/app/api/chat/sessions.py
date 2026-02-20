@@ -430,7 +430,6 @@ async def get_chat_history(
     # Use repositories
     session_repo = SessionRepository()
     chat_repo = ChatRepository()
-
     # Verify session access
     session = session_repo.get_session(session_id, user.id, user.org_id)
     if not session:
@@ -454,6 +453,7 @@ async def get_chat_history(
         "session_id": session.id,
         "messages": [
             {
+                "id": msg.id,
                 "role": msg.role,
                 "content": msg.content,
                 "message_index": msg.message_index,

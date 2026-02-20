@@ -54,7 +54,19 @@ export default function FileUploader({ onResult, onError }) {
 
   const validate = (f) => {
     if (!f) return "No file selected";
-    if (f.type !== "application/pdf") return "Please select a PDF file";
+
+    // Check file type (MIME type + extension fallback)
+    const allowedTypes = new Set([
+      "application/pdf",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    ]);
+    const ext = f.name.toLowerCase().split('.').pop();
+    const allowedExts = ["pdf", "docx"];
+
+    if (!allowedTypes.has(f.type) && !allowedExts.includes(ext)) {
+      return "Please select a PDF or DOCX file";
+    }
+
     if (f.size > 5 * 1024 * 1024) return "File too large. Maximum size is 5MB.";
     return null;
   };
@@ -120,7 +132,7 @@ export default function FileUploader({ onResult, onError }) {
           ref={inputRef}
           id="file-input"
           type="file"
-          accept="application/pdf"
+          accept=".pdf,.docx,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document"
           onChange={onChoose}
           className="hidden"
           disabled={isProcessing}
@@ -141,10 +153,10 @@ export default function FileUploader({ onResult, onError }) {
               />
             </svg>
             <div className="text-sm text-muted-foreground dark:text-[#ececec]">
-              Click to select or drag and drop a PDF
+              Click to select or drag and drop a document
             </div>
             <div className="text-xs text-muted-foreground dark:text-[#a8a8a8] mt-1">
-              PDF up to 5MB
+              PDF or DOCX up to 5MB
             </div>
           </div>
         </label>

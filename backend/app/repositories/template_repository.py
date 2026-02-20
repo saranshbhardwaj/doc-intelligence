@@ -4,8 +4,8 @@ import uuid
 from datetime import datetime
 from typing import Dict, List, Optional
 
-from sqlalchemy import and_, desc, or_
-from sqlalchemy.orm import Session
+from sqlalchemy import and_, desc, or_, func, case
+from sqlalchemy.orm import Session, joinedload
 
 from app.database import SessionLocal
 
@@ -192,6 +192,8 @@ class TemplateRepository:
         """
         Get usage statistics for a template before deletion.
 
+        Uses SQL aggregation for efficiency (single query for counts).
+
         Returns:
             Dict with usage stats and deletion safety info, or None if template not found
         """
@@ -199,21 +201,29 @@ class TemplateRepository:
         if not template:
             return None
 
-        # Get all fill runs referencing this template
-        fill_runs = (
-            self.db.query(TemplateFillRun)
-            .filter(TemplateFillRun.template_id == template_id)
-            .all()
-        )
+        # Use SQL aggregation to count fill runs by status
+        result = self.db.query(
+            func.count(TemplateFillRun.id).label("total"),
+            func.sum(case(
+                (TemplateFillRun.status == "completed", 1),
+                else_=0
+            )).label("completed"),
+            func.sum(case(
+                (TemplateFillRun.status.in_(["queued", "processing", "awaiting_review"]), 1),
+                else_=0
+            )).label("in_progress"),
+            func.sum(case(
+                (TemplateFillRun.status == "failed", 1),
+                else_=0
+            )).label("failed")
+        ).filter(
+            TemplateFillRun.template_id == template_id
+        ).first()
 
-        # Count by status
-        completed_count = sum(1 for run in fill_runs if run.status == "completed")
-        in_progress_count = sum(
-            1
-            for run in fill_runs
-            if run.status in ["queued", "processing", "awaiting_review"]
-        )
-        failed_count = sum(1 for run in fill_runs if run.status == "failed")
+        total_runs = result.total or 0
+        completed_count = result.completed or 0
+        in_progress_count = result.in_progress or 0
+        failed_count = result.failed or 0
 
         # Determine if deletion is safe
         can_delete = in_progress_count == 0
@@ -224,9 +234,9 @@ class TemplateRepository:
                 f"Cannot delete: {in_progress_count} fill run(s) are currently in progress. "
                 f"Please wait for them to complete or fail them first."
             )
-        elif len(fill_runs) > 0:
+        elif total_runs > 0:
             warning_message = (
-                f"This template has {len(fill_runs)} associated fill run(s) "
+                f"This template has {total_runs} associated fill run(s) "
                 f"({completed_count} completed, {failed_count} failed). "
                 f"Fill runs will be preserved but will show '[Deleted Template]'."
             )
@@ -234,7 +244,7 @@ class TemplateRepository:
         return {
             "template_id": template_id,
             "template_name": template.name,
-            "total_fill_runs": len(fill_runs),
+            "total_fill_runs": total_runs,
             "completed_runs": completed_count,
             "in_progress_runs": in_progress_count,
             "failed_runs": failed_count,

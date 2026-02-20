@@ -49,6 +49,8 @@ export const useStore = create(
             jobId: state.workflowDraft.execution.jobId ?? null,
             runId: state.workflowDraft.execution.runId ?? null,
           },
+          // Don't persist pdfViewer (transient presigned URLs and highlight state)
+          pdfViewer: undefined,
         },
         // Persist document indexing jobs for reconnection
         chat: {
@@ -90,6 +92,8 @@ export const useStore = create(
               ...current.workflowDraft.execution,
               ...(persisted.workflowDraft?.execution || {}),
             },
+            // Always use fresh pdfViewer state (never persisted)
+            pdfViewer: current.workflowDraft.pdfViewer,
           },
           chat: {
             ...current.chat,
@@ -218,6 +222,8 @@ export const usePdfViewer = () =>
 
 // Workflow Draft selectors
 export const useWorkflowDraft = () => useStore((state) => state.workflowDraft);
+export const useWorkflowPdfViewer = () =>
+  useStore((state) => state.workflowDraft.pdfViewer);
 export const useWorkflowDraftActions = () =>
   useStore(
     useShallow((state) => ({
@@ -237,6 +243,11 @@ export const useWorkflowDraftActions = () =>
       reconnectWorkflowExecution: state.reconnectWorkflowExecution,
       cancelWorkflowExecution: state.cancelWorkflowExecution,
       resetWorkflowExecution: state.resetWorkflowExecution,
+      // PDF viewer actions (for citation navigation)
+      workflowHighlightChunk: state.workflowHighlightChunk,
+      workflowClearHighlight: state.workflowClearHighlight,
+      workflowSetActivePdfDocument: state.workflowSetActivePdfDocument,
+      workflowClearPdfViewer: state.workflowClearPdfViewer,
     }))
   );
 

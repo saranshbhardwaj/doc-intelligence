@@ -181,6 +181,183 @@ class FeedbackRepository:
                 logger.error(f"Failed to create feedback: {e}", exc_info=True)
                 return None
 
+    def upsert_feedback(
+        self,
+        org_id: str,
+        user_id: str,
+        operation_type: str,
+        rating_type: str,
+        rating_value: int,
+        chat_message_id: Optional[str] = None,
+        workflow_run_id: Optional[str] = None,
+        template_fill_run_id: Optional[str] = None,
+        extraction_id: Optional[str] = None,
+        comment: Optional[str] = None,
+        feedback_category: Optional[str] = None,
+        tags: Optional[List[str]] = None,
+        context_snapshot: Optional[dict] = None,
+        client_ip: Optional[str] = None,
+        user_agent: Optional[str] = None,
+    ) -> Optional[str]:
+        """Create or update feedback for an entity.
+
+        If feedback already exists from this user for this entity, updates it.
+        Otherwise creates a new record.
+
+        Returns:
+            Feedback ID if successful, None otherwise
+        """
+        with self._get_session() as db:
+            try:
+                # Check for existing feedback from this user on this entity
+                existing = None
+                if chat_message_id:
+                    existing = db.query(Feedback).filter(
+                        Feedback.user_id == user_id,
+                        Feedback.chat_message_id == chat_message_id
+                    ).first()
+                elif workflow_run_id:
+                    existing = db.query(Feedback).filter(
+                        Feedback.user_id == user_id,
+                        Feedback.workflow_run_id == workflow_run_id
+                    ).first()
+                elif template_fill_run_id:
+                    existing = db.query(Feedback).filter(
+                        Feedback.user_id == user_id,
+                        Feedback.template_fill_run_id == template_fill_run_id
+                    ).first()
+                elif extraction_id:
+                    existing = db.query(Feedback).filter(
+                        Feedback.user_id == user_id,
+                        Feedback.extraction_id == extraction_id
+                    ).first()
+
+                if existing:
+                    # Update existing feedback
+                    existing.rating_value = rating_value
+                    existing.comment = comment
+                    existing.feedback_category = feedback_category
+                    existing.tags = tags or []
+                    existing.context_snapshot = context_snapshot
+                    existing.client_ip = client_ip
+                    existing.user_agent = user_agent
+
+                    requires_response = (
+                        (rating_type == "thumbs" and rating_value == -1) or
+                        (rating_type == "stars" and rating_value <= 2)
+                    ) and comment is not None and len(comment.strip()) > 0
+                    existing.requires_response = requires_response
+                    existing.response_status = "pending" if requires_response else "none"
+
+                    db.commit()
+                    logger.info(f"Updated feedback: {existing.id}", extra={
+                        "feedback_id": existing.id,
+                        "operation_type": operation_type,
+                        "rating_value": rating_value,
+                    })
+                    return existing.id
+                else:
+                    # Create new feedback
+                    feedback_id = generate_id()
+                    requires_response = (
+                        (rating_type == "thumbs" and rating_value == -1) or
+                        (rating_type == "stars" and rating_value <= 2)
+                    ) and comment is not None and len(comment.strip()) > 0
+
+                    feedback = Feedback(
+                        id=feedback_id,
+                        org_id=org_id,
+                        user_id=user_id,
+                        operation_type=operation_type,
+                        chat_message_id=chat_message_id,
+                        workflow_run_id=workflow_run_id,
+                        template_fill_run_id=template_fill_run_id,
+                        extraction_id=extraction_id,
+                        rating_type=rating_type,
+                        rating_value=rating_value,
+                        comment=comment,
+                        feedback_category=feedback_category,
+                        tags=tags or [],
+                        context_snapshot=context_snapshot,
+                        requires_response=requires_response,
+                        response_status="pending" if requires_response else "none",
+                        client_ip=client_ip,
+                        user_agent=user_agent,
+                    )
+                    db.add(feedback)
+                    db.commit()
+                    logger.info(f"Created feedback: {feedback_id}", extra={
+                        "feedback_id": feedback_id,
+                        "operation_type": operation_type,
+                        "rating_value": rating_value,
+                    })
+                    return feedback_id
+
+            except SQLAlchemyError as e:
+                db.rollback()
+                logger.error(f"Failed to upsert feedback: {e}", exc_info=True)
+                return None
+
+    def delete_feedback_by_entity(
+        self,
+        user_id: str,
+        chat_message_id: str,
+        org_id: str,
+    ) -> bool:
+        """Delete feedback for a chat message (toggle-off).
+
+        Returns:
+            True if deleted, False if not found or error
+        """
+        with self._get_session() as db:
+            try:
+                feedback = db.query(Feedback).filter(
+                    Feedback.user_id == user_id,
+                    Feedback.chat_message_id == chat_message_id,
+                ).first()
+                if not feedback:
+                    return False
+                if feedback.org_id != org_id:
+                    return False
+                db.delete(feedback)
+                db.commit()
+                logger.info(f"Deleted feedback for message {chat_message_id}")
+                return True
+            except SQLAlchemyError as e:
+                db.rollback()
+                logger.error(f"Failed to delete feedback: {e}", exc_info=True)
+                return False
+
+    def get_feedback_for_messages(
+        self,
+        message_ids: List[str],
+        user_id: str,
+    ) -> Dict[str, Dict[str, Any]]:
+        """Batch-fetch feedback for a list of message IDs.
+
+        Returns:
+            Dict mapping message_id -> {feedback_id, rating_value, comment}
+        """
+        if not message_ids:
+            return {}
+        with self._get_session() as db:
+            try:
+                rows = db.query(Feedback).filter(
+                    Feedback.user_id == user_id,
+                    Feedback.chat_message_id.in_(message_ids),
+                ).all()
+                return {
+                    row.chat_message_id: {
+                        "feedback_id": row.id,
+                        "rating_value": row.rating_value,
+                        "comment": row.comment,
+                    }
+                    for row in rows
+                }
+            except SQLAlchemyError as e:
+                logger.error(f"Failed to get feedback for messages: {e}", exc_info=True)
+                return {}
+
     def list_feedback(
         self,
         operation_type: Optional[str] = None,

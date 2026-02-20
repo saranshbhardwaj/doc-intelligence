@@ -41,74 +41,6 @@ def _get_db_session() -> Session:
     return SessionLocal()
 
 
-def _infer_field_type(value: str) -> str:
-    """
-    Infer field type from a value string.
-
-    Returns: text, number, currency, percentage, or date
-    """
-    if not value:
-        return "text"
-
-    value_clean = value.strip().replace(",", "").replace("$", "").replace("%", "")
-
-    # Check for percentage
-    if "%" in value:
-        return "percentage"
-
-    # Check for currency
-    if "$" in value or value.lower().startswith("usd"):
-        return "currency"
-
-    # Check for number
-    try:
-        float(value_clean)
-        return "number"
-    except ValueError:
-        pass
-
-    # Check for date patterns (MM/DD/YYYY, YYYY-MM-DD, etc.)
-    import re
-    date_patterns = [
-        r"\d{1,2}/\d{1,2}/\d{2,4}",
-        r"\d{4}-\d{1,2}-\d{1,2}",
-        r"\d{1,2}-\d{1,2}-\d{2,4}",
-    ]
-    for pattern in date_patterns:
-        if re.match(pattern, value.strip()):
-            return "date"
-
-    return "text"
-
-
-def _infer_field_type_from_name(name: str) -> str:
-    """
-    Infer field type from a field/column name.
-
-    Returns: text, number, currency, percentage, or date
-    """
-    if not name:
-        return "text"
-
-    name_lower = name.lower()
-
-    # Currency indicators
-    if any(keyword in name_lower for keyword in ["price", "cost", "amount", "revenue", "rent", "fee", "payment", "income", "expense", "value", "$", "usd"]):
-        return "currency"
-
-    # Percentage indicators
-    if any(keyword in name_lower for keyword in ["rate", "percent", "%", "ratio", "yield", "cap rate", "occupancy"]):
-        return "percentage"
-
-    # Date indicators
-    if any(keyword in name_lower for keyword in ["date", "year", "month", "day", "time", "period", "expiration", "maturity"]):
-        return "date"
-
-    # Number indicators
-    if any(keyword in name_lower for keyword in ["count", "number", "total", "quantity", "sf", "sqft", "square", "units", "size", "area", "#"]):
-        return "number"
-
-    return "text"
 
 
 @shared_task(bind=True)
@@ -301,13 +233,10 @@ def detect_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                 if not key:
                     continue
 
-                # Infer field type from value
-                field_type = _infer_field_type(value)
-
                 field_data = {
                     "id": f"kv_{field_id_counter}",
                     "name": key,
-                    "type": field_type,
+                    "type": "text",
                     "sample_value": value or "",
                     "confidence": confidence,
                     "citations": [citation],
@@ -344,9 +273,6 @@ def detect_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                 if not col_header or col_header.lower() in ["", "none", "n/a"]:
                     continue
 
-                # Try to infer type from column name
-                field_type = _infer_field_type_from_name(col_header)
-
                 # Get sample value from first row if available
                 sample_value = ""
                 table_data = metadata.get("table_data", [])
@@ -362,7 +288,7 @@ def detect_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                 field_data = {
                     "id": f"tbl_{field_id_counter}",
                     "name": col_header,
-                    "type": field_type,
+                    "type": "text",
                     "sample_value": sample_value,
                     # NOTE: Hardcoded confidence for table columns.
                     # Unlike key-value pairs (which get per-pair confidence from Azure DI),
@@ -943,7 +869,7 @@ def fill_excel_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         # Record latency
         latency = time.monotonic() - start_time
         try:
-            TEMPLATE_FILL_LATENCY_SECONDS.labels(org_id=org_id or "unknown").observe(latency)
+            TEMPLATE_FILL_LATENCY_SECONDS.observe(latency)
         except Exception as e:
             logger.warning(f"Failed to record template fill latency: {e}", exc_info=True)
 
@@ -978,7 +904,7 @@ def fill_excel_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         # Record latency (even for failures)
         latency = time.monotonic() - start_time
         try:
-            TEMPLATE_FILL_LATENCY_SECONDS.labels(org_id=org_id or "unknown").observe(latency)
+            TEMPLATE_FILL_LATENCY_SECONDS.observe(latency)
         except Exception as e:
             logger.warning(f"Failed to record template fill latency: {e}", exc_info=True)
 
@@ -1078,9 +1004,9 @@ def start_fill_run_chain(
         )
 
         # Execute chain
-        task_chain.apply_async()
+        task_chain.apply_async(queue='critical')
 
-        logger.info(f"Fill run chain started: {fill_run_id}")
+        logger.info(f"Fill run chain started: {fill_run_id} (queue=critical)")
 
         return fill_run_id
 

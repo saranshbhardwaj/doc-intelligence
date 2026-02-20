@@ -28,8 +28,13 @@ from app.core.metrics_setup import setup_prometheus_multiproc_dir
 setup_prometheus_multiproc_dir(clear_on_startup=True)
 
 # Now safe to import modules that may transitively import app.utils.metrics
+# Import Celery app so task_routes and queue config are loaded when API dispatches tasks.
+# Without this, apply_async() sends tasks to Celery's built-in "celery" queue
+# instead of our "critical"/"default" queues that workers listen to.
+import app.celery_app  # noqa: F401
+
 from app.core.lifespan import lifespan
-from app.api import extractions, feedback, health, cache, jobs, users, chat, workflows, metrics
+from app.api import extractions, feedback, health, cache, jobs, users, chat, workflows, metrics, dashboard
 from app.api.admin import router as admin_router
 from app.core.middleware import setup_middleware
 from fastapi import FastAPI
@@ -61,6 +66,7 @@ app.include_router(workflows.router, tags=["workflows"])
 app.include_router(jobs.router, tags=["jobs"])
 app.include_router(users.router, tags=["users"])
 app.include_router(feedback.router, tags=["feedback"])
+app.include_router(dashboard.router, tags=["dashboard"])  # User-facing analytics dashboard
 app.include_router(cache.router, prefix="/api/cache", tags=["cache"])
 app.include_router(health.router, tags=["health"])
 app.include_router(metrics.router, tags=["metrics"])  # /metrics for Prometheus

@@ -83,8 +83,8 @@ async def submit_feedback(
             detail="Entity not found or access denied"
         )
 
-    # Create feedback
-    feedback_id = repo.create_feedback(
+    # Upsert feedback (create or update existing)
+    feedback_id = repo.upsert_feedback(
         org_id=user.org_id,
         user_id=user.id,
         operation_type=operation_type,
@@ -120,3 +120,23 @@ async def submit_feedback(
         message="Thank you for your feedback!",
         feedback_id=feedback_id
     )
+
+
+@router.delete("/api/feedback/chat/{message_id}")
+async def delete_chat_feedback(
+    message_id: str,
+    user: User = Depends(get_current_user),
+):
+    """Delete feedback for a chat message (toggle-off)."""
+    repo = FeedbackRepository()
+
+    deleted = repo.delete_feedback_by_entity(
+        user_id=user.id,
+        chat_message_id=message_id,
+        org_id=user.org_id,
+    )
+
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Feedback not found")
+
+    return {"success": True, "message": "Feedback removed"}

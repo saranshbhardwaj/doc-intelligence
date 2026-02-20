@@ -65,8 +65,16 @@ export default function UploadModal({
   const validateFile = (file) => {
     const errors = [];
 
-    if (file.type !== "application/pdf") {
-      errors.push("Only PDF files are allowed");
+    // Check file type (MIME type + extension fallback)
+    const allowedTypes = new Set([
+      "application/pdf",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    ]);
+    const ext = file.name.toLowerCase().split('.').pop();
+    const allowedExts = ["pdf", "docx"];
+
+    if (!allowedTypes.has(file.type) && !allowedExts.includes(ext)) {
+      errors.push("Only PDF and DOCX files are allowed");
     }
 
     if (file.size > 50 * 1024 * 1024) {
@@ -144,7 +152,7 @@ export default function UploadModal({
         <DialogHeader>
           <DialogTitle className="text-xl">Upload Documents</DialogTitle>
           <DialogDescription>
-            Upload PDF documents to your collection. Files will be automatically
+            Upload documents to your collection. Supports PDF and DOCX. Files will be automatically
             parsed, chunked, and embedded.
           </DialogDescription>
         </DialogHeader>
@@ -193,7 +201,7 @@ export default function UploadModal({
             <input
               ref={fileInputRef}
               type="file"
-              accept=".pdf"
+              accept=".pdf,.docx"
               multiple
               onChange={handleFileInput}
               className="hidden"
@@ -213,7 +221,7 @@ export default function UploadModal({
               </div>
 
               <h3 className="text-base font-medium text-foreground mb-1">
-                {dragActive ? "Drop files here" : "Drag & drop PDF files"}
+                {dragActive ? "Drop files here" : "Drag & drop documents"}
               </h3>
               <p className="text-sm text-muted-foreground mb-4">
                 or click to browse
@@ -228,7 +236,7 @@ export default function UploadModal({
               </Button>
 
               <p className="text-xs text-muted-foreground mt-4">
-                Max file size: 50MB • PDF only
+                Max file size: 50MB • PDF, DOCX
               </p>
             </div>
           </div>

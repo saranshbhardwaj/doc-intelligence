@@ -36,6 +36,7 @@ import { cn } from "@/lib/utils";
 import { submitFeedback } from "../../api/feedback";
 import { useUser } from "../../store";
 import { toast } from "sonner";
+import { useAuth } from "@clerk/clerk-react";
 
 const OPERATION_TYPE_LABELS = {
   workflow: "workflow run",
@@ -63,7 +64,7 @@ export default function CompletionFeedbackModal({
   const [category, setCategory] = useState(null);
   const [comment, setComment] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const { getToken } = useUser();
+  const { getToken } = useAuth();
 
   const operationLabel = OPERATION_TYPE_LABELS[operationType] || operationType;
 
@@ -89,7 +90,6 @@ export default function CompletionFeedbackModal({
     setIsSubmitting(true);
 
     try {
-      const token = await getToken();
 
       // Build entity ID field based on operation type
       const entityIdField = {};
@@ -101,7 +101,7 @@ export default function CompletionFeedbackModal({
         entityIdField.extraction_id = entityId;
       }
 
-      const response = await submitFeedback(token, {
+      const response = await submitFeedback(getToken, {
         ...entityIdField,
         rating_type: "stars",
         rating_value: rating,

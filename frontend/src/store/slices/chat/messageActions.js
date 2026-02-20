@@ -139,6 +139,18 @@ export const createChatMessageActions = (set, get) => ({
             },
           }));
 
+          // Refresh messages from API to get database IDs (needed for feedback buttons)
+          chatApi.getChatHistory(getToken, sessionId).then((data) => {
+            set((state) => ({
+              chat: {
+                ...state.chat,
+                messages: data.messages,
+              },
+            }));
+          }).catch((err) => {
+            console.error("Failed to refresh message IDs:", err);
+          });
+
           get().fetchSessions(getToken);
         },
         onError: (error) => {
@@ -163,6 +175,7 @@ export const createChatMessageActions = (set, get) => ({
         chat: {
           ...state.chat,
           currentSession: {
+            ...state.chat.currentSession,
             id: data.session_id,
           },
           messages: data.messages,

@@ -54,6 +54,7 @@ export default function AppLayout({ children, breadcrumbs }) {
     { path: "/app/chat", label: "Chat", icon: MessageSquare },
     { path: "/app/workflows", label: "Workflows", icon: Play },
     { path: "/app/extract", label: "Extract", icon: Zap },
+    { path: "/app/dashboard", label: "Dashboard", icon: LayoutDashboard },
   ];
 
   // Get vertical-specific navigation

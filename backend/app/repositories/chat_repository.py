@@ -11,6 +11,7 @@ Pattern:
 from datetime import datetime
 from typing import Optional, List
 from contextlib import contextmanager
+from sqlalchemy import func, case
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -302,6 +303,8 @@ class ChatRepository:
     ) -> dict:
         """Get statistics for a chat session.
 
+        Uses SQL aggregation for efficiency (single query instead of loading all messages).
+
         Args:
             session_id: Session ID
 
@@ -310,19 +313,29 @@ class ChatRepository:
         """
         with self._get_session() as db:
             try:
-                messages = db.query(ChatMessage).filter(
+                # Use SQL aggregation to avoid loading all messages into memory
+                result = db.query(
+                    func.count(ChatMessage.id).label("message_count"),
+                    func.sum(case(
+                        (ChatMessage.role == "user", 1),
+                        else_=0
+                    )).label("user_messages"),
+                    func.sum(case(
+                        (ChatMessage.role == "assistant", 1),
+                        else_=0
+                    )).label("assistant_messages"),
+                    func.coalesce(func.sum(ChatMessage.tokens_used), 0).label("total_tokens"),
+                    func.coalesce(func.sum(ChatMessage.cost_usd), 0).label("total_cost")
+                ).filter(
                     ChatMessage.session_id == session_id
-                ).all()
-
-                total_tokens = sum(m.tokens_used for m in messages if m.tokens_used)
-                total_cost = sum(m.cost_usd for m in messages if m.cost_usd)
+                ).first()
 
                 return {
-                    "message_count": len(messages),
-                    "user_messages": len([m for m in messages if m.role == "user"]),
-                    "assistant_messages": len([m for m in messages if m.role == "assistant"]),
-                    "total_tokens": total_tokens,
-                    "total_cost_usd": round(total_cost, 4)
+                    "message_count": result.message_count or 0,
+                    "user_messages": result.user_messages or 0,
+                    "assistant_messages": result.assistant_messages or 0,
+                    "total_tokens": result.total_tokens or 0,
+                    "total_cost_usd": round(float(result.total_cost or 0), 4)
                 }
 
             except SQLAlchemyError as e:

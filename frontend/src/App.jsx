@@ -13,6 +13,7 @@ import WorkflowResultPage from "./pages/WorkflowResultPage";
 import ExtractPage from "./pages/ExtractPage";
 import ExtractionHistoryPage from "./pages/ExtractionHistoryPage";
 import ExtractionDetailPage from "./pages/ExtractionDetailPage";
+import DashboardPage from "./pages/DashboardPage";
 import NotFound from "./pages/NotFound";
 import AppNotFound from "./components/layout/AppNotFound";
 import RequireAuth from "./components/common/RequireAuth";
@@ -60,6 +61,7 @@ export default function App() {
               path="/app/extractions/:id"
               element={<ExtractionDetailPage />}
             />
+            <Route path="/app/dashboard" element={<DashboardPage />} />
 
             {/* Vertical-specific routes */}
             {/* Private Equity routes */}

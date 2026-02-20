@@ -7,6 +7,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { useAuth } from "@clerk/clerk-react";
+import { useWorkflowDraftActions, useWorkflowPdfViewer } from "../../store";
 import {
   Download,
   Clock,
@@ -18,6 +19,7 @@ import {
   Trash2,
   FileDown,
   FileSpreadsheet,
+  X,
 } from "lucide-react";
 import { Button } from "../ui/button";
 import { Card } from "../ui/card";
@@ -29,8 +31,14 @@ import {
   DropdownMenuSeparator,
 } from "../ui/dropdown-menu";
 import Spinner from "../common/Spinner";
+import PDFViewer from "../pdf/PDFViewer";
 import { getRun, getRunArtifact, exportRun, deleteRun } from "../../api";
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from "../ui/sheet";
+import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "../ui/sheet";
+import {
+  ResizablePanelGroup,
+  ResizablePanel,
+  ResizableHandle,
+} from "../ui/resizable";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -49,6 +57,8 @@ import { shouldPromptForFeedback } from '../../utils/feedbackRules';
 
 export default function WorkflowResultSheet({ open, onOpenChange, runId }) {
   const { getToken } = useAuth();
+  const { workflowSetActivePdfDocument, workflowHighlightChunk, workflowClearPdfViewer } = useWorkflowDraftActions();
+  const pdfViewerState = useWorkflowPdfViewer();
 
   const [run, setRun] = useState(null);
   const [artifact, setArtifact] = useState(null);
@@ -57,6 +67,24 @@ export default function WorkflowResultSheet({ open, onOpenChange, runId }) {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [showFeedbackModal, setShowFeedbackModal] = useState(false);
+
+  // PDF side panel state for citation navigation
+  const [showPdfPanel, setShowPdfPanel] = useState(false);
+  const [activeCitationDoc, setActiveCitationDoc] = useState("");
+
+  // Derived PDF state
+  const activePdfUrl = pdfViewerState.activeDocumentId
+    ? pdfViewerState.urlCache[pdfViewerState.activeDocumentId]?.url
+    : null;
+
+  const handleCitationClick = useCallback(async (richCite) => {
+    if (!richCite.document_id) return;
+    setActiveCitationDoc(richCite.document || "Source Document");
+    setShowPdfPanel(true);
+    await workflowSetActivePdfDocument(richCite.document_id, getToken);
+    const bbox = richCite.bbox || { page: richCite.page, x0: 0, y0: 0, x1: 1, y1: 1 };
+    workflowHighlightChunk({ ...bbox, page: richCite.page, docId: richCite.document_id }, getToken);
+  }, [getToken, workflowSetActivePdfDocument, workflowHighlightChunk]);
 
   const fetchRunDetails = useCallback(async () => {
     if (!runId) return;
@@ -199,7 +227,7 @@ export default function WorkflowResultSheet({ open, onOpenChange, runId }) {
       <Sheet open={open} onOpenChange={onOpenChange}>
         <SheetContent
           side="left"
-          className="w-[1400px] sm:max-w-[1400px] overflow-y-auto bg-background "
+          className="w-[1400px] sm:max-w-[1400px] overflow-hidden bg-background p-0"
         >
           {loading ? (
             <div className="flex items-center justify-center h-full">
@@ -210,7 +238,10 @@ export default function WorkflowResultSheet({ open, onOpenChange, runId }) {
               <p className="text-muted-foreground">Run not found</p>
             </div>
           ) : (
-            <div className="space-y-6">
+            <ResizablePanelGroup direction="horizontal" className="h-full">
+              {/* Left panel: Workflow content */}
+              <ResizablePanel defaultSize={showPdfPanel ? 55 : 100} minSize={35}>
+                <div className="h-full overflow-y-auto p-6 space-y-6">
               {/* Header */}
               <SheetHeader>
                 <div className="flex items-center gap-3">
@@ -221,6 +252,9 @@ export default function WorkflowResultSheet({ open, onOpenChange, runId }) {
                     </SheetTitle>
                   </div>
                 </div>
+                <SheetDescription>
+                  Workflow run result and execution details
+                </SheetDescription>
               </SheetHeader>
 
               {/* Action Buttons */}
@@ -284,6 +318,13 @@ export default function WorkflowResultSheet({ open, onOpenChange, runId }) {
                     Delete
                   </Button>
                 )}
+                <div className="ml-2">
+                  <FeedbackButton
+                    operationType="workflow"
+                    entityId={runId}
+                    entitySummary={run?.workflow?.name}
+                  />
+                </div>
               </div>
 
               {/* Status Messages */}
@@ -334,7 +375,7 @@ export default function WorkflowResultSheet({ open, onOpenChange, runId }) {
               {artifact &&
                 artifact.artifact &&
                 (run.workflow_name === "Investment Memo" ? (
-                  <InvestmentMemoView artifact={artifact} run={run} />
+                  <InvestmentMemoView artifact={artifact} run={run} onCitationClick={handleCitationClick} />
                 ) : (
                   <Card className="p-4">
                     <h3 className="text-base font-semibold text-foreground mb-3">
@@ -360,6 +401,57 @@ export default function WorkflowResultSheet({ open, onOpenChange, runId }) {
                 </Card>
               )}
             </div>
+          </ResizablePanel>
+
+          {/* Right panel: PDF Viewer (conditionally shown) */}
+          {showPdfPanel && (
+            <>
+              <ResizableHandle />
+              <ResizablePanel defaultSize={45} minSize={25}>
+                <div className="flex flex-col h-full border-l border-border">
+                  {/* PDF Panel Header */}
+                  <div className="flex items-center justify-between px-4 py-2 border-b border-border bg-muted/30">
+                    <div className="flex items-center gap-2 min-w-0">
+                      <FileText className="w-4 h-4 text-muted-foreground shrink-0" />
+                      <span className="text-sm font-medium text-foreground truncate">
+                        {activeCitationDoc || "Source Document"}
+                      </span>
+                    </div>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => {
+                        setShowPdfPanel(false);
+                        workflowClearPdfViewer();
+                      }}
+                      className="h-7 w-7 p-0"
+                    >
+                      <X className="w-4 h-4" />
+                    </Button>
+                  </div>
+
+                  {/* PDF Viewer Content */}
+                  <div className="flex-1 overflow-hidden">
+                    {pdfViewerState.isLoadingUrl ? (
+                      <div className="flex items-center justify-center h-full">
+                        <Spinner size="lg" />
+                      </div>
+                    ) : activePdfUrl ? (
+                      <PDFViewer
+                        pdfUrl={activePdfUrl}
+                        highlightBbox={pdfViewerState.highlightBbox}
+                      />
+                    ) : (
+                      <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
+                        Select a citation to view the source document
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </ResizablePanel>
+            </>
+          )}
+        </ResizablePanelGroup>
           )}
         </SheetContent>
 

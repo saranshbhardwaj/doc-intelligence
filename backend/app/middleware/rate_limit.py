@@ -64,7 +64,6 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                     extra={"client_ip": client_ip, "path": request.url.path}
                 )
                 HTTP_REQUESTS_RATE_LIMITED.labels(
-                    client_ip=client_ip,
                     path=request.url.path
                 ).inc()
                 raise HTTPException(
@@ -86,7 +85,6 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 }
             )
             HTTP_SUSPICIOUS_REQUESTS.labels(
-                client_ip=client_ip,
                 pattern="xss_or_scan"
             ).inc()
 

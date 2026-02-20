@@ -27,7 +27,12 @@ ENV HF_HOME=/worker/.cache/huggingface
 # Switch to non-root user
 USER appuser
 
-# Command to start celery worker; --pool=solo (single process). Remove --pool to enable multiprocessing.
-# Example for multi-process: celery -A app.celery_app.celery_app worker --loglevel=info --concurrency=4
+# Solo pool: single-process worker (no multiprocess complexity).
+# Horizontal scaling via multiple worker containers in docker-compose.yml.
+# This approach:
+#   - Simplifies Prometheus metrics (no multiprocess aggregation issues)
+#   - Scales by adding more containers (industry standard)
+#   - Avoids worker recycling / prefork initialization problems
+# Each worker loads full app (~300-500MB), so scale container count based on load.
 # Use python -Xfrozen_modules=off for more reliable breakpoints.
 CMD ["python", "-Xfrozen_modules=off", "-m", "celery", "-A", "app.celery_app.celery_app", "worker", "--loglevel=info", "--pool=solo"]

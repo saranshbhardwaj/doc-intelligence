@@ -2,7 +2,8 @@
  * FeedbackButton Component
  *
  * Manual feedback trigger button for workflows, template fills, and extractions.
- * Always visible in result views. Shows "Feedback submitted" if already given.
+ * Always visible in result views. Button text changes to "Update Feedback" if already given.
+ * Users can override/update their feedback at any time.
  *
  * Props:
  *   - operationType: "workflow" | "template_fill" | "extraction"
@@ -13,7 +14,7 @@
  */
 
 import { useState, useEffect } from "react";
-import { MessageSquare, CheckCircle } from "lucide-react";
+import { MessageSquare } from "lucide-react";
 import { Button } from "../ui/button";
 import CompletionFeedbackModal from "./CompletionFeedbackModal";
 
@@ -27,7 +28,7 @@ export default function FeedbackButton({
   const [showModal, setShowModal] = useState(false);
   const [feedbackSubmitted, setFeedbackSubmitted] = useState(false);
 
-  // Check localStorage for existing feedback
+  // Check localStorage for existing feedback (no API call needed)
   useEffect(() => {
     if (!entityId) return;
 
@@ -44,20 +45,11 @@ export default function FeedbackButton({
     setShowModal(false);
   };
 
-  if (feedbackSubmitted) {
-    return (
-      <div className="flex items-center gap-1.5 text-sm text-muted-foreground">
-        <CheckCircle className="w-4 h-4 text-success" />
-        <span>Feedback submitted</span>
-      </div>
-    );
-  }
-
   return (
     <>
       <Button variant={variant} size={size} onClick={() => setShowModal(true)}>
         <MessageSquare className="w-4 h-4 mr-1.5" />
-        Give Feedback
+        {feedbackSubmitted ? "Update Feedback" : "Give Feedback"}
       </Button>
       <CompletionFeedbackModal
         isOpen={showModal}

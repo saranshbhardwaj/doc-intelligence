@@ -1,23 +1,69 @@
 version: "3.9"
+
+# ─── Shared worker config (DRY) ────────────────────────────────────
+x-worker-common: &worker-common
+  build:
+    context: .
+    dockerfile: Dockerfile.worker
+  env_file:
+    - .env
+  environment:
+    USE_CELERY: "true"
+    CELERY_BROKER_URL: redis://redis:6379/0
+    CELERY_RESULT_BACKEND: redis://redis:6379/0
+    DATABASE_URL: postgresql+psycopg://docint:docint@db:5432/docint
+    PROMETHEUS_MULTIPROC_DIR: /tmp/prometheus_multiproc
+    CONTAINER_TYPE: worker
+    DEBUG: ${DEBUG:-false}
+    PYDEVD_DISABLE_FILE_VALIDATION: "1"
+  depends_on:
+    redis:
+      condition: service_healthy
+    db:
+      condition: service_healthy
+  volumes:
+    - ./:/worker
+    - uploads_data:/shared_uploads
+    - logs_data:/worker/logs
+    - prometheus_multiproc:/tmp/prometheus_multiproc
+  healthcheck:
+    test: celery -A app.celery_app.celery_app inspect ping -d celery@$$HOSTNAME
+    interval: 30s
+    timeout: 10s
+    retries: 3
+    start_period: 40s
+  deploy:
+    resources:
+      limits:
+        memory: 2G
+        cpus: '2'
+  restart: unless-stopped
+
+# ─── Services ──────────────────────────────────────────────────────
 services:
   db:
     image: pgvector/pgvector:pg16
     container_name: docint-postgres
     environment:
-      POSTGRES_USER:  ${POSTGRES_USER}
+      POSTGRES_USER: ${POSTGRES_USER}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
       POSTGRES_DB: ${POSTGRES_DB}
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ./db/init/init-pgvector.sql:/docker-entrypoint-initdb.d/init-pgvector.sql  # Enable pgvector on first start
+      - ./db/init/init-pgvector.sql:/docker-entrypoint-initdb.d/init-pgvector.sql
     ports:
-      - "127.0.0.1:5432:5432"  # CRITICAL: Database localhost only!
+      - "127.0.0.1:5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U docint"]
       interval: 5s
       timeout: 5s
       retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 768M  # Reduced from 1G
     restart: unless-stopped
+
   api:
     build:
       context: .
@@ -32,66 +78,92 @@ services:
       DATABASE_URL: postgresql+psycopg://docint:docint@db:5432/docint
       HOME: /app
       HF_HOME: /app/.cache/huggingface
-      DEBUG: "true"  # Enable debugpy
+      DEBUG: ${DEBUG:-false}
       PYDEVD_DISABLE_FILE_VALIDATION: "1"
-      PROMETHEUS_MULTIPROC_DIR: /tmp/prometheus_multiproc  # Shared metrics directory
-      # DEBUG_WAIT: "true"  # Uncomment to wait for debugger attach before serving
-  # TRANSFORMERS_CACHE is deprecated; use HF_HOME instead
+      PROMETHEUS_MULTIPROC_DIR: /tmp/prometheus_multiproc
+      CONTAINER_TYPE: api
     ports:
-      - "127.0.0.1:8000:8000"  # Localhost only - prevents external access
-      - "127.0.0.1:5678:5678"  # Debug port - localhost only
+      - "127.0.0.1:8000:8000"
+      - "127.0.0.1:5678:5678"  # Debug port
     depends_on:
       db:
-        condition: service_healthy  # Wait for DB to be ready
+        condition: service_healthy
       redis:
-        condition: service_started
+        condition: service_healthy
     volumes:
-      - ./:/app  # Bind mount source for live code & generated migrations
-      - uploads_data:/shared_uploads  # Shared uploaded PDFs for Celery parsing
-      - logs_data:/app/logs  # Shared logs directory (optional aggregation)
-      - prometheus_multiproc:/tmp/prometheus_multiproc  # Shared Prometheus metrics
+      - ./:/app
+      - uploads_data:/shared_uploads
+      - logs_data:/app/logs
+      - prometheus_multiproc:/tmp/prometheus_multiproc
+    deploy:
+      resources:
+        limits:
+          memory: 1536M  # Reduced from 2G (API needs more than workers)
+          cpus: '2'
     restart: unless-stopped
-  worker:
-    build:
-      context: .
-      dockerfile: Dockerfile.worker
-    container_name: docint-worker
-    env_file:
-      - .env
+
+  # ─── Celery workers (pool=solo, horizontal scaling) ─────────────
+  # worker1 & worker2: "critical" queue (workflows, extractions, template fills)
+  # worker3: "default" queue (document upload/indexing)
+  worker1:
+    <<: *worker-common
+    container_name: docint-worker1
+    command: ["python", "-Xfrozen_modules=off", "-m", "celery", "-A", "app.celery_app.celery_app", "worker", "--loglevel=info", "--pool=solo", "-Q", "critical"]
+    ports:
+      - "127.0.0.1:5679:5679"  # Debug port
+
+  worker2:
+    <<: *worker-common
+    container_name: docint-worker2
+    command: ["python", "-Xfrozen_modules=off", "-m", "celery", "-A", "app.celery_app.celery_app", "worker", "--loglevel=info", "--pool=solo", "-Q", "critical"]
+
+  worker3:
+    <<: *worker-common
+    container_name: docint-worker3
+    command: ["python", "-Xfrozen_modules=off", "-m", "celery", "-A", "app.celery_app.celery_app", "worker", "--loglevel=info", "--pool=solo", "-Q", "default"]
+
+  # Celery Beat scheduler for periodic tasks (stuck task cleanup every 10 min)
+  beat:
+    <<: *worker-common
+    container_name: docint-beat
+    command: ["python", "-Xfrozen_modules=off", "-m", "celery", "-A", "app.celery_app.celery_app", "beat", "--loglevel=info"]
     environment:
       USE_CELERY: "true"
       CELERY_BROKER_URL: redis://redis:6379/0
       CELERY_RESULT_BACKEND: redis://redis:6379/0
       DATABASE_URL: postgresql+psycopg://docint:docint@db:5432/docint
-      DEBUG: "true"  # Enable debugpy
+      PROMETHEUS_MULTIPROC_DIR: /tmp/prometheus_multiproc
+      CONTAINER_TYPE: beat
+      DEBUG: ${DEBUG:-false}
       PYDEVD_DISABLE_FILE_VALIDATION: "1"
-      PROMETHEUS_MULTIPROC_DIR: /tmp/prometheus_multiproc  # Shared metrics directory
-      # DEBUG_WAIT: "true"  # Uncomment to wait for debugger attach before processing tasks
-    depends_on:
-      - redis
-      - db
-    ports:
-      - "127.0.0.1:5679:5679"  # Debug port - localhost only
-    volumes:
-      - ./:/worker  # Bind mount for consistency (tasks, migrations if needed)
-      - uploads_data:/shared_uploads  # Access same uploaded PDF files as api
-      - logs_data:/worker/logs  # Write logs to shared volume
-      - prometheus_multiproc:/tmp/prometheus_multiproc  # Shared Prometheus metrics
+    # No health check needed - Beat schedules tasks, doesn't handle requests
+    # If Beat fails, Prometheus alerts will detect missing task executions
     healthcheck:
-      test: celery -A app.celery_app.celery_app inspect ping -d celery@$HOSTNAME
-      interval: 30s
-      timeout: 10s
-      retries: 3
-      start_period: 40s
-    restart: unless-stopped
+      disable: true
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: '0.5'
+
   redis:
     image: redis:7-alpine
     container_name: docint-redis
     volumes:
       - redis_data:/data
     ports:
-      - "127.0.0.1:6379:6379"  # CRITICAL: Redis localhost only!
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+    deploy:
+      resources:
+        limits:
+          memory: 512M
     restart: unless-stopped
+
   prometheus:
     image: prom/prometheus:latest
     container_name: docint-prometheus
@@ -100,16 +172,17 @@ services:
       - ./prometheus_alerts.yml:/etc/prometheus/prometheus_alerts.yml
       - prometheus_data:/prometheus
     ports:
-      - "127.0.0.1:9090:9090"  # Prometheus localhost only
+      - "127.0.0.1:9090:9090"
     command:
       - '--config.file=/etc/prometheus/prometheus.yml'
       - '--storage.tsdb.path=/prometheus'
-      - '--storage.tsdb.retention.size=3GB'   # Or limit by size
+      - '--storage.tsdb.retention.size=3GB'
       - '--web.console.libraries=/usr/share/prometheus/console_libraries'
       - '--web.console.templates=/usr/share/prometheus/consoles'
     depends_on:
       - api
     restart: unless-stopped
+
   grafana:
     image: grafana/grafana:latest
     container_name: docint-grafana
@@ -123,7 +196,7 @@ services:
       - ${PWD}/grafana/provisioning/dashboards:/etc/grafana/provisioning/dashboards
       - ${PWD}/grafana/dashboards:/etc/grafana/dashboards
     ports:
-      - "127.0.0.1:3000:3000"  # Grafana localhost only
+      - "127.0.0.1:3000:3000"
     depends_on:
       - prometheus
     restart: unless-stopped
@@ -135,4 +208,4 @@ volumes:
   redis_data:
   prometheus_data:
   grafana_data:
-  prometheus_multiproc:  # Shared directory for multiprocess Prometheus metrics
+  prometheus_multiproc:

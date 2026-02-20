@@ -602,18 +602,28 @@ class CollectionRepository:
     def list_documents(
         self,
         collection_id: str,
-        limit: Optional[int] = None
-    ) -> List[Document]:
-        """List documents in a collection.
+        limit: int = 50,
+        offset: int = 0,
+        sort_by: str = "created_at",
+        sort_order: str = "desc",
+        search: Optional[str] = None,
+        status: Optional[str] = None,
+    ) -> tuple[List[Document], int]:
+        """List documents in a collection with pagination and filtering.
 
         Joins through collection_documents to get canonical document metadata.
 
         Args:
             collection_id: Collection ID
-            limit: Optional limit on results
+            limit: Maximum number of results (default 50)
+            offset: Number of results to skip (default 0)
+            sort_by: Field to sort by (created_at, filename, page_count, chunk_count)
+            sort_order: Sort order (asc or desc)
+            search: Optional search query for filename
+            status: Optional status filter (processing, completed, failed)
 
         Returns:
-            List of Document objects (from canonical documents table)
+            Tuple of (List of Document objects, total count)
         """
         with self._get_session() as db:
             try:
@@ -621,18 +631,44 @@ class CollectionRepository:
                     db.query(Document)
                     .join(CollectionDocument, Document.id == CollectionDocument.document_id)
                     .filter(CollectionDocument.collection_id == collection_id)
-                    .order_by(CollectionDocument.added_at.desc())
                 )
 
-                if limit:
-                    query = query.limit(limit)
+                # Apply search filter
+                if search:
+                    query = query.filter(Document.filename.ilike(f"%{search}%"))
 
-                return query.all()
+                # Apply status filter
+                if status:
+                    query = query.filter(Document.status == status)
+
+                # Get total count before pagination
+                total = query.count()
+
+                # Apply sorting
+                sort_column_map = {
+                    "created_at": Document.created_at,
+                    "filename": Document.filename,
+                    "page_count": Document.page_count,
+                    "chunk_count": Document.chunk_count,
+                }
+                sort_column = sort_column_map.get(sort_by, Document.created_at)
+
+                if sort_order == "asc":
+                    query = query.order_by(sort_column.asc())
+                else:
+                    query = query.order_by(sort_column.desc())
+
+                # Apply pagination
+                query = query.limit(limit).offset(offset)
+
+                documents = query.all()
+
+                return documents, total
 
             except SQLAlchemyError as e:
                 logger.error(
                     f"Failed to list documents: {e}",
                     extra={"collection_id": collection_id, "error": str(e)}
                 )
-                return []
+                return [], 0
 

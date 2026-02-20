@@ -112,12 +112,20 @@ async def upload_document(
             detail=f"File too large ({file_size_mb:.1f}MB). Maximum size is {MAX_FILE_SIZE_MB}MB"
         )
 
-    # Validate PDF magic number
-    if not file_bytes.startswith(b'%PDF-'):
-        raise HTTPException(
-            status_code=400,
-            detail="File does not appear to be a valid PDF"
-        )
+    # Validate file magic number based on type
+    if file_ext == '.pdf':
+        if not file_bytes.startswith(b'%PDF-'):
+            raise HTTPException(
+                status_code=400,
+                detail="File does not appear to be a valid PDF"
+            )
+    elif file_ext == '.docx':
+        # DOCX files are ZIP archives; ZIP magic number is PK (0x50 0x4B)
+        if not file_bytes.startswith(b'PK'):
+            raise HTTPException(
+                status_code=400,
+                detail="File does not appear to be a valid DOCX file"
+            )
 
     # Calculate content hash for global deduplication
     content_hash = hashlib.sha256(file_bytes).hexdigest()
@@ -215,8 +223,8 @@ async def upload_document(
             # Upload to storage using document's ID (ensures ID match)
             file_path = None
             try:
-                # Generate storage key: documents/{user_id}/{document.id}.pdf
-                storage_key = f"documents/{user.id}/{document.id}.pdf"
+                # Generate storage key: documents/{user_id}/{document.id}.{ext}
+                storage_key = f"documents/{user.id}/{document.id}{file_ext}"
                 storage.upload(temp_path, storage_key)
                 file_path = storage_key  # Store storage key (not local path)
 
@@ -408,9 +416,17 @@ async def download_document(
             if not os.path.exists(file_path):
                 raise HTTPException(status_code=404, detail="Document file not found on disk")
 
+            # Determine content type from filename extension
+            file_ext = os.path.splitext(document.filename)[1].lower()
+            content_types = {
+                '.pdf': 'application/pdf',
+                '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            }
+            media_type = content_types.get(file_ext, 'application/octet-stream')
+
             return FileResponse(
                 path=file_path,
-                media_type="application/pdf",
+                media_type=media_type,
                 filename=document.filename
             )
 

@@ -89,17 +89,29 @@ def parse_document_for_indexing_task(self, payload: Dict[str, Any]) -> Dict[str,
             storage.download(file_path, local_file_path)
             file_path = local_file_path  # Use local path for processing
 
-        # Detect PDF type
-        pdf_type = detect_pdf_type(file_path)
-        tracker.update_progress(
-            progress_percent=8,
-            message=f"Detected {pdf_type} PDF"
-        )
+        # Determine file type from extension
+        file_ext = os.path.splitext(filename)[1].lower()
 
-        # Get parser
-        parser = ParserFactory.get_parser(settings.force_user_tier or "free", pdf_type)
+        # Detect document type and get parser
+        if file_ext == '.docx':
+            # DOCX files: Azure DI supports DOCX natively, skip PDF type detection
+            pdf_type = "digital"
+            tracker.update_progress(
+                progress_percent=8,
+                message="Detected DOCX document"
+            )
+            parser = ParserFactory.get_parser(settings.force_user_tier or "free", pdf_type)
+        else:
+            # PDF files: detect type (digital vs scanned)
+            pdf_type = detect_pdf_type(file_path)
+            tracker.update_progress(
+                progress_percent=8,
+                message=f"Detected {pdf_type} PDF"
+            )
+            parser = ParserFactory.get_parser(settings.force_user_tier or "free", pdf_type)
+
         if not parser:
-            raise ValueError("No parser available for detected PDF type")
+            raise ValueError(f"No parser available for {file_ext} files")
 
         logger.info(
             f"Parsing document for indexing: {filename}",
@@ -662,7 +674,7 @@ def start_document_indexing_chain(
         store_vectors_task.s(),
     )
 
-    result = task_chain.apply_async()
+    result = task_chain.apply_async(queue='default')
     logger.info(
         "Document indexing pipeline started",
         extra={
@@ -670,7 +682,8 @@ def start_document_indexing_chain(
             "job_id": job_id,
             "task_id": result.id,
             "collection_id": collection_id,
-            "document_id": document_id
+            "document_id": document_id,
+            "queue": "default"
         }
     )
     return result.id

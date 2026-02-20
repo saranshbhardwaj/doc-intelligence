@@ -120,17 +120,29 @@ async def list_collections(
 @router.get("/collections/{collection_id}")
 async def get_collection(
     collection_id: str,
-    user: User = Depends(get_current_user)
+    user: User = Depends(get_current_user),
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    sort_by: str = Query("created_at"),
+    sort_order: str = Query("desc"),
+    search: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
 ):
     """
-    Get collection details including documents.
+    Get collection details including documents with pagination.
 
     Args:
         collection_id: Collection ID (UUID format)
         user: Current user
+        limit: Maximum number of documents to return (1-100, default 50)
+        offset: Number of documents to skip (default 0)
+        sort_by: Field to sort by (created_at, filename, page_count, chunk_count)
+        sort_order: Sort order (asc or desc)
+        search: Optional search query for filename
+        status: Optional status filter (processing, completed, failed)
 
     Returns:
-        Collection with documents list
+        Collection with paginated documents list and total count
 
     Raises:
         HTTPException 404: Collection not found or access denied
@@ -142,8 +154,16 @@ async def get_collection(
     if not collection:
         raise HTTPException(status_code=404, detail="Collection not found")
 
-    # Get documents in collection
-    documents = collection_repo.list_documents(collection_id)
+    # Get documents in collection with pagination
+    documents, total = collection_repo.list_documents(
+        collection_id,
+        limit=limit,
+        offset=offset,
+        sort_by=sort_by,
+        sort_order=sort_order,
+        search=search,
+        status=status,
+    )
 
     return {
         "id": collection.id,
@@ -168,7 +188,10 @@ async def get_collection(
                 "completed_at": d.completed_at.isoformat() if d.completed_at else None,
             }
             for d in documents
-        ]
+        ],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
     }
 
 

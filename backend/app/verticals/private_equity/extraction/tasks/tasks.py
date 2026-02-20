@@ -542,7 +542,7 @@ def extract_structured_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         # Record latency
         latency = time.monotonic() - start_time
         try:
-            EXTRACTION_LATENCY_SECONDS.labels(org_id=org_id or "unknown").observe(latency)
+            EXTRACTION_LATENCY_SECONDS.observe(latency)
         except Exception as e:
             logger.warning(f"Failed to record extraction latency: {e}", exc_info=True)
 
@@ -620,7 +620,7 @@ def extract_structured_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         # Record latency (even for failures)
         latency = time.monotonic() - start_time
         try:
-            EXTRACTION_LATENCY_SECONDS.labels(org_id=org_id or "unknown").observe(latency)
+            EXTRACTION_LATENCY_SECONDS.observe(latency)
         except Exception as lat_e:
             logger.warning(f"Failed to record extraction latency: {lat_e}", exc_info=True)
 
@@ -831,11 +831,11 @@ def start_extraction_from_chunks_task(self, payload: Dict[str, Any]) -> Dict[str
             store_extraction_result_task.s()
         )
 
-        result = task_chain.apply_async()
+        result = task_chain.apply_async(queue='critical')
 
         logger.info(
             "Extraction from chunks started",
-            extra={"job_id": job_id, "document_id": document_id, "chunks_count": len(chunks)}
+            extra={"job_id": job_id, "document_id": document_id, "chunks_count": len(chunks), "queue": "critical"}
         )
 
         return {
@@ -893,8 +893,8 @@ def start_extraction_chain(
         extract_structured_task.s(),
         store_extraction_result_task.s()  # Added final storage step
     )
-    result = task_chain.apply_async()
-    logger.info("Extraction pipeline started", extra={"job_id": job_id, "task_id": result.id})
+    result = task_chain.apply_async(queue='critical')
+    logger.info("Extraction pipeline started", extra={"job_id": job_id, "task_id": result.id, "queue": "critical"})
     return result.id
 
 

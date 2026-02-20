@@ -10,6 +10,7 @@
  */
 
 import { streamWorkflowProgress } from "../../api/workflows";
+import { createWorkflowPdfActions } from "./workflowPdfActions";
 
 export const createWorkflowDraftSlice = (set, get) => ({
   // ========== State ==========
@@ -32,6 +33,14 @@ export const createWorkflowDraftSlice = (set, get) => ({
       stage: null,
       message: null,
       cleanup: null, // SSE cleanup function
+    },
+
+    // PDF viewer state (for citation navigation in workflow results)
+    pdfViewer: {
+      activeDocumentId: null,
+      urlCache: {},
+      highlightBbox: null,
+      isLoadingUrl: false,
     },
   },
 
@@ -353,4 +362,7 @@ export const createWorkflowDraftSlice = (set, get) => ({
       },
     }));
   },
+
+  // ========== PDF Viewer Actions (for citation navigation) ==========
+  ...createWorkflowPdfActions(set, get),
 });

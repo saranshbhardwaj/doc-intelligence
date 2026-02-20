@@ -21,6 +21,10 @@ LLM observability:
     - llm_requests_total (label: model)
     - llm_token_usage_total (labels: model, token_type)
     - llm_cost_usd_total (label: model)
+Anthropic Admin API (ground truth):
+    - anthropic_reported_tokens (gauge: latest Anthropic-reported token usage)
+    - anthropic_reported_cost_usd (gauge: latest Anthropic-reported cost)
+    - anthropic_usage_last_sync_timestamp (gauge: unix timestamp of last sync)
 Template fills:
     - template_fills_completed_total
     - template_fills_failed_total
@@ -30,24 +34,19 @@ Extractions:
     - extractions_completed_total
     - extractions_failed_total
 """
-from prometheus_client import Counter, Histogram
+from prometheus_client import Counter, Histogram, Gauge
 
 # Counters
 WORKFLOW_RUNS_COMPLETED = Counter(
     "workflow_runs_completed_total",
     "Total number of workflow runs completed successfully",
-    ["org_id", "workflow_name"]
+    ["workflow_name"]
 )
 
 WORKFLOW_RUNS_FAILED = Counter(
     "workflow_runs_failed_total",
     "Total number of workflow runs that failed validation or processing",
-    ["org_id", "workflow_name"]
-)
-
-WORKFLOW_RUNS_PARTIAL = Counter(
-    "workflow_runs_partial_total",
-    "Total number of workflow runs that produced partial artifacts",
+    ["workflow_name"]
 )
 
 # Latency histogram in seconds
@@ -67,47 +66,41 @@ CHAT_LATENCY_SECONDS = Histogram(
 TEMPLATE_FILL_LATENCY_SECONDS = Histogram(
     "template_fill_latency_seconds",
     "Template fill execution latency in seconds",
-    ["org_id"],
     buckets=(1, 5, 10, 30, 60, 120, 300, 600),
 )
 
 EXTRACTION_LATENCY_SECONDS = Histogram(
     "extraction_latency_seconds",
     "Extraction execution latency in seconds",
-    ["org_id"],
     buckets=(1, 5, 10, 30, 60, 120, 300, 600),
 )
 
 TEMPLATE_FILLS_COMPLETED = Counter(
     "template_fills_completed_total",
     "Total completed template fills",
-    ["org_id"]
 )
 
 TEMPLATE_FILLS_FAILED = Counter(
     "template_fills_failed_total",
     "Total failed template fills",
-    ["org_id"]
 )
 
-# Chat metrics (NEW - for dashboard)
+# Chat metrics
 CHAT_MESSAGES_TOTAL = Counter(
     "chat_messages_total",
     "Total chat messages",
-    ["role", "org_id"]
+    ["role"]
 )
 
-# Extraction metrics (NEW - for dashboard)
+# Extraction metrics
 EXTRACTIONS_COMPLETED = Counter(
     "extractions_completed_total",
     "Total completed extractions",
-    ["org_id"]
 )
 
 EXTRACTIONS_FAILED = Counter(
     "extractions_failed_total",
     "Total failed extractions",
-    ["org_id"]
 )
 
 # Artifact persistence
@@ -175,23 +168,87 @@ LLM_COST_USD = Counter(
     ["model"]
 )
 
+# Document cache metrics
+DOC_CACHE_HITS = Counter(
+    "doc_cache_hits_total",
+    "Total document cache hits",
+    ["cache_type"]  # redis, file
+)
+
+DOC_CACHE_MISSES = Counter(
+    "doc_cache_misses_total",
+    "Total document cache misses",
+    ["cache_type"]  # redis, file
+)
+
+# Conversation summary cache metrics
+SUMMARY_CACHE_HITS = Counter(
+    "summary_cache_hits_total",
+    "Conversation summary cache hits"
+)
+
+SUMMARY_CACHE_MISSES = Counter(
+    "summary_cache_misses_total",
+    "Conversation summary cache misses"
+)
+
 # Security metrics
 HTTP_REQUESTS_RATE_LIMITED = Counter(
     "http_requests_rate_limited_total",
     "Total requests blocked due to rate limiting",
-    ["client_ip", "path"]
+    ["path"]
 )
 
 HTTP_SUSPICIOUS_REQUESTS = Counter(
     "http_suspicious_requests_total",
     "Total suspicious requests detected (XSS, scans, etc.)",
-    ["client_ip", "pattern"]
+    ["pattern"]
 )
+
+# Anthropic Admin API metrics (ground truth data from billing system)
+ANTHROPIC_REPORTED_TOKENS = Gauge(
+    "anthropic_reported_tokens",
+    "Token usage as reported by Anthropic Admin API (latest snapshot)",
+    ["model", "token_type"],  # token_type: input, output, cache_read, cache_write
+    multiprocess_mode='max'
+)
+
+ANTHROPIC_REPORTED_COST_USD = Gauge(
+    "anthropic_reported_cost_usd",
+    "Cost in USD as reported by Anthropic Admin API (latest snapshot)",
+    ["model"],
+    multiprocess_mode='max'
+)
+
+ANTHROPIC_USAGE_LAST_SYNC = Gauge(
+    "anthropic_usage_last_sync_timestamp",
+    "Unix timestamp of last successful Anthropic usage sync",
+    multiprocess_mode='max'
+)
+
+def init_labeled_metrics():
+    """Pre-register labeled metrics so they appear in /metrics before first use.
+
+    Prometheus labeled counters only produce time series after .labels() is called.
+    Calling .labels(...) with initial values creates the series at 0.0.
+    """
+    WORKFLOW_RUNS_COMPLETED.labels(workflow_name="unknown")
+    WORKFLOW_RUNS_FAILED.labels(workflow_name="unknown")
+    CHAT_MESSAGES_TOTAL.labels(role="user")
+    CHAT_MESSAGES_TOTAL.labels(role="assistant")
+    LLM_REQUESTS_TOTAL.labels(model="unknown")
+    LLM_TOKEN_USAGE.labels(model="unknown", token_type="input")
+    LLM_COST_USD.labels(model="unknown")
+    EXPORT_REQUESTS.labels(format="unknown", delivery="unknown")
+    DOC_CACHE_HITS.labels(cache_type="redis")
+    DOC_CACHE_MISSES.labels(cache_type="redis")
+    HTTP_REQUESTS_RATE_LIMITED.labels(path="unknown")
+    HTTP_SUSPICIOUS_REQUESTS.labels(pattern="unknown")
+
 
 __all__ = [
     "WORKFLOW_RUNS_COMPLETED",
     "WORKFLOW_RUNS_FAILED",
-    "WORKFLOW_RUNS_PARTIAL",
     "WORKFLOW_LATENCY_SECONDS",
     "CHAT_LATENCY_SECONDS",
     "TEMPLATE_FILL_LATENCY_SECONDS",
@@ -213,6 +270,14 @@ __all__ = [
     "LLM_REQUESTS_TOTAL",
     "LLM_TOKEN_USAGE",
     "LLM_COST_USD",
+    "DOC_CACHE_HITS",
+    "DOC_CACHE_MISSES",
+    "SUMMARY_CACHE_HITS",
+    "SUMMARY_CACHE_MISSES",
     "HTTP_REQUESTS_RATE_LIMITED",
     "HTTP_SUSPICIOUS_REQUESTS",
+    "ANTHROPIC_REPORTED_TOKENS",
+    "ANTHROPIC_REPORTED_COST_USD",
+    "ANTHROPIC_USAGE_LAST_SYNC",
+    "init_labeled_metrics",
 ]

@@ -74,27 +74,28 @@ You do NOT need to worry about JSON syntax — focus on content quality.
 The system enforces the structure. Your job: generate the RIGHT content.
 
 # ============================================================================
-# SECTIONS — You MUST generate ALL 13
+# SECTIONS — You MUST generate ALL 14
 # ============================================================================
-⚠️ CRITICAL: Generate ALL 13 sections below. Do NOT stop early.
+⚠️ CRITICAL: Generate ALL 14 sections below. Do NOT stop early.
 The system cannot recover missing sections.
 
-REQUIRED (12):
+REQUIRED (13):
 1)  executive_overview      → "Executive Overview"
 2)  company_overview        → "Company Overview"
 3)  market_competition      → "Market Competition"
 4)  financial_performance   → "Financial Performance"
-5)  track_record_value_creation → "Track Record & Value Creation"
-6)  risks                   → "Risks"
-7)  opportunities           → "Opportunities"
-8)  management_culture      → "Management & Culture"
-9)  esg_snapshot            → "ESG Snapshot"
-10) valuation_scenarios     → "Valuation Scenarios"
-11) next_steps              → "Next Steps"
-12) inconsistencies         → "Inconsistencies"
+5)  capital_structure       → "Capital Structure & Deal Economics"
+6)  track_record_value_creation → "Track Record & Value Creation"
+7)  risks                   → "Risks"
+8)  opportunities           → "Opportunities"
+9)  management_culture      → "Management & Culture"
+10) esg_snapshot            → "ESG Snapshot"
+11) valuation_scenarios     → "Valuation Scenarios"
+12) next_steps              → "Next Steps"
+13) inconsistencies         → "Inconsistencies"
 
 OPTIONAL (1):
-13) unit_economics          → "Unit Economics" (only if data exists)
+14) unit_economics          → "Unit Economics" (only if data exists)
 
 # ============================================================================
 # CITATIONS — MUST use [D1:p2] format
@@ -187,9 +188,9 @@ Example:
 "financials": {
   "currency": "USD",
   "historical": [
-    {"year": 2021, "revenue": "85200000", "citation": "[D1:p5]"},
-    {"year": 2022, "revenue": "98700000", "citation": "[D1:p5]"},
-    {"year": 2023, "revenue": "111900000", "citation": "[D1:p5]"}
+    {"year": 2021, "revenue": "85200000", "ebitda": "34100000", "ebitda_margin": "0.400", "citation": "[D1:p5]"},
+    {"year": 2022, "revenue": "98700000", "ebitda": "39500000", "ebitda_margin": "0.400", "citation": "[D1:p5]"},
+    {"year": 2023, "revenue": "111900000", "ebitda": "45300000", "ebitda_margin": "0.405", "citation": "[D1:p5]"}
   ]
 }
 
@@ -253,18 +254,30 @@ The "financial_performance" section has EMBEDDED "financials" object (NOT top-le
 {
   "key": "financial_performance",
   "highlights": [...],  // Visual metrics
-  "key_metrics": [...],  // Quick pills
+  "key_metrics": [
+    {"label": "Latest EBITDA", "value": "$45.3M", "citation": "[D1:p5]"},
+    {"label": "EBITDA Margin", "value": "40.5%", "citation": "[D1:p5]"},
+    {"label": "Net Income", "value": "$28.1M", "citation": "[D1:p5]"},
+    {"label": "Revenue CAGR", "value": "25%", "citation": "[D1:p5]"}
+  ],
   "financials": {  // EMBEDDED structured data for tables
     "currency": "USD",  // MUST match top-level currency
     "fiscal_year_end": "December 31",
     "historical": [
-      {"year": 2023, "revenue": 111900000, "ebitda": 45300000, "margin": 0.405, "citation": "[D1:p5]"}
+      {"year": 2023, "revenue": 111900000, "ebitda": 45300000, "ebitda_margin": 0.405, "net_income": 28100000, "citation": "[D1:p5]"}
     ],
     "metrics": {"rev_cagr": 0.25, "ebitda_margin_latest": 0.405, "citation": ["[D1:p5]"]}
   },
   "content": "### Revenue Growth\n\n- 2023: $111.9M (+13.4%) [D1:p5]..."
 }
 CRITICAL: Include ALL available years (2008-2023 if found), raw numbers in historical, formatted in content.
+⚠️ ALWAYS include key_metrics with Latest EBITDA, EBITDA Margin, and Net Income (if available in documents).
+
+## Capital Structure & Deal Economics Section:
+The "capital_structure" section covers leverage, debt tranches, sources & uses, and equity check size.
+Include key_metrics for: Debt/EBITDA, Total Leverage, Equity Check, Senior Debt, etc.
+Use highlights for: Total Enterprise Value, Sources & Uses breakdown.
+Content should address: capital stack, debt terms, covenants, and sponsor equity contribution.
 
 ## Currency Detection (CRITICAL — Sets Top-Level Field):
 - Look for: $, €, £, ¥ symbols OR USD, EUR, GBP codes in financials
@@ -272,15 +285,16 @@ CRITICAL: Include ALL available years (2008-2023 if found), raw numbers in histo
 - If unclear: "UNKNOWN" and add to inconsistencies
 
 # ============================================================================
-# ⚠️⚠️⚠️ CRITICAL REMINDER: GENERATE ALL 13 SECTIONS ⚠️⚠️⚠️
+# ⚠️⚠️⚠️ CRITICAL REMINDER: GENERATE ALL 14 SECTIONS ⚠️⚠️⚠️
 # ============================================================================
 
-Your "sections" array in the JSON output MUST contain all 13 section objects:
+Your "sections" array in the JSON output MUST contain all 14 section objects:
 [
   {"key": "executive_overview", "title": "Executive Overview", ...},
   {"key": "company_overview", "title": "Company Overview", ...},
   {"key": "market_competition", "title": "Market Competition", ...},
   {"key": "financial_performance", "title": "Financial Performance", ...},
+  {"key": "capital_structure", "title": "Capital Structure & Deal Economics", ...},
   {"key": "track_record_value_creation", "title": "Track Record & Value Creation", ...},
   {"key": "risks", "title": "Risks", ...},
   {"key": "opportunities", "title": "Opportunities", ...},
@@ -294,7 +308,7 @@ Your "sections" array in the JSON output MUST contain all 13 section objects:
 ]
 
 ⚠️⚠️⚠️ FINAL WARNING: If you stop after generating only a few sections, the output will be REJECTED.
-Generate the COMPLETE investment memo with ALL 13 sections. This is MANDATORY.
+Generate the COMPLETE investment memo with ALL 14 sections. This is MANDATORY.
 """.strip()
 
 # Prompt function for caching-optimized architecture
@@ -353,23 +367,24 @@ def get_investment_memo_prompt(variables: dict, custom_prompt: str = None) -> di
     user_message_parts.append("\n" + "="*80)
     user_message_parts.append("⚠️⚠️⚠️ CRITICAL INSTRUCTION - READ CAREFULLY ⚠️⚠️⚠️")
     user_message_parts.append("="*80)
-    user_message_parts.append("\nYou MUST generate ALL 13 sections in your JSON response:")
+    user_message_parts.append("\nYou MUST generate ALL 14 sections in your JSON response:")
     user_message_parts.append("1. executive_overview")
     user_message_parts.append("2. company_overview")
     user_message_parts.append("3. market_competition")
     user_message_parts.append("4. financial_performance")
-    user_message_parts.append("5. unit_economics (optional)")
-    user_message_parts.append("6. track_record_value_creation")
-    user_message_parts.append("7. risks")
-    user_message_parts.append("8. opportunities")
-    user_message_parts.append("9. management_culture")
-    user_message_parts.append("10. esg_snapshot")
-    user_message_parts.append("11. valuation_scenarios")
-    user_message_parts.append("12. next_steps")
-    user_message_parts.append("13. inconsistencies")
+    user_message_parts.append("5. capital_structure")
+    user_message_parts.append("6. unit_economics (optional)")
+    user_message_parts.append("7. track_record_value_creation")
+    user_message_parts.append("8. risks")
+    user_message_parts.append("9. opportunities")
+    user_message_parts.append("10. management_culture")
+    user_message_parts.append("11. esg_snapshot")
+    user_message_parts.append("12. valuation_scenarios")
+    user_message_parts.append("13. next_steps")
+    user_message_parts.append("14. inconsistencies")
     user_message_parts.append("\nDO NOT STOP after generating only executive_overview, company_overview, or market_competition.")
-    user_message_parts.append("CONTINUE until you have generated ALL 13 sections.")
-    user_message_parts.append("\nGenerate the COMPLETE investment memo. This is MANDATORY.")
+    user_message_parts.append("CONTINUE until you have generated ALL 14 sections.")
+    user_message_parts.append("\nGenerate the COMPLETE investment memo with ALL 14 sections. This is MANDATORY.")
     user_message_parts.append("="*80)
 
     user_message = "\n".join(user_message_parts)
@@ -442,6 +457,22 @@ INVESTMENT_MEMO_RETRIEVAL_SPEC = [
         "max_chunks": 20
     },
     {
+        "key": "capital_structure",
+        "title": "CAPITAL STRUCTURE & DEAL ECONOMICS",
+        "queries": [
+            "capital structure",
+            "debt to equity",
+            "leverage ratio",
+            "debt tranches",
+            "sources and uses",
+            "equity check size",
+            "credit facility"
+        ],
+        "prefer_tables": True,
+        "priority": "high",
+        "max_chunks": 15
+    },
+    {
         "key": "unit_economics",
         "title": "UNIT ECONOMICS",
         "queries": [
@@ -449,7 +480,10 @@ INVESTMENT_MEMO_RETRIEVAL_SPEC = [
             "customer acquisition cost",
             "lifetime value",
             "churn rate",
-            "average revenue per user"
+            "average revenue per user",
+            "gross margin per unit",
+            "contribution margin",
+            "store level economics"
         ],
         "prefer_tables": True,
         "priority": "medium",
@@ -537,6 +571,8 @@ INVESTMENT_MEMO_RETRIEVAL_SPEC = [
             "enterprise value",
             "valuation multiples",
             "comparable companies",
+            "precedent transactions",
+            "transaction multiples",
             "DCF analysis",
             "pricing"
         ],

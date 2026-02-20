@@ -229,7 +229,8 @@ async def _execute_map_reduce(
     workflow_template: Any,
     variables: Dict,
     custom_prompt: str,
-    db: Any
+    db: Any,
+    job_id: str = None
 ) -> Dict[str, Any]:
     """
     Execute map-reduce workflow: section summaries → final synthesis.
@@ -244,18 +245,23 @@ async def _execute_map_reduce(
         variables: Template variables
         custom_prompt: Custom user prompt (optional)
         db: Database session
+        job_id: Job ID for progress tracking
 
     Returns:
         LLM result dict with final output
     """
     from app.verticals.private_equity.workflows.templates.investment_memo import get_investment_memo_prompt
+    from app.services.job_tracker import JobProgressTracker
 
     logger.info(
         f"Starting map-reduce execution for {len(sections_content)} sections",
         extra={"run_id": run_id, "section_count": len(sections_content)}
     )
 
-    # Phase 1: Summarize each section (Map)
+    # Initialize progress tracker
+    tracker = JobProgressTracker(db, job_id) if job_id else JobProgressTracker(db, run_id)
+
+    # Phase 1: Summarize each section (Map) — parallel execution
     section_summaries = {}
     retrieval_spec = workflow_template.retrieval_spec_json or []
 
@@ -264,6 +270,20 @@ async def _execute_map_reduce(
         import json
         retrieval_spec = json.loads(retrieval_spec)
 
+    # Build parallel tasks for all sections with chunks
+    async def _summarize_with_key(spec, chunks):
+        result = await _summarize_section(
+            section_key=spec["key"],
+            section_spec=spec,
+            chunks=chunks,
+            workflow_name=workflow_template.name,
+            run_id=run_id,
+            db=db,
+            compressor=None
+        )
+        return spec["key"], result
+
+    summary_tasks = []
     for section_spec in retrieval_spec:
         section_key = section_spec.get("key")
         chunks = sections_content.get(section_key, [])
@@ -275,25 +295,65 @@ async def _execute_map_reduce(
             )
             continue
 
-        # Summarize section
-        summary = await _summarize_section(
-            section_key=section_key,
-            section_spec=section_spec,
-            chunks=chunks,
-            workflow_name=workflow_template.name,
-            run_id=run_id,
-            db=db,
-            compressor=None  # No longer using compression
-        )
+        summary_tasks.append(_summarize_with_key(section_spec, chunks))
 
-        section_summaries[section_key] = summary
+    if not summary_tasks:
+        logger.warning("No sections to summarize", extra={"run_id": run_id})
+        return {}
+
+    # ──────────────────────────────────────────────────────────────────
+    # Cache-optimized execution: Sequential first + Parallel rest
+    # Execute first section sequentially to prime Anthropic's prompt cache,
+    # then execute remaining sections in parallel (cache hits = 90% cost savings)
+    # ──────────────────────────────────────────────────────────────────
+    logger.info(
+        f"Starting cache-optimized summarization: 1 sequential + {len(summary_tasks)-1} parallel sections",
+        extra={"run_id": run_id, "total_sections": len(summary_tasks)}
+    )
+
+    total_sections = len(summary_tasks)
+    # Map phase: 50% → 75% (25% range for section summarization)
+    map_start_percent = 50
+    map_end_percent = 75
+
+    # Execute first section to prime cache
+    tracker.update_progress(progress_percent=map_start_percent, message=f"Summarizing sections (1/{total_sections})")
+    first_key, first_summary = await summary_tasks[0]
+    section_summaries[first_key] = first_summary
+    logger.info(f"✅ Cache primed with first section: {first_key}", extra={"run_id": run_id})
+
+    # Update progress after first section
+    sections_completed = 1
+    current_percent = map_start_percent + int((sections_completed / total_sections) * (map_end_percent - map_start_percent))
+    tracker.update_progress(progress_percent=current_percent, message=f"Summarizing sections ({sections_completed}/{total_sections})")
+
+    # Execute remaining sections in parallel (cache now exists)
+    if len(summary_tasks) > 1:
+        results = await asyncio.gather(*summary_tasks[1:], return_exceptions=True)
+
+        for result in results:
+            if isinstance(result, Exception):
+                logger.error(
+                    f"Section summary failed: {result}",
+                    extra={"run_id": run_id},
+                    exc_info=result
+                )
+                continue
+            key, summary = result
+            section_summaries[key] = summary
+
+            # Update progress as each section completes
+            sections_completed += 1
+            current_percent = map_start_percent + int((sections_completed / total_sections) * (map_end_percent - map_start_percent))
+            tracker.update_progress(progress_percent=current_percent, message=f"Summarizing sections ({sections_completed}/{total_sections})")
 
     logger.info(
-        f"Map phase complete: {len(section_summaries)} sections summarized",
-        extra={"run_id": run_id, "summaries": section_summaries.keys()}
+        f"Map phase complete: {len(section_summaries)} sections summarized (parallel)",
+        extra={"run_id": run_id, "summaries": list(section_summaries.keys())}
     )
 
     # Phase 2: Synthesize summaries (Reduce)
+    tracker.update_progress(progress_percent=80, message="Synthesizing final artifact")
     synthesis_context = _build_synthesis_context(section_summaries)
 
     # Build final workflow prompt (returns separate system/user for caching)
@@ -322,6 +382,8 @@ async def _execute_map_reduce(
         pydantic_model=InvestmentMemo,
         use_cache=True
     )
+
+    tracker.update_progress(progress_percent=95, message="Finalizing artifact")
 
     logger.info(
         f"Map-reduce synthesis complete",
