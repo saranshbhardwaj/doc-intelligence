@@ -1,11 +1,19 @@
 """Template filling functionality for Excel templates."""
 
 import re
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 from openpyxl.cell import Cell, MergedCell
 from openpyxl.worksheet.worksheet import Worksheet
 
 from app.utils.logging import logger
+from app.verticals.real_estate.template_filling.excel.schema_based.validation import (
+    CONFIDENCE_THRESHOLDS,
+    FieldValidator,
+    FillConfidenceReport,
+    categorize_confidence,
+    should_fill_cell,
+    create_confidence_report,
+)
 
 
 class TemplateFiller:
@@ -49,6 +57,17 @@ class TemplateFiller:
             sheets_modified = set()
             errors = []
 
+            # Confidence tracking
+            confidence_stats = {
+                "high_confidence": 0,      # >= 0.85
+                "needs_review": 0,         # 0.70-0.84
+                "low_confidence": 0,       # 0.50-0.69
+                "skipped_low_confidence": 0,  # < 0.50
+                "validation_errors": 0,
+            }
+            needs_review_cells: List[Dict[str, Any]] = []
+            validation_error_cells: List[Dict[str, Any]] = []
+
             # Extract data sections (clean nested schema)
             llm_extracted = extracted_data.get("llm_extracted", {})
             manual_edits = extracted_data.get("manual_edits", {})
@@ -58,9 +77,20 @@ class TemplateFiller:
                 pdf_field_id = mapping.get("pdf_field_id")
                 excel_cell = mapping.get("excel_cell")
                 excel_sheet = mapping.get("excel_sheet")
+                confidence = mapping.get("confidence", 0.0)
+                source = mapping.get("source", "unknown")
 
                 if not all([pdf_field_id, excel_cell, excel_sheet]):
                     errors.append(f"Invalid mapping: {mapping}")
+                    continue
+
+                # Track confidence category
+                confidence_category = categorize_confidence(confidence)
+
+                # Check if we should skip low-confidence mappings
+                if not should_fill_cell(confidence):
+                    confidence_stats["skipped_low_confidence"] += 1
+                    logger.debug(f"Skipping low-confidence mapping: {excel_sheet}!{excel_cell} (confidence={confidence:.2f})")
                     continue
 
                 # Get extracted value from LLM data
@@ -90,14 +120,55 @@ class TemplateFiller:
                         errors.append(f"Cell {excel_sheet}!{excel_cell} is in a merged range but top-left cell not found")
                         continue
 
-                    # Preserve cell type - convert value appropriately
-                    filled_value = self._convert_value_for_cell(value, target_cell)
+                    # Infer expected data type from cell format
+                    cell_type = self._infer_cell_type(target_cell)
+
+                    # Validate value against expected type
+                    validation_result = FieldValidator.validate(value, cell_type)
+
+                    if not validation_result.is_valid:
+                        confidence_stats["validation_errors"] += 1
+                        validation_error_cells.append({
+                            "sheet": excel_sheet,
+                            "cell": excel_cell,
+                            "value": value,
+                            "expected_type": cell_type,
+                            "error": validation_result.error_message,
+                        })
+                        logger.warning(f"Validation error for {excel_sheet}!{excel_cell}: {validation_result.error_message}")
+                        # Still fill with original value, but log the warning
+                        filled_value = self._convert_value_for_cell(value, target_cell)
+                    else:
+                        # Use validated/converted value
+                        filled_value = validation_result.converted_value if validation_result.converted_value is not None else self._convert_value_for_cell(value, target_cell)
 
                     # Set value (formulas in other cells will auto-recalculate)
                     target_cell.value = filled_value
 
                     cells_filled += 1
                     sheets_modified.add(excel_sheet)
+
+                    # Track confidence category
+                    if confidence_category == "auto_fill":
+                        confidence_stats["high_confidence"] += 1
+                    elif confidence_category == "needs_review":
+                        confidence_stats["needs_review"] += 1
+                        needs_review_cells.append({
+                            "sheet": excel_sheet,
+                            "cell": excel_cell,
+                            "confidence": confidence,
+                            "source": source,
+                            "value": str(value)[:50],  # Truncate for logging
+                        })
+                    elif confidence_category == "low_confidence":
+                        confidence_stats["low_confidence"] += 1
+                        needs_review_cells.append({
+                            "sheet": excel_sheet,
+                            "cell": excel_cell,
+                            "confidence": confidence,
+                            "source": source,
+                            "value": str(value)[:50],
+                        })
 
                 except Exception as e:
                     errors.append(f"Error filling {excel_sheet}!{excel_cell}: {str(e)}")
@@ -252,7 +323,20 @@ class TemplateFiller:
                 "sheets_modified": sorted(list(sheets_modified)),
                 "formulas_preserved": True,  # openpyxl preserves formulas by default
                 "errors": errors,
+                # Confidence breakdown
+                "confidence_stats": confidence_stats,
+                "needs_review_cells": needs_review_cells[:20],  # Limit to first 20
+                "validation_error_cells": validation_error_cells[:20],
             }
+
+            # Log confidence breakdown
+            logger.info(
+                f"Confidence breakdown: {confidence_stats['high_confidence']} high, "
+                f"{confidence_stats['needs_review']} needs review, "
+                f"{confidence_stats['low_confidence']} low, "
+                f"{confidence_stats['skipped_low_confidence']} skipped, "
+                f"{confidence_stats['validation_errors']} validation errors"
+            )
 
             logger.info(
                 f"Template filled successfully: {cells_filled} cells across "

@@ -8,6 +8,7 @@ class Settings(BaseSettings):
 
     # API Keys
     anthropic_api_key: str
+    anthropic_admin_api_key: str = ""  # sk-ant-admin-... from Anthropic Console (for Usage & Cost API)
     admin_api_key: str = "change-this-in-production"  # For analytics endpoint access
 
     # Authentication (Clerk)
@@ -127,6 +128,8 @@ class Settings(BaseSettings):
     # Chunking Settings
     enable_chunking: bool = True  # Enable multi-stage LLM processing with chunking
     chunk_batch_size: int = 10  # Number of narrative chunks to process per cheap LLM call
+    chunk_overlap_paragraphs: int = 1  # Paragraphs to repeat from previous chunk (structured docs)
+    chunk_overlap_sentences: int = 2   # Sentences to repeat from previous chunk (unstructured/fallback docs)
 
     # ===== EMBEDDINGS CONFIGURATION =====
     # Which embedding provider to use: "sentence-transformer" (free, local) or "openai" (paid, API)
@@ -287,6 +290,7 @@ class Settings(BaseSettings):
     workflow_max_cost_per_run_usd: float = 5.0  # Max USD cost per workflow run
     workflow_max_attempts: int = 3  # Max LLM generation attempts with retry
     workflow_context_max_chars: int = 150_000  # Max context characters per workflow run
+    workflow_map_reduce_token_threshold: int = 10_000  # Tokens above which map-reduce is used
     
     class Config:
         # Point explicitly to backend/.env so scripts run from repo root still load variables

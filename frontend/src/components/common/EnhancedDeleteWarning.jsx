@@ -8,16 +8,18 @@
  *   - documentId: string
  *   - documentName: string
  *   - getToken: () => Promise<string>
- *   - onConfirmDelete: () => void
+ *   - onConfirmDelete: () => Promise<void>
  *   - trigger: React.ReactNode (the button/element that triggers the dialog)
+ *   - isDeleting: boolean - Whether deletion is in progress
  *
  * Output:
  *   - Renders AlertDialog with usage information
  *   - Handles deletion confirmation with safety check
+ *   - Shows loading state during deletion
  */
 
 import { useState, useEffect } from "react";
-import { AlertTriangle, MessageSquare, FileText, Workflow } from "lucide-react";
+import { AlertTriangle, MessageSquare, FileText, Workflow, Loader2 } from "lucide-react";
 import {
   AlertDialog,
   AlertDialogAction,
@@ -39,6 +41,7 @@ export default function EnhancedDeleteWarning({
   getToken,
   onConfirmDelete,
   trigger,
+  isDeleting = false,
 }) {
   const [isOpen, setIsOpen] = useState(false);
   const [usageData, setUsageData] = useState(null);
@@ -65,7 +68,7 @@ export default function EnhancedDeleteWarning({
     }
   };
 
-  const handleConfirm = () => {
+  const handleConfirm = async () => {
     // If document is in use, require "DELETE" confirmation
     if (usageData && usageData.total_usage_count > 0) {
       if (confirmText !== "DELETE") {
@@ -73,7 +76,10 @@ export default function EnhancedDeleteWarning({
       }
     }
 
-    onConfirmDelete?.();
+    // Call the delete handler (it will handle the async deletion)
+    await onConfirmDelete?.();
+
+    // Only close dialog after deletion completes
     setIsOpen(false);
     setConfirmText("");
     setUsageData(null); // Reset for next time
@@ -87,6 +93,7 @@ export default function EnhancedDeleteWarning({
 
   const isInUse = usageData && usageData.total_usage_count > 0;
   const canDelete = !isInUse || confirmText === "DELETE";
+  const isButtonDisabled = !canDelete || isLoading || isDeleting;
 
   const chatCount = usageData?.usage?.chat_sessions?.length || 0;
   const extractCount = usageData?.usage?.extracts?.length || 0;
@@ -241,13 +248,24 @@ export default function EnhancedDeleteWarning({
         </AlertDialogHeader>
 
         <AlertDialogFooter>
-          <AlertDialogCancel onClick={handleCancel}>Cancel</AlertDialogCancel>
+          <AlertDialogCancel onClick={handleCancel} disabled={isDeleting}>
+            Cancel
+          </AlertDialogCancel>
           <AlertDialogAction
             onClick={handleConfirm}
-            disabled={!canDelete || isLoading}
+            disabled={isButtonDisabled}
             className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
           >
-            {isLoading ? "Loading..." : "Delete"}
+            {isDeleting ? (
+              <span className="flex items-center gap-2">
+                <Loader2 className="w-4 h-4 animate-spin" />
+                Deleting...
+              </span>
+            ) : isLoading ? (
+              "Loading..."
+            ) : (
+              "Delete"
+            )}
           </AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>

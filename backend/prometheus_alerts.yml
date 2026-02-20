@@ -74,6 +74,40 @@ groups:
           summary: "High extraction p95 latency"
           description: "Extraction p95 latency exceeding 180 seconds for 10 minutes ({{ $value }}s)"
 
+      # === STUCK TASK ALERTS ===
+      - alert: HighCeleryQueueDepth
+        expr: celery_queue_length{queue="critical"} > 10
+        for: 5m
+        labels:
+          severity: warning
+          component: celery
+        annotations:
+          summary: "Critical queue has backed up tasks"
+          description: "Critical queue has {{ $value }} tasks waiting for >5 minutes - workers may be stuck or overwhelmed"
+
+      - alert: NoWorkflowCompletionsRecently
+        expr: |
+          (time() - workflow_runs_completed_total) > 1200
+          and
+          workflow_runs_completed_total > 0
+        for: 5m
+        labels:
+          severity: warning
+          component: workflows
+        annotations:
+          summary: "No workflow completions in 20 minutes"
+          description: "No workflows have completed in the last 20 minutes - workers may be stuck or tasks misrouted"
+
+      - alert: CeleryWorkerDown
+        expr: up{job=~"worker.*"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          component: celery
+        annotations:
+          summary: "Celery worker is down"
+          description: "Worker {{ $labels.instance }} has been down for 2 minutes"
+
   - name: docint_llm
     interval: 30s
     rules:
@@ -127,14 +161,14 @@ groups:
     rules:
       # === SERVICE HEALTH ===
       - alert: ServiceDown
-        expr: up{job="docint-api"} == 0
+        expr: up{job="api"} == 0
         for: 2m
         labels:
           severity: critical
           component: infrastructure
         annotations:
           summary: "API service is down"
-          description: "The docint-api service has been down for 2 minutes"
+          description: "The API service has been down for 2 minutes"
 
       # === HIGH ERROR RATES ===
       - alert: HighSecurityRequestRate

@@ -42,7 +42,8 @@ USER appuser
 EXPOSE 8000
 
 # Health command (optional)
-HEALTHCHECK --interval=120s --timeout=5s CMD curl -f http://localhost:8000/api/health || exit 1
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 CMD curl -f http://localhost:8000/api/health || exit 1
 
-# Run uvicorn by default (disable frozen modules to improve breakpoint reliability)
-CMD ["python", "-Xfrozen_modules=off", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Run uvicorn with 2 workers for concurrent request handling.
+# Prometheus multiproc cleanup is handled by Python code in metrics_setup.py (PID-based)
+CMD ["python", "-Xfrozen_modules=off", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]

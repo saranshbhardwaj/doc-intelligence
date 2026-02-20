@@ -1,7 +1,10 @@
 import os
+import logging
 from fastapi import APIRouter, Response
 from prometheus_client import generate_latest, CONTENT_TYPE_LATEST, CollectorRegistry
 from prometheus_client.multiprocess import MultiProcessCollector
+
+_metrics_logger = logging.getLogger("app.metrics_debug")
 
 router = APIRouter(prefix="/metrics", tags=["metrics"])
 
@@ -10,20 +13,24 @@ router = APIRouter(prefix="/metrics", tags=["metrics"])
 def metrics_root():
     """Expose Prometheus metrics from all processes (API + Celery workers).
 
-    Uses multiprocess mode to aggregate metrics from:
-    - API process (HTTP requests, system metrics)
-    - Celery worker processes (workflow runs, LLM metrics)
+    Uses multiprocess mode to aggregate metrics from all .db files in the
+    shared PROMETHEUS_MULTIPROC_DIR directory. Each container type uses a
+    PID offset to avoid filename collisions (see metrics_setup.py).
     """
-    # Check if multiprocess mode is enabled
     multiproc_dir = os.environ.get('PROMETHEUS_MULTIPROC_DIR')
 
     if multiproc_dir and os.path.exists(multiproc_dir):
-        # Multiprocess mode: collect from all processes
         registry = CollectorRegistry()
-        MultiProcessCollector(registry)
+        MultiProcessCollector(registry, path=multiproc_dir)
         data = generate_latest(registry)
     else:
-        # Single process mode (fallback)
         data = generate_latest()
+
+    # METRICS_DEBUG: log workflow-related lines from scrape output
+    workflow_lines = [l for l in data.decode().split('\n') if 'workflow_runs' in l]
+    if workflow_lines:
+        _metrics_logger.info(f"METRICS_DEBUG /metrics scrape: {workflow_lines}")
+    else:
+        _metrics_logger.info("METRICS_DEBUG /metrics scrape: NO workflow_runs lines found")
 
     return Response(content=data, media_type=CONTENT_TYPE_LATEST)

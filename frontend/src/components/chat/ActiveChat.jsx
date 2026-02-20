@@ -961,7 +961,7 @@ export default function ActiveChat({
       </ResizablePanel>
 
       {/* Resizable Handle - only show if PDF panel is visible */}
-      {showPdfPanel && sessionDocIds.length > 0 && <ResizableHandle withHandle />}
+      {showPdfPanel && sessionDocIds.length > 0 && <ResizableHandle />}
 
       {/* Right Panel: PDF Viewer */}
       {showPdfPanel && sessionDocIds.length > 0 && (

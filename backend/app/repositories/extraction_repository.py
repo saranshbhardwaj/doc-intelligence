@@ -16,6 +16,7 @@ from typing import Generator
 
 from app.db_models_users import UsageLog
 from pytz import timezone
+from sqlalchemy import func, case
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -653,26 +654,46 @@ class ExtractionRepository:
     def get_extraction_stats(self, user_id: str, org_id: str) -> dict:
         """Get extraction statistics for a user.
 
+        Uses SQL aggregation for efficiency (single query instead of loading all extractions).
+
         Args:
             user_id: User identifier
+            org_id: Organization identifier
 
         Returns:
             Dictionary with stats (total_extractions, total_pages, etc.)
         """
         with self._get_session() as db:
             try:
-                extractions = db.query(Extraction).filter(
+                # Use SQL aggregation to avoid loading all extractions into memory
+                result = db.query(
+                    func.count(Extraction.id).label("total_extractions"),
+                    func.coalesce(func.sum(Extraction.page_count), 0).label("total_pages"),
+                    func.coalesce(func.sum(Extraction.cost_usd), 0).label("total_cost"),
+                    func.sum(case(
+                        (Extraction.status == "completed", 1),
+                        else_=0
+                    )).label("successful"),
+                    func.sum(case(
+                        (Extraction.status == "failed", 1),
+                        else_=0
+                    )).label("failed"),
+                    func.sum(case(
+                        (Extraction.from_cache == True, 1),
+                        else_=0
+                    )).label("from_cache")
+                ).filter(
                     Extraction.user_id == user_id,
                     Extraction.org_id == org_id
-                ).all()
+                ).first()
 
                 return {
-                    "total_extractions": len(extractions),
-                    "total_pages": sum(e.page_count for e in extractions if e.page_count),
-                    "total_cost_usd": sum(e.cost_usd for e in extractions if e.cost_usd),
-                    "successful": len([e for e in extractions if e.status == "completed"]),
-                    "failed": len([e for e in extractions if e.status == "failed"]),
-                    "from_cache": len([e for e in extractions if e.from_cache])
+                    "total_extractions": result.total_extractions or 0,
+                    "total_pages": result.total_pages or 0,
+                    "total_cost_usd": round(float(result.total_cost or 0), 4),
+                    "successful": result.successful or 0,
+                    "failed": result.failed or 0,
+                    "from_cache": result.from_cache or 0
                 }
             except SQLAlchemyError as e:
                 logger.error(

@@ -17,13 +17,24 @@ else:
     backend_kind = "sqlite" if DATABASE_URL.startswith("sqlite") else "postgres"
     logger.info("Database configuration loaded", extra={"backend": backend_kind})
 
-# Create engine
+# Create engine with connection pooling
 # For SQLite, we need check_same_thread=False
 connect_args = {}
+pool_config = {}
+
 if DATABASE_URL.startswith("sqlite"):
     connect_args = {"check_same_thread": False}
+else:
+    # PostgreSQL connection pool configuration for production scalability
+    pool_config = {
+        "pool_size": 20,           # Base connections per container
+        "max_overflow": 10,        # Allow 10 overflow (total 30 max)
+        "pool_pre_ping": True,     # Validate connections before reuse (prevents stale connections)
+        "pool_recycle": 3600,      # Recycle connections after 1 hour
+        "pool_timeout": 30,        # Wait 30s for connection before error
+    }
 
-engine = create_engine(DATABASE_URL, connect_args=connect_args)
+engine = create_engine(DATABASE_URL, connect_args=connect_args, **pool_config)
 
 # Create session factory
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -37,7 +48,18 @@ elif DATABASE_URL.startswith("sqlite"):
 else:
     ASYNC_DATABASE_URL = DATABASE_URL
 
-async_engine = create_async_engine(ASYNC_DATABASE_URL, echo=False)
+# Async engine with connection pooling (same config as sync engine)
+async_pool_config = {}
+if not DATABASE_URL.startswith("sqlite"):
+    async_pool_config = {
+        "pool_size": 20,
+        "max_overflow": 10,
+        "pool_pre_ping": True,
+        "pool_recycle": 3600,
+        "pool_timeout": 30,
+    }
+
+async_engine = create_async_engine(ASYNC_DATABASE_URL, echo=False, **async_pool_config)
 AsyncSessionLocal = async_sessionmaker(
     async_engine,
     class_=AsyncSession,

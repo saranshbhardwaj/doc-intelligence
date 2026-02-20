@@ -430,7 +430,6 @@ async def get_chat_history(
     # Use repositories
     session_repo = SessionRepository()
     chat_repo = ChatRepository()
-
     # Verify session access
     session = session_repo.get_session(session_id, user.id, user.org_id)
     if not session:
@@ -454,13 +453,15 @@ async def get_chat_history(
         "session_id": session.id,
         "messages": [
             {
+                "id": msg.id,
                 "role": msg.role,
                 "content": msg.content,
                 "message_index": msg.message_index,
                 "created_at": msg.created_at.isoformat() if msg.created_at else None,
                 "source_chunks": msg.source_chunks,
                 "num_chunks_retrieved": msg.num_chunks_retrieved,
-                "comparison_metadata": json.loads(msg.comparison_metadata) if msg.comparison_metadata else None
+                "comparison_metadata": json.loads(msg.comparison_metadata) if msg.comparison_metadata else None,
+                "citation_context": json.loads(msg.citation_metadata) if msg.citation_metadata else None
             }
             for msg in messages
         ],
@@ -574,6 +575,8 @@ async def export_session(
         ]
 
     # Format export data
+    import json
+
     export_data = {
         "session": {
             "id": session.id,
@@ -591,7 +594,8 @@ async def export_session(
                 "message_index": msg.message_index,
                 "created_at": msg.created_at.isoformat() if msg.created_at else None,
                 "source_chunks": msg.source_chunks,
-                "num_chunks_retrieved": msg.num_chunks_retrieved
+                "num_chunks_retrieved": msg.num_chunks_retrieved,
+                "citation_context": json.loads(msg.citation_metadata) if msg.citation_metadata else None
             }
             for msg in messages
         ],

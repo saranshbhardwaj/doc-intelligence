@@ -19,7 +19,7 @@ import OpportunitiesCard from "./OpportunitiesCard";
 import NextStepsCard from "./NextStepsCard";
 import WorkflowMetricsDashboard from "./WorkflowMetricsDashboard";
 
-export default function InvestmentMemoView({ artifact, run }) {
+export default function InvestmentMemoView({ artifact, run, onCitationClick }) {
 
   if (!artifact || !artifact.artifact) {
     console.warn("No artifact or artifact.artifact found", { artifact });
@@ -99,6 +99,7 @@ export default function InvestmentMemoView({ artifact, run }) {
               index={idx}
               currency={currency}
               richCitations={artifact.artifact.rich_citations || []}
+              onCitationClick={onCitationClick}
             />
           ))}
         </div>

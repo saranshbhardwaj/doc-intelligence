@@ -10,6 +10,7 @@ Handles:
 - Confidence score validation
 """
 from typing import Any, Dict, List, Optional
+import json
 import re
 from app.utils.logging import logger
 
@@ -18,6 +19,7 @@ INVESTMENT_MEMO_SECTION_KEYS = [
     "company_overview",
     "market_competition",
     "financial_performance",
+    "capital_structure",
     "unit_economics",
     "track_record_value_creation",
     "risks",
@@ -33,6 +35,8 @@ INVESTMENT_MEMO_SECTION_KEY_ALIASES = {
     "track_record": "track_record_value_creation",
     "esg": "esg_snapshot",
     "valuation": "valuation_scenarios",
+    "deal_economics": "capital_structure",
+    "cap_structure": "capital_structure",
 }
 
 CITATION_PATTERN = re.compile(r"^\[D\d+:p\d+\]$")
@@ -215,6 +219,117 @@ def _coerce_investment_memo_sections(sections: List[Dict[str, Any]]) -> List[Dic
     return ordered_sections
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# Financial enrichment: recover fields not in Pydantic grammar
+# The Pydantic schema is kept slim to avoid Anthropic's grammar size limit.
+# Extra fields (ebitda, ebitda_margin, net_income, metrics) are requested via
+# prompt and recovered here from raw_text or key_metrics.
+# ─────────────────────────────────────────────────────────────────────────────
+
+_FINANCIAL_EXTRA_FIELDS = ["ebitda", "ebitda_margin", "net_income", "margin"]
+
+
+def _enrich_financials_from_raw_text(normalized: Dict[str, Any], raw_text: str) -> int:
+    """Recover extra financial fields from raw LLM JSON that Pydantic model_dump() stripped.
+
+    Returns the number of fields enriched.
+    """
+    enriched = 0
+    try:
+        raw_json = json.loads(raw_text)
+    except (json.JSONDecodeError, TypeError):
+        return 0
+
+    for raw_section in raw_json.get("sections", []):
+        if raw_section.get("key") != "financial_performance":
+            continue
+
+        raw_financials = raw_section.get("financials", {})
+        raw_historical = raw_financials.get("historical", [])
+        raw_metrics = raw_financials.get("metrics", {})
+
+        # Find matching normalized section
+        for norm_section in normalized.get("sections", []):
+            if norm_section.get("key") != "financial_performance":
+                continue
+
+            norm_financials = norm_section.get("financials")
+            if not isinstance(norm_financials, dict):
+                continue
+
+            # Enrich historical entries by matching year
+            norm_historical = norm_financials.get("historical", [])
+            raw_by_year = {
+                entry.get("year"): entry
+                for entry in raw_historical
+                if isinstance(entry, dict) and entry.get("year")
+            }
+
+            for norm_entry in norm_historical:
+                year = norm_entry.get("year")
+                raw_entry = raw_by_year.get(year, {})
+                for field in _FINANCIAL_EXTRA_FIELDS:
+                    if field in raw_entry and field not in norm_entry:
+                        norm_entry[field] = raw_entry[field]
+                        enriched += 1
+
+            # Enrich metrics object
+            if raw_metrics and isinstance(raw_metrics, dict):
+                norm_financials.setdefault("metrics", {})
+                for key, value in raw_metrics.items():
+                    if key not in norm_financials["metrics"]:
+                        norm_financials["metrics"][key] = value
+                        enriched += 1
+
+    return enriched
+
+
+def _enrich_financials_from_key_metrics(normalized: Dict[str, Any]) -> int:
+    """Fallback: extract financial data from key_metrics when raw_text enrichment fails.
+
+    Looks for key_metrics in the financial_performance section with labels
+    matching EBITDA, Net Income, etc. and injects into financials.historical.
+    """
+    enriched = 0
+
+    # Label patterns -> field name mapping
+    label_map = {
+        "ebitda": "ebitda",
+        "net income": "net_income",
+        "ebitda margin": "ebitda_margin",
+    }
+
+    for section in normalized.get("sections", []):
+        if section.get("key") != "financial_performance":
+            continue
+
+        key_metrics = section.get("key_metrics", [])
+        financials = section.get("financials")
+        if not isinstance(financials, dict):
+            continue
+
+        historical = financials.get("historical", [])
+        if not historical:
+            continue
+
+        # Get the latest year entry to enrich
+        sorted_entries = sorted(historical, key=lambda e: e.get("year", 0), reverse=True)
+        latest = sorted_entries[0] if sorted_entries else None
+        if not latest:
+            continue
+
+        for metric in key_metrics:
+            label_lower = (metric.get("label", "") or "").lower().strip()
+            value = metric.get("value", "")
+
+            for pattern, field_name in label_map.items():
+                if pattern in label_lower and field_name not in latest:
+                    latest[field_name] = value
+                    enriched += 1
+
+    return enriched
+
+
 def normalize_workflow_output(
     data: Dict[str, Any],
     workflow_name: str,
@@ -264,6 +379,18 @@ def normalize_workflow_output(
                 # Remove financials if historical is empty/missing
                 if not financials.get("historical"):
                     section.pop("financials", None)
+
+        # ── Enrich financials with fields not in Pydantic grammar ──
+        # The Pydantic schema is kept slim to avoid grammar size limits.
+        # Extra fields (ebitda, ebitda_margin, net_income, metrics) are
+        # recovered from raw_text or extracted from key_metrics.
+        fields_enriched = 0
+        if raw_text:
+            fields_enriched = _enrich_financials_from_raw_text(normalized, raw_text)
+        if fields_enriched == 0:
+            fields_enriched = _enrich_financials_from_key_metrics(normalized)
+        if fields_enriched > 0:
+            logger.info(f"Financial enrichment: {fields_enriched} extra fields recovered")
 
         # Normalize highlights and key_metrics in sections
         for section in normalized.get("sections", []):
@@ -449,7 +576,7 @@ def normalize_financials(financials: Dict[str, Any], currency: str) -> Dict[str,
             if not isinstance(entry, dict):
                 continue
             # Format numeric fields
-            for key in ["revenue", "ebitda", "margin", "growth"]:
+            for key in ["revenue", "ebitda", "ebitda_margin", "net_income", "margin", "growth"]:
                 if key in entry:
                     entry[key] = normalize_number(entry[key])
 

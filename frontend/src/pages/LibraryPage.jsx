@@ -15,6 +15,7 @@
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useAuth } from "@clerk/clerk-react";
+import { toast } from "sonner";
 import AppLayout from "../components/layout/AppLayout";
 import StatsHeader from "../components/library/StatsHeader";
 import CollectionsSidebar from "../components/library/CollectionsSidebar";
@@ -53,24 +54,32 @@ export default function LibraryPage() {
   // Documents state
   const [documents, setDocuments] = useState([]);
   const [loadingDocs, setLoadingDocs] = useState(false);
-  const [selectedDocs, setSelectedDocs] = useState([]);
+  const [totalDocs, setTotalDocs] = useState(0);
+
+  // Pagination and filters
+  const [page, setPage] = useState(0);
+  const [pageSize] = useState(50);
+  const [sortBy, setSortBy] = useState("created_at");
+  const [sortOrder, setSortOrder] = useState("desc");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [statusFilter, setStatusFilter] = useState(null);
 
   // UI state
   const [showUpload, setShowUpload] = useState(false);
   const [uploadCollection, setUploadCollection] = useState(null);
+  const [deletingDocId, setDeletingDocId] = useState(null);
 
-  // Calculate stats from documents
+  // Calculate stats from current page of documents
   const stats = useMemo(() => {
-    const allDocs = documents;
     return {
-      totalDocuments: allDocs.length,
+      totalDocuments: totalDocs, // Use total from server, not just current page
       totalCollections: collections.length,
-      processingCount: allDocs.filter((d) => d.status === "processing").length,
-      readyCount: allDocs.filter(
+      processingCount: documents.filter((d) => d.status === "processing").length,
+      readyCount: documents.filter(
         (d) => d.status === "completed" && d.has_embeddings
       ).length,
     };
-  }, [documents, collections]);
+  }, [totalDocs, documents, collections]);
 
   // Fetch collections
   const fetchCollections = useCallback(async () => {
@@ -111,16 +120,25 @@ export default function LibraryPage() {
     async (collectionId) => {
       setLoadingDocs(true);
       try {
-        const res = await apiGetCollection(getToken, collectionId);
+        const res = await apiGetCollection(getToken, collectionId, {
+          limit: pageSize,
+          offset: page * pageSize,
+          sort_by: sortBy,
+          sort_order: sortOrder,
+          search: searchQuery || null,
+          status: statusFilter,
+        });
         setDocuments(res?.documents || []);
+        setTotalDocs(res?.total || 0);
       } catch (error) {
         console.error("Failed to fetch documents:", error);
         setDocuments([]);
+        setTotalDocs(0);
       } finally {
         setLoadingDocs(false);
       }
     },
-    [getToken]
+    [getToken, page, pageSize, sortBy, sortOrder, searchQuery, statusFilter]
   );
 
   // Initial load
@@ -128,11 +146,15 @@ export default function LibraryPage() {
     fetchCollections();
   }, [fetchCollections]);
 
-  // Load documents when collection changes
+  // Reset page when collection or filters change
+  useEffect(() => {
+    setPage(0);
+  }, [selectedCollection, searchQuery, statusFilter, sortBy, sortOrder]);
+
+  // Load documents when collection or page/filters change
   useEffect(() => {
     if (selectedCollection) {
       fetchDocuments(selectedCollection.id);
-      setSelectedDocs([]);
     }
   }, [selectedCollection, fetchDocuments]);
 
@@ -313,11 +335,21 @@ export default function LibraryPage() {
   };
 
   const handleDeleteDocument = async (docId, docFilename) => {
+    // Store original documents for potential rollback
+    const originalDocuments = documents;
+
     try {
+      // Set deleting state
+      setDeletingDocId(docId);
+
+      // Optimistic update: Remove document from UI immediately
+      setDocuments((prev) => prev.filter((doc) => doc.id !== docId));
+
+      // Make API call
       const token = await getToken();
       const response = await fetch(
         `${
-          import.meta.env.VITE_API_BASE_URL || "http://localhost:8000"
+          import.meta.env.VITE_API_URL || "http://localhost:8000"
         }/api/chat/documents/${docId}`,
         {
           method: "DELETE",
@@ -331,12 +363,13 @@ export default function LibraryPage() {
         throw new Error("Failed to delete document");
       }
 
-      // Refresh documents and collections (for counts)
-      await fetchDocuments(selectedCollection.id);
-      await fetchCollections();
+      // Success toast
+      toast.success(`Deleted ${docFilename}`, {
+        description: "Document has been permanently removed",
+      });
 
-      // Remove from selected docs if it was selected
-      setSelectedDocs((prev) => prev.filter((id) => id !== docId));
+      // Refresh collections (for counts) - don't refresh documents, already updated optimistically
+      await fetchCollections();
 
       // Purge document references from localStorage used by other pages
       try {
@@ -379,16 +412,18 @@ export default function LibraryPage() {
       }
     } catch (error) {
       console.error("Failed to delete document:", error);
-      alert(`Failed to delete ${docFilename}: ${error.message}`);
-    }
-  };
 
-  const toggleDocSelection = (docId) => {
-    setSelectedDocs((prev) =>
-      prev.includes(docId)
-        ? prev.filter((id) => id !== docId)
-        : [...prev, docId]
-    );
+      // Rollback optimistic update
+      setDocuments(originalDocuments);
+
+      // Error toast
+      toast.error(`Failed to delete ${docFilename}`, {
+        description: error.message || "Please try again",
+      });
+    } finally {
+      // Clear deleting state
+      setDeletingDocId(null);
+    }
   };
 
   return (
@@ -435,11 +470,22 @@ export default function LibraryPage() {
                   <DocumentsTable
                     documents={documents}
                     loading={loadingDocs}
-                    selectedDocs={selectedDocs}
                     getToken={getToken}
-                    onToggleSelection={toggleDocSelection}
                     onDeleteDocument={handleDeleteDocument}
                     onUpload={() => setShowUpload(true)}
+                    deletingDocId={deletingDocId}
+                    page={page}
+                    setPage={setPage}
+                    totalDocs={totalDocs}
+                    pageSize={pageSize}
+                    sortBy={sortBy}
+                    setSortBy={setSortBy}
+                    sortOrder={sortOrder}
+                    setSortOrder={setSortOrder}
+                    searchQuery={searchQuery}
+                    setSearchQuery={setSearchQuery}
+                    statusFilter={statusFilter}
+                    setStatusFilter={setStatusFilter}
                   />
                 </div>
               </div>

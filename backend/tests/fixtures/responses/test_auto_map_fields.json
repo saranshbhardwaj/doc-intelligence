@@ -1,0 +1,20 @@
+{
+  "id": "msg_01Test123456789",
+  "type": "message",
+  "role": "assistant",
+  "content": [
+    {
+      "type": "text",
+      "text": "{\"mappings\":[{\"pdf_field_id\":\"kv_1\",\"pdf_field_name\":\"Property Name\",\"excel_cell\":\"B2\",\"excel_sheet\":\"Summary\",\"excel_label\":\"Property Name\",\"confidence\":0.98,\"citations\":[\"[D1:p1]\"],\"reasoning\":\"Exact terminology match - both fields refer to property name\"},{\"pdf_field_id\":\"kv_2\",\"pdf_field_name\":\"Purchase Price\",\"excel_cell\":\"B3\",\"excel_sheet\":\"Summary\",\"excel_label\":\"Purchase Price\",\"confidence\":0.95,\"citations\":[\"[D1:p1]\"],\"reasoning\":\"Exact terminology match - both fields refer to purchase price\"},{\"pdf_field_id\":\"kv_3\",\"pdf_field_name\":\"Cap Rate\",\"excel_cell\":\"B5\",\"excel_sheet\":\"Summary\",\"excel_label\":\"Going-In Cap Rate\",\"confidence\":0.92,\"citations\":[\"[D1:p2]\"],\"reasoning\":\"Terminology match - Cap Rate and Going-In Cap Rate are equivalent terms\"},{\"pdf_field_id\":\"kv_4\",\"pdf_field_name\":\"Acquisition Date\",\"excel_cell\":\"B6\",\"excel_sheet\":\"Summary\",\"excel_label\":\"Close Date\",\"confidence\":0.88,\"citations\":[\"[D1:p1]\"],\"reasoning\":\"Semantic match - Acquisition Date corresponds to Close Date\"}],\"total_mapped\":4,\"total_unmapped\":0,\"high_confidence_count\":3}"
+    }
+  ],
+  "model": "claude-haiku-4-5-20251001",
+  "stop_reason": "end_turn",
+  "stop_sequence": null,
+  "usage": {
+    "input_tokens": 2450,
+    "output_tokens": 380,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  }
+}

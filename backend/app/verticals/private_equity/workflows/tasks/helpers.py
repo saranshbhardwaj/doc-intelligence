@@ -368,16 +368,26 @@ def validate_investment_memo_constraints(memo: dict) -> dict:
     # ─────────────────────────────────────
     required_sections = {
         "executive_overview", "company_overview", "market_competition",
-        "financial_performance", "track_record_value_creation",
+        "financial_performance",
+        "track_record_value_creation",
         "risks", "opportunities", "management_culture", "esg_snapshot",
         "valuation_scenarios", "next_steps", "inconsistencies"
     }
+    # Preferred but not mandatory — documents may lack capital structure data
+    preferred_sections = {"capital_structure"}
+
     missing = required_sections - actual_keys
+    missing_preferred = preferred_sections - actual_keys
 
     if missing:
         errors.append({
             "code": "missing_sections",
             "message": f"Missing sections: {missing}",
+        })
+    if missing_preferred:
+        issues.append({
+            "code": "missing_preferred_sections",
+            "message": f"Preferred sections missing (may lack source data): {missing_preferred}",
         })
 
     # ─────────────────────────────────────
@@ -480,16 +490,18 @@ def validate_investment_memo_constraints(memo: dict) -> dict:
         if not financials:
             continue
         for i, year_data in enumerate(financials.get("historical", [])):
-            revenue = year_data.get("revenue", "")
-            # Strip formatting and check if numeric
-            cleaned = str(revenue).replace(",", "").replace("$", "").replace("%", "").replace(" ", "").strip()
-            try:
-                float(cleaned)
-            except (ValueError, TypeError):
-                issues.append({
-                    "code": "unparseable_revenue",
-                    "message": f"historical[{i}].revenue='{revenue}' not parseable as number",
-                })
+            for field_name in ["revenue", "ebitda", "net_income"]:
+                field_val = year_data.get(field_name, "")
+                if not field_val:
+                    continue
+                cleaned = str(field_val).replace(",", "").replace("$", "").replace("%", "").replace(" ", "").strip()
+                try:
+                    float(cleaned)
+                except (ValueError, TypeError):
+                    issues.append({
+                        "code": f"unparseable_{field_name}",
+                        "message": f"historical[{i}].{field_name}='{field_val}' not parseable as number",
+                    })
 
             # Also validate year is reasonable
             year = year_data.get("year")

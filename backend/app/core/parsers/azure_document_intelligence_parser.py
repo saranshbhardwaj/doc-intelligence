@@ -108,6 +108,9 @@ class AzureDocumentIntelligenceParser(DocumentParser):
         if not file_path or not isinstance(file_path, str):
             raise ValueError(f"Invalid file_path: {file_path} (expected non-empty string)")
 
+        # Determine file extension to conditionally include features
+        file_ext = file_path.lower().split('.')[-1] if '.' in file_path else ''
+
         # Edge case: Handle file open failures
         try:
             with open(file_path, "rb") as f:
@@ -124,6 +127,16 @@ class AzureDocumentIntelligenceParser(DocumentParser):
             raise ValueError(f"parse_error: PDF file at {file_path} is empty (0 bytes)")
 
         try:
+            # Determine which features to request based on file type
+            # KEY_VALUE_PAIRS is only supported for PDF and images (JPEG, PNG, TIFF, BMP)
+            # NOT supported for DOCX or XLSX
+            features = []
+            if file_ext in ('pdf', 'jpg', 'jpeg', 'png', 'tiff', 'bmp', 'heif'):
+                features.append(DocumentAnalysisFeature.KEY_VALUE_PAIRS)
+                logger.info(f"Requesting KEY_VALUE_PAIRS feature for {file_ext} file")
+            else:
+                logger.info(f"Skipping KEY_VALUE_PAIRS feature for {file_ext} file (not supported)")
+
             # Attempt calling SDK using new AnalyzeDocumentRequest signature.
             # Some releases of azure-ai-documentintelligence (including 1.0.0) expect a positional 'body'
             # and can mis-handle keyword usage, producing a TypeError about missing positional 'body'.
@@ -131,12 +144,19 @@ class AzureDocumentIntelligenceParser(DocumentParser):
             poller = None
             try:
                 # Prefer positional invocation to avoid signature mismatch issues.
-                # Add KEY_VALUE_PAIRS feature to extract form-like key-value pairs
-                poller = self.client.begin_analyze_document(
-                    self.model_name,
-                    body=analyze_request,
-                    features=[DocumentAnalysisFeature.KEY_VALUE_PAIRS]
-                )
+                # Conditionally add KEY_VALUE_PAIRS feature (only for PDF/images, not DOCX)
+                if features:
+                    poller = self.client.begin_analyze_document(
+                        self.model_name,
+                        body=analyze_request,
+                        features=features
+                    )
+                else:
+                    # No features for DOCX/XLSX
+                    poller = self.client.begin_analyze_document(
+                        self.model_name,
+                        body=analyze_request
+                    )
             except TypeError as te:
                 # Retry using raw bytes (older/alternate signature accepting the document directly)
                 logger.warning(
@@ -144,11 +164,17 @@ class AzureDocumentIntelligenceParser(DocumentParser):
                     extra={"error": str(te)}
                 )
                 try:
-                    poller = self.client.begin_analyze_document(
-                        self.model_name,
-                        pdf_bytes,
-                        features=[DocumentAnalysisFeature.KEY_VALUE_PAIRS]
-                    )
+                    if features:
+                        poller = self.client.begin_analyze_document(
+                            self.model_name,
+                            pdf_bytes,
+                            features=features
+                        )
+                    else:
+                        poller = self.client.begin_analyze_document(
+                            self.model_name,
+                            pdf_bytes
+                        )
                 except Exception as e:
                     raise RuntimeError(f"parse_error: Azure begin_analyze_document failed after fallback: {e}") from e
             except AzureError as ae:
@@ -369,12 +395,29 @@ class AzureDocumentIntelligenceParser(DocumentParser):
         - sections: List of sections (hierarchical structure)
         - figures: List of figures with captions
         - content: Full document text (for span-based extraction)
+        - page_spans: Page span map for DOCX fallback
         """
+        # Build page span map for DOCX fallback (paragraphs/tables without bounding_regions)
+        page_spans_map: dict[int, list[tuple[int, int]]] = {}
+        for page in getattr(result, "pages", []) or []:
+            if page is None:
+                continue
+            page_num = getattr(page, "page_number", None)
+            if not page_num:
+                continue
+            page_spans_map[page_num] = []
+            for span in getattr(page, "spans", []) or []:
+                if span:
+                    offset = getattr(span, "offset", 0)
+                    length = getattr(span, "length", 0)
+                    page_spans_map[page_num].append((offset, offset + length))
+
         structured_data = {
             "paragraphs": [],
             "sections": [],
             "figures": [],
-            "content": getattr(result, "content", "")
+            "content": getattr(result, "content", ""),
+            "page_spans": page_spans_map  # For matching DOCX paragraphs/tables to pages
         }
 
         # Extract paragraphs with roles
@@ -500,16 +543,33 @@ class AzureDocumentIntelligenceParser(DocumentParser):
         """
         enhanced_pages = []
 
+        # Get page spans for DOCX fallback
+        page_spans = structured_data.get("page_spans", {})
+
         for page_data in pages_data:
             page_num = page_data.page_number
 
             # Find paragraphs on this page
             page_paragraphs = []
             for para in structured_data["paragraphs"]:
-                for br in para["bounding_regions"]:
-                    if br["page_number"] == page_num:
+                # Try bounding_regions first (PDF)
+                found_page = False
+                for br in para.get("bounding_regions", []) or []:
+                    if br and br.get("page_number") == page_num:
                         page_paragraphs.append(para)
+                        found_page = True
                         break
+
+                # Fallback: Use span matching (DOCX/XLSX)
+                if not found_page and para.get("spans"):
+                    para_spans = para.get("spans", [])
+                    if para_spans and para_spans[0]:
+                        para_offset = para_spans[0].get("offset", 0)
+                        # Check if paragraph span overlaps with this page's span
+                        for span_start, span_end in page_spans.get(page_num, []):
+                            if para_offset >= span_start and para_offset < span_end:
+                                page_paragraphs.append(para)
+                                break
 
             # Group paragraphs by role
             paragraphs_by_role = {}
@@ -520,10 +580,19 @@ class AzureDocumentIntelligenceParser(DocumentParser):
             # Find figures on this page
             page_figures = []
             for figure in structured_data["figures"]:
-                for br in figure["bounding_regions"]:
-                    if br["page_number"] == page_num:
+                # Try bounding_regions first (PDF)
+                found_page = False
+                for br in figure.get("bounding_regions", []) or []:
+                    if br and br.get("page_number") == page_num:
                         page_figures.append(figure)
+                        found_page = True
                         break
+
+                # Fallback: Use span matching (DOCX/XLSX)
+                # Note: DOCX figures might not be common, but handle it for completeness
+                if not found_page and figure.get("spans"):
+                    # Figures don't have direct spans, but check elements if present
+                    pass  # Skip for now - figures are rare in DOCX
 
             # Build enhanced page metadata
             enhanced_page = {
@@ -624,6 +693,79 @@ class AzureDocumentIntelligenceParser(DocumentParser):
         if not pages_narrative:
             raise ValueError("No valid pages found in Azure result")
 
+        # DOCX/XLSX fallback: If lines extraction yielded no text, use paragraphs instead
+        # This is necessary because Azure DI stores DOCX content in paragraphs, not lines
+        total_line_text = sum(len(text.strip()) for text in pages_narrative.values())
+        if total_line_text == 0:
+            logger.info("Lines extraction yielded no text, falling back to paragraph-based extraction (DOCX/XLSX)")
+            pages_narrative_from_paras: dict[int, list[str]] = {}
+
+            # Build page span map for matching paragraphs to pages
+            page_spans: dict[int, list[tuple[int, int]]] = {}
+            for page in result.pages:
+                if page is None:
+                    continue
+                page_num = getattr(page, "page_number", None)
+                if not page_num:
+                    continue
+                page_spans[page_num] = []
+                for span in getattr(page, "spans", []) or []:
+                    if span:
+                        offset = getattr(span, "offset", 0)
+                        length = getattr(span, "length", 0)
+                        page_spans[page_num].append((offset, offset + length))
+
+            for para in getattr(result, "paragraphs", []) or []:
+                if para is None:
+                    continue
+
+                para_content = getattr(para, "content", "")
+                if not para_content or not para_content.strip():
+                    continue
+
+                # Try bounding regions first (for PDF)
+                page_num = None
+                bounding_regions = getattr(para, "bounding_regions", []) or []
+                for br in bounding_regions:
+                    if br is None:
+                        continue
+                    page_num = getattr(br, "page_number", None)
+                    if page_num:
+                        break
+
+                # Fallback: Use span matching (for DOCX/XLSX where bounding_regions may be missing)
+                if not page_num:
+                    para_spans = getattr(para, "spans", []) or []
+                    if para_spans and para_spans[0]:
+                        para_offset = getattr(para_spans[0], "offset", 0)
+
+                        # Find which page this paragraph belongs to based on span overlap
+                        for pnum, pspans in page_spans.items():
+                            for span_start, span_end in pspans:
+                                # Check if paragraph span starts within page span
+                                if para_offset >= span_start and para_offset < span_end:
+                                    page_num = pnum
+                                    break
+                            if page_num:
+                                break
+
+                # If still no page found, assign to page 1 (common for single-page DOCX)
+                if not page_num and len(result.pages) == 1:
+                    page_num = 1
+
+                if page_num:
+                    pages_narrative_from_paras.setdefault(page_num, []).append(para_content)
+
+            # Join paragraphs into page text
+            if pages_narrative_from_paras:
+                pages_narrative = {
+                    page_num: "\n\n".join(paras)
+                    for page_num, paras in pages_narrative_from_paras.items()
+                }
+                logger.info(f"Extracted text from {len(pages_narrative)} pages using paragraphs")
+            else:
+                logger.warning("Paragraph-based extraction also yielded no text")
+
         # Build table data by page
         tables_by_page: dict[int, List[Dict]] = {}
         for table in result.tables or []:
@@ -632,16 +774,32 @@ class AzureDocumentIntelligenceParser(DocumentParser):
                 logger.warning("Skipping None table in result.tables")
                 continue
 
-            if not table.bounding_regions:
-                logger.warning("Skipping table without bounding_regions")
-                continue
+            # Try to get page number from bounding_regions (PDF)
+            page_num = None
+            if table.bounding_regions and len(table.bounding_regions) > 0:
+                page_num = table.bounding_regions[0].page_number
 
-            # Edge case: Validate bounding_regions has at least one element
-            if len(table.bounding_regions) == 0:
-                logger.warning("Skipping table with empty bounding_regions")
-                continue
+            # Fallback: Use span matching (DOCX/XLSX without bounding_regions)
+            if not page_num:
+                table_spans = getattr(table, "spans", []) or []
+                if table_spans and table_spans[0]:
+                    table_offset = getattr(table_spans[0], "offset", 0)
+                    # Find which page this table belongs to
+                    for pnum, pspans in page_spans.items():
+                        for span_start, span_end in pspans:
+                            if table_offset >= span_start and table_offset < span_end:
+                                page_num = pnum
+                                break
+                        if page_num:
+                            break
 
-            page_num = table.bounding_regions[0].page_number
+            # If still no page found, assign to page 1 (single-page DOCX)
+            if not page_num and len(result.pages) == 1:
+                page_num = 1
+
+            if not page_num:
+                logger.warning("Skipping table - could not determine page number")
+                continue
 
             # Edge case: Validate page_num is valid
             if not isinstance(page_num, int) or page_num <= 0:

@@ -5,10 +5,13 @@ This module provides safe wrappers for recording Prometheus metrics with:
 - Consistent label handling
 - Clear naming conventions
 
+Note: org_id is NOT a Prometheus label (high-cardinality anti-pattern).
+Per-org analytics come from the database, not Prometheus.
+
 Usage:
     from app.utils.metrics_recorder import record_workflow_completed
 
-    record_workflow_completed(org_id="org_123", workflow_name="Investment Memo")
+    record_workflow_completed(workflow_name="Investment Memo")
 """
 from app.utils.metrics import (
     WORKFLOW_RUNS_COMPLETED,
@@ -22,98 +25,76 @@ from app.utils.metrics import (
 from app.utils.logging import logger
 
 
-def record_workflow_completed(org_id: str, workflow_name: str) -> None:
+def record_workflow_completed(workflow_name: str, **kwargs) -> None:
     """Record a successful workflow completion.
 
     Args:
-        org_id: Organization/tenant ID (Clerk org ID)
         workflow_name: Name of the workflow (e.g., "Investment Memo")
     """
     try:
         WORKFLOW_RUNS_COMPLETED.labels(
-            org_id=org_id or "unknown",
             workflow_name=workflow_name or "unknown"
         ).inc()
     except Exception as e:
         logger.warning(f"Failed to record workflow completion metric: {e}")
 
 
-def record_workflow_failed(org_id: str, workflow_name: str) -> None:
+def record_workflow_failed(workflow_name: str, **kwargs) -> None:
     """Record a failed workflow execution.
 
     Args:
-        org_id: Organization/tenant ID (Clerk org ID)
         workflow_name: Name of the workflow (e.g., "Investment Memo")
     """
     try:
         WORKFLOW_RUNS_FAILED.labels(
-            org_id=org_id or "unknown",
             workflow_name=workflow_name or "unknown"
         ).inc()
     except Exception as e:
         logger.warning(f"Failed to record workflow failure metric: {e}")
 
 
-def record_chat_message(role: str, org_id: str) -> None:
+def record_chat_message(role: str, **kwargs) -> None:
     """Record a chat message.
 
     Args:
         role: Message role ("user" or "assistant")
-        org_id: Organization/tenant ID
     """
     try:
         CHAT_MESSAGES_TOTAL.labels(
             role=role or "unknown",
-            org_id=org_id or "unknown"
         ).inc()
     except Exception as e:
         logger.warning(f"Failed to record chat message metric: {e}")
 
 
-def record_extraction_completed(org_id: str) -> None:
-    """Record a successful extraction.
-
-    Args:
-        org_id: Organization/tenant ID
-    """
+def record_extraction_completed(**kwargs) -> None:
+    """Record a successful extraction."""
     try:
-        EXTRACTIONS_COMPLETED.labels(org_id=org_id or "unknown").inc()
+        EXTRACTIONS_COMPLETED.inc()
     except Exception as e:
         logger.warning(f"Failed to record extraction completion metric: {e}")
 
 
-def record_extraction_failed(org_id: str) -> None:
-    """Record a failed extraction.
-
-    Args:
-        org_id: Organization/tenant ID
-    """
+def record_extraction_failed(**kwargs) -> None:
+    """Record a failed extraction."""
     try:
-        EXTRACTIONS_FAILED.labels(org_id=org_id or "unknown").inc()
+        EXTRACTIONS_FAILED.inc()
     except Exception as e:
         logger.warning(f"Failed to record extraction failure metric: {e}")
 
 
-def record_template_fill_completed(org_id: str) -> None:
-    """Record a successful template fill.
-
-    Args:
-        org_id: Organization/tenant ID
-    """
+def record_template_fill_completed(**kwargs) -> None:
+    """Record a successful template fill."""
     try:
-        TEMPLATE_FILLS_COMPLETED.labels(org_id=org_id or "unknown").inc()
+        TEMPLATE_FILLS_COMPLETED.inc()
     except Exception as e:
         logger.warning(f"Failed to record template fill completion metric: {e}")
 
 
-def record_template_fill_failed(org_id: str) -> None:
-    """Record a failed template fill.
-
-    Args:
-        org_id: Organization/tenant ID
-    """
+def record_template_fill_failed(**kwargs) -> None:
+    """Record a failed template fill."""
     try:
-        TEMPLATE_FILLS_FAILED.labels(org_id=org_id or "unknown").inc()
+        TEMPLATE_FILLS_FAILED.inc()
     except Exception as e:
         logger.warning(f"Failed to record template fill failure metric: {e}")
 

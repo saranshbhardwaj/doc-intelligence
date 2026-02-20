@@ -18,7 +18,9 @@ class KeyMetric(BaseModel):
     citation: str
 
 class FinancialYear(BaseModel):
-    """Minimal financial year"""
+    """Minimal financial year - keep slim for structured output grammar limits.
+    Extra fields (ebitda, ebitda_margin, net_income) are requested via prompt
+    and recovered in the normalization layer from raw_text."""
     year: int
     revenue: str
     citation: str

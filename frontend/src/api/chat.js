@@ -39,9 +39,22 @@ export async function listCollections(
   return response.data;
 }
 
-export async function getCollection(getToken, collectionId) {
+export async function getCollection(
+  getToken,
+  collectionId,
+  {
+    limit = 50,
+    offset = 0,
+    sort_by = "created_at",
+    sort_order = "desc",
+    search = null,
+    status = null,
+  } = {}
+) {
   const api = createAuthenticatedApi(getToken);
-  const response = await api.get(`/api/chat/collections/${collectionId}`);
+  const response = await api.get(`/api/chat/collections/${collectionId}`, {
+    params: { limit, offset, sort_by, sort_order, search, status },
+  });
   return response.data;
 }
 

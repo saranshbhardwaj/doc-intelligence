@@ -523,8 +523,10 @@ class DocumentRepository:
                     for extraction in extracts
                 ]
 
-                # Query workflow runs using this document
-                workflows = db.query(WorkflowRun).filter(
+                # Query workflow runs using this document (with eager loading to avoid N+1)
+                workflows = db.query(WorkflowRun).options(
+                    joinedload(WorkflowRun.workflow)
+                ).filter(
                     WorkflowRun.document_ids.contains([document_id]),
                     WorkflowRun.user_id == user_id,
                     WorkflowRun.org_id == org_id

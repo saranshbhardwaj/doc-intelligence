@@ -7,7 +7,7 @@
 import { useEffect, useState, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useAuth } from "@clerk/clerk-react";
-import { useWorkflowDraft, useWorkflowDraftActions } from "../store";
+import { useWorkflowDraft, useWorkflowDraftActions, useWorkflowPdfViewer } from "../store";
 import {
   Download,
   Clock,
@@ -20,6 +20,7 @@ import {
   ArrowLeft,
   FileDown,
   FileSpreadsheet,
+  X,
 } from "lucide-react";
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
@@ -31,7 +32,13 @@ import {
   DropdownMenuSeparator,
 } from "../components/ui/dropdown-menu";
 import Spinner from "../components/common/Spinner";
+import PDFViewer from "../components/pdf/PDFViewer";
 import AppLayout from "../components/layout/AppLayout";
+import {
+  ResizablePanelGroup,
+  ResizablePanel,
+  ResizableHandle,
+} from "../components/ui/resizable";
 import { getRun, getRunArtifact, exportRun, deleteRun } from "../api";
 import {
   AlertDialog,
@@ -56,7 +63,8 @@ export default function WorkflowResultPage() {
 
   // Zustand execution state for progress tracking
   const { execution } = useWorkflowDraft();
-  const { reconnectWorkflowExecution } = useWorkflowDraftActions();
+  const { reconnectWorkflowExecution, workflowSetActivePdfDocument, workflowHighlightChunk, workflowClearPdfViewer } = useWorkflowDraftActions();
+  const pdfViewerState = useWorkflowPdfViewer();
 
   const [run, setRun] = useState(null);
   const [artifact, setArtifact] = useState(null);
@@ -69,6 +77,24 @@ export default function WorkflowResultPage() {
   const [isLegacy, setIsLegacy] = useState(false);
   const [registering, setRegistering] = useState(false);
   const [showFeedbackModal, setShowFeedbackModal] = useState(false);
+
+  // PDF side panel state for citation navigation
+  const [showPdfPanel, setShowPdfPanel] = useState(false);
+  const [activeCitationDoc, setActiveCitationDoc] = useState("");
+
+  // Derived PDF state
+  const activePdfUrl = pdfViewerState.activeDocumentId
+    ? pdfViewerState.urlCache[pdfViewerState.activeDocumentId]?.url
+    : null;
+
+  const handleCitationClick = useCallback(async (richCite) => {
+    if (!richCite.document_id) return;
+    setActiveCitationDoc(richCite.document || "Source Document");
+    setShowPdfPanel(true);
+    await workflowSetActivePdfDocument(richCite.document_id, getToken);
+    const bbox = richCite.bbox || { page: richCite.page, x0: 0, y0: 0, x1: 1, y1: 1 };
+    workflowHighlightChunk({ ...bbox, page: richCite.page, docId: richCite.document_id }, getToken);
+  }, [getToken, workflowSetActivePdfDocument, workflowHighlightChunk]);
 
   const fetchRunDetails = useCallback(async () => {
     // Clear previous state when switching runs
@@ -259,12 +285,6 @@ export default function WorkflowResultPage() {
 
   return (
     <AppLayout breadcrumbs={breadcrumbs}>
-
-      <FeedbackButton 
-        operationType="workflow"
-        entityId={runId}
-        entitySummary={run?.workflow?.name}
-      />
       <CompletionFeedbackModal
         isOpen={showFeedbackModal}
         onClose={() => setShowFeedbackModal(false)}
@@ -273,211 +293,275 @@ export default function WorkflowResultPage() {
         entitySummary={run?.workflow?.name}
       />
 
-      <div className="max-w-7xl mx-auto px-6 py-8">
-        {/* Back Button */}
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => navigate("/app/workflows/history")}
-          className="mb-4"
-        >
-          <ArrowLeft className="w-4 h-4 mr-2" />
-          Back to Workflows
-        </Button>
-
-        {/* Page Header */}
-        <div className="flex items-center justify-between mb-6">
-          <div className="flex items-center gap-3">
-            {getStatusIcon(run.status)}
-            <div>
-              <h1 className="text-2xl font-bold text-foreground">
-                {run.workflow_name || "Workflow Run"}
-              </h1>
-            </div>
-          </div>
-          <div className="flex gap-2">
-            {run.status === "completed" && (
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="outline" size="sm" disabled={exporting}>
-                    <Download className="w-4 h-4 mr-2" />
-                    {exporting ? "Exporting..." : "Export"}
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-56">
-                  <DropdownMenuItem onClick={() => handleExport("word")}>
-                    <FileDown className="w-4 h-4 mr-3 text-primary" />
-                    <div className="flex flex-col">
-                      <span className="font-medium">Word Document</span>
-                      <span className="text-xs text-muted-foreground">
-                        Professional report (.docx)
-                      </span>
-                    </div>
-                  </DropdownMenuItem>
-
-                  <DropdownMenuSeparator />
-
-                  <DropdownMenuItem onClick={() => handleExport("pdf")}>
-                    <FileText className="w-4 h-4 mr-3 text-destructive" />
-                    <div className="flex flex-col">
-                      <span className="font-medium">PDF</span>
-                      <span className="text-xs text-muted-foreground">
-                        Portable document (.pdf)
-                      </span>
-                    </div>
-                  </DropdownMenuItem>
-
-                  <DropdownMenuItem
-                    onClick={() => handleExport("xlsx")}
-                    disabled
-                  >
-                    <FileSpreadsheet className="w-4 h-4 mr-3 text-muted-foreground" />
-                    <div className="flex flex-col">
-                      <span className="font-medium">Excel (Coming Soon)</span>
-                      <span className="text-xs text-muted-foreground">
-                        Needs workflow-specific setup
-                      </span>
-                    </div>
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            )}
+      <ResizablePanelGroup direction="horizontal" className="flex-1">
+        {/* Left panel: Workflow content */}
+        <ResizablePanel defaultSize={showPdfPanel ? 55 : 100} minSize={35}>
+          <div className="max-w-7xl mx-auto px-6 py-8 overflow-y-auto h-full">
+            {/* Back Button */}
             <Button
-              variant="outline"
+              variant="ghost"
               size="sm"
-              onClick={handleDeleteClick}
-              className="text-destructive hover:bg-destructive/10"
+              onClick={() => navigate("/app/workflows/history")}
+              className="mb-4"
             >
-              <Trash2 className="w-4 h-4 mr-2" />
-              Delete
+              <ArrowLeft className="w-4 h-4 mr-2" />
+              Back to Workflows
             </Button>
-          </div>
-        </div>
 
-        {/* Status Messages */}
-        {(run.status === "running" || run.status === "queued") &&
-          execution &&
-          execution.runId === runId && (
-            <Card className="p-6 mb-8 bg-primary/10 border-primary/20">
-              <div className="mb-4">
-                <div className="flex items-center gap-3 mb-3">
-                  <RefreshCw className="w-5 h-5 text-primary animate-spin" />
-                  <p className="text-primary font-semibold">
-                    {run.status === "queued"
-                      ? "Workflow Queued"
-                      : "Workflow Running"}
-                  </p>
+            {/* Page Header */}
+            <div className="flex items-center justify-between mb-6">
+              <div className="flex items-center gap-3">
+                {getStatusIcon(run.status)}
+                <div>
+                  <h1 className="text-2xl font-bold text-foreground">
+                    {run.workflow_name || "Workflow Run"}
+                  </h1>
                 </div>
-                <p className="text-sm text-muted-foreground mb-4">
-                  {execution.message ||
-                    (run.status === "queued"
-                      ? "Workflow is queued and will start shortly..."
-                      : "Processing your workflow...")}
-                </p>
               </div>
+              <div className="flex items-center gap-2">
+                <div className="flex gap-2">
+                  {run.status === "completed" && (
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <Button variant="outline" size="sm" disabled={exporting}>
+                          <Download className="w-4 h-4 mr-2" />
+                          {exporting ? "Exporting..." : "Export"}
+                        </Button>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="w-56">
+                        <DropdownMenuItem onClick={() => handleExport("word")}>
+                          <FileDown className="w-4 h-4 mr-3 text-primary" />
+                          <div className="flex flex-col">
+                            <span className="font-medium">Word Document</span>
+                            <span className="text-xs text-muted-foreground">
+                              Professional report (.docx)
+                            </span>
+                          </div>
+                        </DropdownMenuItem>
 
-              {/* Progress Bar */}
-              <div className="space-y-2">
-                <div className="flex items-center justify-between text-sm">
-                  <span className="text-primary font-medium">
-                    {execution.stage || "Initializing"}
-                  </span>
-                  <span className="text-primary font-mono">
-                    {execution.progress || 0}%
-                  </span>
+                        <DropdownMenuSeparator />
+
+                        <DropdownMenuItem onClick={() => handleExport("pdf")}>
+                          <FileText className="w-4 h-4 mr-3 text-destructive" />
+                          <div className="flex flex-col">
+                            <span className="font-medium">PDF</span>
+                            <span className="text-xs text-muted-foreground">
+                              Portable document (.pdf)
+                            </span>
+                          </div>
+                        </DropdownMenuItem>
+
+                        <DropdownMenuItem
+                          onClick={() => handleExport("xlsx")}
+                          disabled
+                        >
+                          <FileSpreadsheet className="w-4 h-4 mr-3 text-muted-foreground" />
+                          <div className="flex flex-col">
+                            <span className="font-medium">Excel (Coming Soon)</span>
+                            <span className="text-xs text-muted-foreground">
+                              Needs workflow-specific setup
+                            </span>
+                          </div>
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  )}
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleDeleteClick}
+                    className="text-destructive hover:bg-destructive/10"
+                  >
+                    <Trash2 className="w-4 h-4 mr-2" />
+                    Delete
+                  </Button>
                 </div>
-                <div className="w-full bg-muted rounded-full h-3 overflow-hidden">
-                  <div
-                    className="bg-primary h-3 rounded-full transition-all duration-500 ease-out"
-                    style={{ width: `${execution.progress || 0}%` }}
+                {/* Feedback button - right aligned */}
+                <div className="ml-2">
+                  <FeedbackButton
+                    operationType="workflow"
+                    entityId={runId}
+                    entitySummary={run?.workflow?.name}
                   />
                 </div>
               </div>
-            </Card>
-          )}
-
-        {(run.status === "running" || run.status === "queued") &&
-          execution &&
-          execution.runId !== runId && (
-            <Card className="p-6 mb-8 bg-warning/10 border-warning/20">
-              <div className="flex items-center gap-3">
-                <Clock className="w-5 h-5 text-warning" />
-                <p className="text-warning">
-                  Workflow {run.status}... Refresh the page to see updates.
-                </p>
-              </div>
-            </Card>
-          )}
-
-        {run.status === "failed" && (
-          <Card className="p-6 mb-8 bg-destructive/10 border-destructive/20">
-            <div className="flex items-center gap-3">
-              <XCircle className="w-5 h-5 text-destructive" />
-              <div>
-                <p className="text-destructive font-semibold">
-                  Workflow Failed
-                </p>
-                {run.error_message && (
-                  <p className="text-sm text-destructive/80 mt-1">
-                    {run.error_message}
-                  </p>
-                )}
-              </div>
             </div>
-          </Card>
-        )}
 
-        {/* Artifact Display */}
-        {artifact &&
-          artifact.artifact &&
-          (run.workflow_name === "Investment Memo" ? (
-            <InvestmentMemoView artifact={artifact} run={run} />
-          ) : (
-            <Card className="p-6">
-              <h2 className="text-lg font-semibold text-foreground mb-4">
-                Workflow Output
-              </h2>
-              <div className="bg-background rounded-lg p-6 overflow-auto max-h-[600px]">
-                {renderArtifact(
-                  artifact.artifact.parsed ||
-                    artifact.artifact.partial_parsed ||
-                    artifact.artifact
-                )}
-              </div>
+            {/* Status Messages */}
+            {(run.status === "running" || run.status === "queued") &&
+              execution &&
+              execution.runId === runId && (
+                <Card className="p-6 mb-8 bg-primary/10 border-primary/20">
+                  <div className="mb-4">
+                    <div className="flex items-center gap-3 mb-3">
+                      <RefreshCw className="w-5 h-5 text-primary animate-spin" />
+                      <p className="text-primary font-semibold">
+                        {run.status === "queued"
+                          ? "Workflow Queued"
+                          : "Workflow Running"}
+                      </p>
+                    </div>
+                    <p className="text-sm text-muted-foreground mb-4">
+                      {execution.message ||
+                        (run.status === "queued"
+                          ? "Workflow is queued and will start shortly..."
+                          : "Processing your workflow...")}
+                    </p>
+                  </div>
 
-              {artifact.artifact.citation_snippets && (
-                <div className="mt-6">
-                  <h3 className="text-sm font-semibold text-muted-foreground mb-3">
-                    Citations
-                  </h3>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    {Object.entries(artifact.artifact.citation_snippets).map(
-                      ([cite, snippet]) => (
-                        <div
-                          key={cite}
-                          className="bg-muted p-3 rounded text-xs"
-                        >
-                          <span className="font-mono text-primary">{cite}</span>
-                          <p className="text-muted-foreground mt-1">
-                            {snippet}
-                          </p>
-                        </div>
-                      )
+                  {/* Progress Bar */}
+                  <div className="space-y-2">
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-primary font-medium">
+                        {execution.stage || "Initializing"}
+                      </span>
+                      <span className="text-primary font-mono">
+                        {execution.progress || 0}%
+                      </span>
+                    </div>
+                    <div className="w-full bg-muted rounded-full h-3 overflow-hidden">
+                      <div
+                        className="bg-primary h-3 rounded-full transition-all duration-500 ease-out"
+                        style={{ width: `${execution.progress || 0}%` }}
+                      />
+                    </div>
+                  </div>
+                </Card>
+              )}
+
+            {(run.status === "running" || run.status === "queued") &&
+              execution &&
+              execution.runId !== runId && (
+                <Card className="p-6 mb-8 bg-warning/10 border-warning/20">
+                  <div className="flex items-center gap-3">
+                    <Clock className="w-5 h-5 text-warning" />
+                    <p className="text-warning">
+                      Workflow {run.status}... Refresh the page to see updates.
+                    </p>
+                  </div>
+                </Card>
+              )}
+
+            {run.status === "failed" && (
+              <Card className="p-6 mb-8 bg-destructive/10 border-destructive/20">
+                <div className="flex items-center gap-3">
+                  <XCircle className="w-5 h-5 text-destructive" />
+                  <div>
+                    <p className="text-destructive font-semibold">
+                      Workflow Failed
+                    </p>
+                    {run.error_message && (
+                      <p className="text-sm text-destructive/80 mt-1">
+                        {run.error_message}
+                      </p>
                     )}
                   </div>
                 </div>
-              )}
-            </Card>
-          ))}
+              </Card>
+            )}
 
-        {!artifact && run.status === "completed" && (
-          <Card className="p-8 text-center">
-            <p className="text-muted-foreground">
-              No artifact available for this run
-            </p>
-          </Card>
+            {/* Artifact Display */}
+            {artifact &&
+              artifact.artifact &&
+              (run.workflow_name === "Investment Memo" ? (
+                <InvestmentMemoView artifact={artifact} run={run} onCitationClick={handleCitationClick} />
+              ) : (
+                <Card className="p-6">
+                  <h2 className="text-lg font-semibold text-foreground mb-4">
+                    Workflow Output
+                  </h2>
+                  <div className="bg-background rounded-lg p-6 overflow-auto max-h-[600px]">
+                    {renderArtifact(
+                      artifact.artifact.parsed ||
+                        artifact.artifact.partial_parsed ||
+                        artifact.artifact
+                    )}
+                  </div>
+
+                  {artifact.artifact.citation_snippets && (
+                    <div className="mt-6">
+                      <h3 className="text-sm font-semibold text-muted-foreground mb-3">
+                        Citations
+                      </h3>
+                      <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                        {Object.entries(artifact.artifact.citation_snippets).map(
+                          ([cite, snippet]) => (
+                            <div
+                              key={cite}
+                              className="bg-muted p-3 rounded text-xs"
+                            >
+                              <span className="font-mono text-primary">{cite}</span>
+                              <p className="text-muted-foreground mt-1">
+                                {snippet}
+                              </p>
+                            </div>
+                          )
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </Card>
+              ))}
+
+            {!artifact && run.status === "completed" && (
+              <Card className="p-8 text-center">
+                <p className="text-muted-foreground">
+                  No artifact available for this run
+                </p>
+              </Card>
+            )}
+          </div>
+        </ResizablePanel>
+
+        {/* Right panel: PDF Viewer (conditionally shown) */}
+        {showPdfPanel && (
+          <>
+            <ResizableHandle />
+            <ResizablePanel defaultSize={45} minSize={25}>
+              <div className="flex flex-col h-full border-l border-border">
+                {/* PDF Panel Header */}
+                <div className="flex items-center justify-between px-4 py-2 border-b border-border bg-muted/30">
+                  <div className="flex items-center gap-2 min-w-0">
+                    <FileText className="w-4 h-4 text-muted-foreground shrink-0" />
+                    <span className="text-sm font-medium text-foreground truncate">
+                      {activeCitationDoc || "Source Document"}
+                    </span>
+                  </div>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => {
+                      setShowPdfPanel(false);
+                      workflowClearPdfViewer();
+                    }}
+                    className="h-7 w-7 p-0"
+                  >
+                    <X className="w-4 h-4" />
+                  </Button>
+                </div>
+
+                {/* PDF Viewer Content */}
+                <div className="flex-1 overflow-hidden">
+                  {pdfViewerState.isLoadingUrl ? (
+                    <div className="flex items-center justify-center h-full">
+                      <Spinner size="lg" />
+                    </div>
+                  ) : activePdfUrl ? (
+                    <PDFViewer
+                      pdfUrl={activePdfUrl}
+                      highlightBbox={pdfViewerState.highlightBbox}
+                    />
+                  ) : (
+                    <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
+                      Select a citation to view the source document
+                    </div>
+                  )}
+                </div>
+              </div>
+            </ResizablePanel>
+          </>
         )}
-      </div>
+      </ResizablePanelGroup>
 
       {/* Delete Confirmation Dialog */}
       <AlertDialog open={deleteDialogOpen} onOpenChange={setDeleteDialogOpen}>

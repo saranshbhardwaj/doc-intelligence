@@ -65,8 +65,12 @@ class ChunkerFactory:
 
         # Edge case: Validate chunker_class can be instantiated
         try:
+            from app.config import settings
             logger.info(f"Using chunker: {chunker_class.__name__} for parser: {parser_name}")
-            return chunker_class()
+            return chunker_class(
+                overlap_paragraphs=settings.chunk_overlap_paragraphs,
+                overlap_sentences=settings.chunk_overlap_sentences,
+            )
         except Exception as e:
             logger.error(
                 f"Failed to instantiate chunker {chunker_class.__name__}: {e}",

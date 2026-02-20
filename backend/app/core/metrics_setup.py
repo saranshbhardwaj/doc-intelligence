@@ -2,21 +2,68 @@
 
 This module configures Prometheus to collect metrics from multiple processes:
 - API process (HTTP requests, system metrics)
-- Celery worker process (workflow runs, LLM metrics)
+- Celery worker processes (workflow runs, LLM metrics)
+- Celery beat process (periodic task scheduler)
 
 Without this, worker metrics won't show up in the API's /metrics endpoint.
+
+Docker note: All containers run as PID 1, so we use a combination of
+container type offset + HOSTNAME hash to give each container a unique
+process identifier. This ensures separate .db files per container
+(no clobbering) while preserving the {type}_{integer}.db format that
+MultiProcessCollector can parse.
+
+Example: worker1 → counter_234567.db, worker2 → counter_278901.db
 """
 import os
-import atexit
+import hashlib
 from pathlib import Path
+import prometheus_client.values
 from app.utils.logging import logger
 
+# Base offsets per container type to group .db files by range.
+# API: 100000-199999, Workers: 200000-299999, Beat: 300000-399999
+PID_OFFSETS = {'api': 100000, 'worker': 200000, 'beat': 300000}
 
-def _cleanup_stale_files(metrics_dir: str) -> int:
-    """Clean stale prometheus multiprocess files.
 
-    Uses PID-based detection to identify and remove files from dead processes,
-    with fallback to direct file deletion for corrupted files.
+def _get_process_identifier(container_type: str) -> int:
+    """Generate a unique process identifier per process instance.
+
+    Uses container_type to select the base offset range, then combines
+    HOSTNAME (Docker container ID) with real PID to differentiate:
+    - Multiple containers of the same type (worker1, worker2, worker3)
+    - Multiple processes within a container (uvicorn workers in API)
+
+    Result: Each process gets unique ID:
+    - API uvicorn worker PID 8 → ~155818
+    - API uvicorn worker PID 9 → ~167234
+    - worker1 container PID 1 → ~261124
+    - worker2 container PID 1 → ~279892
+
+    Each process gets its own .db files — no clobbering.
+    """
+    base_offset = PID_OFFSETS.get(container_type, 200000)
+
+    # Combine HOSTNAME + PID for truly unique identifier
+    # This handles both multi-container AND multi-process scenarios
+    hostname = os.environ.get('HOSTNAME', '')
+    pid = os.getpid()
+
+    if hostname:
+        # Hash "hostname:pid" to get unique ID per process
+        unique_str = f"{hostname}:{pid}"
+        host_hash = int(hashlib.md5(unique_str.encode()).hexdigest()[:8], 16) % 99999
+        return base_offset + host_hash + 1  # +1 to avoid offset+0
+
+    # Fallback for local dev (no Docker): use real PID + offset
+    return pid + base_offset
+
+
+def _cleanup_stale_files(metrics_dir: str, proc_id: int) -> int:
+    """Clean only THIS container's stale prometheus files on startup.
+
+    Uses the exact proc_id to match files (e.g., counter_234567.db),
+    so restarting one container never wipes another container's metrics.
 
     Returns:
         Number of files cleaned
@@ -27,93 +74,94 @@ def _cleanup_stale_files(metrics_dir: str) -> int:
     if not metrics_path.exists():
         return 0
 
-    # Get all .db files
-    db_files = list(metrics_path.glob("*.db"))
-
-    for db_file in db_files:
+    # Only delete files with our specific proc_id suffix
+    for db_file in metrics_path.glob(f"*_{proc_id}.db"):
         try:
-            # Try to extract PID from filename (format: type_pid.db)
-            parts = db_file.stem.split("_")
-            if len(parts) >= 2:
-                pid_str = parts[-1]
-                try:
-                    pid = int(pid_str)
-                    # Check if process is still alive
-                    try:
-                        os.kill(pid, 0)  # Signal 0 = check if process exists
-                        # Process alive, skip
-                        continue
-                    except OSError:
-                        # Process dead, safe to remove
-                        pass
-                except ValueError:
-                    # Not a valid PID, remove anyway
-                    pass
-
-            # Remove the file
             db_file.unlink(missing_ok=True)
             cleaned += 1
             logger.debug(f"Cleaned stale prometheus file: {db_file.name}")
-
         except Exception as e:
-            # If we can't process the file, try to remove it anyway
-            try:
-                db_file.unlink(missing_ok=True)
-                cleaned += 1
-            except Exception:
-                logger.warning(f"Failed to clean prometheus file {db_file}: {e}")
+            logger.warning(f"Failed to clean prometheus file {db_file}: {e}")
 
     return cleaned
 
 
 def setup_prometheus_multiproc_dir(clear_on_startup: bool = True):
-    """Initialize Prometheus multiprocess directory.
+    """Initialize Prometheus multiprocess directory with PID offset.
+
+    Uses integer PID offsets to avoid PID collisions in Docker where both
+    API and worker containers run as PID 1. This keeps the standard
+    {type}_{integer}.db filename format that MultiProcessCollector can parse.
 
     Args:
-        clear_on_startup: If True, clean stale metric files on startup (recommended for API)
+        clear_on_startup: If True, clean stale metric files from our PID range
     """
-    # Get or set multiprocess directory
-    metrics_dir = os.environ.get('PROMETHEUS_MULTIPROC_DIR')
-
-    if not metrics_dir:
-        # Default to /tmp/prometheus_multiproc in production, or temp dir locally
-        metrics_dir = '/tmp/prometheus_multiproc'
-        os.environ['PROMETHEUS_MULTIPROC_DIR'] = metrics_dir
+    # Get metrics directory — keep it FLAT (no subdirectories)
+    metrics_dir = os.environ.get('PROMETHEUS_MULTIPROC_DIR', '/tmp/prometheus_multiproc')
+    os.environ['PROMETHEUS_MULTIPROC_DIR'] = metrics_dir
 
     metrics_path = Path(metrics_dir)
-
-    # Create directory first
     metrics_path.mkdir(parents=True, exist_ok=True)
 
-    # Clean stale files from dead processes
+    # Generate unique process identifier per container instance
+    container_type = os.environ.get('CONTAINER_TYPE', 'app')
+    proc_id = _get_process_identifier(container_type)
+
+    # Set custom process identifier BEFORE any metrics are created
+    # Each container gets a unique ID → separate .db files → no clobbering
+    prometheus_client.values.ValueClass = prometheus_client.values.MultiProcessValue(
+        process_identifier=lambda: proc_id
+    )
+
+    # Clean only THIS container's stale files (not other containers')
     if clear_on_startup:
         try:
-            cleaned = _cleanup_stale_files(metrics_dir)
+            cleaned = _cleanup_stale_files(metrics_dir, proc_id)
             if cleaned > 0:
                 logger.info(f"Cleaned {cleaned} stale Prometheus metric file(s)")
         except Exception as e:
-            # If cleanup fails, try full wipe as fallback
-            logger.warning(f"Stale file cleanup failed, performing full wipe: {e}")
-            try:
-                import shutil
-                shutil.rmtree(metrics_path, ignore_errors=True)
-                metrics_path.mkdir(parents=True, exist_ok=True)
-            except Exception as e2:
-                logger.error(f"Failed to wipe prometheus dir: {e2}")
+            logger.warning(f"Stale file cleanup failed: {e}")
 
-    logger.info(f"Prometheus multiprocess directory: {metrics_dir}")
+    logger.info(
+        f"Prometheus multiprocess directory: {metrics_dir} "
+        f"(container_type={container_type}, pid={os.getpid()}, "
+        f"proc_id={proc_id})"
+    )
 
-    # Register cleanup on process exit (graceful shutdown)
-    def _cleanup_on_exit():
-        try:
-            pid = os.getpid()
-            for pattern in ["counter", "gauge", "histogram", "summary"]:
-                filepath = metrics_path / f"{pattern}_{pid}.db"
-                if filepath.exists():
-                    filepath.unlink(missing_ok=True)
-        except Exception:
-            pass  # Best effort cleanup
+    # Initialize a gauge on startup so /metrics always returns at least one metric
+    try:
+        from prometheus_client import Gauge
+        startup_gauge = Gauge(
+            'docint_process_info',
+            'Active process heartbeat (1 = alive)',
+            ['container_type', 'pid'],
+            multiprocess_mode='liveall'
+        )
+        startup_gauge.labels(
+            container_type=container_type,
+            pid=str(os.getpid())
+        ).set(1)
+        logger.info(f"Initialized docint_process_info gauge (container={container_type}, pid={os.getpid()})")
+    except Exception as e:
+        logger.warning(f"Failed to initialize startup gauge: {e}")
 
-    atexit.register(_cleanup_on_exit)
+    # Pre-register labeled metrics so they appear in /metrics immediately
+    try:
+        from app.utils.metrics import init_labeled_metrics
+        init_labeled_metrics()
+        logger.info("Initialized labeled Prometheus metrics")
+    except Exception as e:
+        logger.warning(f"Failed to initialize labeled metrics: {e}")
+
+    # METRICS_DEBUG: log .db files in multiproc dir at startup
+    try:
+        import glob as glob_mod
+        db_files = glob_mod.glob(os.path.join(metrics_dir, "*.db"))
+        logger.info(
+            f"METRICS_DEBUG: {len(db_files)} .db files in {metrics_dir}: "
+            f"{[os.path.basename(f) for f in db_files[:20]]}"
+        )
+    except Exception as e:
+        logger.warning(f"METRICS_DEBUG: failed to list .db files: {e}")
 
     return metrics_dir

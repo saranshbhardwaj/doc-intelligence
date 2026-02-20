@@ -194,6 +194,89 @@ class JobState(Base):
     template_fill_run = relationship("TemplateFillRun", back_populates="job_states")
 
 
+class AnthropicUsageSnapshot(Base):
+    """Daily usage and cost snapshots from Anthropic Admin API.
+
+    Stores ground-truth token usage and costs as reported by Anthropic's billing system.
+    Used for cost reconciliation and validating internal tracking accuracy.
+    """
+    __tablename__ = "anthropic_usage_snapshots"
+    __table_args__ = (
+        Index("idx_anthropic_snapshots_date", "snapshot_date"),
+        Index("idx_anthropic_snapshots_date_model", "snapshot_date", "model"),
+        {"schema": None},  # Use default schema
+    )
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+
+    # Time dimensions
+    snapshot_date = Column(
+        DateTime(timezone=False),  # Store as date (no timezone)
+        nullable=False,
+        index=True,
+        comment="The date this snapshot covers (UTC)"
+    )
+    fetched_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        comment="When we fetched this data from Anthropic API"
+    )
+
+    # Model dimension
+    model = Column(
+        String(100),
+        nullable=False,
+        comment="Model name (e.g., claude-sonnet-4-5-20250929)"
+    )
+
+    # Usage data (from /usage_report/messages)
+    input_tokens = Column(
+        Integer,
+        nullable=False,
+        server_default="0",
+        comment="Input tokens (user messages + context)"
+    )
+    output_tokens = Column(
+        Integer,
+        nullable=False,
+        server_default="0",
+        comment="Output tokens (assistant responses)"
+    )
+    cache_read_input_tokens = Column(
+        Integer,
+        nullable=False,
+        server_default="0",
+        comment="Tokens read from prompt cache"
+    )
+    cache_creation_input_tokens = Column(
+        Integer,
+        nullable=False,
+        server_default="0",
+        comment="Tokens written to prompt cache"
+    )
+
+    # Cost data (from /cost_report)
+    cost_usd = Column(
+        Float,
+        nullable=False,
+        server_default="0",
+        comment="Cost in USD as reported by Anthropic"
+    )
+
+    # Raw API responses (for debugging/audit)
+    raw_usage_response = Column(
+        JSONB,
+        nullable=True,
+        comment="Raw usage API response for this snapshot"
+    )
+    raw_cost_response = Column(
+        JSONB,
+        nullable=True,
+        comment="Raw cost API response for this snapshot"
+    )
+
+
 # Import template models to ensure they're registered with SQLAlchemy when JobState is used
 # This prevents "failed to locate a name" errors in the worker
 from app.db_models_templates import TemplateFillRun  # noqa: F401, E402

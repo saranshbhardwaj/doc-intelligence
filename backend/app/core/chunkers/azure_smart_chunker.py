@@ -58,15 +58,20 @@ class AzureSmartChunker(DocumentChunker):
         self,
         max_tokens: int = 500,
         include_page_headers: bool = False,
-        link_tables_to_narrative: bool = True
+        link_tables_to_narrative: bool = True,
+        overlap_paragraphs: int = 1,
+        overlap_sentences: int = 2,
     ):
         self.max_tokens = max_tokens
         self.include_page_headers = include_page_headers
         self.link_tables_to_narrative = link_tables_to_narrative
+        self.overlap_paragraphs = overlap_paragraphs
+        self.overlap_sentences = overlap_sentences
 
         logger.info(
             f"AzureSmartChunker initialized: max_tokens={max_tokens}, "
-            f"include_headers={include_page_headers}, link_tables={link_tables_to_narrative}"
+            f"include_headers={include_page_headers}, link_tables={link_tables_to_narrative}, "
+            f"overlap_paragraphs={overlap_paragraphs}, overlap_sentences={overlap_sentences}"
         )
 
     def chunk(self, parser_output: ParserOutput) -> ChunkingOutput:
@@ -344,6 +349,7 @@ class AzureSmartChunker(DocumentChunker):
         - Each chunk ≤ max_tokens
         - Carry forward section heading to each chunk
         - Link chunks as parent-child
+        - Overlap last N paragraphs from previous chunk into next chunk
 
         Args:
             section: Large SectionGroup to split
@@ -378,9 +384,11 @@ class AzureSmartChunker(DocumentChunker):
                 )
                 chunks.append(chunk)
 
-                # Start new chunk
-                current_paragraphs = [para]
-                current_tokens = para_tokens
+                # Start new chunk with overlap from previous chunk
+                overlap_paras = current_paragraphs[-self.overlap_paragraphs:] if self.overlap_paragraphs > 0 else []
+                overlap_tokens = sum(estimate_tokens(p.get("content", "")) for p in overlap_paras)
+                current_paragraphs = overlap_paras + [para]
+                current_tokens = overlap_tokens + para_tokens
             else:
                 current_paragraphs.append(para)
                 current_tokens += para_tokens
@@ -407,6 +415,10 @@ class AzureSmartChunker(DocumentChunker):
         # Update total_chunks_in_section for all chunks
         for chunk in chunks:
             chunk.metadata["total_chunks_in_section"] = len(chunks)
+            # Mark overlap metadata on continuation chunks
+            if chunk.metadata.get("chunk_sequence", 1) > 1 and self.overlap_paragraphs > 0:
+                chunk.metadata["has_overlap"] = True
+                chunk.metadata["overlap_paragraphs"] = self.overlap_paragraphs
 
         return chunks
 
@@ -418,6 +430,7 @@ class AzureSmartChunker(DocumentChunker):
         - Split text at sentence boundaries using simple heuristics
         - Group sentences into ~max_tokens chunks
         - Mark as continuation chunks
+        - Overlap last N sentences from previous chunk into next chunk
 
         Args:
             section: The unstructured section to chunk
@@ -454,9 +467,11 @@ class AzureSmartChunker(DocumentChunker):
                 )
                 chunks.append(chunk)
 
-                # Start new chunk
-                current_sentences = [sentence]
-                current_tokens = sentence_tokens
+                # Start new chunk with overlap from previous chunk
+                overlap_sents = current_sentences[-self.overlap_sentences:] if self.overlap_sentences > 0 else []
+                overlap_tokens = sum(estimate_tokens(s) for s in overlap_sents)
+                current_sentences = overlap_sents + [sentence]
+                current_tokens = overlap_tokens + sentence_tokens
             else:
                 current_sentences.append(sentence)
                 current_tokens += sentence_tokens
@@ -475,6 +490,10 @@ class AzureSmartChunker(DocumentChunker):
         # Update total for all chunks
         for chunk in chunks:
             chunk.metadata["total_chunks_in_section"] = len(chunks)
+            # Mark overlap metadata on continuation chunks
+            if chunk.metadata.get("chunk_sequence", 1) > 1 and self.overlap_sentences > 0:
+                chunk.metadata["has_overlap"] = True
+                chunk.metadata["overlap_sentences"] = self.overlap_sentences
 
         logger.info(
             f"Fallback chunking created {len(chunks)} chunks from unstructured document"

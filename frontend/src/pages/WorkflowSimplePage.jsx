@@ -5,7 +5,7 @@
  * UX: Professional, clean, deliverables.ai-inspired
  */
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@clerk/clerk-react";
 import { FileText, Sparkles, ArrowLeft, Settings, Plus, X } from "lucide-react";
@@ -22,7 +22,7 @@ import { useWorkflowDraft, useWorkflowDraftActions } from "../store";
 import { streamWorkflowProgress } from "../api/workflows";
 import axios from "axios";
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
+const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
 export default function WorkflowSimplePage() {
   const navigate = useNavigate();
@@ -66,6 +66,16 @@ export default function WorkflowSimplePage() {
       }
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Refresh runs list when execution finishes (success or failure)
+  // This handles both fresh executions and reconnections after page refresh
+  const prevProcessingRef = useRef(execution?.isProcessing);
+  useEffect(() => {
+    if (prevProcessingRef.current === true && execution?.isProcessing === false) {
+      fetchInitialData();
+    }
+    prevProcessingRef.current = execution?.isProcessing;
+  }, [execution?.isProcessing]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Fetch templates and recent runs (documents come from modal/store)
   const fetchInitialData = async () => {
@@ -136,6 +146,9 @@ export default function WorkflowSimplePage() {
       return;
     }
 
+    // Start execution immediately with temporary values for instant UI feedback
+    startWorkflowExecution(null, null, null);
+
     try {
       const token = await getToken();
 
@@ -174,13 +187,14 @@ export default function WorkflowSimplePage() {
               ? errorData
               : errorData?.message || "Workflow failed";
           failWorkflowExecution(errorMsg);
+          fetchInitialData();
         },
         onEnd: (data) => {
           console.log("🏁 SSE stream ended:", data?.reason);
         },
       });
 
-      // Start execution tracking in store with cleanup function
+      // Update execution with real values
       startWorkflowExecution(jobId, runId, cleanup);
     } catch (error) {
       console.error("Failed to start workflow:", error);

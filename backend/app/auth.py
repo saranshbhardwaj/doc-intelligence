@@ -10,8 +10,8 @@ import httpx
 import json
 
 try:
-    import redis
-    _redis_client = redis.Redis.from_url(settings.redis_url, decode_responses=True)
+    from app.core.redis_client import get_redis_client
+    _redis_client = get_redis_client(decode_responses=True)
 except Exception:
     _redis_client = None
 

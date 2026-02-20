@@ -30,6 +30,7 @@ export default function PDFViewer({
   const [pageHeight, setPageHeight] = useState(null);
   const [containerWidth, setContainerWidth] = useState(null);
   const [loadedPages, setLoadedPages] = useState(3);  // Start with 3 pages
+  const [pdfReady, setPdfReady] = useState(false);  // True after PDF document loads
   const pageRef = useRef(null);
   const containerRef = useRef(null);
 
@@ -37,27 +38,31 @@ export default function PDFViewer({
     setPageNumber(defaultPage);
   }, [defaultPage]);
 
-  // Scroll to page when highlight changes
+  // Scroll to page when highlight changes AND PDF is loaded
+  // Gated on pdfReady so that on first load (e.g. after page refresh),
+  // scrolling waits until the PDF document has finished loading.
   useEffect(() => {
-    if (highlightBbox && highlightBbox.page) {
-      const targetPage = highlightBbox.page;
+    if (!pdfReady || !highlightBbox || !highlightBbox.page) return;
 
-      // Ensure target page is loaded
-      if (targetPage > loadedPages) {
-        setLoadedPages(targetPage + 2);  // Load a bit extra
-      }
+    const targetPage = highlightBbox.page;
 
-      // Scroll to the page after a brief delay (for rendering)
-      setTimeout(() => {
-        const pageElement = containerRef.current?.querySelector(
-          `[data-page-number="${targetPage}"]`
-        );
-        if (pageElement) {
-          pageElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
-        }
-      }, 100);
+    // Ensure target page is loaded (lazy loading)
+    if (targetPage > loadedPages) {
+      setLoadedPages(targetPage + 2);  // Load a bit extra
     }
-  }, [highlightBbox, loadedPages]);
+
+    // Scroll to the page after a brief delay (for page rendering)
+    const timer = setTimeout(() => {
+      const pageElement = containerRef.current?.querySelector(
+        `[data-page-number="${targetPage}"]`
+      );
+      if (pageElement) {
+        pageElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }
+    }, 300);
+
+    return () => clearTimeout(timer);
+  }, [highlightBbox, pdfReady, loadedPages]);
 
   // Reset state when PDF URL changes
   useEffect(() => {
@@ -66,20 +71,44 @@ export default function PDFViewer({
     setLoadedPages(3);  // Reset to initial 3 pages
     setLoading(true);
     setError(null);
+    setPdfReady(false);  // Wait for new PDF to load before scrolling
   }, [pdfUrl]);
 
-  // Measure container width for responsive sizing
+  // Measure container width for responsive sizing using ResizeObserver
   useEffect(() => {
     const updateWidth = () => {
       if (containerRef.current) {
         // Use 90% of container width for padding
-        setContainerWidth(containerRef.current.offsetWidth * 0.9);
+        const width = containerRef.current.offsetWidth * 0.9;
+        console.log('[PDFViewer] Container width measured:', width, 'offsetWidth:', containerRef.current.offsetWidth);
+        setContainerWidth(width);
       }
     };
 
-    updateWidth();
+    // Initial measurement with slight delay to ensure container is rendered
+    const initialTimer = setTimeout(updateWidth, 50);
+
+    // Use ResizeObserver for responsive updates
+    const resizeObserver = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        const width = entry.contentRect.width * 0.9;
+        console.log('[PDFViewer] ResizeObserver triggered, width:', width);
+        setContainerWidth(width);
+      }
+    });
+
+    if (containerRef.current) {
+      resizeObserver.observe(containerRef.current);
+    }
+
+    // Fallback for window resize
     window.addEventListener('resize', updateWidth);
-    return () => window.removeEventListener('resize', updateWidth);
+
+    return () => {
+      clearTimeout(initialTimer);
+      resizeObserver.disconnect();
+      window.removeEventListener('resize', updateWidth);
+    };
   }, []);
 
   // Lazy load more pages as user scrolls
@@ -113,6 +142,7 @@ export default function PDFViewer({
     setNumPages(numPages);
     setLoading(false);
     setError(null);
+    setPdfReady(true);  // PDF loaded -- safe to scroll to highlights
   }
 
   function onDocumentLoadError(error) {
@@ -233,13 +263,14 @@ export default function PDFViewer({
             }
           >
             {/* Render multiple pages */}
-            {numPages && Array.from(new Array(Math.min(loadedPages, numPages)), (el, index) => {
+            {numPages && Array.from(new Array(Math.min(loadedPages, numPages)), (_, index) => {
               const currentPage = index + 1;
+              const pageWidth = containerWidth ? containerWidth * scale : undefined;
               return (
                 <div key={`page_${currentPage}`} data-page-number={currentPage} className="mb-4 relative">
                   <Page
                     pageNumber={currentPage}
-                    width={containerWidth ? containerWidth * scale : undefined}
+                    width={pageWidth}
                     renderTextLayer={true}
                     renderAnnotationLayer={true}
                     onMouseUp={handleTextSelection}

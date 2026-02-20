@@ -16,10 +16,17 @@ const ICON_MAP = {
   stat: Target,
 };
 
-export default function HighlightCard({ highlight, currency = "USD" }) {
+export default function HighlightCard({ highlight, currency = "USD", richCitations = [], onCitationClick }) {
   if (!highlight) return null;
 
   const Icon = ICON_MAP[highlight.type] || Target;
+
+  // Get rich citation data for the citation token
+  const getRichCitation = (token) => {
+    return richCitations.find(
+      (rc) => rc.token === token || rc.id === token
+    );
+  };
 
   // Format the value based on type
   const formatValue = () => {
@@ -116,11 +123,45 @@ export default function HighlightCard({ highlight, currency = "USD" }) {
           )}
 
           {/* Citation */}
-          {highlight.citation && (
-            <Badge variant="outline" className="text-xs font-mono mt-2">
-              {highlight.citation}
-            </Badge>
-          )}
+          {highlight.citation && (() => {
+            const richCite = getRichCitation(highlight.citation);
+
+            // Extract filename without extension and truncate if needed
+            const getShortFilename = (filename) => {
+              if (!filename || filename === "Unknown") return "Doc";
+              const nameWithoutExt = filename.replace(/\.[^/.]+$/, ""); // Remove extension
+              return nameWithoutExt.length > 20 ? nameWithoutExt.substring(0, 17) + "..." : nameWithoutExt;
+            };
+
+            const displayText = richCite
+              ? `[${getShortFilename(richCite.document)}:p${richCite.page || '?'}]`
+              : highlight.citation;
+
+            // If we have rich citation data and click handler, make it clickable
+            if (richCite && onCitationClick) {
+              return (
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    onCitationClick(richCite);
+                  }}
+                  className="inline-flex items-center px-2 py-1 rounded text-xs font-mono font-semibold bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 hover:bg-blue-200 dark:hover:bg-blue-900/50 transition-colors cursor-pointer border border-blue-300 dark:border-blue-700 mt-2"
+                  title={`Click to view: ${richCite.document || 'Document'} - Page ${richCite.page || '?'}`}
+                >
+                  {displayText}
+                </button>
+              );
+            }
+
+            // Fallback: non-clickable badge
+            return (
+              <Badge variant="outline" className="text-xs font-mono mt-2">
+                {displayText}
+              </Badge>
+            );
+          })()}
         </div>
       </div>
     </Card>

@@ -32,3 +32,16 @@ export async function submitFeedback(getToken, feedbackData) {
   const response = await api.post("/api/feedback", feedbackData);
   return response.data;
 }
+
+/**
+ * Delete feedback for a chat message (toggle-off)
+ *
+ * @param {Function} getToken - Function to get auth token
+ * @param {string} messageId - Chat message ID
+ * @returns {Promise<Object>} Response with success status
+ */
+export async function deleteChatFeedback(getToken, messageId) {
+  const api = createAuthenticatedApi(getToken);
+  const response = await api.delete(`/api/feedback/chat/${messageId}`);
+  return response.data;
+}
