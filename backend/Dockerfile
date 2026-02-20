@@ -22,7 +22,9 @@ ENV SHARED_UPLOAD_ROOT=/shared_uploads
 
 # Install Python deps separately to leverage layer cache
 COPY requirements.txt ./requirements.txt
-RUN pip install --upgrade pip && pip install -r requirements.txt
+RUN pip install --upgrade pip && \
+    pip install torch --index-url https://download.pytorch.org/whl/cpu && \
+    pip install -r requirements.txt
 
 # Copy application (exclude via .dockerignore)
 COPY . .
