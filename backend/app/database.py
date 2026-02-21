@@ -7,15 +7,48 @@ from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sess
 from app.utils.logging import logger
 from app.config import settings
 
+
+def _build_database_urls(raw_url: str) -> tuple[str, str]:
+    """
+    Derive sync (psycopg3) and async (asyncpg) SQLAlchemy URLs from any
+    common DATABASE_URL format:
+
+        postgres://...              Railway / Heroku style
+        postgresql://...            Standard, no driver specified
+        postgresql+psycopg://...    Already psycopg3 (docker-compose)
+        sqlite:///...               Local development
+    """
+    url = raw_url
+
+    # Normalize legacy "postgres://" prefix used by Railway / Heroku
+    if url.startswith("postgres://"):
+        url = "postgresql" + url[len("postgres"):]
+
+    # SQLite — no driver swapping needed
+    if url.startswith("sqlite"):
+        return url, url.replace("sqlite:///", "sqlite+aiosqlite:///", 1)
+
+    # Strip any existing driver prefix so we have a clean "postgresql://..." base
+    if "://" in url:
+        base = "postgresql://" + url.split("://", 1)[1]
+    else:
+        base = url
+
+    sync_url  = base.replace("postgresql://", "postgresql+psycopg://",  1)
+    async_url = base.replace("postgresql://", "postgresql+asyncpg://", 1)
+    return sync_url, async_url
+
+
 # Get database URL from settings (which loads from .env)
 DATABASE_URL = settings.database_url
 
 if not DATABASE_URL:
     # Fail fast – explicit URL required now that we use Postgres in containers
     raise RuntimeError("DATABASE_URL is not set. Define it in .env or docker-compose environment.")
-else:
-    backend_kind = "sqlite" if DATABASE_URL.startswith("sqlite") else "postgres"
-    logger.info("Database configuration loaded", extra={"backend": backend_kind})
+
+SYNC_DATABASE_URL, ASYNC_DATABASE_URL = _build_database_urls(DATABASE_URL)
+backend_kind = "sqlite" if DATABASE_URL.startswith("sqlite") else "postgres"
+logger.info("Database configuration loaded", extra={"backend": backend_kind})
 
 # Create engine with connection pooling
 # For SQLite, we need check_same_thread=False
@@ -34,19 +67,10 @@ else:
         "pool_timeout": 30,        # Wait 30s for connection before error
     }
 
-engine = create_engine(DATABASE_URL, connect_args=connect_args, **pool_config)
+engine = create_engine(SYNC_DATABASE_URL, connect_args=connect_args, **pool_config)
 
 # Create session factory
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
-
-# Create async engine and session factory for async operations
-# Convert sync DATABASE_URL to async (postgresql -> postgresql+asyncpg, sqlite -> sqlite+aiosqlite)
-if DATABASE_URL.startswith("postgresql"):
-    ASYNC_DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+asyncpg://")
-elif DATABASE_URL.startswith("sqlite"):
-    ASYNC_DATABASE_URL = DATABASE_URL.replace("sqlite:///", "sqlite+aiosqlite:///")
-else:
-    ASYNC_DATABASE_URL = DATABASE_URL
 
 # Async engine with connection pooling (same config as sync engine)
 async_pool_config = {}

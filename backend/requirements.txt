@@ -17,6 +17,7 @@ redis>=4.7.0
 # Database
 sqlalchemy==2.0.23
 psycopg[binary]==3.1.18  # PostgreSQL driver bundled with libpq to avoid 'libpq library not found'
+asyncpg==0.30.0           # Async PostgreSQL driver for SQLAlchemy async engine
 alembic>=1.12.1  # Database migrations (optional, for future)
 pgvector==0.3.6  # PostgreSQL vector extension for embeddings
 

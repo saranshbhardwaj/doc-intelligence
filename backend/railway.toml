@@ -1,0 +1,65 @@
+# Railway deployment configuration
+# https://docs.railway.com/reference/config-as-code
+
+# ─── API Service (default) ──────────────────────────────────────────────────
+# This file configures the main API service.
+# Celery workers and beat are separate Railway services — see comments below.
+
+[build]
+builder = "DOCKERFILE"
+dockerfilePath = "Dockerfile"
+
+[deploy]
+# Railway injects $PORT automatically
+startCommand = "python -Xfrozen_modules=off -m uvicorn main:app --host 0.0.0.0 --port $PORT --workers 2"
+healthcheckPath = "/api/health"
+healthcheckTimeout = 300
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10
+
+
+# ─── Additional Railway services to create manually in the dashboard ─────────
+#
+# Each service below uses the SAME repo + backend/ root directory.
+# Set the Dockerfile path and start command per service in Railway UI.
+#
+# SERVICE: worker-critical
+#   Dockerfile:    Dockerfile.worker
+#   Start command: python -Xfrozen_modules=off -m celery -A app.celery_app.celery_app worker --loglevel=info --pool=solo -Q critical
+#   Replicas: 2
+#
+# SERVICE: worker-default
+#   Dockerfile:    Dockerfile.worker
+#   Start command: python -Xfrozen_modules=off -m celery -A app.celery_app.celery_app worker --loglevel=info --pool=solo -Q default
+#   Replicas: 1
+#
+# SERVICE: beat
+#   Dockerfile:    Dockerfile.worker
+#   Start command: python -Xfrozen_modules=off -m celery -A app.celery_app.celery_app beat --loglevel=info
+#   Replicas: 1  (NEVER scale beat above 1 — duplicate schedules cause duplicate tasks)
+#
+# ─── Required environment variables (set on ALL services) ───────────────────
+#
+#   DATABASE_URL          → from Supabase (postgresql://... or postgres://...)
+#   CELERY_BROKER_URL     → from Railway Redis  (redis://...)
+#   CELERY_RESULT_BACKEND → from Railway Redis  (redis://...)
+#   USE_CELERY            → true
+#   ANTHROPIC_API_KEY     → from Anthropic console
+#   CLERK_SECRET_KEY      → from Clerk dashboard
+#   CLERK_PUBLISHABLE_KEY → from Clerk dashboard
+#   ENVIRONMENT           → production
+#   ADMIN_API_KEY         → generate a secure random string
+#   CORS_ORIGINS          → ["https://your-app.vercel.app"]
+#   PROMETHEUS_MULTIPROC_DIR → /tmp/prometheus_multiproc
+#
+#   # Cloudflare R2 (document storage)
+#   USE_R2_FOR_DOCUMENTS  → true
+#   R2_ACCESS_KEY_ID      → from R2 dashboard
+#   R2_SECRET_ACCESS_KEY  → from R2 dashboard
+#   R2_BUCKET             → your bucket name
+#   R2_ENDPOINT_URL       → https://<accountid>.r2.cloudflarestorage.com
+#
+#   # Optional
+#   AZURE_DOC_INTELLIGENCE_API_KEY  → from Azure portal
+#   AZURE_DOC_INTELLIGENCE_ENDPOINT → from Azure portal
+#   ANTHROPIC_ADMIN_API_KEY         → for usage/cost tracking
