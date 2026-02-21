@@ -37,6 +37,9 @@ ENV USE_CELERY=${USE_CELERY} \
     CELERY_BROKER_URL=${CELERY_BROKER_URL} \
     CELERY_RESULT_BACKEND=${CELERY_RESULT_BACKEND}
 
+ENV HOME=/app
+ENV HF_HOME=/app/.cache/huggingface
+
 # Switch to non-root user
 USER appuser
 
