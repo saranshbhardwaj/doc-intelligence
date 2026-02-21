@@ -43,17 +43,23 @@ async def lifespan(app):
     removed = cache.clear_expired()
     logger.info(f"Cache cleanup on startup: removed {removed} expired entries")
 
-    # Seed workflow templates (idempotent)
-    try:
-        db = next(get_db())
-        created = seed_workflows(db)
-        if created:
-            logger.info("Seeded workflows", extra={"count": len(created), "names": created})
-        else:
-            logger.info("No new workflows seeded (already present)")
-        db.close()
-    except Exception as e:
-        logger.error("Workflow seeding failed", extra={"error": str(e)})
+    # Seed workflow templates (idempotent) — retry for Railway IPv6→IPv4 fallback
+    for attempt in range(3):
+        try:
+            db = next(get_db())
+            created = seed_workflows(db)
+            if created:
+                logger.info("Seeded workflows", extra={"count": len(created), "names": created})
+            else:
+                logger.info("No new workflows seeded (already present)")
+            db.close()
+            break
+        except Exception as e:
+            if attempt < 2:
+                logger.warning("Workflow seeding retry", extra={"attempt": attempt + 1, "error": str(e)})
+                await asyncio.sleep(5)
+            else:
+                logger.error("Workflow seeding failed after 3 attempts", extra={"error": str(e)})
 
     # Start background cleanup task (cache + uploaded file pruning)
     cleanup_task = asyncio.create_task(periodic_cleanup())

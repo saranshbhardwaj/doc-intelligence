@@ -118,7 +118,7 @@ def setup_prometheus_multiproc_dir(clear_on_startup: bool = True):
         try:
             cleaned = _cleanup_stale_files(metrics_dir, proc_id)
             if cleaned > 0:
-                logger.info(f"Cleaned {cleaned} stale Prometheus metric file(s)")
+                logger.debug(f"Cleaned {cleaned} stale Prometheus metric file(s)")
         except Exception as e:
             logger.warning(f"Stale file cleanup failed: {e}")
 
@@ -143,7 +143,7 @@ def setup_prometheus_multiproc_dir(clear_on_startup: bool = True):
         ).set(1)
         logger.info(f"Initialized docint_process_info gauge (container={container_type}, pid={os.getpid()})")
     except Exception as e:
-        logger.warning(f"Failed to initialize startup gauge: {e}")
+        logger.debug(f"Startup gauge already registered: {e}")
 
     # Pre-register labeled metrics so they appear in /metrics immediately
     try:
