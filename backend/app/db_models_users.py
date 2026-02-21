@@ -13,6 +13,7 @@ class User(Base):
     org_id = Column(String(64), nullable=False, index=True)  # Clerk org ID (tenant)
     email = Column(String(255), unique=True, nullable=False, index=True)
     tier = Column(String(20), default="free")  # free, standard, pro, admin
+    status = Column(String(20), default="pending_approval", nullable=False)  # active, pending_approval
     vertical = Column(String(50), default="private_equity", nullable=False, index=True)  # Vertical/domain
 
     # Usage tracking
@@ -49,4 +50,14 @@ class UsageLog(Base):
     operation_type = Column(String(50), default="extraction")  # parsing, extraction
     cost_usd = Column(Float, default=0.0)  # Actual cost (Azure + Claude)
 
+    created_at = Column(DateTime, default=datetime.now, nullable=False)
+
+
+class AllowedEmail(Base):
+    """Pre-approved emails that can use the app (invite-only access control)"""
+    __tablename__ = "allowed_emails"
+
+    id = Column(String(36), primary_key=True)
+    email = Column(String(255), unique=True, nullable=False, index=True)
+    added_by = Column(String(36), nullable=True)  # admin user_id who added this
     created_at = Column(DateTime, default=datetime.now, nullable=False)

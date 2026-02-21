@@ -52,10 +52,19 @@ export function createAuthenticatedApi(getToken) {
     return config;
   });
 
-  // Handle errors with centralized error handler
+  // Handle errors — redirect to /access-pending on 403 "access_pending"
   authenticatedApi.interceptors.response.use(
     (response) => response,
-    createErrorInterceptor()
+    (error) => {
+      if (
+        error.response?.status === 403 &&
+        error.response?.data?.detail === "access_pending"
+      ) {
+        window.location.href = "/access-pending";
+        return new Promise(() => {}); // Never resolve — page is navigating
+      }
+      return createErrorInterceptor()(error);
+    }
   );
 
   return authenticatedApi;

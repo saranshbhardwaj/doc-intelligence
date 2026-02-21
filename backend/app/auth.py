@@ -192,6 +192,10 @@ def get_current_user(request: Request) -> User:
         print(f"❌ [Auth Backend] Failed to get or create user: {user_id}")
         raise HTTPException(status_code=500, detail="Failed to authenticate user")
 
+    # Gate: only active users can access the app
+    if getattr(user, "status", "active") != "active":
+        raise HTTPException(status_code=403, detail="access_pending")
+
     return user
 
 

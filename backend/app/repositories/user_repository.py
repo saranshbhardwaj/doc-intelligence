@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError, IntegrityError
 
 from app.database import SessionLocal
-from app.db_models_users import User
+from app.db_models_users import User, AllowedEmail
 from app.utils.logging import logger
 
 
@@ -65,6 +65,13 @@ class UserRepository:
                 )
                 return None
 
+    def _is_email_allowed(self, db: Session, email: str) -> bool:
+        """Check if email is in the allowlist (case-insensitive)."""
+        from sqlalchemy import func
+        return db.query(AllowedEmail).filter(
+            func.lower(AllowedEmail.email) == email.lower()
+        ).first() is not None
+
     def create_user(
         self,
         user_id: str,
@@ -77,24 +84,24 @@ class UserRepository:
     ) -> Optional[User]:
         """Create a new user.
 
-        Args:
-            user_id: User ID (Clerk ID)
-            email: User email address
-            tier: Subscription tier (default: "free")
-            pages_limit: Page processing limit (default: 100)
-            total_pages_processed: Total pages processed (default: 0)
-            pages_this_month: Pages processed this month (default: 0)
+        Checks the allowlist to determine initial status:
+        - Email in allowed_emails → status="active"
+        - Email not in allowed_emails → status="pending_approval"
 
         Returns:
             User object if successful, None on error (including duplicate)
         """
         with self._get_session() as db:
             try:
+                # Check allowlist to set initial status
+                status = "active" if self._is_email_allowed(db, email) else "pending_approval"
+
                 user = User(
                     id=user_id,
                     org_id=org_id,
                     email=email,
                     tier=tier,
+                    status=status,
                     pages_limit=pages_limit,
                     total_pages_processed=total_pages_processed,
                     pages_this_month=pages_this_month
@@ -105,7 +112,7 @@ class UserRepository:
 
                 logger.info(
                     f"Created user: {user_id}",
-                    extra={"user_id": user_id, "org_id": org_id, "email": email, "tier": tier}
+                    extra={"user_id": user_id, "org_id": org_id, "email": email, "tier": tier, "status": status}
                 )
 
                 return user
