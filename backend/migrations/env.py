@@ -14,8 +14,7 @@ if str(PROJECT_ROOT) not in sys.path:
 
 # Import settings and metadata AFTER path injection
 try:
-    from app.config import settings  # type: ignore
-    from app.database import Base  # type: ignore
+    from app.database import Base, SYNC_DATABASE_URL  # type: ignore
     # Import models to ensure they are registered with Base.metadata
     import app.db_models  # noqa: F401
     import app.db_models_users  # noqa: F401
@@ -29,8 +28,7 @@ except ModuleNotFoundError:
     for cand in ROOT_CANDIDATES:
         if cand.exists() and str(cand) not in sys.path:
             sys.path.insert(0, str(cand))
-    from app.config import settings  # type: ignore
-    from app.database import Base  # type: ignore
+    from app.database import Base, SYNC_DATABASE_URL  # type: ignore
     import app.db_models  # noqa: F401
     import app.db_models_users  # noqa: F401
     import app.db_models_chat  # noqa: F401
@@ -41,11 +39,10 @@ except ModuleNotFoundError:
 # access to the values within the .ini file in use.
 config = context.config
 
-# Override sqlalchemy.url from environment (.env loaded by settings)
-database_url = settings.database_url
-if not database_url:
+# Use the normalized psycopg3 URL (handles postgres://, postgresql://, etc.)
+if not SYNC_DATABASE_URL:
     raise RuntimeError("DATABASE_URL not set; cannot run migrations")
-config.set_main_option("sqlalchemy.url", database_url)
+config.set_main_option("sqlalchemy.url", SYNC_DATABASE_URL)
 
 # Interpret the config file for Python logging.
 # This line sets up loggers basically.

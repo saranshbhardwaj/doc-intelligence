@@ -17,7 +17,10 @@ depends_on = None
 
 
 def upgrade():
-    """Create unified feedback table supporting all operation types."""
+    """Replace simple feedback table (from 001) with unified multi-operation version."""
+    # Drop the original simple feedback table created in 001_initial_schema
+    op.drop_table('feedback')
+
     op.create_table(
         'feedback',
         sa.Column('id', sa.String(36), primary_key=True),
