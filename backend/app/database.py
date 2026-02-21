@@ -43,7 +43,12 @@ def _build_database_urls(raw_url: str) -> tuple[str, str]:
 # Get database URL from settings (which loads from .env)
 # Fallback to os.environ directly — pydantic-settings may miss env vars
 # when the env_file path doesn't exist (e.g. in Railway containers).
-DATABASE_URL = settings.database_url or os.environ.get("DATABASE_URL", "")
+DATABASE_URL = (
+    settings.database_url
+    or settings.supabase_database_url
+    or os.environ.get("DATABASE_URL", "")
+    or os.environ.get("SUPABASE_DATABASE_URL", "")
+)
 
 if not DATABASE_URL:
     # Log available env hints to help diagnose Railway variable injection

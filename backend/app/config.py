@@ -17,6 +17,7 @@ class Settings(BaseSettings):
 
     # Database
     database_url: str = ""
+    supabase_database_url: str = ""  # Use this name in Railway (DATABASE_URL is reserved)
 
     # Azure Document Intelligence (optional)
     azure_doc_intelligence_api_key: str = ""
