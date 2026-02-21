@@ -7,7 +7,7 @@ class Settings(BaseSettings):
     """Application settings from environment variables"""
 
     # API Keys
-    anthropic_api_key: str
+    anthropic_api_key: str = ""  # Required at runtime; default allows container to boot for health checks
     anthropic_admin_api_key: str = ""  # sk-ant-admin-... from Anthropic Console (for Usage & Cost API)
     admin_api_key: str = "change-this-in-production"  # For analytics endpoint access
 

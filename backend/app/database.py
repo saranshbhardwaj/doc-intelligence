@@ -1,5 +1,6 @@
 # backend/app/database.py
 """Database configuration and session management"""
+import os
 from sqlalchemy import create_engine, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
@@ -40,10 +41,17 @@ def _build_database_urls(raw_url: str) -> tuple[str, str]:
 
 
 # Get database URL from settings (which loads from .env)
-DATABASE_URL = settings.database_url
+# Fallback to os.environ directly — pydantic-settings may miss env vars
+# when the env_file path doesn't exist (e.g. in Railway containers).
+DATABASE_URL = settings.database_url or os.environ.get("DATABASE_URL", "")
 
 if not DATABASE_URL:
-    # Fail fast – explicit URL required now that we use Postgres in containers
+    # Log available env hints to help diagnose Railway variable injection
+    _has_db = "DATABASE_URL" in os.environ
+    logger.error(
+        "DATABASE_URL is not set",
+        extra={"in_os_environ": _has_db, "settings_value": repr(settings.database_url)},
+    )
     raise RuntimeError("DATABASE_URL is not set. Define it in .env or docker-compose environment.")
 
 SYNC_DATABASE_URL, ASYNC_DATABASE_URL = _build_database_urls(DATABASE_URL)
