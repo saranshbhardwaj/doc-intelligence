@@ -8,7 +8,10 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@clerk/clerk-react";
-import { FileText, Sparkles, ArrowLeft, Settings, Plus, X } from "lucide-react";
+import { FileText, Sparkles, ArrowLeft, Settings, Plus, X, Clock } from "lucide-react";
+
+// Only these workflow names are fully functional. All others show as "Coming Soon".
+const WORKING_WORKFLOWS = new Set(["Investment Memo"]);
 import AppLayout from "../components/layout/AppLayout";
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
@@ -322,36 +325,49 @@ export default function WorkflowSimplePage() {
               </p>
 
               <div className="grid grid-cols-1 gap-4">
-                {templates.map((template) => (
-                  <Card
-                    key={template.id}
-                    className="p-5 hover:shadow-lg transition-shadow cursor-pointer border-2 hover:border-primary"
-                    onClick={() => handleSelectTemplate(template)}
-                  >
-                    <div className="flex items-start justify-between">
-                      <div className="flex-1">
-                        <div className="flex items-center gap-2 mb-2">
-                          <Sparkles className="w-5 h-5 text-primary" />
-                          <h3 className="text-lg font-semibold text-foreground">
-                            {template.name}
-                          </h3>
-                        </div>
-                        <p className="text-sm text-muted-foreground mb-3">
-                          {template.description}
-                        </p>
-                        <div className="flex items-center gap-2">
-                          <Badge variant="outline" className="text-xs">
-                            {template.category}
-                          </Badge>
-                          <span className="text-xs text-muted-foreground">
-                            {template.min_documents}-
-                            {template.max_documents || "∞"} docs
-                          </span>
+                {templates.map((template) => {
+                  const isAvailable = WORKING_WORKFLOWS.has(template.name);
+                  return (
+                    <Card
+                      key={template.id}
+                      className={`p-5 border-2 transition-shadow ${
+                        isAvailable
+                          ? "hover:shadow-lg cursor-pointer hover:border-primary"
+                          : "opacity-50 cursor-not-allowed border-border"
+                      }`}
+                      onClick={() => isAvailable && handleSelectTemplate(template)}
+                    >
+                      <div className="flex items-start justify-between">
+                        <div className="flex-1">
+                          <div className="flex items-center gap-2 mb-2">
+                            <Sparkles className={`w-5 h-5 ${isAvailable ? "text-primary" : "text-muted-foreground"}`} />
+                            <h3 className="text-lg font-semibold text-foreground">
+                              {template.name}
+                            </h3>
+                            {!isAvailable && (
+                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-muted text-muted-foreground border border-border">
+                                <Clock className="w-3 h-3" />
+                                Coming Soon
+                              </span>
+                            )}
+                          </div>
+                          <p className="text-sm text-muted-foreground mb-3">
+                            {template.description}
+                          </p>
+                          <div className="flex items-center gap-2">
+                            <Badge variant="outline" className="text-xs">
+                              {template.category}
+                            </Badge>
+                            <span className="text-xs text-muted-foreground">
+                              {template.min_documents}-
+                              {template.max_documents || "∞"} docs
+                            </span>
+                          </div>
                         </div>
                       </div>
-                    </div>
-                  </Card>
-                ))}
+                    </Card>
+                  );
+                })}
               </div>
             </div>
           ) : (
