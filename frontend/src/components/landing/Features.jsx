@@ -3,9 +3,9 @@ import {
   Zap,
   FileSpreadsheet,
   ShieldAlert,
-  TrendingUp,
+  MessageSquare,
+  Building2,
   BarChart3,
-  Users,
   Target,
   Clock,
   CheckCircle2,
@@ -15,45 +15,45 @@ export default function Features() {
   const features = [
     {
       icon: Zap,
-      title: "AI-Powered Extraction",
+      title: "Smart Extraction",
       description:
-        "Our AI models read and understand CIMs like a senior analyst, extracting all key metrics automatically.",
+        "Upload PDFs or Excel. AI extracts structured data instantly — financials, metrics, and key terms.",
       color: "blue",
     },
     {
-      icon: FileSpreadsheet,
-      title: "Excel-Ready Output",
+      icon: MessageSquare,
+      title: "AI Chat",
       description:
-        "Get perfectly formatted Excel files with 12+ sheets covering financials, risks, valuation, and more.",
+        "Ask questions across your entire document library. Get instant, cited answers from your deal docs.",
+      color: "green",
+    },
+    {
+      icon: BarChart3,
+      title: "PE Workflows",
+      description:
+        "Investment memos, red flag analysis, deal screening — automated from your uploaded documents.",
+      color: "purple",
+    },
+    {
+      icon: Building2,
+      title: "RE Workflows",
+      description:
+        "Underwriting models, property analysis, template fill — generated directly from your deal docs.",
+      color: "orange",
+    },
+    {
+      icon: FileSpreadsheet,
+      title: "Excel Export",
+      description:
+        "Structured data ready to drop into your financial models. Clean, formatted, and model-ready.",
       color: "green",
     },
     {
       icon: ShieldAlert,
-      title: "Automated Red Flags",
+      title: "Red Flag Detection",
       description:
-        "Quantitative risk detection highlights leverage issues, declining margins, and customer concentration.",
+        "Automatic risk scoring and anomaly detection highlights leverage issues, margin declines, and more.",
       color: "red",
-    },
-    {
-      icon: TrendingUp,
-      title: "Financial Analysis",
-      description:
-        "Revenue, EBITDA, FCF, margins, and growth metrics extracted with full historical and projected years.",
-      color: "purple",
-    },
-    {
-      icon: BarChart3,
-      title: "Valuation & Ratios",
-      description:
-        "Key multiples, debt ratios, liquidity metrics, and ROE/ROA calculated automatically.",
-      color: "orange",
-    },
-    {
-      icon: Users,
-      title: "Deal Context",
-      description:
-        "Management bios, customer analysis, market sizing, and strategic rationale all in one place.",
-      color: "pink",
     },
   ];
 
@@ -78,11 +78,11 @@ export default function Features() {
             Everything You Need for
             <span className="bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
               {" "}
-              Deal Analysis
+              Deal Intelligence
             </span>
           </h2>
           <p className="text-xl text-muted-foreground dark:text-gray-300 max-w-3xl mx-auto">
-            Built specifically for PE analysts. Extract, analyze, and model
+            Built for PE and real estate analysts. Extract, analyze, and model
             faster than ever before.
           </p>
         </div>
@@ -125,10 +125,10 @@ export default function Features() {
                 1
               </div>
               <h4 className="text-xl font-semibold text-foreground mb-2">
-                Upload Your CIM
+                Upload Your Documents
               </h4>
               <p className="text-muted-foreground dark:text-muted-foreground">
-                Drop your PDF (up to 60 pages). Processing starts immediately.
+                Drop your PDFs or Excel files. Processing starts immediately.
               </p>
             </div>
 
@@ -137,11 +137,11 @@ export default function Features() {
                 2
               </div>
               <h4 className="text-xl font-semibold text-foreground mb-2">
-                AI Extracts Data
+                AI Extracts & Analyzes
               </h4>
               <p className="text-muted-foreground dark:text-muted-foreground">
                 The tool reads every page, extracting financials, risks, and
-                metrics.
+                metrics across PE and RE deals.
               </p>
             </div>
 
@@ -150,10 +150,10 @@ export default function Features() {
                 3
               </div>
               <h4 className="text-xl font-semibold text-foreground mb-2">
-                Download Excel
+                Get Structured Output
               </h4>
               <p className="text-muted-foreground dark:text-muted-foreground">
-                Get structured data in Excel, ready to import into your model.
+                Download Excel, run AI workflows, or ask questions — your data, your way.
               </p>
             </div>
           </div>
@@ -169,7 +169,7 @@ export default function Features() {
                   Bank-Level Security
                 </div>
                 <div className="text-sm text-muted-foreground dark:text-muted-foreground">
-                  Your CIMs are encrypted and deleted after processing
+                  Your documents are encrypted and deleted after processing
                 </div>
               </div>
             </div>
@@ -178,7 +178,7 @@ export default function Features() {
               <div>
                 <div className="font-semibold text-foreground">10x Faster</div>
                 <div className="text-sm text-muted-foreground dark:text-muted-foreground">
-                  What takes 3 hours manually takes 5 minutes with Sand Cloud
+                  What takes 3 hours manually takes 5 minutes with DealWorks
                 </div>
               </div>
             </div>
@@ -186,10 +186,10 @@ export default function Features() {
               <Target className="w-8 h-8 text-purple-600 dark:text-purple-400 flex-shrink-0" />
               <div>
                 <div className="font-semibold text-foreground">
-                  PE-Optimized
+                  PE & RE Focused
                 </div>
                 <div className="text-sm text-muted-foreground dark:text-muted-foreground">
-                  Built by PE analysts for PE analysts
+                  Built for private equity and real estate professionals
                 </div>
               </div>
             </div>

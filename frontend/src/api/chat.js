@@ -129,9 +129,7 @@ export async function connectToIndexingProgress(
           : errorData?.message || "Indexing failed";
       onError(new Error(errorMsg));
     },
-    onEnd: (data) => {
-      console.log("[Document Indexing] SSE stream ended:", data?.reason);
-    },
+    onEnd: () => {},
     autoReconnect,
     fetchInitialState,
     getJobStatus: fetchInitialState ? getJobStatus : null,

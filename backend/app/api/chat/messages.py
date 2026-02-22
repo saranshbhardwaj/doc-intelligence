@@ -7,7 +7,6 @@ Session-centric architecture:
 - RAG retrieval uses session's documents
 """
 
-from typing import Optional
 from fastapi import APIRouter, Form, HTTPException, Depends, Body
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
@@ -138,17 +137,10 @@ async def chat_with_session(
         """Stream chat response chunks as SSE events (manually formatted)"""
         import json
 
-        logger.info(
-            f"[Chat SSE] ★★★ Starting event stream for session {session_id}",
-            extra={"session_id": session_id}
-        )
-
         # Send session_id first
-        logger.info(f"[Chat SSE] Sending session event", extra={"session_id": session_id})
         yield f"event: session\ndata: {json.dumps({'session_id': session_id})}\n\n"
 
         # Send thinking event to show progress feedback
-        logger.info(f"[Chat SSE] Sending thinking event", extra={"session_id": session_id})
         yield f"event: thinking\ndata: {json.dumps({'message': 'Analyzing documents...'})}\n\n"
 
         # Check session length and send warning if needed
@@ -186,33 +178,19 @@ async def chat_with_session(
             ):
                 # Send comparison context before first chunk (if available)
                 if not comparison_context_sent and rag_service.last_comparison_context:
-                    logger.info(f"[Chat SSE] Sending comparison context", extra={"session_id": session_id})
                     yield f"event: comparison_context\ndata: {json.dumps(rag_service.last_comparison_context)}\n\n"
                     comparison_context_sent = True
                     # Don't clear yet - needed for message saving after streaming completes
 
                 # Send citation context before first chunk (if available)
                 if not citation_context_sent and rag_service.last_citation_context:
-                    logger.info(
-                        f"[Chat SSE] Sending citation context",
-                        extra={
-                            "session_id": session_id,
-                            "citation_count": len(rag_service.last_citation_context.get("citations", []))
-                        }
-                    )
                     yield f"event: citation_context\ndata: {json.dumps(rag_service.last_citation_context)}\n\n"
                     citation_context_sent = True
                     # Don't clear yet - needed for message saving after streaming completes
 
                 chunk_count += 1
-                logger.debug(f"[Chat SSE] Sending chunk #{chunk_count}", extra={"session_id": session_id})
                 yield f"event: chunk\ndata: {json.dumps({'chunk': chunk})}\n\n"
 
-            # Send completion event
-            logger.info(
-                f"[Chat SSE] Sending done event (streamed {chunk_count} chunks)",
-                extra={"session_id": session_id, "chunk_count": chunk_count}
-            )
             yield f"event: done\ndata: {json.dumps({'status': 'completed'})}\n\n"
 
         except Exception as e:
@@ -222,11 +200,6 @@ async def chat_with_session(
                 extra={"session_id": session_id}
             )
             yield f"event: error\ndata: {json.dumps({'error': str(e)})}\n\n"
-
-        logger.info(
-            f"[Chat SSE] ★★★ Event stream ended for session {session_id}",
-            extra={"session_id": session_id}
-        )
 
     return StreamingResponse(
         event_generator(),
@@ -351,11 +324,6 @@ async def confirm_comparison_selection(
         """Stream chat response chunks as SSE events"""
         import json
 
-        logger.info(
-            f"[Comparison Confirm SSE] Starting event stream",
-            extra={"session_id": session_id, "force_comparison": force_comparison}
-        )
-
         # Send session_id first
         yield f"event: session\ndata: {json.dumps({'session_id': session_id})}\n\n"
 
@@ -378,18 +346,12 @@ async def confirm_comparison_selection(
             ):
                 # Send comparison context before first chunk (if comparison mode)
                 if not comparison_context_sent and rag_service.last_comparison_context:
-                    logger.info(f"[Comparison Confirm SSE] Sending comparison context")
                     yield f"event: comparison_context\ndata: {json.dumps(rag_service.last_comparison_context)}\n\n"
                     comparison_context_sent = True
 
                 chunk_count += 1
                 yield f"event: chunk\ndata: {json.dumps({'chunk': chunk})}\n\n"
 
-            # Send completion event
-            logger.info(
-                f"[Comparison Confirm SSE] Completed (streamed {chunk_count} chunks)",
-                extra={"session_id": session_id, "chunk_count": chunk_count}
-            )
             yield f"event: done\ndata: {json.dumps({'status': 'completed'})}\n\n"
 
         except Exception as e:
@@ -399,11 +361,6 @@ async def confirm_comparison_selection(
                 extra={"session_id": session_id}
             )
             yield f"event: error\ndata: {json.dumps({'error': str(e)})}\n\n"
-
-        logger.info(
-            f"[Comparison Confirm SSE] Event stream ended",
-            extra={"session_id": session_id}
-        )
 
     return StreamingResponse(
         event_generator(),

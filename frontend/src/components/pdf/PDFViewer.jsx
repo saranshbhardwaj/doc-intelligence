@@ -80,7 +80,6 @@ export default function PDFViewer({
       if (containerRef.current) {
         // Use 90% of container width for padding
         const width = containerRef.current.offsetWidth * 0.9;
-        console.log('[PDFViewer] Container width measured:', width, 'offsetWidth:', containerRef.current.offsetWidth);
         setContainerWidth(width);
       }
     };
@@ -92,7 +91,6 @@ export default function PDFViewer({
     const resizeObserver = new ResizeObserver((entries) => {
       for (const entry of entries) {
         const width = entry.contentRect.width * 0.9;
-        console.log('[PDFViewer] ResizeObserver triggered, width:', width);
         setContainerWidth(width);
       }
     });

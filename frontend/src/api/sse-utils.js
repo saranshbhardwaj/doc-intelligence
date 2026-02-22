@@ -239,10 +239,6 @@ export async function streamJobProgress(
   const baseDelay = 1000; // 1 second base delay
 
   eventSource.onerror = (err) => {
-    console.log(
-      `[SSE Utils] onerror fired: streamEnded=${streamEnded}, readyState=${eventSource.readyState}`
-    );
-
     // If domain error already received (application failure) or graceful end, skip transport reconnect
     if (isCleaningUp || streamEnded || receivedDomainError || terminalFailed) {
       return;

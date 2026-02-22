@@ -1,11 +1,41 @@
 // src/components/RequireAuth.jsx
-import { Navigate, Outlet } from "react-router-dom";
+import { useState, useEffect } from "react";
+import { Navigate, Outlet, useNavigate } from "react-router-dom";
 import { OrganizationSwitcher, useAuth } from "@clerk/clerk-react";
+import { createAuthenticatedApi } from "../../api/client";
 
 export default function RequireAuth({ redirectTo = "/sign-in" }) {
-  const { isLoaded, userId, orgId } = useAuth();
+  const { isLoaded, userId, orgId, getToken } = useAuth();
+  const navigate = useNavigate();
+  const [statusChecked, setStatusChecked] = useState(false);
 
-  if (!isLoaded) return null; // or a spinner
+  useEffect(() => {
+    // Only run the status check once Clerk is loaded, user is signed in, and has an org
+    if (!isLoaded || !userId || !orgId) return;
+
+    const checkStatus = async () => {
+      try {
+        const authApi = createAuthenticatedApi(getToken);
+        await authApi.get("/api/users/me");
+        setStatusChecked(true);
+      } catch (error) {
+        if (
+          error.response?.status === 403 &&
+          error.response?.data?.detail === "access_pending"
+        ) {
+          navigate("/access-pending", { replace: true });
+        } else {
+          // Any other error (network, 500, etc.) — let the app render and
+          // individual pages will handle their own errors.
+          setStatusChecked(true);
+        }
+      }
+    };
+
+    checkStatus();
+  }, [isLoaded, userId, orgId, getToken, navigate]);
+
+  if (!isLoaded) return null;
 
   if (!userId) return <Navigate to={redirectTo} replace />;
 
@@ -25,6 +55,8 @@ export default function RequireAuth({ redirectTo = "/sign-in" }) {
     );
   }
 
-  // Authenticated: render nested app routes
+  // Block rendering until status check completes
+  if (!statusChecked) return null;
+
   return <Outlet />;
 }

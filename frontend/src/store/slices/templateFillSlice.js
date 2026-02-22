@@ -122,8 +122,6 @@ export const createTemplateFillSlice = (set, get) => ({
             },
           }));
         }
-      } else {
-        console.log('⏭️ Skipping PDF reload (already loaded)');
       }
 
       return fillRunData;

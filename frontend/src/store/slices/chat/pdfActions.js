@@ -86,7 +86,6 @@ export const createChatPdfActions = (set, get) => ({
           },
         }));
 
-        console.log(`✅ Loaded PDF URL for document ${documentId}`);
       } else {
         console.error(`❌ No URL in response for document ${documentId}`);
         set((state) => ({

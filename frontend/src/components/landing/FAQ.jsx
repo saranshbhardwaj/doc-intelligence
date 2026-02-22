@@ -9,52 +9,42 @@ export default function FAQ() {
     {
       question: "What file formats do you support?",
       answer:
-        "We currently support digital PDF files (text-based PDFs). Scanned PDFs or image-based documents are not supported yet. This work is in progress.",
+        "We support text-based PDFs, scanned PDFs, and Word documents. For Excel template fill workflows, we support .xlsx files.",
     },
     {
       question: "How accurate is the extraction?",
       answer:
-        "We achieve 95%+ accuracy on standard CIM documents. The system specializes in reading and understanding financial documents like a senior analyst. However, we always recommend reviewing the extracted data, especially for critical deal decisions.",
+        "We achieve 95%+ accuracy on standard deal documents. Every extracted field includes a citation back to the source page and a confidence score for any inferred values. So you can verify exactly where the data came from. We always recommend reviewing before critical deal decisions.",
     },
     {
-      question: "Is my data secure? What happens to my CIMs?",
+      question: "Is my data secure? What happens to my documents?",
       answer:
-        "Your data security is our top priority. All uploads are encrypted in transit and at rest. Your CIM documents are processed and then deleted from our servers after 30 days. We never share your documents with third parties, and all processing is confidential.",
-    },
-    {
-      question: "What's the difference between Free and Pro plans?",
-      answer:
-        "Free plan includes 2 CIM extractions per month. Pro plan ($99/month) offers 500 extractions, 30-day extraction history, priority support, comparison mode to analyze multiple CIMs side-by-side, and custom red flag rules.",
-    },
-    {
-      question: "Can I compare multiple CIMs?",
-      answer:
-        "Yes! Pro and Enterprise plans include comparison mode, which allows you to upload 2-3 CIMs and get a side-by-side Excel comparison highlighting the best metrics across deals. This feature is coming soon to all plans.",
+        "Your data security is our top priority. All uploads are encrypted in transit and at rest. Your documents are processed and then deleted from our servers after 30 days. We never share your documents with third parties, and all processing is confidential.",
     },
     {
       question: "How long does processing take?",
       answer:
-        "Most CIMs (40-80 pages) are processed in 1-6 minutes. You'll see real-time progress updates while your document is being analyzed.",
+        "Most documents (40-80 pages) are processed in 1-6 minutes. You'll see real-time progress updates while your document is being analyzed.",
     },
     {
-      question: "What data do you extract from CIMs?",
+      question: "What data do you extract from deal documents?",
       answer:
-        "We extract 12+ categories including: company overview, financials (revenue, EBITDA, margins, FCF), balance sheet, valuation multiples, capital structure, customer metrics, market analysis, management team, risks, and strategic rationale. All data is delivered in structured Excel format.",
+        "For PE deals: company overview, financials (revenue, EBITDA, margins, FCF), balance sheet, valuation multiples, capital structure, customer metrics, management team, risks, and strategic rationale. For real estate: NOI, cap rates, occupancy, rent rolls, lease terms, operating expenses, and market comps. All data is delivered in structured Excel format.",
+    },
+    {
+      question: "Do you support real estate documents like rent rolls and offering memoranda?",
+      answer:
+        "Yes! DealWorks supports real estate document types including offering memoranda, rent rolls, operating statements, property appraisals, and market reports. Our RE workflows extract NOI, cap rates, occupancy, lease terms, and more, and can auto-populate your Excel underwriting templates.",
     },
     {
       question: "Do you support languages other than English?",
       answer:
-        "Currently, we only support English-language CIM documents. Support for other languages is on our roadmap.",
+        "Currently, we only support English-language documents. Support for other languages is on our roadmap.",
     },
     {
       question: "What if the extraction has errors?",
       answer:
         "If you find inaccuracies, please use the feedback form on the results page. We review all feedback and continuously improve our AI models. For critical errors, contact us at saranshbhardwaj@gmail.com and we'll re-process your document manually.",
-    },
-    {
-      question: "Can I cancel my subscription anytime?",
-      answer:
-        "Yes! Pro subscriptions can be cancelled anytime. You'll retain access until the end of your billing period, and there are no cancellation fees. We also offer a 7-day free trial and money-back guarantee.",
     },
   ];
 
@@ -75,7 +65,7 @@ export default function FAQ() {
             </span>
           </h2>
           <p className="text-xl text-muted-foreground dark:text-gray-300">
-            Everything you need to know about Sand Cloud
+            Everything you need to know about DealWorks
           </p>
         </div>
 

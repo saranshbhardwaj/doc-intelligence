@@ -184,7 +184,6 @@ export default function TemplateFillPage() {
             setJobStatus('idle');
           }, 100);
         } else if (data.status === 'failed') {
-          console.log('❌ Failed status detected in progress event');
           setJobStatus('failed');
         }
       },

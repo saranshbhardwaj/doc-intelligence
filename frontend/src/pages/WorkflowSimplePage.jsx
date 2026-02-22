@@ -189,9 +189,7 @@ export default function WorkflowSimplePage() {
           failWorkflowExecution(errorMsg);
           fetchInitialData();
         },
-        onEnd: (data) => {
-          console.log("🏁 SSE stream ended:", data?.reason);
-        },
+        onEnd: () => {},
       });
 
       // Update execution with real values

@@ -141,17 +141,13 @@ export const createChatComparisonActions = (set, get) => ({
       originalQuery,
       skipComparison,
       {
-        onSession: (returnedSessionId) => {
-          console.log("Session confirmed:", returnedSessionId);
-        },
-        onThinking: (data) => {
-          console.log("Backend is thinking:", data);
+        onSession: () => {},
+        onThinking: () => {
           set((state) => ({
             chat: { ...state.chat, isThinking: true },
           }));
         },
         onComparisonContext: (context) => {
-          console.log("Received comparison context:", context);
           set((state) => ({
             chat: {
               ...state.chat,

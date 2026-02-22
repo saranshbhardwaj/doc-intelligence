@@ -36,10 +36,8 @@ class RedisDocumentCache:
         try:
             raw = self.client.get(key)
             if not raw:
-                logger.info(f"Redis cache MISS for {key}")
                 DOC_CACHE_MISSES.labels(cache_type="redis").inc()
                 return None
-            logger.info(f"Redis cache HIT for {key}")
             DOC_CACHE_HITS.labels(cache_type="redis").inc()
             import json
 
@@ -55,7 +53,6 @@ class RedisDocumentCache:
             import json
 
             self.client.setex(key, self.cache_ttl_seconds, json.dumps(result, ensure_ascii=False))
-            logger.info(f"Redis cache SET for {key}")
         except Exception as e:
             logger.warning(f"Redis cache error on set: {e}")
 

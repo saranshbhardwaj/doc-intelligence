@@ -1,7 +1,7 @@
 # backend/app/api/admin/allowlist.py
 """Admin endpoints for managing the email allowlist (invite-only access control)."""
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel
 from sqlalchemy import func
 from app.auth import require_admin
 from app.db_models_users import User, AllowedEmail
@@ -13,7 +13,7 @@ router = APIRouter()
 
 
 class AllowEmailRequest(BaseModel):
-    emails: list[EmailStr]
+    emails: list[str]
 
 
 class ActivateUserRequest(BaseModel):

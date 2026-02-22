@@ -48,17 +48,13 @@ export const createChatMessageActions = (set, get) => ({
       message,
       numChunks,
       {
-        onSession: (returnedSessionId) => {
-          console.log("Session confirmed:", returnedSessionId);
-        },
-        onThinking: (data) => {
-          console.log("Backend is thinking:", data);
+        onSession: () => {},
+        onThinking: () => {
           set((state) => ({
             chat: { ...state.chat, isThinking: true },
           }));
         },
         onComparisonContext: (context) => {
-          console.log("Received comparison context:", context);
           set((state) => ({
             chat: {
               ...state.chat,
@@ -73,7 +69,6 @@ export const createChatMessageActions = (set, get) => ({
           }));
         },
         onCitationContext: (context) => {
-          console.log("Received citation context:", context);
           set((state) => ({
             chat: {
               ...state.chat,
@@ -82,7 +77,6 @@ export const createChatMessageActions = (set, get) => ({
           }));
         },
         onSessionWarning: (data) => {
-          console.log("Session warning received:", data);
           // Display toast notification for long conversation
           toast.warning("Long conversation detected", {
             description: data.recommendation || "Consider starting a new session for best results",
@@ -102,7 +96,6 @@ export const createChatMessageActions = (set, get) => ({
           });
         },
         onComparisonSelection: (data) => {
-          console.log("Comparison selection needed:", data);
           get().setComparisonSelectionNeeded(data);
         },
         onChunk: (chunk) => {

@@ -98,7 +98,6 @@ export const createChatIndexingActions = (set, get) => ({
     const { indexingJobs } = get().chat;
 
     if (!indexingJobs || Object.keys(indexingJobs).length === 0) {
-      console.log("❌ No active indexing jobs to reconnect");
       return;
     }
 
@@ -109,8 +108,6 @@ export const createChatIndexingActions = (set, get) => ({
         }
 
         try {
-          console.log(`🔄 Reconnecting to indexing job for document ${docId}...`);
-
           const cleanup = await streamJobProgress(job.jobId, getToken, {
             onProgress: (data) => {
               get().updateIndexingProgress(docId, data);
@@ -125,24 +122,18 @@ export const createChatIndexingActions = (set, get) => ({
                   : errorData?.message || "Indexing failed";
 
               if (errorData?.type === "not_found") {
-                console.log(`ℹ️ Job ${job.jobId} not found, clearing state`);
                 get().clearIndexingJob(docId);
                 return;
               }
 
               if (errorData?.type === "connection_error") {
-                console.log(
-                  `⚠️ Connection error during reconnect for ${docId}, clearing state`
-                );
                 get().clearIndexingJob(docId);
                 return;
               }
 
               get().failIndexing(docId, errorMsg);
             },
-            onEnd: (data) => {
-              console.log(`🏁 Indexing SSE stream ended for ${docId}:`, data?.reason);
-            },
+            onEnd: () => {},
           });
 
           set((state) => ({

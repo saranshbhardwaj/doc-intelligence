@@ -1,7 +1,7 @@
 // src/components/landing/Hero.jsx
-import { ArrowRight, FileText, Zap, TrendingUp } from "lucide-react";
+import { ArrowRight, Zap, TrendingUp, Workflow } from "lucide-react";
 
-export default function Hero({ onGetStarted, onTryDemo }) {
+export default function Hero({ onGetStarted }) {
   return (
     <div className="relative overflow-hidden bg-gradient-to-br from-blue-50 via-white to-purple-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900">
       {/* Background decoration */}
@@ -16,23 +16,22 @@ export default function Hero({ onGetStarted, onTryDemo }) {
           {/* Badge */}
           <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 text-sm font-medium mb-8">
             <Zap className="w-4 h-4" />
-            AI-Powered CIM Analysis
+            AI-Powered Document Intelligence
           </div>
 
           {/* Main heading */}
           <h1 className="text-5xl sm:text-6xl lg:text-7xl font-extrabold text-foreground mb-6 leading-tight">
-            Extract Deal Data from
+            AI-Powered Intelligence for
             <span className="bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
               {" "}
-              CIMs in Minutes
+              PE & Real Estate
             </span>
           </h1>
 
           {/* Subheading */}
           <p className="text-xl sm:text-2xl text-muted-foreground dark:text-gray-300 mb-10 max-w-3xl mx-auto leading-relaxed">
-            Stop spending hours extracting financials from documents. Our AI
-            reads CIMs and delivers structured data in Excel ready for your
-            model.
+            Stop spending hours on manual document review. Extract structured
+            data, run AI workflows, and generate deal documents — in minutes.
           </p>
 
           {/* Stats */}
@@ -55,10 +54,10 @@ export default function Hero({ onGetStarted, onTryDemo }) {
             </div>
             <div className="text-center">
               <div className="text-4xl font-bold text-pink-600 dark:text-pink-400">
-                12+
+                10+
               </div>
               <div className="text-sm text-muted-foreground dark:text-muted-foreground">
-                Data categories extracted
+                AI workflow types
               </div>
             </div>
           </div>
@@ -72,18 +71,11 @@ export default function Hero({ onGetStarted, onTryDemo }) {
               Get Started Free
               <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
             </button>
-            <button
-              onClick={onTryDemo}
-              className="px-8 py-4 bg-card border-2 border-border dark:border-gray-600 hover:border-blue-500 dark:hover:border-blue-500 text-foreground font-semibold rounded-xl shadow hover:shadow-lg transform hover:scale-105 transition-all duration-200 flex items-center gap-2"
-            >
-              <FileText className="w-5 h-5" />
-              View Sample Output
-            </button>
           </div>
 
           {/* Trust badge */}
           <p className="text-sm text-muted-foreground dark:text-muted-foreground mt-8">
-            No credit card required • up to 100 pages • Cancel anytime
+            Upload documents • Chat with AI • Run workflows • Export to Excel
           </p>
         </div>
 
@@ -98,7 +90,7 @@ export default function Hero({ onGetStarted, onTryDemo }) {
                 Lightning Fast
               </h3>
               <p className="text-sm text-muted-foreground dark:text-muted-foreground">
-                Process 30+ page CIMs in under 5 minutes
+                Process 100+ page documents in under 5 minutes
               </p>
             </div>
           </div>
@@ -119,14 +111,14 @@ export default function Hero({ onGetStarted, onTryDemo }) {
 
           <div className="flex items-start gap-4 p-6 rounded-xl bg-background/50 dark:bg-card/50 backdrop-blur border border-border dark:border-gray-700">
             <div className="flex-shrink-0 w-12 h-12 bg-pink-100 dark:bg-pink-900/30 rounded-lg flex items-center justify-center">
-              <FileText className="w-6 h-6 text-pink-600 dark:text-pink-400" />
+              <Workflow className="w-6 h-6 text-pink-600 dark:text-pink-400" />
             </div>
             <div>
               <h3 className="font-semibold text-foreground mb-1">
-                Red Flag Detection
+                AI Workflows
               </h3>
               <p className="text-sm text-muted-foreground dark:text-muted-foreground">
-                Automatic risk analysis on every deal
+                Investment memos, underwriting & more
               </p>
             </div>
           </div>

@@ -293,8 +293,7 @@ export const createWorkflowDraftSlice = (set, get) => ({
 
           get().failWorkflowExecution(errorMsg);
         },
-        onEnd: async (data) => {
-          console.log("🏁 Workflow SSE stream ended:", data?.reason);
+        onEnd: async () => {
           // If stream ended due to not_found, state is already cleared in onError
           // Don't reset jobId/runId here for other cases - keep them for result page navigation
         },

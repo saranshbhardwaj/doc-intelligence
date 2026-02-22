@@ -28,7 +28,6 @@ class DocumentCache:
         cache_path = self._get_cache_path(content_hash)
 
         if not cache_path.exists():
-            logger.info(f"Cache MISS for hash {content_hash[:8]}...")
             DOC_CACHE_MISSES.labels(cache_type="file").inc()
             return None
 
@@ -37,12 +36,9 @@ class DocumentCache:
             cached_at = datetime.fromisoformat(cache_data["cached_at"])
 
             if datetime.now() - cached_at > self.cache_ttl:
-                logger.info(f"Cache EXPIRED for hash {content_hash[:8]}...")
                 cache_path.unlink(missing_ok=True)
                 DOC_CACHE_MISSES.labels(cache_type="file").inc()
                 return None
-
-            logger.info(f"Cache HIT for hash {content_hash[:8]}...")
             DOC_CACHE_HITS.labels(cache_type="file").inc()
             return cache_data["result"]
 
@@ -63,7 +59,6 @@ class DocumentCache:
 
         try:
             cache_path.write_text(json.dumps(cache_data, indent=2))
-            logger.info(f"Cached result for hash {content_hash[:8]}...")
         except Exception as e:
             logger.error(f"Cache write error: {e}")
 

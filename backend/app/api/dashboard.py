@@ -13,7 +13,6 @@ from fastapi import APIRouter, Depends, Query
 from app.auth import get_current_user
 from app.db_models_users import User
 from app.repositories.dashboard_repository import DashboardRepository
-from app.utils.logging import logger
 
 router = APIRouter(tags=["dashboard"])
 
@@ -52,17 +51,6 @@ async def get_dashboard_overview(
     """
     repo = DashboardRepository()
     overview = repo.get_overview(org_id=user.org_id, days=days)
-
-    logger.info(
-        f"Dashboard overview requested",
-        extra={
-            "user_id": user.id,
-            "org_id": user.org_id,
-            "days": days,
-            "total_documents": overview.get("documents", {}).get("total", 0)
-        }
-    )
-
     return overview
 
 
@@ -94,17 +82,6 @@ async def get_dashboard_activity(
     """
     repo = DashboardRepository()
     daily = repo.get_daily_activity(org_id=user.org_id, days=days)
-
-    logger.info(
-        f"Dashboard activity requested",
-        extra={
-            "user_id": user.id,
-            "org_id": user.org_id,
-            "days": days,
-            "activity_days_returned": len(daily)
-        }
-    )
-
     return {"daily": daily}
 
 
@@ -142,17 +119,6 @@ async def get_dashboard_template_fills(
     """
     repo = DashboardRepository()
     stats = repo.get_template_fill_stats(org_id=user.org_id, days=days)
-
-    logger.info(
-        f"Dashboard template fill stats requested",
-        extra={
-            "user_id": user.id,
-            "org_id": user.org_id,
-            "days": days,
-            "total_fills": sum(stats.get("by_status", {}).values())
-        }
-    )
-
     return stats
 
 

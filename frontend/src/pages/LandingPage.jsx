@@ -10,7 +10,7 @@ import {
 import { useEffect } from "react";
 import Hero from "../components/landing/Hero";
 import Features from "../components/landing/Features";
-import Pricing from "../components/landing/Pricing";
+import WorkflowShowcase from "../components/landing/WorkflowShowcase";
 import FAQ from "../components/landing/FAQ";
 import DarkModeToggle from "../components/common/DarkModeToggle";
 import { useDarkMode } from "../hooks/useDarkMode";
@@ -37,18 +37,6 @@ export default function LandingPage() {
     navigate("/app?demo=true");
   };
 
-  const handleSelectPlan = (planName) => {
-    if (planName === "free") {
-      navigate("/app");
-    } else if (planName === "pro") {
-      // TODO: Navigate to signup with pro plan pre-selected
-      navigate("/app");
-    } else {
-      // Enterprise - open contact form or mailto
-      window.location.href =
-        "mailto:saranshbhardwaj@gmail.com?subject=Enterprise Plan Inquiry";
-    }
-  };
 
   return (
     <div className="min-h-screen bg-background  transition-colors duration-200">
@@ -60,11 +48,11 @@ export default function LandingPage() {
             <div className="flex items-center gap-3">
               <img
                 src="/Sand_cloud_logo_dark-gray.svg"
-                alt="Sand Cloud"
+                alt="DealWorks"
                 className="h-8 w-auto"
               />
-              <span className="text-xl font-bold text-foreground">
-                Sand Cloud
+              <span className="text-xl font-extrabold tracking-tight bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
+                DealWorks
               </span>
             </div>
 
@@ -76,12 +64,12 @@ export default function LandingPage() {
               >
                 Features
               </a>
-              {/* <a
-                href="#pricing"
+              <a
+                href="#workflows"
                 className="text-muted-foreground dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
               >
-                Pricing
-              </a> */}
+                Workflows
+              </a>
               <a
                 href="#faq"
                 className="text-muted-foreground dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
@@ -154,9 +142,9 @@ export default function LandingPage() {
         <Features />
       </div>
 
-      {/* Pricing Section */}
-      <div id="pricing">
-        <Pricing onSelectPlan={handleSelectPlan} />
+      {/* Workflow Showcase Section */}
+      <div id="workflows">
+        <WorkflowShowcase />
       </div>
 
       {/* FAQ Section */}
@@ -169,7 +157,7 @@ export default function LandingPage() {
             Ready to 10x Your Deal Analysis?
           </h2>
           <p className="text-xl text-blue-100 mb-8">
-            Join PE analysts who are saving hours on every deal.
+            Join PE and real estate analysts who are saving hours on every deal.
           </p>
           <SignedOut>
             <button
@@ -178,9 +166,6 @@ export default function LandingPage() {
             >
               Get Started Free
             </button>
-            <p className="text-sm text-blue-100 mt-4">
-              No credit card required • 100 pages free
-            </p>
           </SignedOut>
           <SignedIn>
             <button
@@ -200,12 +185,12 @@ export default function LandingPage() {
             {/* Company */}
             <div>
               <div className="mb-4">
-                <span className="text-2xl font-bold text-foreground">
-                  Sand Cloud
+                <span className="text-2xl font-extrabold tracking-tight bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
+                  DealWorks
                 </span>
               </div>
               <p className="text-sm">
-                AI-powered CIM analysis for PE analysts.
+                AI-powered document intelligence for PE and real estate.
               </p>
             </div>
 
@@ -320,7 +305,7 @@ export default function LandingPage() {
           </div>
 
           <div className="border-t border-gray-800 mt-12 pt-8 text-center text-sm">
-            <p>&copy; 2025 Sand Cloud. All rights reserved.</p>
+            <p>&copy; 2026 DealWorks. All rights reserved.</p>
           </div>
         </div>
       </footer>

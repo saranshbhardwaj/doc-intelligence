@@ -166,7 +166,6 @@ export default function LibraryPage() {
     }
 
     if (indexingJobs && Object.keys(indexingJobs).length > 0) {
-      console.log("📡 Clerk auth ready, reconnecting to indexing jobs...");
       reconnectAllIndexingJobs(getToken);
     }
   }, [isLoaded, isSignedIn]); // eslint-disable-line react-hooks/exhaustive-deps

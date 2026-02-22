@@ -66,7 +66,6 @@ async def list_user_extractions(
     """
     List extractions for the current user (paginated, newest first).
     """
-    logger.info("Listing user extractions", extra={"user_id": user.id, "limit": limit, "offset": offset})
     repo = ExtractionRepository()
     extractions, total = repo.list_user_extractions(user.id, user.org_id, limit=limit, offset=offset, status=status)
     result = []
@@ -256,17 +255,6 @@ async def extract_document(
                         }
                     )
 
-        # Log usage
-        if user.tier == "free":
-            logger.info(f"User page usage (total): {user.total_pages_processed}/{user.pages_limit}", extra={
-                "request_id": request_id,
-                "user_id": user.id
-            })
-        else:
-            logger.info(f"User page usage (monthly): {user.pages_this_month}/{user.pages_limit}", extra={
-                "request_id": request_id,
-                "user_id": user.id
-            })
 
         # ============================================
         # STEP 3: Check cache (global cache across all users)

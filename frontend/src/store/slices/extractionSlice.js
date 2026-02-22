@@ -204,7 +204,6 @@ export const createExtractionSlice = (set, get) => ({
           // If job not found (e.g., deleted), clear extraction state entirely
           const errorType = typeof errorData === 'object' ? errorData?.type : null;
           if (errorType === 'not_found') {
-            console.log('🗑️ Extraction job not found - clearing state');
             get().resetExtraction();
             return;
           }
@@ -556,7 +555,6 @@ export const createExtractionSlice = (set, get) => ({
     const { jobId, extractionId } = get().extraction;
 
     if (!jobId || !extractionId) {
-      console.log("❌ No active extraction to reconnect");
       return;
     }
     setProcessing(true);
