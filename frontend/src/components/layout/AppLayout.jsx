@@ -83,11 +83,11 @@ export default function AppLayout({ children, breadcrumbs }) {
             >
               <img
                 src="/Sand_cloud_logo_dark-gray.svg"
-                alt="SandCloud"
+                alt="DealWorks"
                 className="h-8 w-auto"
               />
-              <span className="text-xl font-bold text-foreground">
-                SandCloud
+              <span className="text-xl font-extrabold tracking-tight bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
+                DealWorks
               </span>
             </Link>
 

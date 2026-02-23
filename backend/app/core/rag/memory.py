@@ -75,7 +75,8 @@ class ConversationMemory:
 
         summary_text: Optional[str] = None
         key_facts: List[str] = []
-        recent_messages = history_messages[-settings.chat_verbatim_message_count:] if settings.chat_verbatim_message_count > 0 else []
+        # Start with full history — only trim to verbatim_count after a summary is generated
+        recent_messages = history_messages
 
         should_summarize = (
             len(history_messages) >= settings.chat_summary_min_messages and
@@ -156,6 +157,14 @@ class ConversationMemory:
                         )
                         summary_text = await self._summarize_messages(older_messages)
                         key_facts = await self.chat_llm_service.extract_key_facts(older_messages)
+
+        # Only trim recent_messages to verbatim_count when a summary actually covers the older messages
+        if summary_text and settings.chat_verbatim_message_count > 0:
+            recent_messages = (
+                history_messages[-settings.chat_verbatim_message_count:]
+                if settings.chat_verbatim_message_count < len(history_messages)
+                else history_messages
+            )
 
         return summary_text, recent_messages, key_facts
 

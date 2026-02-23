@@ -36,7 +36,14 @@ from app.utils.chunk_metadata import validate_and_normalize_chunks
 from app.core.rag.chat_persistence import ChatPersistence
 from app.core.rag.comparison_flow import ComparisonChatHandler
 from app.core.rag.document_matching import DocumentMatcher
-import re
+from app.core.rag.low_signal import is_low_signal_message, low_signal_response
+
+# Adaptive retrieval sizing by query type: (min_candidates, max_candidates, min_top_k, max_top_k)
+_RETRIEVAL_SIZING = {
+    QueryType.DATA_EXTRACTION: (25, None, 12, None),   # at least 25/12, no upper cap
+    QueryType.SUMMARIZATION:   (15, 20, 8, 10),
+    QueryType.ENTITY_LOOKUP:   (12, 20, 6, 10),
+}
 import json
 import time
 from app.services.service_locator import get_reranker
@@ -122,43 +129,6 @@ class RAGService:
             on_comparison_context=self._set_comparison_context
         )
 
-        # Low-signal chat detection (skip retrieval/reranking for acknowledgements)
-        self._ack_words = {
-            "ok", "okay", "k", "kk", "alright", "sure", "sounds", "good", "cool", "great",
-            "perfect", "awesome", "nice", "fine", "got", "it", "understood", "yep", "yes",
-            "no", "thanks", "thank", "you", "thx", "appreciate", "appreciated",
-            "hi", "hello", "hey", "bye", "goodbye", "later", "cheers"
-        }
-        self._greeting_words = {"hi", "hello", "hey"}
-        self._thanks_words = {"thanks", "thank", "thx", "appreciate", "appreciated"}
-        self._farewell_words = {"bye", "goodbye", "later", "cheers"}
-
-    def _is_low_signal_message(self, user_message: str) -> bool:
-        if not user_message:
-            return False
-        msg = user_message.strip().lower()
-        if not msg or len(msg) > 50:
-            return False
-        if "?" in msg:
-            return False
-        if re.search(r"\d", msg):
-            return False
-        normalized = re.sub(r"[^a-z\s]", " ", msg)
-        words = [w for w in normalized.split() if w]
-        if not words:
-            return False
-        return all(w in self._ack_words for w in words)
-
-    def _low_signal_response(self, user_message: str) -> str:
-        msg = (user_message or "").strip().lower()
-        if any(w in msg for w in self._thanks_words):
-            return "You're welcome! Let me know if you'd like me to analyze anything else."
-        if any(w in msg for w in self._farewell_words):
-            return "Got it. If you need anything else, just ask."
-        if any(w in msg for w in self._greeting_words):
-            return "Hi! What would you like to know about these documents?"
-        return "Okay. Let me know if you'd like anything else."
-
     def _set_comparison_context(self, comparison_data: Dict):
         self.last_comparison_context = comparison_data
 
@@ -169,8 +139,6 @@ class RAGService:
         user_message: str,
         user_id: Optional[str] = None,
         org_id: Optional[str] = None,
-        num_chunks: int = 5,  # DEPRECATED: Now uses rag_final_top_k from config
-        similarity_threshold: float = 0.0,  # DEPRECATED: Not used with hybrid retrieval
         document_ids: Optional[List[str]] = None,
         force_comparison: Optional[bool] = None  # NEW: Skip detection if set (True=force comparison, False=skip comparison)
     ) -> AsyncIterator[str]:
@@ -188,8 +156,6 @@ class RAGService:
             collection_id: Optional collection ID to search within (if None, uses document_ids filter)
             user_message: User's question/message
             user_id: Optional user ID for logging
-            num_chunks: DEPRECATED - Now uses settings.rag_final_top_k (kept for backwards compatibility)
-            similarity_threshold: DEPRECATED - Not used with hybrid retrieval (kept for backwards compatibility)
             document_ids: Optional filter by specific documents (required if collection_id is None)
             force_comparison: Skip detection if set (True=force comparison, False=skip comparison, None=auto-detect)
 
@@ -204,30 +170,14 @@ class RAGService:
             )
             raise ValueError("User message cannot be empty")
 
-        # Edge case: Validate num_chunks is positive
-        if num_chunks <= 0:
-            logger.warning(
-                f"Invalid num_chunks: {num_chunks}, using default 5",
-                extra={"session_id": session_id}
-            )
-            num_chunks = 5
-
-        # Edge case: Validate similarity_threshold is in valid range
-        if not (0 <= similarity_threshold <= 1):
-            logger.warning(
-                f"Invalid similarity_threshold: {similarity_threshold}, using default 0.0",
-                extra={"session_id": session_id}
-            )
-            similarity_threshold = 0.0
-
-        # STEP 0: History & optional summarization via memory component
+        # STEP 1: History & optional summarization via memory component
         start_time = time.monotonic()
         history_messages = self.memory.load_history(session_id)
         summary_text, recent_messages, key_facts = await self.memory.maybe_summarize(session_id, history_messages, user_message)
 
-        # STEP 0.25: Short-circuit low-signal messages (skip retrieval/rerank)
-        if self._is_low_signal_message(user_message):
-            assistant_message = self._low_signal_response(user_message)
+        # STEP 2: Short-circuit low-signal messages (skip retrieval/rerank)
+        if is_low_signal_message(user_message):
+            assistant_message = low_signal_response(user_message)
             yield assistant_message
             await self.persistence.save_chat_messages(
                 session_id=session_id,
@@ -240,7 +190,7 @@ class RAGService:
             self.last_comparison_context = None
             return
 
-        # STEP 0.5: Query Understanding (LLM-powered analysis)
+        # STEP 3: Query Understanding (LLM-powered analysis)
         # Load document metadata for query understanding context
         doc_info = []
         if document_ids:
@@ -254,19 +204,15 @@ class RAGService:
             document_filenames=doc_filenames
         )
 
-        # STEP 0.75: Adaptive retrieval sizing based on query intent
+        # STEP 4: Adaptive retrieval sizing based on query intent
         retrieval_candidates = settings.rag_retrieval_candidates
         final_top_k = settings.rag_final_top_k
         if understanding.confidence is None or understanding.confidence >= 0.4:
-            if understanding.query_type == QueryType.DATA_EXTRACTION:
-                retrieval_candidates = max(retrieval_candidates, 25)
-                final_top_k = max(final_top_k, 12)
-            elif understanding.query_type == QueryType.SUMMARIZATION:
-                retrieval_candidates = max(15, min(retrieval_candidates, 20))
-                final_top_k = max(8, min(final_top_k, 10))
-            elif understanding.query_type == QueryType.ENTITY_LOOKUP:
-                retrieval_candidates = max(12, min(retrieval_candidates, 20))
-                final_top_k = max(6, min(final_top_k, 10))
+            sizing = _RETRIEVAL_SIZING.get(understanding.query_type)
+            if sizing:
+                min_c, max_c, min_k, max_k = sizing
+                retrieval_candidates = max(min_c, retrieval_candidates) if max_c is None else max(min_c, min(retrieval_candidates, max_c))
+                final_top_k = max(min_k, final_top_k) if max_k is None else max(min_k, min(final_top_k, max_k))
 
         logger.info(
             "Adaptive retrieval sizing",
@@ -279,7 +225,7 @@ class RAGService:
             }
         )
 
-        # Branch to comparison flow if detected (or forced) and multiple documents available
+        # STEP 5: Branch to comparison flow if detected (or forced) and multiple documents available
         should_compare = (
             (force_comparison is True) or
             (force_comparison is None and understanding.query_type == QueryType.COMPARISON)
@@ -291,7 +237,7 @@ class RAGService:
             # ≤3 docs in session: proceed automatically
             if len(document_ids) <= 3:
                 final_doc_ids = document_ids
-                logger.info(
+                logger.debug(
                     f"Auto-proceeding with comparison (≤3 documents)",
                     extra={
                         "session_id": session_id,
@@ -306,7 +252,7 @@ class RAGService:
                 # User mentioned 2-3 specific docs: use them directly
                 if matched_ids and len(matched_ids) >= 2 and len(matched_ids) <= 3:
                     final_doc_ids = matched_ids
-                    logger.info(
+                    logger.debug(
                         f"Auto-proceeding with user-mentioned documents (2-3 docs)",
                         extra={
                             "session_id": session_id,
@@ -316,7 +262,7 @@ class RAGService:
 
                 # User mentioned >3 specific docs: ask user to select up to 3
                 elif matched_ids and len(matched_ids) > 3:
-                    logger.info(
+                    logger.debug(
                         f"User mentioned {len(matched_ids)} documents, requesting selection",
                         extra={
                             "session_id": session_id,
@@ -342,7 +288,7 @@ class RAGService:
 
                 # No specific docs mentioned: ask user to select from all session docs
                 else:
-                    logger.info(
+                    logger.debug(
                         f"No specific documents mentioned, requesting selection from all {len(document_ids)} docs",
                         extra={
                             "session_id": session_id,
@@ -366,7 +312,7 @@ class RAGService:
                     yield f"event: comparison_selection\ndata: {json.dumps(selection_event)}\n\n"
                     return  # Wait for user selection
 
-            logger.info(
+            logger.debug(
                 f"Comparison query proceeding with {len(final_doc_ids)} documents",
                 extra={
                     "user_id": user_id,
@@ -463,14 +409,13 @@ class RAGService:
                     "user_id": user_id,
                     "session_id": session_id,
                     "document_count": len(document_ids) if document_ids else 0,
-                    "query_length": len(user_message),
-                    "similarity_threshold": similarity_threshold
+                    "query_length": len(user_message)
                 }
             )
             # Continue with empty context - let LLM respond that it can't find relevant info
 
         # ------------------------------------------------------------------
-        # STEP 2.5: Validate and normalize chunk metadata
+        # STEP 3: Validate and normalize chunk metadata
         if relevant_chunks:
             logger.debug(
                 f"Validating {len(relevant_chunks)} chunks before budget enforcement",
@@ -483,7 +428,7 @@ class RAGService:
             )
 
         # ------------------------------------------------------------------
-        # STEP 2.6: Context Expansion (all query types)
+        # STEP 4: Context Expansion (all query types)
         if relevant_chunks and settings.rag_expansion_enabled:
             expansion_start = time.monotonic()
 
@@ -536,7 +481,7 @@ class RAGService:
                 )
 
         # ------------------------------------------------------------------
-        # STEP 3: Budget enforcement
+        # STEP 5: Budget enforcement
         budget_start = time.monotonic()
         summary_text, recent_messages, relevant_chunks = await self.budget.enforce(
             memory=self.memory,
@@ -807,10 +752,6 @@ class RAGService:
         Returns:
             Dict with citations array and document_map
         """
-        from app.repositories.document_repository import DocumentRepository
-
-        doc_repo = DocumentRepository()
-
         # Collect unique document IDs
         doc_ids = list(set(
             chunk.get('document_id') for chunk in chunks
@@ -821,7 +762,7 @@ class RAGService:
             return {"citations": [], "document_map": {}}
 
         # Batch fetch document info (1 query, not N)
-        doc_info_list = doc_repo.get_doc_info_by_ids(doc_ids)
+        doc_info_list = self.document_repo.get_doc_info_by_ids(doc_ids)
         doc_map = {d['id']: d for d in doc_info_list}
 
         # Build citation entries
@@ -833,12 +774,13 @@ class RAGService:
 
             doc_id = chunk.get('document_id')
             doc_info = doc_map.get(doc_id, {})
-            metadata = chunk.get('chunk_metadata') or chunk.get('metadata') or {}
+            # chunk_metadata is guaranteed to be a dict after validate_and_normalize_chunks
+            metadata = chunk.get('chunk_metadata') or {}
 
             # Use bbox page if available (physical PDF page from Azure DI bounding_regions)
             # This is more accurate than page_number column which may contain document's internal numbering
             bbox = metadata.get('bbox', {})
-            page = bbox.get('page') if bbox else chunk.get('page_number', 1)
+            page = bbox.get('page') if isinstance(bbox, dict) and bbox else chunk.get('page_number', 1)
 
             citations.append({
                 "ref": chunk_id[:8],  # Short reference for LLM
@@ -850,7 +792,7 @@ class RAGService:
                 "bbox": bbox or None,  # For PDF highlighting (includes accurate page number)
             })
 
-        logger.info(
+        logger.debug(
             "Built citation context",
             extra={
                 "chunk_count": len(chunks),

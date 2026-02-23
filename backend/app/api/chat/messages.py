@@ -18,7 +18,6 @@ from app.core.rag import RAGService
 from app.repositories.session_repository import SessionRepository
 from app.repositories.rag_repository import RAGRepository
 from app.utils.logging import logger
-from app.services.service_locator import get_reranker
 from app.api.chat.schemas import ComparisonConfirmRequest
 
 router = APIRouter()
@@ -28,7 +27,6 @@ router = APIRouter()
 async def chat_with_session(
     session_id: str,
     message: str = Form(...),
-    num_chunks: int = Form(5),
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db)  # Still needed for RAGService
 ):
@@ -45,7 +43,6 @@ async def chat_with_session(
     Args:
         session_id: Session ID (UUID format)
         message: User's message/question (1-4000 chars)
-        num_chunks: Number of chunks to retrieve (1-20, default: 5)
         user: Current user
         db: Database session (for RAGService)
 
@@ -53,7 +50,7 @@ async def chat_with_session(
         SSE events with streaming chat response
 
     Raises:
-        HTTPException 400: Invalid input (empty message, no documents, invalid num_chunks)
+        HTTPException 400: Invalid input (empty message, no documents)
         HTTPException 404: Session not found or access denied
         HTTPException 500: Server error during chat processing
 
@@ -63,7 +60,7 @@ async def chat_with_session(
         - done: Streaming completed
         - error: Error during streaming
 
-    Input: session_id, message, num_chunks, user_id (from auth)
+    Input: session_id, message, user_id (from auth)
     Output: SSE stream with chunks
     """
     # Edge case: Validate message is not empty
@@ -75,10 +72,6 @@ async def chat_with_session(
     # Edge case: Validate message length
     if len(message) > 4000:
         raise HTTPException(status_code=400, detail="Message too long (max 4000 characters)")
-
-    # Edge case: Validate num_chunks range
-    if num_chunks < 1 or num_chunks > 20:
-        raise HTTPException(status_code=400, detail="num_chunks must be between 1 and 20")
 
     # Use repositories
     session_repo = SessionRepository()
@@ -129,8 +122,7 @@ async def chat_with_session(
     )
 
     # Initialize RAG service (still needs db session for vector search)
-    reranker = get_reranker()
-    rag_service = RAGService(db, reranker=reranker)
+    rag_service = RAGService(db)
 
     # Stream chat response
     async def event_generator():
@@ -173,7 +165,6 @@ async def chat_with_session(
                 user_message=message,
                 user_id=user.id,
                 org_id=user.org_id,
-                num_chunks=num_chunks,
                 document_ids=document_ids  # Use session's documents
             ):
                 # Send comparison context before first chunk (if available)
@@ -316,8 +307,7 @@ async def confirm_comparison_selection(
         )
 
     # Initialize RAG service
-    reranker = get_reranker()
-    rag_service = RAGService(db, reranker=reranker)
+    rag_service = RAGService(db)
 
     # Stream chat response
     async def event_generator():
@@ -340,7 +330,6 @@ async def confirm_comparison_selection(
                 collection_id=None,
                 user_message=original_query,
                 user_id=user.id,
-                num_chunks=5,
                 document_ids=document_ids,
                 force_comparison=force_comparison  # Force comparison mode on/off
             ):
