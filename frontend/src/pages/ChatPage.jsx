@@ -179,7 +179,6 @@ export default function ChatPage() {
   }
 
   const breadcrumbs = [{ label: "Chat" }];
-
   return (
     <AppLayout breadcrumbs={breadcrumbs}>
       {/* Full-height two-pane layout with independent scroll */}
@@ -217,8 +216,8 @@ export default function ChatPage() {
           </div>
         )}
 
-        {/* Right: Main Chat Area (scrollable pane) */}
-        <div className="flex-1 min-w-0 overflow-y-auto scrollbar-chat">
+        {/* Right: Main Chat Area */}
+        <div className="flex-1 min-w-0 min-h-0 overflow-hidden">
           {isInitializing ? (
             <div className="flex items-center justify-center h-full">
               <Spinner />

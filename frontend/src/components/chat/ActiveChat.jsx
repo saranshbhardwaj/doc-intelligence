@@ -25,7 +25,7 @@
  *   - Editable session title
  */
 
-import { useState, useRef, useEffect, useMemo } from "react";
+import { useState, useRef, useEffect, useMemo, useLayoutEffect } from "react";
 import {
   Send,
   Download,
@@ -103,16 +103,61 @@ export default function ActiveChat({
   const [showComparisonPanel, setShowComparisonPanel] = useState(false);
   const [showPdfPanel, setShowPdfPanel] = useState(false);
   const messagesEndRef = useRef(null);
+  const messagesContainerRef = useRef(null);
+  const shouldAutoScrollRef = useRef(true);
+  const messagesScrollTopRef = useRef(0);
   const titleInputRef = useRef(null);
 
   // Search and filter state
   const [documentSearchQuery, setDocumentSearchQuery] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
 
-  // Auto-scroll to bottom when messages change
+  const isNearBottom = (element, threshold = 120) => {
+    if (!element) return true;
+    const distanceFromBottom =
+      element.scrollHeight - element.scrollTop - element.clientHeight;
+    return distanceFromBottom <= threshold;
+  };
+
+  // Auto-scroll when new content arrives, but only if user is near the bottom.
+  // Use direct scrollTop during streaming to avoid repeated smooth-scroll pinning.
   useEffect(() => {
+    const container = messagesContainerRef.current;
+    if (!container || !shouldAutoScrollRef.current) return;
+
+    if (isStreaming) {
+      container.scrollTop = container.scrollHeight;
+      return;
+    }
+
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, streamingMessage]);
+
+  const handleMessagesScroll = () => {
+    if (messagesContainerRef.current) {
+      messagesScrollTopRef.current = messagesContainerRef.current.scrollTop;
+    }
+    shouldAutoScrollRef.current = isNearBottom(messagesContainerRef.current);
+  };
+
+  const handleMessagesWheel = (e) => {
+    if (e.deltaY < 0) {
+      shouldAutoScrollRef.current = false;
+    }
+  };
+
+  // Reset to bottom when switching sessions.
+  useEffect(() => {
+    shouldAutoScrollRef.current = true;
+    messagesEndRef.current?.scrollIntoView({ behavior: "auto" });
+  }, [currentSession?.id]);
+
+  // Preserve chat scroll position when PDF panel toggles (e.g., citation click).
+  useLayoutEffect(() => {
+    const container = messagesContainerRef.current;
+    if (!container) return;
+    container.scrollTop = messagesScrollTopRef.current;
+  }, [showPdfPanel]);
 
   // Auto-select first collection
   useEffect(() => {
@@ -287,6 +332,9 @@ export default function ActiveChat({
 
   // Handler for clicking document chip (switch active PDF)
   const handleDocumentChipClick = (docId) => {
+    if (messagesContainerRef.current) {
+      messagesScrollTopRef.current = messagesContainerRef.current.scrollTop;
+    }
     setActivePdfDocument(docId, getToken);
     setShowPdfPanel(true);
   };
@@ -300,6 +348,9 @@ export default function ActiveChat({
   // Auto-show PDF panel when active document is set AND URL is available
   useEffect(() => {
     if (pdfViewer.activeDocumentId && pdfViewer.urlCache[pdfViewer.activeDocumentId]?.url) {
+      if (messagesContainerRef.current) {
+        messagesScrollTopRef.current = messagesContainerRef.current.scrollTop;
+      }
       setShowPdfPanel(true);
     }
   }, [pdfViewer.activeDocumentId, pdfViewer.urlCache]);
@@ -307,6 +358,9 @@ export default function ActiveChat({
   // Auto-show PDF panel when highlight changes (for citation clicks)
   useEffect(() => {
     if (pdfViewer.highlightBbox) {
+      if (messagesContainerRef.current) {
+        messagesScrollTopRef.current = messagesContainerRef.current.scrollTop;
+      }
       setShowPdfPanel(true);
     }
   }, [pdfViewer.highlightBbox]);
@@ -317,17 +371,20 @@ export default function ActiveChat({
     : null;
 
   return (
-    <ResizablePanelGroup
-      direction="horizontal"
-      className="flex-1 overflow-hidden"
-    >
+    <>
+      <ResizablePanelGroup
+        key={showPdfPanel ? "chat-split-open" : "chat-split-closed"}
+        direction="horizontal"
+        className="h-full min-w-0"
+      >
       {/* Left Panel: Chat Interface */}
       <ResizablePanel
+        id="chat-left-panel"
+        order={1}
         defaultSize={showPdfPanel ? 55 : 100}
-        minSize={showPdfPanel ? 35 : 100}
-        maxSize={showPdfPanel ? 70 : 100}
+        minSize={35}
       >
-        <div className="w-full flex flex-col h-full overflow-hidden">
+        <div className="w-full flex flex-col h-full min-w-0 overflow-hidden">
           {/* Sticky Header with Editable Title and Document Chips */}
           <div className="sticky top-0 z-10 bg-card/80 backdrop-blur border-b border-border px-6 py-3">
         <div className="flex items-center justify-between mb-3">
@@ -660,7 +717,12 @@ export default function ActiveChat({
       {/* End: Sticky Header */}
 
       {/* Messages Area */}
-      <div className="flex-1 overflow-y-auto bg-background">
+      <div
+        ref={messagesContainerRef}
+        onScroll={handleMessagesScroll}
+        onWheel={handleMessagesWheel}
+        className="flex-1 overflow-y-auto bg-background"
+      >
         {messages.length === 0 && !streamingMessage ? (
           <div className="flex items-center justify-center h-full">
             <div className="text-center max-w-md">
@@ -712,10 +774,10 @@ export default function ActiveChat({
                   } animate-message-slide-left`}
                 >
                   <div
-                    className={`group max-w-[80%] rounded-2xl px-5 py-3 ${
+                    className={`group rounded-2xl px-5 py-3 ${
                       msg.role === "user"
-                        ? "bg-primary text-primary-foreground"
-                        : "bg-card border border-border"
+                        ? "max-w-[80%] bg-primary text-primary-foreground"
+                        : "max-w-[92%] bg-card border border-border"
                     }`}
                   >
                     {msg.role === "assistant" ? (
@@ -961,11 +1023,18 @@ export default function ActiveChat({
       </ResizablePanel>
 
       {/* Resizable Handle - only show if PDF panel is visible */}
-      {showPdfPanel && sessionDocIds.length > 0 && <ResizableHandle />}
+      {showPdfPanel && sessionDocIds.length > 0 && (
+        <ResizableHandle withHandle />
+      )}
 
       {/* Right Panel: PDF Viewer */}
       {showPdfPanel && sessionDocIds.length > 0 && (
-        <ResizablePanel defaultSize={45} minSize={30} maxSize={65}>
+        <ResizablePanel
+          id="chat-pdf-panel"
+          order={2}
+          defaultSize={45}
+          minSize={30}
+        >
           <div className="w-full h-full flex flex-col bg-background overflow-hidden">
             <div className="bg-card px-4 py-2 border-b flex-shrink-0">
               <div className="flex items-center justify-between">
@@ -1016,11 +1085,13 @@ export default function ActiveChat({
         </ResizablePanel>
       )}
 
+    </ResizablePanelGroup>
+
       {/* Comparison Panel Sheet */}
       <ComparisonPanel
         isOpen={showComparisonPanel}
         onClose={() => setShowComparisonPanel(false)}
       />
-    </ResizablePanelGroup>
+    </>
   );
 }
