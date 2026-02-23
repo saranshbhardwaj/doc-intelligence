@@ -157,7 +157,6 @@ class WorkflowRetriever:
                 reranked = self.reranker.rerank(
                     query=combined_query,
                     chunks=candidates_list,
-                    query_analysis=query_analysis,
                     top_k=max_chunks * 2  # Get 2x for diversity filtering
                 )
 

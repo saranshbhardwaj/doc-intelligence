@@ -97,7 +97,7 @@ try:
         import app.services.tasks.document_processor  # noqa: F401 - Document indexing pipeline tasks
         import app.services.tasks.stuck_task_monitor  # noqa: F401 - Background cleanup of stuck tasks
         import app.verticals.private_equity.extraction.tasks  # noqa: F401 - PE extraction pipeline tasks
-        import app.verticals.private_equity.workflows.tasks  # noqa: F401 - PE workflow execution pipeline tasks
+        import app.verticals.private_equity.workflows.tasks.tasks  # noqa: F401 - PE workflow execution pipeline tasks (explicit import to ensure registration)
         import app.verticals.real_estate.template_filling.tasks  # noqa: F401 - RE template filling tasks
 except Exception as e:
     # Log task import failures so we can debug worker registration issues
