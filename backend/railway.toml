@@ -17,6 +17,13 @@ healthcheckTimeout = 300
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 10
 
+[services.api-2.deploy]
+startCommand = "sh -c 'python -Xfrozen_modules=off -m uvicorn main:app --host 0.0.0.0 --port $PORT --workers 1 --log-config uvicorn_log_config.json'"
+healthcheckPath = "/api/health"
+healthcheckTimeout = 300
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10
+
 # ─── Celery worker — critical queue (document extractions, template fills) ──
 
 [services.worker-critical.build]
@@ -24,6 +31,11 @@ builder = "DOCKERFILE"
 dockerfilePath = "Dockerfile.worker"
 
 [services.worker-critical.deploy]
+startCommand = "python -Xfrozen_modules=off -m celery -A app.celery_app.celery_app worker --loglevel=info --pool=solo -Q critical --logfile=/dev/stdout"
+restartPolicyType = "ON_FAILURE"
+restartPolicyMaxRetries = 10
+
+[services.worker-critical-2.deploy]
 startCommand = "python -Xfrozen_modules=off -m celery -A app.celery_app.celery_app worker --loglevel=info --pool=solo -Q critical --logfile=/dev/stdout"
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 10
