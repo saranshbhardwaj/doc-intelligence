@@ -11,7 +11,7 @@ builder = "DOCKERFILE"
 dockerfilePath = "Dockerfile"
 
 [services.api.deploy]
-startCommand = "sh -c 'python -Xfrozen_modules=off -m uvicorn main:app --host 0.0.0.0 --port $PORT --workers 2'"
+startCommand = "sh -c 'python -Xfrozen_modules=off -m uvicorn main:app --host 0.0.0.0 --port $PORT --workers 1 --log-config uvicorn_log_config.json'"
 healthcheckPath = "/api/health"
 healthcheckTimeout = 300
 restartPolicyType = "ON_FAILURE"
@@ -24,7 +24,7 @@ builder = "DOCKERFILE"
 dockerfilePath = "Dockerfile.worker"
 
 [services.worker-critical.deploy]
-startCommand = "python -Xfrozen_modules=off -m celery -A app.celery_app.celery_app worker --loglevel=info --pool=solo -Q critical"
+startCommand = "python -Xfrozen_modules=off -m celery -A app.celery_app.celery_app worker --loglevel=info --pool=solo -Q critical --logfile=/dev/stdout"
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 10
 
@@ -35,7 +35,7 @@ builder = "DOCKERFILE"
 dockerfilePath = "Dockerfile.worker"
 
 [services.worker-default.deploy]
-startCommand = "python -Xfrozen_modules=off -m celery -A app.celery_app.celery_app worker --loglevel=info --pool=solo -Q default"
+startCommand = "python -Xfrozen_modules=off -m celery -A app.celery_app.celery_app worker --loglevel=info --pool=solo -Q default --logfile=/dev/stdout"
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 10
 
@@ -47,7 +47,7 @@ builder = "DOCKERFILE"
 dockerfilePath = "Dockerfile.worker"
 
 [services.beat.deploy]
-startCommand = "python -Xfrozen_modules=off -m celery -A app.celery_app.celery_app beat --loglevel=info"
+startCommand = "python -Xfrozen_modules=off -m celery -A app.celery_app.celery_app beat --loglevel=info --logfile=/dev/stdout"
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 10
 
