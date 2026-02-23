@@ -48,11 +48,11 @@ export default function LandingPage() {
             <div className="flex items-center gap-3">
               <img
                 src="/Sand_cloud_logo_dark-gray.svg"
-                alt="LoomStack"
+                alt="Freara"
                 className="h-8 w-auto"
               />
               <span className="text-xl font-extrabold tracking-tight bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
-                LoomStack
+                Freara
               </span>
             </div>
 
@@ -186,7 +186,7 @@ export default function LandingPage() {
             <div>
               <div className="mb-4">
                 <span className="text-2xl font-extrabold tracking-tight bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
-                  LoomStack
+                  Freara
                 </span>
               </div>
               <p className="text-sm">
@@ -305,7 +305,7 @@ export default function LandingPage() {
           </div>
 
           <div className="border-t border-gray-800 mt-12 pt-8 text-center text-sm">
-            <p>&copy; 2026 LoomStack. All rights reserved.</p>
+            <p>&copy; 2026 Freara. All rights reserved.</p>
           </div>
         </div>
       </footer>

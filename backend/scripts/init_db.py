@@ -21,7 +21,7 @@ def main():
     """Initialize database - create all tables"""
     try:
         logger.info("=" * 60)
-        logger.info("Initializing LoomStack database...")
+        logger.info("Initializing Freara database...")
         logger.info("=" * 60)
 
         # Apply latest Alembic migrations instead of raw create_all
