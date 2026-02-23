@@ -147,11 +147,11 @@ export default function UploadPage() {
               >
                 <img
                   src="/Sand_cloud_logo_dark-gray.svg"
-                  alt="DealWOrks"
+                  alt="LoomStack"
                   className="h-8 w-auto"
                 />
                 <span className="text-xl font-extrabold tracking-tight bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
-                  DealWorks
+                  LoomStack
                 </span>
               </button>
 
@@ -267,7 +267,7 @@ export default function UploadPage() {
                 analysis.
               </p>
               <p className="text-base text-muted-foreground dark:text-muted-foreground">
-                Explore the sample output below to see what DealWorks can
+                Explore the sample output below to see what LoomStack can
                 extract from your documents.
               </p>
             </div>

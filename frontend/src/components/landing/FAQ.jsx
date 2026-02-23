@@ -34,7 +34,7 @@ export default function FAQ() {
     {
       question: "Do you support real estate documents like rent rolls and offering memoranda?",
       answer:
-        "Yes! DealWorks supports real estate document types including offering memoranda, rent rolls, operating statements, property appraisals, and market reports. Our RE workflows extract NOI, cap rates, occupancy, lease terms, and more, and can auto-populate your Excel underwriting templates.",
+        "Yes! LoomStack supports real estate document types including offering memoranda, rent rolls, operating statements, property appraisals, and market reports. Our RE workflows extract NOI, cap rates, occupancy, lease terms, and more, and can auto-populate your Excel underwriting templates.",
     },
     {
       question: "Do you support languages other than English?",
@@ -65,7 +65,7 @@ export default function FAQ() {
             </span>
           </h2>
           <p className="text-xl text-muted-foreground dark:text-gray-300">
-            Everything you need to know about DealWorks
+            Everything you need to know about LoomStack
           </p>
         </div>
 

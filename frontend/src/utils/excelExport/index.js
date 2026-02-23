@@ -28,7 +28,7 @@ import {
 export async function exportToExcel(data, metadata) {
   const workbook = new ExcelJS.Workbook();
 
-  workbook.creator = "DealWorks Document Intelligence";
+  workbook.creator = "LoomStack Document Intelligence";
   workbook.created = new Date();
   workbook.modified = new Date();
 
