@@ -87,15 +87,17 @@ export default function ActionButtons({ onFeedbackClick, data, metadata }) {
       </div>
 
       {/* Feedback Button */}
-      <Button
-        variant="outline"
-        size="default"
-        onClick={onFeedbackClick}
-        className="font-semibold"
-      >
-        <MessageSquare className="w-4 h-4 mr-2" />
-        Give Feedback
-      </Button>
+      {onFeedbackClick && (
+        <Button
+          variant="outline"
+          size="default"
+          onClick={onFeedbackClick}
+          className="font-semibold"
+        >
+          <MessageSquare className="w-4 h-4 mr-2" />
+          Give Feedback
+        </Button>
+      )}
     </div>
   );
 }

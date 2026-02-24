@@ -16,6 +16,7 @@ import {
   Sheet,
   SheetContent,
   SheetTitle,
+  SheetDescription,
 } from "../ui/sheet";
 import { Button } from "../ui/button";
 import { Badge } from "../ui/badge";
@@ -122,6 +123,9 @@ export default function ComparisonPanel({ isOpen, onClose }) {
             <SheetTitle className="comparison-title">
               Document Comparison
             </SheetTitle>
+            <SheetDescription className="sr-only">
+              Compare documents side by side with cards, table, and PDF views.
+            </SheetDescription>
             <p className="comparison-subtitle">
               Review matched sections, citations, and side-by-side context.
             </p>

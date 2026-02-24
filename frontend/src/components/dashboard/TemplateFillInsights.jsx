@@ -85,7 +85,7 @@ export default function TemplateFillInsights({ stats, loading }) {
                   />
                 )}
               </div>
-              <div className="flex items-center gap-4 text-xs">
+              <div className="flex items-center gap-4 flex-wrap text-xs">
                 <div className="flex items-center gap-1.5">
                   <div className="h-2 w-2 rounded-full bg-green-500" />
                   <span className="text-muted-foreground">Completed: {completedCount}</span>
@@ -109,35 +109,35 @@ export default function TemplateFillInsights({ stats, loading }) {
           {/* Metrics Row */}
           <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
             {/* Avg Fields */}
-            <div className="flex items-start gap-3 p-4 rounded-lg bg-muted/30">
+            <div className="flex items-start gap-3 p-3 sm:p-4 rounded-lg bg-muted/30">
               <div className="flex items-center justify-center h-10 w-10 rounded-full bg-primary/10">
                 <BarChart3 className="h-5 w-5 text-primary" />
               </div>
               <div>
                 <p className="text-sm text-muted-foreground">Avg Fields Filled</p>
-                <p className="text-2xl font-bold">{avg_fields_filled?.toFixed(1) || "0.0"}</p>
+                <p className="text-xl sm:text-2xl font-bold">{avg_fields_filled?.toFixed(1) || "0.0"}</p>
               </div>
             </div>
 
             {/* Auto-Map Rate */}
-            <div className="flex items-start gap-3 p-4 rounded-lg bg-muted/30">
+            <div className="flex items-start gap-3 p-3 sm:p-4 rounded-lg bg-muted/30">
               <div className="flex items-center justify-center h-10 w-10 rounded-full bg-primary/10">
                 <Target className="h-5 w-5 text-primary" />
               </div>
               <div>
                 <p className="text-sm text-muted-foreground">Auto-Map Rate</p>
-                <p className="text-2xl font-bold">{avg_auto_map_rate ? `${(avg_auto_map_rate * 100).toFixed(0)}%` : "0%"}</p>
+                <p className="text-xl sm:text-2xl font-bold">{avg_auto_map_rate ? `${(avg_auto_map_rate * 100).toFixed(0)}%` : "0%"}</p>
               </div>
             </div>
 
             {/* Avg Processing Time */}
-            <div className="flex items-start gap-3 p-4 rounded-lg bg-muted/30">
+            <div className="flex items-start gap-3 p-3 sm:p-4 rounded-lg bg-muted/30">
               <div className="flex items-center justify-center h-10 w-10 rounded-full bg-primary/10">
                 <Clock className="h-5 w-5 text-primary" />
               </div>
               <div>
                 <p className="text-sm text-muted-foreground">Avg Time</p>
-                <p className="text-2xl font-bold">{avg_processing_time_seconds?.toFixed(1) || "0.0"}s</p>
+                <p className="text-xl sm:text-2xl font-bold">{avg_processing_time_seconds?.toFixed(1) || "0.0"}s</p>
                 {avg_processing_time_seconds > 0 && (
                   <p className="text-xs text-muted-foreground mt-0.5">vs ~20 min manually</p>
                 )}

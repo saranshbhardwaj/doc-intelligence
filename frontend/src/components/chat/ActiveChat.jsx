@@ -102,6 +102,7 @@ export default function ActiveChat({
   const [editedTitle, setEditedTitle] = useState(currentSession?.title || "");
   const [showComparisonPanel, setShowComparisonPanel] = useState(false);
   const [showPdfPanel, setShowPdfPanel] = useState(false);
+  const [isMobile, setIsMobile] = useState(false);
   const messagesEndRef = useRef(null);
   const messagesContainerRef = useRef(null);
   const shouldAutoScrollRef = useRef(true);
@@ -273,8 +274,18 @@ export default function ActiveChat({
   // Get comparison context for rendering
   const comparison = useComparison();
   const pdfViewer = usePdfViewer();
-  const { clearHighlight, setActivePdfDocument, clearPdfUrlCache } = useChatActions();
+  const actions = useChatActions();
+  const { clearHighlight, setActivePdfDocument, clearPdfUrlCache } = actions;
   const citationContext = useStore((state) => state.chat.citationContext);
+
+  useEffect(() => {
+    const updateViewport = () => {
+      setIsMobile(window.innerWidth < 768);
+    };
+    updateViewport();
+    window.addEventListener("resize", updateViewport);
+    return () => window.removeEventListener("resize", updateViewport);
+  }, []);
 
   // Helper functions for processing citations in text
   const CITATION_REGEX = /\[ref:[a-f0-9]+:p\d+\]/gi;
@@ -386,8 +397,8 @@ export default function ActiveChat({
       >
         <div className="w-full flex flex-col h-full min-w-0 overflow-hidden">
           {/* Sticky Header with Editable Title and Document Chips */}
-          <div className="sticky top-0 z-10 bg-card/80 backdrop-blur border-b border-border px-6 py-3">
-        <div className="flex items-center justify-between mb-3">
+          <div className="sticky top-0 z-10 bg-card/80 backdrop-blur border-b border-border px-3 md:px-6 py-3">
+        <div className="flex items-start md:items-center justify-between gap-2 mb-3">
           {/* Editable Title */}
           <div className="flex items-center gap-2 flex-1 min-w-0">
             {isEditingTitle ? (
@@ -435,9 +446,9 @@ export default function ActiveChat({
           {/* Export Dropdown */}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="sm">
-                <Download className="w-4 h-4 mr-2" />
-                Export
+              <Button variant="outline" size="sm" className="shrink-0">
+                <Download className="w-4 h-4 md:mr-2" />
+                <span className="hidden md:inline">Export</span>
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end" className="w-48">
@@ -490,7 +501,7 @@ export default function ActiveChat({
                     title="Click to view PDF"
                   >
                     <FileText className="w-3 h-3" />
-                    <span className="max-w-[120px] truncate">{doc.name}</span>
+                    <span className="max-w-[90px] md:max-w-[120px] truncate">{doc.name}</span>
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
@@ -742,7 +753,7 @@ export default function ActiveChat({
             </div>
           </div>
         ) : (
-          <div className="max-w-4xl mx-auto py-6 px-4 space-y-6">
+          <div className="max-w-4xl mx-auto py-4 md:py-6 px-3 md:px-4 space-y-4 md:space-y-6">
             {messages.map((msg, index) => {
               const isLastMessage = index === messages.length - 1;
               const isComparisonResponse =
@@ -969,15 +980,15 @@ export default function ActiveChat({
       </div>
 
       {/* Composer - sticky at bottom of scroll pane */}
-      <div className="sticky bottom-0 bg-card/90 backdrop-blur border-t border-border p-4">
-        <div className="max-w-4xl mx-auto px-4">
+      <div className="sticky bottom-0 bg-card/90 backdrop-blur border-t border-border p-3 md:p-4">
+        <div className="max-w-4xl mx-auto px-0 md:px-4">
           {chatError && (
             <div className="mb-3 p-3 bg-destructive/10 text-destructive rounded-lg text-sm border border-destructive/20">
               ⚠️ {chatError}
             </div>
           )}
 
-          <form onSubmit={handleSendMessage} className="flex gap-3">
+          <form onSubmit={handleSendMessage} className="flex gap-2 md:gap-3">
             <input
               type="text"
               value={message}
@@ -996,7 +1007,7 @@ export default function ActiveChat({
                 !message.trim() || isStreaming || sessionDocIds.length === 0
               }
               size="lg"
-              className="min-w-[100px]"
+              className="min-w-[72px] md:min-w-[100px] px-3 md:px-4"
             >
               {isStreaming ? (
                 <>
@@ -1004,8 +1015,8 @@ export default function ActiveChat({
                 </>
               ) : (
                 <>
-                  <Send className="w-4 h-4 mr-2" />
-                  Send
+                  <Send className="w-4 h-4 md:mr-2" />
+                  <span className="hidden md:inline">Send</span>
                 </>
               )}
             </Button>
@@ -1023,12 +1034,12 @@ export default function ActiveChat({
       </ResizablePanel>
 
       {/* Resizable Handle - only show if PDF panel is visible */}
-      {showPdfPanel && sessionDocIds.length > 0 && (
+      {showPdfPanel && sessionDocIds.length > 0 && !isMobile && (
         <ResizableHandle withHandle />
       )}
 
       {/* Right Panel: PDF Viewer */}
-      {showPdfPanel && sessionDocIds.length > 0 && (
+      {showPdfPanel && sessionDocIds.length > 0 && !isMobile && (
         <ResizablePanel
           id="chat-pdf-panel"
           order={2}
@@ -1086,6 +1097,50 @@ export default function ActiveChat({
       )}
 
     </ResizablePanelGroup>
+
+      {/* Mobile PDF Overlay */}
+      {showPdfPanel && sessionDocIds.length > 0 && isMobile && (
+        <div className="fixed inset-0 z-[70] bg-background md:hidden">
+          <div className="bg-card px-3 py-2 border-b flex items-center justify-between">
+            <div className="flex items-center gap-2 min-w-0">
+              <FileText className="h-4 w-4 text-muted-foreground shrink-0" />
+              <h2 className="font-medium text-sm text-foreground truncate">
+                {activePdfUrl && pdfViewer.activeDocumentId
+                  ? currentSession?.documents?.find((d) => d.id === pdfViewer.activeDocumentId)?.name || "Document"
+                  : "Document"}
+              </h2>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setShowPdfPanel(false)}
+              className="h-8 px-3"
+            >
+              <X className="h-4 w-4 mr-1" />
+              Close
+            </Button>
+          </div>
+          <div className="h-[calc(100dvh-49px)] overflow-hidden">
+            {pdfViewer.isLoadingUrl ? (
+              <div className="flex flex-col items-center justify-center h-full gap-2">
+                <Spinner size="md" />
+                <p className="text-sm text-muted-foreground">Loading PDF...</p>
+              </div>
+            ) : activePdfUrl ? (
+              <PDFViewer
+                pdfUrl={activePdfUrl}
+                highlightBbox={pdfViewer.highlightBbox}
+                onHighlightClick={clearHighlight}
+              />
+            ) : (
+              <div className="flex flex-col items-center justify-center h-full gap-2 text-muted-foreground">
+                <FileText className="w-12 h-12 opacity-20" />
+                <p className="text-sm">No document selected</p>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Comparison Panel Sheet */}
       <ComparisonPanel

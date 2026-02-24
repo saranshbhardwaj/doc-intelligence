@@ -12,7 +12,7 @@
 
 import { useEffect, useState } from "react";
 import { useAuth } from "@clerk/clerk-react";
-import { ChevronRight } from "lucide-react";
+import { ChevronRight, PanelLeft } from "lucide-react";
 import { useChat, useChatActions } from "../store";
 import { Button } from "../components/ui/button";
 import AppLayout from "../components/layout/AppLayout";
@@ -21,6 +21,7 @@ import EmptyState from "../components/chat/EmptyState";
 import ActiveChat from "../components/chat/ActiveChat";
 import Spinner from "../components/common/Spinner";
 import { exportAsMarkdown, exportAsWord } from "../utils/exportChat";
+import { Sheet, SheetContent, SheetTitle, SheetDescription } from "../components/ui/sheet";
 
 export default function ChatPage() {
   const { getToken, isLoaded } = useAuth();
@@ -29,6 +30,7 @@ export default function ChatPage() {
 
   const [selectedDocuments, setSelectedDocuments] = useState([]);
   const [isInitializing, setIsInitializing] = useState(true);
+  const [mobileSessionsOpen, setMobileSessionsOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     try {
       return localStorage.getItem("chatSidebarCollapsed") === "true";
@@ -73,6 +75,7 @@ export default function ChatPage() {
 
   const handleSelectSession = async (sessionId) => {
     await actions.loadSession(getToken, sessionId);
+    setMobileSessionsOpen(false);
     try {
       localStorage.setItem("lastActiveChatSessionId", sessionId);
     } catch {}
@@ -182,10 +185,46 @@ export default function ChatPage() {
   return (
     <AppLayout breadcrumbs={breadcrumbs}>
       {/* Full-height two-pane layout with independent scroll */}
-      <div className="h-[calc(100vh-64px)] flex gap-4 relative">
+      <div className="h-[calc(100vh-64px)] flex md:gap-4 relative">
+        {/* Mobile sessions drawer trigger */}
+        <div className="md:hidden absolute left-3 top-3 z-40">
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => setMobileSessionsOpen(true)}
+            className="h-8 px-2.5 bg-card/95 backdrop-blur"
+            title="Open sessions"
+          >
+            <PanelLeft className="h-4 w-4 mr-1.5" />
+            Sessions
+          </Button>
+        </div>
+
+        {/* Mobile sessions drawer */}
+        <Sheet open={mobileSessionsOpen} onOpenChange={setMobileSessionsOpen}>
+          <SheetContent side="left" className="w-[88vw] max-w-sm p-3">
+            <SheetTitle className="sr-only">Chat Sessions</SheetTitle>
+            <SheetDescription className="sr-only">
+              Browse, search, create, and delete chat sessions.
+            </SheetDescription>
+            <div className="h-full pt-6">
+              <SessionSidebar
+                sessions={chat.sessions}
+                currentSession={chat.currentSession}
+                sessionsLoading={chat.sessionsLoading}
+                onNewChat={handleNewChat}
+                onSelectSession={handleSelectSession}
+                onDeleteSession={handleDeleteSession}
+                isCollapsed={false}
+                onToggleCollapse={() => setMobileSessionsOpen(false)}
+              />
+            </div>
+          </SheetContent>
+        </Sheet>
+
         {/* Left: Session Sidebar (scrollable, collapsible) */}
         <div
-          className={`flex-shrink-0 overflow-hidden scrollbar-thin transition-all duration-300 ${
+          className={`hidden md:block flex-shrink-0 overflow-hidden scrollbar-thin transition-all duration-300 ${
             sidebarCollapsed ? "w-0" : "w-80"
           }`}
         >
@@ -203,7 +242,7 @@ export default function ChatPage() {
 
         {/* Expand Button (shown when sidebar is collapsed) */}
         {sidebarCollapsed && (
-          <div className="absolute left-0 top-0 z-50">
+          <div className="hidden md:block absolute left-0 top-0 z-50">
             <Button
               variant="ghost"
               size="icon"
@@ -217,7 +256,7 @@ export default function ChatPage() {
         )}
 
         {/* Right: Main Chat Area */}
-        <div className="flex-1 min-w-0 min-h-0 overflow-hidden">
+        <div className="flex-1 min-w-0 min-h-0 overflow-hidden pt-12 md:pt-0">
           {isInitializing ? (
             <div className="flex items-center justify-center h-full">
               <Spinner />

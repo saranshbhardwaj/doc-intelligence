@@ -266,21 +266,21 @@ export default function TemplatesPage() {
       <div className="h-full flex flex-col bg-background">
         {/* Header - ChatGPT Inspired */}
         <div className="border-b bg-card/50 backdrop-blur supports-[backdrop-filter]:bg-card/50">
-          <div className="px-6 py-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
+          <div className="px-4 sm:px-6 py-4">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+              <div className="flex items-center gap-3 min-w-0">
                 <div className="p-2 bg-primary/10 rounded-lg">
                   <FileSpreadsheet className="h-5 w-5 text-primary" />
                 </div>
-                <div>
-                  <h1 className="text-lg font-semibold text-foreground">Excel Templates</h1>
+                <div className="min-w-0">
+                  <h1 className="text-lg font-semibold text-foreground truncate">Excel Templates</h1>
                   <p className="text-xs text-muted-foreground mt-0.5">
                     Upload and manage templates for document filling
                   </p>
                 </div>
               </div>
               <div className="flex items-center gap-2">
-                <Button onClick={() => setShowUploadModal(true)}>
+                <Button onClick={() => setShowUploadModal(true)} className="w-full sm:w-auto">
                   <Upload className="h-4 w-4 mr-2" />
                   Upload Template
                 </Button>
@@ -289,7 +289,7 @@ export default function TemplatesPage() {
           </div>
 
           {/* Tabs */}
-          <div className="px-6 flex gap-6 border-t">
+          <div className="px-4 sm:px-6 flex gap-6 border-t overflow-x-auto">
             <button
               onClick={() => setSearchParams({ tab: 'templates' })}
               className={cn(
@@ -327,7 +327,7 @@ export default function TemplatesPage() {
 
         {/* Error Messages */}
         {uploadError && (
-          <div className="mx-6 mt-4 bg-destructive/10 border border-destructive/20 rounded-lg p-3 flex items-start gap-2">
+          <div className="mx-4 sm:mx-6 mt-4 bg-destructive/10 border border-destructive/20 rounded-lg p-3 flex items-start gap-2">
             <AlertCircle className="h-4 w-4 text-destructive mt-0.5" />
             <div className="flex-1">
               <p className="text-sm font-medium text-destructive">Upload Failed</p>
@@ -337,7 +337,7 @@ export default function TemplatesPage() {
         )}
 
         {/* Content */}
-        <div className="flex-1 overflow-auto p-6">
+        <div className="flex-1 overflow-auto p-4 sm:p-6">
           {loading ? (
             <div className="flex items-center justify-center h-full">
               <Loader2 className="h-8 w-8 animate-spin text-primary" />
@@ -502,7 +502,7 @@ function TemplatesGrid({ templates, searchQuery, onSearchChange, onView, onStart
   return (
     <div className="max-w-7xl mx-auto">
       {/* Search Bar */}
-      <div className="mb-6">
+      <div className="mb-4 sm:mb-6">
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
@@ -517,13 +517,13 @@ function TemplatesGrid({ templates, searchQuery, onSearchChange, onView, onStart
 
       {/* Templates Grid */}
       {templates.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
+        <div className="flex flex-col items-center justify-center py-12 sm:py-16 text-muted-foreground">
           <FileSpreadsheet className="h-16 w-16 mb-4 text-muted-foreground/50" />
           <p className="text-sm">No templates found</p>
           <p className="text-xs mt-1">Upload an Excel template to get started</p>
         </div>
       ) : (
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3 sm:gap-4">
           {templates.map((template) => (
             <TemplateCard
               key={template.id}
@@ -587,6 +587,7 @@ function TemplateCard({ template, onView, onStartFill, onDelete }) {
           size="sm"
           variant="outline"
           onClick={() => onView(template.id)}
+          className="px-2 sm:px-3"
         >
           <Eye className="h-3 w-3" />
         </Button>
@@ -602,6 +603,7 @@ function TemplateCard({ template, onView, onStartFill, onDelete }) {
           size="sm"
           variant="outline"
           onClick={() => onDelete(template.id)}
+          className="px-2 sm:px-3"
         >
           <Trash2 className="h-3 w-3" />
         </Button>
@@ -615,7 +617,7 @@ function FillRunsList({ fillRuns, searchQuery, onSearchChange, onViewFill, onDel
   return (
     <div className="max-w-7xl mx-auto">
       {/* Search Bar */}
-      <div className="mb-6">
+      <div className="mb-4 sm:mb-6">
         <div className="relative">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
@@ -630,7 +632,7 @@ function FillRunsList({ fillRuns, searchQuery, onSearchChange, onViewFill, onDel
 
       {/* Fill Runs List */}
       {fillRuns.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
+        <div className="flex flex-col items-center justify-center py-12 sm:py-16 text-muted-foreground">
           <Clock className="h-16 w-16 mb-4 text-muted-foreground/50" />
           <p className="text-sm">No fill runs found</p>
           <p className="text-xs mt-1">Start a fill run from a template</p>
@@ -690,8 +692,8 @@ function FillRunCard({ fillRun, onView, onDelete }) {
   const documentDeleted = !fillRun.document_id;
 
   return (
-    <div className="bg-card rounded-lg border border-border hover:border-primary/50 transition-all p-4">
-      <div className="flex items-start justify-between">
+    <div className="bg-card rounded-lg border border-border hover:border-primary/50 transition-all p-3 sm:p-4">
+      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
         <div
           className="flex-1 min-w-0 cursor-pointer"
           onClick={() => onView(fillRun.id)}
@@ -716,7 +718,7 @@ function FillRunCard({ fillRun, onView, onDelete }) {
             )}
           </div>
 
-          <div className="flex items-center gap-4 text-xs text-muted-foreground">
+          <div className="flex items-center gap-3 sm:gap-4 flex-wrap text-xs text-muted-foreground">
             <span className={cn(documentDeleted && "line-through opacity-50")}>
               {fillRun.document_metadata?.filename || 'Unknown Document'}
             </span>
@@ -735,9 +737,9 @@ function FillRunCard({ fillRun, onView, onDelete }) {
           )}
         </div>
 
-        <div className="flex items-center gap-2 ml-4">
+        <div className="flex items-center gap-2 sm:ml-4 w-full sm:w-auto">
           {fillRun.status === 'completed' && fillRun.artifact && (
-            <Button size="sm" variant="outline">
+            <Button size="sm" variant="outline" className="flex-1 sm:flex-none">
               <Download className="h-3 w-3 mr-1.5" />
               Download
             </Button>
@@ -746,6 +748,7 @@ function FillRunCard({ fillRun, onView, onDelete }) {
             size="sm"
             variant="outline"
             onClick={() => onView(fillRun.id)}
+            className="flex-1 sm:flex-none"
           >
             <Eye className="h-3 w-3 mr-1.5" />
             View
@@ -757,6 +760,7 @@ function FillRunCard({ fillRun, onView, onDelete }) {
               e.stopPropagation();
               onDelete(fillRun.id);
             }}
+            className="px-2 sm:px-3"
           >
             <Trash2 className="h-3 w-3" />
           </Button>

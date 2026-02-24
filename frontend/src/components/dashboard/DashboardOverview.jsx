@@ -74,11 +74,11 @@ export default function DashboardOverview() {
   const anyLoading = overviewLoading || activityLoading || templateStatsLoading;
 
   return (
-    <div className="max-w-7xl mx-auto px-6 py-8 space-y-8">
+    <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4 sm:py-8 space-y-5 sm:space-y-8">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Dashboard</h1>
           <p className="text-muted-foreground mt-1">Your organization's activity overview</p>
           {!anyLoading && overview && (overview.documents.pages_analyzed > 0 || overview.template_fills.total_fields_populated > 0) && (
             <p className="text-sm text-primary font-medium mt-1">
@@ -91,8 +91,8 @@ export default function DashboardOverview() {
         </div>
 
         {/* Period Selector */}
-        <Tabs value={String(period)} onValueChange={(val) => setPeriod(Number(val))}>
-          <TabsList>
+        <Tabs value={String(period)} onValueChange={(val) => setPeriod(Number(val))} className="w-full sm:w-auto">
+          <TabsList className="grid w-full grid-cols-3 sm:w-auto">
             <TabsTrigger value="7">7d</TabsTrigger>
             <TabsTrigger value="30">30d</TabsTrigger>
             <TabsTrigger value="90">90d</TabsTrigger>
@@ -104,7 +104,7 @@ export default function DashboardOverview() {
       {anyError && (
         <Alert variant="destructive">
           <AlertCircle className="h-4 w-4" />
-          <AlertDescription className="flex items-center justify-between">
+          <AlertDescription className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <span>Failed to load dashboard data. Please try again.</span>
             <Button
               variant="outline"
@@ -163,7 +163,7 @@ export default function DashboardOverview() {
         </div>
 
         {/* Workflows & Active Users Sidebar (1 col) */}
-        <div className="space-y-4">
+        <div className="space-y-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-1">
           <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">

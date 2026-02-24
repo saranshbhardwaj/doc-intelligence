@@ -7,7 +7,7 @@ import React, { useState, useEffect } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../../../components/ui/tabs';
 import { FileSpreadsheet, AlertCircle, Loader2, Info } from 'lucide-react';
 import { Badge } from '../../../components/ui/badge';
-import { Sheet, SheetContent } from '../../../components/ui/sheet';
+import { Sheet, SheetContent, SheetTitle, SheetDescription } from '../../../components/ui/sheet';
 
 import { useExcelWorkbook } from '../hooks/useExcelWorkbook';
 import ExcelGrid from './ExcelGrid';
@@ -232,6 +232,10 @@ export default function ExcelGridView({
       {/* Mapping Details Drawer */}
       <Sheet open={!!selectedCell} onOpenChange={(open) => !open && setSelectedCell(null)}>
         <SheetContent side="right" className="w-[400px] flex flex-col">
+          <SheetTitle className="sr-only">Cell Mapping Details</SheetTitle>
+          <SheetDescription className="sr-only">
+            Inspect and edit mapping details for the selected spreadsheet cell.
+          </SheetDescription>
           {selectedCell && (
             <MappingDetailsDialog
               selectedCell={selectedCell}

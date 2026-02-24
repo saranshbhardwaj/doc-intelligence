@@ -109,9 +109,12 @@ export default function WorkflowResultSheet({ open, onOpenChange, runId }) {
   // Fetch run details when sheet opens
   useEffect(() => {
     if (open && runId) {
+      setShowPdfPanel(false);
+      setActiveCitationDoc("");
+      workflowClearPdfViewer();
       fetchRunDetails();
     }
-  }, [open, runId, fetchRunDetails]);
+  }, [open, runId, fetchRunDetails, workflowClearPdfViewer]);
 
   useEffect(() => {
   if (run?.status === "completed" && runId) {
@@ -227,7 +230,7 @@ export default function WorkflowResultSheet({ open, onOpenChange, runId }) {
       <Sheet open={open} onOpenChange={onOpenChange}>
         <SheetContent
           side="left"
-          className="w-[1400px] sm:max-w-[1400px] overflow-hidden bg-background p-0"
+          className="w-[100vw] sm:w-[95vw] lg:w-[1400px] sm:max-w-[95vw] lg:max-w-[1400px] overflow-hidden bg-background p-0"
         >
           {loading ? (
             <div className="flex items-center justify-center h-full">
@@ -238,7 +241,9 @@ export default function WorkflowResultSheet({ open, onOpenChange, runId }) {
               <p className="text-muted-foreground">Run not found</p>
             </div>
           ) : (
-            <ResizablePanelGroup direction="horizontal" className="h-full">
+            <>
+
+            <ResizablePanelGroup direction="horizontal" className="hidden md:flex h-full">
               {/* Left panel: Workflow content */}
               <ResizablePanel defaultSize={showPdfPanel ? 55 : 100} minSize={35}>
                 <div className="h-full overflow-y-auto p-6 space-y-6">
@@ -452,6 +457,188 @@ export default function WorkflowResultSheet({ open, onOpenChange, runId }) {
             </>
           )}
         </ResizablePanelGroup>
+        <div className={`md:hidden h-full overflow-y-auto p-4 space-y-4 ${showPdfPanel ? "invisible" : ""}`}>
+          <>
+              <SheetHeader>
+                <div className="flex items-center gap-3">
+                  {getStatusIcon(run.status)}
+                  <div className="flex-1 min-w-0">
+                    <SheetTitle className="text-xl font-bold text-foreground truncate">
+                      {run.workflow_name || "Workflow Run"}
+                    </SheetTitle>
+                  </div>
+                </div>
+                <SheetDescription>
+                  Workflow run result and execution details
+                </SheetDescription>
+              </SheetHeader>
+
+              <div className="flex gap-2 flex-wrap">
+                {run.status === "completed" && (
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button variant="outline" size="sm" disabled={exporting}>
+                        <Download className="w-4 h-4 mr-2" />
+                        {exporting ? "Exporting..." : "Export"}
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="w-56">
+                      <DropdownMenuItem onClick={() => handleExport("word")}>
+                        <FileDown className="w-4 h-4 mr-3 text-primary" />
+                        <div className="flex flex-col">
+                          <span className="font-medium">Word Document</span>
+                          <span className="text-xs text-muted-foreground">
+                            Professional report (.docx)
+                          </span>
+                        </div>
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem onClick={() => handleExport("pdf")}>
+                        <FileText className="w-4 h-4 mr-3 text-destructive" />
+                        <div className="flex flex-col">
+                          <span className="font-medium">PDF</span>
+                          <span className="text-xs text-muted-foreground">
+                            Portable document (.pdf)
+                          </span>
+                        </div>
+                      </DropdownMenuItem>
+                      <DropdownMenuItem onClick={() => handleExport("xlsx")} disabled>
+                        <FileSpreadsheet className="w-4 h-4 mr-3 text-muted-foreground" />
+                        <div className="flex flex-col">
+                          <span className="font-medium">Excel (Coming Soon)</span>
+                          <span className="text-xs text-muted-foreground">
+                            Needs workflow-specific setup
+                          </span>
+                        </div>
+                      </DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
+                )}
+                {run.status !== "running" && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handleDeleteClick}
+                    className="text-destructive hover:bg-destructive/10"
+                  >
+                    <Trash2 className="w-4 h-4 mr-2" />
+                    Delete
+                  </Button>
+                )}
+                <div className="ml-2">
+                  <FeedbackButton
+                    operationType="workflow"
+                    entityId={runId}
+                    entitySummary={run?.workflow?.name}
+                  />
+                </div>
+              </div>
+
+              {run.status === "running" && (
+                <Card className="p-4 bg-primary/10 border-primary/20">
+                  <div className="flex items-center gap-3 mb-3">
+                    <RefreshCw className="w-5 h-5 text-primary animate-spin" />
+                    <p className="text-primary font-semibold text-sm">
+                      Workflow Running
+                    </p>
+                  </div>
+                  <p className="text-xs text-muted-foreground">
+                    Processing your workflow...
+                  </p>
+                </Card>
+              )}
+
+              {run.status === "queued" && (
+                <Card className="p-4 bg-warning/10 border-warning/20">
+                  <div className="flex items-center gap-3">
+                    <Clock className="w-5 h-5 text-warning" />
+                    <p className="text-warning text-sm">
+                      Workflow queued... Will start shortly.
+                    </p>
+                  </div>
+                </Card>
+              )}
+
+              {run.status === "failed" && (
+                <Card className="p-4 bg-destructive/10 border-destructive/20">
+                  <div className="flex items-center gap-3">
+                    <XCircle className="w-5 h-5 text-destructive" />
+                    <div>
+                      <p className="text-destructive font-semibold text-sm">
+                        Workflow Failed
+                      </p>
+                      {run.error_message && (
+                        <p className="text-xs text-destructive/80 mt-1">
+                          {run.error_message}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                </Card>
+              )}
+
+              {artifact &&
+                artifact.artifact &&
+                (run.workflow_name === "Investment Memo" ? (
+                  <InvestmentMemoView artifact={artifact} run={run} onCitationClick={handleCitationClick} />
+                ) : (
+                  <Card className="p-4">
+                    <h3 className="text-base font-semibold text-foreground mb-3">
+                      Workflow Output
+                    </h3>
+                    <div className="bg-background rounded-lg p-4 overflow-auto max-h-[65vh]">
+                      {renderArtifact(
+                        artifact.artifact.parsed ||
+                          artifact.artifact.partial_parsed ||
+                          artifact.artifact
+                      )}
+                    </div>
+                  </Card>
+                ))}
+          </>
+        </div>
+
+        {showPdfPanel && (
+          <div className="md:hidden fixed inset-0 z-[70] bg-background">
+            <div className="flex items-center justify-between px-4 py-2 border-b border-border bg-muted/30">
+              <div className="flex items-center gap-2 min-w-0">
+                <FileText className="w-4 h-4 text-muted-foreground shrink-0" />
+                <span className="text-sm font-medium text-foreground truncate">
+                  {activeCitationDoc || "Source Document"}
+                </span>
+              </div>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => {
+                  setShowPdfPanel(false);
+                  workflowClearPdfViewer();
+                }}
+                className="h-8 px-3"
+              >
+                <X className="w-4 h-4 mr-1" />
+                Close
+              </Button>
+            </div>
+            <div className="h-[calc(100dvh-44px)]">
+              {pdfViewerState.isLoadingUrl ? (
+                <div className="flex items-center justify-center h-full">
+                  <Spinner size="lg" />
+                </div>
+              ) : activePdfUrl ? (
+                <PDFViewer
+                  pdfUrl={activePdfUrl}
+                  highlightBbox={pdfViewerState.highlightBbox}
+                />
+              ) : (
+                <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
+                  Select a citation to view the source document
+                </div>
+              )}
+            </div>
+          </div>
+        )}
+        </>
           )}
         </SheetContent>
 

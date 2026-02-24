@@ -54,6 +54,7 @@ export default function ExtractPage() {
   const [extractionContext, setExtractionContext] = useState("");
   const [sheetOpen, setSheetOpen] = useState(false);
   const [selectedExtractionId, setSelectedExtractionId] = useState(null);
+  const [mobilePanel, setMobilePanel] = useState("source"); // source | recent
 
   // Extraction slice
   const extraction = useExtraction();
@@ -183,9 +184,30 @@ export default function ExtractPage() {
 
   return (
     <AppLayout breadcrumbs={[{ label: "Extract" }]}>
-      <div className="flex-1 flex gap-4">
+      <div className="md:hidden mb-3 grid grid-cols-2 gap-2">
+        <Button
+          size="sm"
+          variant={mobilePanel === "source" ? "default" : "outline"}
+          onClick={() => setMobilePanel("source")}
+        >
+          Source
+        </Button>
+        <Button
+          size="sm"
+          variant={mobilePanel === "recent" ? "default" : "outline"}
+          onClick={() => setMobilePanel("recent")}
+        >
+          Recent
+        </Button>
+      </div>
+
+      <div className="flex-1 flex flex-col md:flex-row gap-3 md:gap-4 min-h-0">
         {/* LEFT PANEL - Source Selection */}
-        <div className="w-[420px] flex-shrink-0 bg-card rounded-lg border border-border p-6 overflow-y-auto">
+        <div
+          className={`${
+            mobilePanel === "source" ? "block" : "hidden"
+          } md:block w-full md:w-[420px] md:flex-shrink-0 bg-card rounded-lg border border-border p-4 md:p-6 overflow-y-auto`}
+        >
           <h2 className="text-lg font-semibold text-foreground mb-4">
             Extract Document
           </h2>
@@ -208,7 +230,11 @@ export default function ExtractPage() {
           {/* Library Mode */}
           {mode === "library" && (
             <div className="space-y-3">
-              <Button variant="outline" onClick={() => setSelectorOpen(true)}>
+              <Button
+                variant="outline"
+                onClick={() => setSelectorOpen(true)}
+                className="w-full sm:w-auto"
+              >
                 Choose from Library
               </Button>
               {selectedDocId && (
@@ -316,7 +342,11 @@ export default function ExtractPage() {
         </div>
 
         {/* RIGHT PANEL - Recent Extractions */}
-        <div className="flex-1 bg-card rounded-lg border border-border p-6 overflow-y-auto">
+        <div
+          className={`${
+            mobilePanel === "recent" ? "block" : "hidden"
+          } md:block flex-1 bg-card rounded-lg border border-border p-4 md:p-6 overflow-y-auto`}
+        >
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-lg font-semibold text-foreground">
               Recent Extractions

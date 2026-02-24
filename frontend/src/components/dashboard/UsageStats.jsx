@@ -32,8 +32,8 @@ export default function UsageStats({ userInfo }) {
   return (
     <Card>
       <CardHeader>
-        <div className="flex items-center justify-between">
-          <div>
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0">
             <CardTitle>Usage Statistics</CardTitle>
             <CardDescription>
               {isFree
@@ -41,7 +41,7 @@ export default function UsageStats({ userInfo }) {
                 : "Monthly page limit resets at the end of billing period"}
             </CardDescription>
           </div>
-          <Badge variant={getTierBadgeVariant()}>
+          <Badge variant={getTierBadgeVariant()} className="w-fit">
             {getTierDisplay()} Tier
           </Badge>
         </div>
@@ -50,11 +50,11 @@ export default function UsageStats({ userInfo }) {
         <div className="space-y-6">
           {/* Pages Used/Remaining */}
           <div>
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-sm font-medium">
+            <div className="flex items-center justify-between gap-3 mb-2">
+              <span className="text-sm font-medium min-w-0">
                 Pages Processed
               </span>
-              <span className="text-sm font-medium">
+              <span className="text-sm font-medium shrink-0">
                 {usage.pages_used} / {usage.pages_limit}
               </span>
             </div>
@@ -67,7 +67,7 @@ export default function UsageStats({ userInfo }) {
               />
             </div>
 
-            <div className="flex items-center justify-between mt-2 text-xs text-muted-foreground">
+            <div className="flex items-center justify-between mt-2 text-xs text-muted-foreground gap-2">
               <span>
                 {usage.pages_remaining} pages remaining
               </span>

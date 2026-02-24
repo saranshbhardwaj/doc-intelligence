@@ -4,7 +4,7 @@
  * Side sheet (opens from left) to display full extraction output
  * without leaving the ExtractPage.
  */
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { useAuth } from "@clerk/clerk-react";
 import {
   Download,
@@ -14,7 +14,7 @@ import {
   AlertCircle,
   Loader2,
 } from "lucide-react";
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from "../ui/sheet";
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "../ui/sheet";
 import { Button } from "../ui/button";
 import { Card } from "../ui/card";
 import Spinner from "../common/Spinner";
@@ -23,6 +23,9 @@ import { fetchExtractionResult, deleteExtraction } from "../../api/extraction";
 import { exportToExcel } from "../../utils/excelExport";
 import { saveAs } from "file-saver";
 import { useExtraction, useExtractionActions } from "../../store";
+import FeedbackButton from "../feedback/FeedbackButton";
+import CompletionFeedbackModal from "../feedback/CompletionFeedbackModal";
+import { shouldPromptForFeedback } from "../../utils/feedbackRules";
 
 export default function ExtractionResultSheet({
   open,
@@ -38,6 +41,8 @@ export default function ExtractionResultSheet({
   const [data, setData] = useState(null);
   const [deleting, setDeleting] = useState(false);
   const [exporting, setExporting] = useState(false);
+  const [showFeedbackModal, setShowFeedbackModal] = useState(false);
+  const feedbackPromptedForRef = useRef(null);
 
   const effectiveExtractionId = propExtractionId || extraction.extractionId;
 
@@ -59,6 +64,21 @@ export default function ExtractionResultSheet({
   useEffect(() => {
     loadData();
   }, [loadData]);
+
+  useEffect(() => {
+    if (!open) {
+      feedbackPromptedForRef.current = null;
+      setShowFeedbackModal(false);
+      return;
+    }
+    if (!effectiveExtractionId || loading || !data) return;
+    if (feedbackPromptedForRef.current === effectiveExtractionId) return;
+
+    feedbackPromptedForRef.current = effectiveExtractionId;
+    setShowFeedbackModal(
+      shouldPromptForFeedback("extraction", effectiveExtractionId)
+    );
+  }, [open, effectiveExtractionId, loading, data]);
 
   const handleExportJSON = () => {
     if (!data) return;
@@ -138,7 +158,7 @@ export default function ExtractionResultSheet({
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="left"
-        className="w-[1400px] sm:max-w-[1400px] overflow-y-auto bg-background"
+        className="w-[100vw] sm:w-[95vw] lg:w-[1400px] sm:max-w-[95vw] lg:max-w-[1400px] overflow-y-auto bg-background"
       >
         <SheetHeader>
           <div className="flex items-center gap-3">
@@ -147,6 +167,9 @@ export default function ExtractionResultSheet({
               <SheetTitle className="text-xl font-bold text-foreground">
                 Extraction Result
               </SheetTitle>
+              <SheetDescription className="sr-only">
+                View extraction output details and export options.
+              </SheetDescription>
               {effectiveExtractionId && (
                 <p className="text-xs text-muted-foreground mt-1">
                   ID: {effectiveExtractionId}
@@ -196,6 +219,13 @@ export default function ExtractionResultSheet({
                 {deleting ? "Deleting..." : "Delete"}
               </Button>
             )}
+            {effectiveExtractionId && (
+              <FeedbackButton
+                operationType="extraction"
+                entityId={effectiveExtractionId}
+                entitySummary={data?.metadata?.filename}
+              />
+            )}
           </div>
 
           {/* Progress / Error */}
@@ -234,7 +264,9 @@ export default function ExtractionResultSheet({
             </div>
           )}
 
-          {!loading && data && <ResultViews result={data} />}
+          {!loading && data && (
+            <ResultViews result={data} showLegacyFeedback={false} />
+          )}
 
           {!loading &&
             !data &&
@@ -246,6 +278,14 @@ export default function ExtractionResultSheet({
             )}
         </div>
       </SheetContent>
+
+      <CompletionFeedbackModal
+        isOpen={showFeedbackModal}
+        onClose={() => setShowFeedbackModal(false)}
+        operationType="extraction"
+        entityId={effectiveExtractionId}
+        entitySummary={data?.metadata?.filename}
+      />
     </Sheet>
   );
 }

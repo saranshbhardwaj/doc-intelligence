@@ -4,7 +4,7 @@ import { Command as CommandPrimitive } from "cmdk";
 import { Search } from "lucide-react";
 
 import { cn } from "@/lib/utils";
-import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogTitle, DialogDescription } from "@/components/ui/dialog";
 
 const Command = React.forwardRef(({ className, ...props }, ref) => (
   <CommandPrimitive
@@ -24,6 +24,9 @@ const CommandDialog = ({ children, ...props }) => {
       <DialogContent className="overflow-hidden p-0 shadow-lg">
         {/* Accessible title for screen readers */}
         <DialogTitle className="sr-only">Command Palette</DialogTitle>
+        <DialogDescription className="sr-only">
+          Search and run commands from the application command palette.
+        </DialogDescription>
         <Command className="[&_[cmdk-group-heading]]:px-2 [&_[cmdk-group-heading]]:font-medium [&_[cmdk-group-heading]]:text-muted-foreground [&_[cmdk-group]:not([hidden])_~[cmdk-group]]:pt-0 [&_[cmdk-group]]:px-2 [&_[cmdk-input-wrapper]_svg]:h-5 [&_[cmdk-input-wrapper]_svg]:w-5 [&_[cmdk-input]]:h-12 [&_[cmdk-item]]:px-2 [&_[cmdk-item]]:py-3 [&_[cmdk-item]_svg]:h-5 [&_[cmdk-item]_svg]:w-5">
           {children}
         </Command>

@@ -53,6 +53,7 @@ export default function WorkflowSimplePage() {
   const [showDocSelector, setShowDocSelector] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [selectedRunId, setSelectedRunId] = useState(null);
+  const [mobilePanel, setMobilePanel] = useState("workflow"); // documents | workflow | results
 
   useEffect(() => {
     fetchInitialData();
@@ -237,9 +238,38 @@ export default function WorkflowSimplePage() {
   return (
     <AppLayout breadcrumbs={breadcrumbs}>
       {/* Full-height three-pane layout with independent scrolls */}
-      <div className="h-[calc(100vh-64px)] flex gap-4">
+      <div className="h-[calc(100vh-64px)] flex flex-col md:flex-row gap-3 md:gap-4 min-h-0">
+        {/* Mobile panel switcher */}
+        <div className="md:hidden grid grid-cols-3 gap-2 px-1">
+          <Button
+            size="sm"
+            variant={mobilePanel === "documents" ? "default" : "outline"}
+            onClick={() => setMobilePanel("documents")}
+          >
+            Documents
+          </Button>
+          <Button
+            size="sm"
+            variant={mobilePanel === "workflow" ? "default" : "outline"}
+            onClick={() => setMobilePanel("workflow")}
+          >
+            Workflow
+          </Button>
+          <Button
+            size="sm"
+            variant={mobilePanel === "results" ? "default" : "outline"}
+            onClick={() => setMobilePanel("results")}
+          >
+            Results
+          </Button>
+        </div>
+
         {/* LEFT PANEL: Selected Documents */}
-        <div className="w-64 flex-shrink-0 bg-card rounded-lg border border-border p-4 flex flex-col overflow-y-auto scrollbar-thin">
+        <div
+          className={`${
+            mobilePanel === "documents" ? "flex" : "hidden"
+          } md:flex w-full md:w-64 flex-shrink-0 bg-card rounded-lg border border-border p-4 flex-col overflow-y-auto scrollbar-thin min-h-0`}
+        >
           <h3 className="font-semibold text-sm text-foreground mb-3 flex items-center gap-2">
             <FileText className="w-4 h-4" />
             Selected Documents
@@ -312,7 +342,11 @@ export default function WorkflowSimplePage() {
         </div>
 
         {/* MIDDLE PANEL: Workflow Selection or Config */}
-        <div className="flex-1 bg-card rounded-lg border border-border p-6 overflow-y-auto scrollbar-chat">
+        <div
+          className={`${
+            mobilePanel === "workflow" ? "block" : "hidden"
+          } md:block flex-1 bg-card rounded-lg border border-border p-4 md:p-6 overflow-y-auto scrollbar-chat min-h-0`}
+        >
           {!selectedWorkflow ? (
             /* Workflow Selection */
             <div>
@@ -468,7 +502,11 @@ export default function WorkflowSimplePage() {
         </div>
 
         {/* RIGHT PANEL: Results */}
-        <div className="w-96 flex-shrink-0 bg-card rounded-lg border border-border p-4 overflow-y-auto scrollbar-thin">
+        <div
+          className={`${
+            mobilePanel === "results" ? "block" : "hidden"
+          } md:block w-full md:w-96 flex-shrink-0 bg-card rounded-lg border border-border p-4 overflow-y-auto scrollbar-thin min-h-0`}
+        >
           <div className="flex items-center justify-between mb-3">
             <h3 className="font-semibold text-sm text-foreground">
               {selectedWorkflow

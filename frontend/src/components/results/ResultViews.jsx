@@ -27,7 +27,7 @@ import ManagementTeam from "./sections/ManagementTeam";
 import ExtractionNotes from "./sections/ExtractionNotes";
 import FeedbackBanner from "./sections/FeedbackBanner";
 
-export default function ResultsView({ result }) {
+export default function ResultsView({ result, showLegacyFeedback = true }) {
   const [showFeedback, setShowFeedback] = useState(false);
 
   if (!result || !result.data) {
@@ -40,7 +40,9 @@ export default function ResultsView({ result }) {
     <div className="min-h-screen bg-background py-8 px-4 transition-colors duration-200">
       <div className="max-w-7xl mx-auto space-y-6">
         <ActionButtons
-          onFeedbackClick={() => setShowFeedback(true)}
+          onFeedbackClick={
+            showLegacyFeedback ? () => setShowFeedback(true) : undefined
+          }
           data={data}
           metadata={result.metadata}
         />
@@ -85,7 +87,9 @@ export default function ResultsView({ result }) {
 
         <ExtractionNotes data={data} />
 
-        <FeedbackBanner onFeedbackClick={() => setShowFeedback(true)} />
+        {showLegacyFeedback && (
+          <FeedbackBanner onFeedbackClick={() => setShowFeedback(true)} />
+        )}
 
         {/* Footer */}
         <div className="bg-card rounded-xl shadow-md p-6 text-center text-sm text-muted-foreground">
@@ -100,16 +104,18 @@ export default function ResultsView({ result }) {
       </div>
 
       {/* Feedback Modal */}
-      <Modal
-        isOpen={showFeedback}
-        onClose={() => setShowFeedback(false)}
-        title="📝 Help Us Improve"
-      >
-        <FeedbackForm
-          requestId={result.metadata.request_id}
+      {showLegacyFeedback && (
+        <Modal
+          isOpen={showFeedback}
           onClose={() => setShowFeedback(false)}
-        />
-      </Modal>
+          title="📝 Help Us Improve"
+        >
+          <FeedbackForm
+            requestId={result.metadata.request_id}
+            onClose={() => setShowFeedback(false)}
+          />
+        </Modal>
+      )}
     </div>
   );
 }

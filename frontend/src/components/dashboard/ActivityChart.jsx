@@ -39,7 +39,7 @@ export default function ActivityChart({ data, loading }) {
           <CardDescription>Daily activity breakdown</CardDescription>
         </CardHeader>
         <CardContent>
-          <Skeleton className="h-[300px] w-full" />
+          <Skeleton className="h-[240px] sm:h-[300px] w-full" />
         </CardContent>
       </Card>
     );
@@ -54,7 +54,7 @@ export default function ActivityChart({ data, loading }) {
           <CardDescription>Daily activity breakdown</CardDescription>
         </CardHeader>
         <CardContent>
-          <div className="flex flex-col items-center justify-center h-[300px] text-center">
+          <div className="flex flex-col items-center justify-center h-[240px] sm:h-[300px] text-center">
             <BarChart3 className="h-12 w-12 text-muted-foreground mb-4" />
             <p className="text-sm text-muted-foreground">No activity in this period</p>
           </div>
@@ -76,7 +76,7 @@ export default function ActivityChart({ data, loading }) {
         <CardDescription>Daily chat messages, template fills, extractions, and workflows</CardDescription>
       </CardHeader>
       <CardContent>
-        <ChartContainer config={chartConfig} className="h-[300px]">
+        <ChartContainer config={chartConfig} className="h-[240px] sm:h-[300px]">
           <AreaChart data={data} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
             <defs>
               <linearGradient id="fillChat" x1="0" y1="0" x2="0" y2="1">
@@ -100,11 +100,13 @@ export default function ActivityChart({ data, loading }) {
             <XAxis
               dataKey="date"
               tickFormatter={formatDate}
-              className="text-xs"
+              className="text-[10px] sm:text-xs"
+              minTickGap={24}
+              interval="preserveStartEnd"
               tickLine={false}
               axisLine={false}
             />
-            <YAxis className="text-xs" tickLine={false} axisLine={false} />
+            <YAxis className="text-[10px] sm:text-xs" tickLine={false} axisLine={false} />
             <ChartTooltip content={<ChartTooltipContent />} />
             <Area
               type="monotone"

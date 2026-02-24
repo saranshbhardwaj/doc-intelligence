@@ -12,6 +12,7 @@ import {
   DialogContent,
   DialogHeader,
   DialogTitle,
+  DialogDescription,
 } from '../../../components/ui/dialog';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../../../components/ui/tabs';
 import { Button } from '../../../components/ui/button';
@@ -92,7 +93,9 @@ export default function ExcelViewerDialog({ open, onOpenChange, templateId, temp
               </div>
               <div>
                 <DialogTitle className="text-lg">{templateName || 'Excel Template'}</DialogTitle>
-                <p className="text-xs text-muted-foreground mt-0.5">Read-only preview</p>
+                <DialogDescription className="text-xs text-muted-foreground mt-0.5">
+                  Read-only preview
+                </DialogDescription>
               </div>
             </div>
             {fileBlob && (

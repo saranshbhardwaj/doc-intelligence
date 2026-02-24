@@ -7,7 +7,7 @@ import {
   UserButton,
   useAuth,
 } from "@clerk/clerk-react";
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import Hero from "../components/landing/Hero";
 import Features from "../components/landing/Features";
 import WorkflowShowcase from "../components/landing/WorkflowShowcase";
@@ -19,6 +19,7 @@ export default function LandingPage() {
   const navigate = useNavigate();
   const { isDark, toggle } = useDarkMode();
   const { isSignedIn, isLoaded } = useAuth();
+  const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
   // Redirect signed-in users to library (only after Clerk finishes loading)
   useEffect(() => {
@@ -114,7 +115,13 @@ export default function LandingPage() {
                 toggle={toggle}
                 variant="inline"
               />
-              <button className="text-muted-foreground dark:text-gray-300">
+              <button
+                type="button"
+                onClick={() => setMobileMenuOpen((prev) => !prev)}
+                className="text-muted-foreground dark:text-gray-300"
+                aria-label="Toggle mobile menu"
+                aria-expanded={mobileMenuOpen}
+              >
                 <svg
                   className="w-6 h-6"
                   fill="none"
@@ -132,6 +139,64 @@ export default function LandingPage() {
             </div>
           </div>
         </div>
+
+        {/* Mobile Menu Panel */}
+        {mobileMenuOpen && (
+          <div className="md:hidden border-t border-border bg-background/95 backdrop-blur">
+            <div className="max-w-7xl mx-auto px-4 py-3 flex flex-col gap-3">
+              <a
+                href="#features"
+                className="text-sm text-muted-foreground hover:text-foreground transition-colors"
+                onClick={() => setMobileMenuOpen(false)}
+              >
+                Features
+              </a>
+              <a
+                href="#workflows"
+                className="text-sm text-muted-foreground hover:text-foreground transition-colors"
+                onClick={() => setMobileMenuOpen(false)}
+              >
+                Workflows
+              </a>
+              <a
+                href="#faq"
+                className="text-sm text-muted-foreground hover:text-foreground transition-colors"
+                onClick={() => setMobileMenuOpen(false)}
+              >
+                FAQ
+              </a>
+
+              <SignedOut>
+                <SignInButton mode="modal">
+                  <button className="w-full text-left px-3 py-2 rounded-md text-sm text-muted-foreground hover:bg-muted transition-colors">
+                    Sign In
+                  </button>
+                </SignInButton>
+                <button
+                  onClick={() => {
+                    setMobileMenuOpen(false);
+                    handleGetStarted();
+                  }}
+                  className="w-full px-4 py-2 bg-gradient-to-r from-blue-600 to-purple-600 text-foreground font-semibold rounded-lg"
+                >
+                  Get Started Free
+                </button>
+              </SignedOut>
+
+              <SignedIn>
+                <button
+                  onClick={() => {
+                    setMobileMenuOpen(false);
+                    navigate("/app/library");
+                  }}
+                  className="w-full px-4 py-2 bg-gradient-to-r from-blue-600 to-purple-600 text-foreground font-semibold rounded-lg"
+                >
+                  Go to App
+                </button>
+              </SignedIn>
+            </div>
+          </div>
+        )}
       </nav>
 
       {/* Hero Section */}

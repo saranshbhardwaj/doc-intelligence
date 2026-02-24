@@ -11,11 +11,13 @@
 
 import { Link, useLocation } from "react-router-dom";
 import { UserButton } from "@clerk/clerk-react";
-import { Library, MessageSquare, Play, Zap, FileSpreadsheet, LayoutDashboard } from "lucide-react";
+import { Library, MessageSquare, Play, Zap, FileSpreadsheet, LayoutDashboard, Menu } from "lucide-react";
+import { useState } from "react";
 import DarkModeToggle from "../common/DarkModeToggle";
 import { useDarkMode } from "../../hooks/useDarkMode";
 import VerticalDropdown from "../navigation/VerticalDropdown";
 import { getVerticalNavigation } from "../../config/verticals";
+import { Sheet, SheetContent, SheetTitle, SheetDescription } from "../ui/sheet";
 
 // Icon mapping for vertical navigation
 const ICON_MAP = {
@@ -31,6 +33,7 @@ const ICON_MAP = {
 export default function AppLayout({ children, breadcrumbs }) {
   const location = useLocation();
   const { isDark, toggle } = useDarkMode();
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
   // Detect current vertical from URL
   const currentVertical = (() => {
@@ -140,6 +143,14 @@ export default function AppLayout({ children, breadcrumbs }) {
 
             {/* Right Actions */}
             <div className="flex items-center gap-4">
+              <button
+                type="button"
+                onClick={() => setMobileNavOpen(true)}
+                className="md:hidden p-2 rounded-lg border border-border bg-card text-foreground"
+                aria-label="Open navigation menu"
+              >
+                <Menu className="w-5 h-5" />
+              </button>
               <DarkModeToggle
                 isDark={isDark}
                 toggle={toggle}
@@ -156,6 +167,98 @@ export default function AppLayout({ children, breadcrumbs }) {
           </div>
         </div>
       </header>
+
+      <Sheet open={mobileNavOpen} onOpenChange={setMobileNavOpen}>
+        <SheetContent side="right" className="w-[85vw] max-w-sm p-4">
+          <SheetTitle className="sr-only">Mobile Navigation</SheetTitle>
+          <SheetDescription className="sr-only">
+            Navigate between core app pages and vertical sections.
+          </SheetDescription>
+          <div className="space-y-4">
+            <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
+              Navigation
+            </div>
+
+            <div className="space-y-1">
+              {coreNavLinks.map((link) => {
+                const Icon = link.icon;
+                const active = isActive(link.path);
+                const isComingSoon = link.comingSoon;
+
+                return (
+                  <Link
+                    key={link.path}
+                    to={link.path}
+                    onClick={(e) => {
+                      if (isComingSoon) {
+                        e.preventDefault();
+                        return;
+                      }
+                      setMobileNavOpen(false);
+                    }}
+                    className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium transition-all ${
+                      isComingSoon
+                        ? "text-muted-foreground/50 cursor-not-allowed"
+                        : active
+                        ? "bg-primary/10 text-primary"
+                        : "text-muted-foreground hover:bg-popover"
+                    }`}
+                    aria-current={active ? "page" : undefined}
+                    aria-disabled={isComingSoon}
+                  >
+                    <Icon className="w-4 h-4" />
+                    {link.label}
+                    {isComingSoon && (
+                      <span className="text-xs bg-muted px-1.5 py-0.5 rounded ml-auto">
+                        Soon
+                      </span>
+                    )}
+                  </Link>
+                );
+              })}
+            </div>
+
+            <div className="pt-3 border-t border-border">
+              <div className="text-xs font-semibold uppercase tracking-wide text-muted-foreground mb-2">
+                Verticals
+              </div>
+              <div className="space-y-1">
+                {currentVertical && (
+                  <Link
+                    to="/app/library"
+                    onClick={() => setMobileNavOpen(false)}
+                    className="block px-3 py-2 rounded-lg text-sm text-muted-foreground hover:bg-popover transition-colors"
+                  >
+                    Back to Core Features
+                  </Link>
+                )}
+                <Link
+                  to="/app/re"
+                  onClick={() => setMobileNavOpen(false)}
+                  className={`block px-3 py-2 rounded-lg text-sm transition-colors ${
+                    currentVertical === "re"
+                      ? "bg-primary/10 text-primary"
+                      : "text-muted-foreground hover:bg-popover"
+                  }`}
+                >
+                  Real Estate
+                </Link>
+                <Link
+                  to="/app/pe"
+                  onClick={() => setMobileNavOpen(false)}
+                  className={`block px-3 py-2 rounded-lg text-sm transition-colors ${
+                    currentVertical === "pe"
+                      ? "bg-primary/10 text-primary"
+                      : "text-muted-foreground hover:bg-popover"
+                  }`}
+                >
+                  Private Equity
+                </Link>
+              </div>
+            </div>
+          </div>
+        </SheetContent>
+      </Sheet>
 
       {/* Main Content */}
       <main className="flex-1 flex flex-col">{children}</main>

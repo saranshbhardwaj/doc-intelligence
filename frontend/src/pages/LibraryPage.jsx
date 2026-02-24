@@ -16,11 +16,14 @@ import { useState, useEffect, useCallback, useMemo } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useAuth } from "@clerk/clerk-react";
 import { toast } from "sonner";
+import { Menu } from "lucide-react";
 import AppLayout from "../components/layout/AppLayout";
 import StatsHeader from "../components/library/StatsHeader";
 import CollectionsSidebar from "../components/library/CollectionsSidebar";
 import DocumentsTable from "../components/library/DocumentsTable";
 import UploadModal from "../components/library/UploadModal";
+import { Button } from "../components/ui/button";
+import { Sheet, SheetContent, SheetTitle, SheetDescription } from "../components/ui/sheet";
 import {
   listCollections,
   createCollection as apiCreateCollection,
@@ -68,6 +71,7 @@ export default function LibraryPage() {
   const [showUpload, setShowUpload] = useState(false);
   const [uploadCollection, setUploadCollection] = useState(null);
   const [deletingDocId, setDeletingDocId] = useState(null);
+  const [mobileCollectionsOpen, setMobileCollectionsOpen] = useState(false);
 
   // Calculate stats from current page of documents
   const stats = useMemo(() => {
@@ -174,6 +178,7 @@ export default function LibraryPage() {
   const handleSelectCollection = (collection) => {
     setSelectedCollection(collection);
     setSearchParams({ collection: collection.id });
+    setMobileCollectionsOpen(false);
   };
 
   const handleCreateCollection = async (name) => {
@@ -437,9 +442,9 @@ export default function LibraryPage() {
         />
 
         {/* Main Content */}
-        <div className="flex-1 flex gap-6 min-h-0">
+        <div className="flex-1 flex gap-4 md:gap-6 min-h-0">
           {/* Collections Sidebar */}
-          <div className="w-64 flex-shrink-0">
+          <div className="hidden md:block w-64 flex-shrink-0">
             <CollectionsSidebar
               collections={collections}
               selectedCollection={selectedCollection}
@@ -452,6 +457,20 @@ export default function LibraryPage() {
 
           {/* Documents Area */}
           <div className="flex-1 min-w-0">
+            <div className="md:hidden mb-3">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setMobileCollectionsOpen(true)}
+                className="w-full justify-start"
+              >
+                <Menu className="w-4 h-4 mr-2" />
+                {selectedCollection
+                  ? `Collections: ${selectedCollection.name}`
+                  : "Open Collections"}
+              </Button>
+            </div>
+
             {selectedCollection ? (
               <div className="h-full flex flex-col">
                 {/* Collection Header */}
@@ -513,6 +532,23 @@ export default function LibraryPage() {
         onCollectionChange={setUploadCollection}
         onUpload={handleUploadFiles}
       />
+
+      <Sheet open={mobileCollectionsOpen} onOpenChange={setMobileCollectionsOpen}>
+        <SheetContent side="left" className="w-[90vw] max-w-sm p-4">
+          <SheetTitle className="sr-only">Collections</SheetTitle>
+          <SheetDescription className="sr-only">
+            Select, create, or delete document collections.
+          </SheetDescription>
+          <CollectionsSidebar
+            collections={collections}
+            selectedCollection={selectedCollection}
+            loading={loadingCollections}
+            onSelectCollection={handleSelectCollection}
+            onCreateCollection={handleCreateCollection}
+            onDeleteCollection={handleDeleteCollection}
+          />
+        </SheetContent>
+      </Sheet>
     </AppLayout>
   );
 }

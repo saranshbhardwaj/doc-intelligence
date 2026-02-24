@@ -12,7 +12,7 @@ export default function StatCard({ icon: Icon, title, value, subtitle, loading }
   if (loading) {
     return (
       <Card>
-        <CardContent className="p-6">
+        <CardContent className="p-4 sm:p-6">
           <div className="space-y-3">
             <Skeleton className="h-8 w-8 rounded-full" />
             <Skeleton className="h-4 w-20" />
@@ -26,21 +26,21 @@ export default function StatCard({ icon: Icon, title, value, subtitle, loading }
 
   return (
     <Card>
-      <CardContent className="p-6">
+      <CardContent className="p-4 sm:p-6">
         <div className="flex items-start justify-between">
           <div className="flex-1">
-            <div className="flex items-center gap-3 mb-4">
+            <div className="flex items-center gap-3 mb-3 sm:mb-4">
               {Icon && (
-                <div className="flex items-center justify-center h-10 w-10 rounded-full bg-primary/10">
-                  <Icon className="h-5 w-5 text-primary" />
+                <div className="flex items-center justify-center h-9 w-9 sm:h-10 sm:w-10 rounded-full bg-primary/10">
+                  <Icon className="h-4 w-4 sm:h-5 sm:w-5 text-primary" />
                 </div>
               )}
               <p className="text-sm font-medium text-muted-foreground">{title}</p>
             </div>
             <div className="space-y-1">
-              <p className="text-3xl font-bold tracking-tight">{value}</p>
+              <p className="text-2xl sm:text-3xl font-bold tracking-tight">{value}</p>
               {subtitle && (
-                <p className="text-sm text-muted-foreground">{subtitle}</p>
+                <p className="text-xs sm:text-sm text-muted-foreground">{subtitle}</p>
               )}
             </div>
           </div>
