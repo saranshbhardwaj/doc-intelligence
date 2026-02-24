@@ -74,11 +74,10 @@ const reWorkflows = [
 ];
 
 const colorClasses = {
-  blue: "bg-blue-100 dark:bg-blue-900/30 text-blue-600 dark:text-blue-400",
+  blue: "bg-primary/15 text-primary",
   green: "bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400",
   red: "bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400",
-  purple:
-    "bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400",
+  purple: "bg-accent/20 text-accent",
   orange:
     "bg-orange-100 dark:bg-orange-900/30 text-orange-600 dark:text-orange-400",
 };
@@ -95,7 +94,7 @@ export default function WorkflowShowcase() {
         <div className="text-center mb-12">
           <h2 className="text-4xl sm:text-5xl font-bold text-foreground mb-4">
             Powerful Workflows for
-            <span className="bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
+            <span className="bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
               {" "}
               Every Deal Type
             </span>
@@ -113,7 +112,7 @@ export default function WorkflowShowcase() {
               onClick={() => setActiveTab("pe")}
               className={`px-6 py-2.5 rounded-lg font-semibold text-sm transition-all duration-200 ${
                 activeTab === "pe"
-                  ? "bg-gradient-to-r from-blue-600 to-purple-600 text-white shadow-md"
+                  ? "bg-gradient-to-r from-primary to-accent text-primary-foreground shadow-md"
                   : "text-muted-foreground dark:text-gray-400 hover:text-foreground dark:hover:text-foreground"
               }`}
             >
@@ -123,7 +122,7 @@ export default function WorkflowShowcase() {
               onClick={() => setActiveTab("re")}
               className={`px-6 py-2.5 rounded-lg font-semibold text-sm transition-all duration-200 ${
                 activeTab === "re"
-                  ? "bg-gradient-to-r from-blue-600 to-purple-600 text-white shadow-md"
+                  ? "bg-gradient-to-r from-primary to-accent text-primary-foreground shadow-md"
                   : "text-muted-foreground dark:text-gray-400 hover:text-foreground dark:hover:text-foreground"
               }`}
             >
@@ -139,7 +138,7 @@ export default function WorkflowShowcase() {
             return (
               <div
                 key={index}
-                className="group flex items-start gap-5 p-6 rounded-2xl bg-background dark:bg-card border border-border dark:border-gray-700 hover:border-blue-500 dark:hover:border-blue-500 hover:shadow-lg transition-all duration-300 transform hover:scale-105"
+                className="group flex items-start gap-5 p-6 rounded-2xl bg-background dark:bg-card border border-border dark:border-gray-700 hover:border-primary/70 dark:hover:border-primary/70 hover:shadow-lg transition-all duration-300 transform hover:scale-105"
               >
                 <div
                   className={`flex-shrink-0 w-12 h-12 rounded-xl ${

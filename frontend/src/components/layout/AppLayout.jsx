@@ -30,7 +30,7 @@ const ICON_MAP = {
   'dashboard': LayoutDashboard,
 };
 
-export default function AppLayout({ children, breadcrumbs }) {
+export default function AppLayout({ children }) {
   const location = useLocation();
   const { isDark, toggle } = useDarkMode();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
@@ -84,13 +84,15 @@ export default function AppLayout({ children, breadcrumbs }) {
               to="/app/library"
               className="flex items-center gap-3 hover:opacity-80 transition-opacity"
             >
-              <img
-                src="/Sand_cloud_logo_dark-gray.svg"
-                alt="FrearaAI"
-                className="h-8 w-auto"
-              />
-              <span className="text-xl font-extrabold tracking-tight bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
-                FrearaAI
+              <span className="relative h-8 w-8 shrink-0 overflow-hidden rounded-md">
+                <img
+                  src="/Freara%20ai%20logo.png"
+                  alt="frearaAI"
+                  className="absolute inset-0 h-full w-full scale-[1.78] object-cover"
+                />
+              </span>
+              <span className="text-xl font-extrabold tracking-tight bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
+                frearaAI
               </span>
             </Link>
 

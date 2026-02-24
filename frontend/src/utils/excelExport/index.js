@@ -28,7 +28,7 @@ import {
 export async function exportToExcel(data, metadata) {
   const workbook = new ExcelJS.Workbook();
 
-  workbook.creator = "FrearaAI Document Intelligence";
+  workbook.creator = "frearaAI Document Intelligence";
   workbook.created = new Date();
   workbook.modified = new Date();
 

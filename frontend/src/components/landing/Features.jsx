@@ -178,7 +178,7 @@ export default function Features() {
               <div>
                 <div className="font-semibold text-foreground">10x Faster</div>
                 <div className="text-sm text-muted-foreground dark:text-muted-foreground">
-                  What takes 3 hours manually takes 5 minutes with FrearaAI
+                  What takes 3 hours manually takes 5 minutes with frearaAI
                 </div>
               </div>
             </div>
