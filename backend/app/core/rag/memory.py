@@ -49,124 +49,173 @@ class ConversationMemory:
         count_tokens
         return max(1, count_tokens(text))
 
+    # -------- Conversation Budget Check --------
+    def _exceeds_conversation_budget(
+        self,
+        history_messages: List[Dict[str, Any]],
+        cached: Optional[Dict[str, Any]]
+    ) -> bool:
+        """
+        Check if the conversation portion we'd send to the LLM exceeds the char budget.
+
+        When a summary exists: measures (summary + last N verbatim messages).
+        When no summary yet: measures all history messages combined.
+        """
+        verbatim_count = settings.chat_verbatim_message_count
+        verbatim = (
+            history_messages[-verbatim_count:]
+            if verbatim_count < len(history_messages)
+            else history_messages
+        )
+
+        if cached and cached.get("summary"):
+            summary_chars = len(cached["summary"])
+            recent_chars = sum(len(m["content"]) for m in verbatim)
+            convo_chars = summary_chars + recent_chars
+        else:
+            # No summary yet — full history is what we'd send
+            convo_chars = sum(len(m["content"]) for m in history_messages)
+
+        return convo_chars > settings.chat_conversation_char_budget
+
+    # -------- Summarization Pre-check --------
+    def will_summarize(
+        self,
+        session_id: str,
+        history_messages: List[Dict[str, Any]]
+    ) -> bool:
+        """Quick pre-check: will maybe_summarize() trigger compaction?
+
+        Checks whether the conversation portion we'd send exceeds chat_conversation_char_budget.
+        Used to emit a 'Compacting conversation history...' thinking event before
+        the expensive maybe_summarize() call. Cache lookup only — no LLM/DB writes.
+        """
+        if not history_messages or len(history_messages) < settings.chat_summary_min_messages:
+            return False
+        cached = self.cache.get(session_id)
+        return self._exceeds_conversation_budget(history_messages, cached)
+
     # -------- Summarization Decision --------
     async def maybe_summarize(
         self,
         session_id: str,
-        history_messages: List[Dict[str, Any]],
-        user_message: str
+        history_messages: List[Dict[str, Any]]
     ) -> Tuple[Optional[str], List[Dict[str, Any]], List[str]]:
         """
-        Return (summary_text, recent_messages, key_facts) based on history & budgeting thresholds.
+        Return (summary_text, recent_messages, key_facts).
 
-        Uses progressive summarization: instead of re-summarizing all history,
-        only summarizes new messages since last summary.
+        Uses Claude-style compaction: compact when (summary + recent messages) exceeds
+        chat_conversation_char_budget. Between compaction points, reuse cached summary
+        with no LLM call. Only compact when the conversation portion actually overflows.
         """
         if not history_messages:
             return None, [], []
 
-        history_text = "\n".join([f"{m['role'].title()}: {m['content']}" for m in history_messages])
-        est_history_tokens = self.estimate_tokens(history_text)
-        est_user_tokens = self.estimate_tokens(user_message)
+        verbatim_count = settings.chat_verbatim_message_count
+        verbatim_msgs = (
+            history_messages[-verbatim_count:]
+            if verbatim_count < len(history_messages)
+            else history_messages
+        )
 
-        # Estimate max input tokens from max chars (rough approximation: 1 token ≈ 4 chars)
-        max_input_tokens = settings.llm_max_input_chars // 4 if settings.llm_max_input_chars else 0
-        usage_ratio = (est_history_tokens + est_user_tokens) / max_input_tokens if max_input_tokens else 0
+        cached = self.cache.get(session_id)
+
+        # Decide whether compaction is needed
+        should_compact = (
+            len(history_messages) >= settings.chat_summary_min_messages
+            and self._exceeds_conversation_budget(history_messages, cached)
+        )
+
+        if not should_compact:
+            # Under budget — return cached summary (if any) with verbatim messages
+            if cached and cached.get("summary"):
+                logger.info("Using cached conversation summary", extra={"session_id": session_id})
+                return cached["summary"], verbatim_msgs, cached.get("key_facts", [])
+            else:
+                # No summary yet and under budget — return full history verbatim
+                return None, history_messages, []
+
+        # --- Compaction needed ---
+        older_messages = (
+            history_messages[:-verbatim_count]
+            if verbatim_count < len(history_messages)
+            else []
+        )
+        if not older_messages:
+            return None, history_messages, []
 
         summary_text: Optional[str] = None
         key_facts: List[str] = []
-        # Start with full history — only trim to verbatim_count after a summary is generated
-        recent_messages = history_messages
 
-        should_summarize = (
-            len(history_messages) >= settings.chat_summary_min_messages and
-            usage_ratio >= settings.chat_summary_trigger_ratio
-        )
+        if cached and cached.get("summary"):
+            # Progressive compaction: fold new messages into existing summary
+            last_idx = cached.get("last_summarized_index", 0)
 
-        if should_summarize:
-            older_messages = history_messages[:-settings.chat_verbatim_message_count] if settings.chat_verbatim_message_count < len(history_messages) else []
-            if older_messages:
-                cached = self.cache.get(session_id)
-                current_message_count = len(history_messages)
+            # Guard: clamp to valid range to catch DB drift / message deletion
+            if last_idx < 0 or last_idx > len(older_messages):
+                logger.warning(
+                    "last_summarized_index out of bounds — clamping",
+                    extra={
+                        "session_id": session_id,
+                        "last_idx": last_idx,
+                        "older_messages_len": len(older_messages),
+                    }
+                )
+                last_idx = len(older_messages)
 
-                if cached and cached.get("message_count") == current_message_count:
-                    # Exact cache hit - use cached summary and facts
-                    summary_text = cached.get("compressed") or cached.get("summary")
-                    key_facts = cached.get("key_facts", [])
-                    logger.info("Using cached conversation summary", extra={"session_id": session_id})
-                elif not cached:
-                    # Cache miss - try loading from database (persistent storage)
-                    db_summary = self.session_repo.get_summary(session_id)
-                    if db_summary:
-                        logger.info(
-                            "Loaded summary from database (cache miss)",
-                            extra={"session_id": session_id}
-                        )
-                        # Warm the cache with DB data
-                        self.cache.set(
-                            session_id=session_id,
-                            message_count=current_message_count,
-                            summary=db_summary["summary"],
-                            key_facts=db_summary["key_facts"],
-                            last_summarized_index=db_summary["last_summarized_index"]
-                        )
-                        summary_text = db_summary["summary"]
-                        key_facts = db_summary["key_facts"]
-                    else:
-                        # No summary in DB either - proceed to generate new one
-                        pass
-                else:
-                    # Need to summarize
-                    if cached:
-                        # Progressive summarization: update existing summary with new messages
-                        last_idx = cached.get("last_summarized_index", 0)
-                        new_messages = older_messages[last_idx:]
+            new_messages = older_messages[last_idx:]
 
-                        if new_messages:
-                            logger.info(
-                                "Progressive summarization triggered",
-                                extra={
-                                    "session_id": session_id,
-                                    "last_index": last_idx,
-                                    "new_message_count": len(new_messages)
-                                }
-                            )
-                            # Extract key facts from new messages
-                            new_facts = await self.chat_llm_service.extract_key_facts(new_messages)
+            if new_messages:
+                logger.info(
+                    "Progressive summarization triggered",
+                    extra={
+                        "session_id": session_id,
+                        "last_index": last_idx,
+                        "new_message_count": len(new_messages),
+                    }
+                )
+                new_facts = await self.chat_llm_service.extract_key_facts(new_messages)
+                key_facts = self._merge_key_facts(cached.get("key_facts", []), new_facts)
+                summary_text = await self.chat_llm_service.progressive_summarize(
+                    previous_summary=cached["summary"],
+                    new_messages=new_messages,
+                    key_facts=key_facts,
+                )
+            else:
+                # Nothing new to fold — reuse existing summary
+                logger.info(
+                    "Progressive summarization skipped — no new messages since last summary",
+                    extra={"session_id": session_id, "last_idx": last_idx},
+                )
+                summary_text = cached["summary"]
+                key_facts = cached.get("key_facts", [])
+        else:
+            # Cache miss — check DB before generating a fresh summary
+            db_summary = self.session_repo.get_summary(session_id)
+            if db_summary:
+                logger.info(
+                    "Loaded summary from database (cache miss)",
+                    extra={"session_id": session_id}
+                )
+                self.cache.set(
+                    session_id=session_id,
+                    message_count=len(history_messages),
+                    summary=db_summary["summary"],
+                    key_facts=db_summary["key_facts"],
+                    last_summarized_index=db_summary["last_summarized_index"]
+                )
+                summary_text = db_summary["summary"]
+                key_facts = db_summary["key_facts"]
+            else:
+                # First compaction — summarize all older messages
+                logger.info(
+                    "First summarization triggered",
+                    extra={"session_id": session_id, "message_count": len(older_messages)}
+                )
+                summary_text = await self._summarize_messages(older_messages)
+                key_facts = await self.chat_llm_service.extract_key_facts(older_messages)
 
-                            # Merge with existing facts (keep unique, limit to 10)
-                            existing_facts = cached.get("key_facts", [])
-                            key_facts = self._merge_key_facts(existing_facts, new_facts)
-
-                            # Progressive summarization
-                            previous_summary = cached.get("summary", "")
-                            summary_text = await self.chat_llm_service.progressive_summarize(
-                                previous_summary=previous_summary,
-                                new_messages=new_messages,
-                                key_facts=key_facts
-                            )
-                        else:
-                            # No new messages to summarize
-                            summary_text = cached.get("summary", "")
-                            key_facts = cached.get("key_facts", [])
-                    else:
-                        # First summarization - summarize all older messages
-                        logger.info(
-                            "First summarization triggered",
-                            extra={"session_id": session_id, "message_count": len(older_messages)}
-                        )
-                        summary_text = await self._summarize_messages(older_messages)
-                        key_facts = await self.chat_llm_service.extract_key_facts(older_messages)
-
-        # Only trim recent_messages to verbatim_count when a summary actually covers the older messages
-        if summary_text and settings.chat_verbatim_message_count > 0:
-            recent_messages = (
-                history_messages[-settings.chat_verbatim_message_count:]
-                if settings.chat_verbatim_message_count < len(history_messages)
-                else history_messages
-            )
-
-        return summary_text, recent_messages, key_facts
+        return summary_text, verbatim_msgs, key_facts
 
     # -------- Summarization --------
     async def _summarize_messages(self, messages: List[Dict[str, Any]]) -> str:

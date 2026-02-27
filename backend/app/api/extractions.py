@@ -33,6 +33,13 @@ from app.utils.logging import logger
 from app.repositories.job_repository import JobRepository
 from app.repositories.extraction_repository import ExtractionRepository
 from app.repositories.document_repository import DocumentRepository
+from app.repositories.user_repository import UserRepository
+from app.services.beta_limits import (
+    enforce_extraction_limit,
+    enforce_page_limit,
+    log_shadow_credits,
+    reserve_shadow_credits,
+)
 
 # Orchestration service
 from celery import chain
@@ -222,38 +229,8 @@ async def extract_document(
                 "extraction_id": existing_extraction.id
             })
 
-        # ============================================
-        # STEP 2: Check page limit (admin users have unlimited)
-        # ============================================
-        if user.tier != "admin" and user.pages_limit > 0:
-            # For free tier: Check total pages processed (one-time limit)
-            # For paid tiers: Check monthly pages (recurring limit)
-            if user.tier == "free":
-                # Free tier gets 100 pages ONE TIME total
-                if user.total_pages_processed >= user.pages_limit:
-                    raise HTTPException(
-                        status_code=403,
-                        detail={
-                            "error": "page_limit_exceeded",
-                            "message": f"Free tier limit reached ({user.pages_limit} pages total). Please upgrade to continue.",
-                            "pages_used": user.total_pages_processed,
-                            "pages_limit": user.pages_limit,
-                            "tier": user.tier
-                        }
-                    )
-            else:
-                # Paid tiers have monthly limits
-                if user.pages_this_month >= user.pages_limit:
-                    raise HTTPException(
-                        status_code=403,
-                        detail={
-                            "error": "page_limit_exceeded",
-                            "message": f"Monthly page limit reached ({user.pages_limit} pages). Your limit resets next month.",
-                            "pages_used": user.pages_this_month,
-                            "pages_limit": user.pages_limit,
-                            "tier": user.tier
-                        }
-                    )
+        # STEP 2: Check extraction quota (skip duplicates returned above)
+        enforce_extraction_limit(user)
 
 
         # ============================================
@@ -266,6 +243,10 @@ async def extract_document(
                 "request_id": request_id,
                 "user_id": user.id
             })
+
+            cached_pages = int(cached_result.get("metadata", {}).get("pages", 0) or 0)
+            if cached_pages > 0:
+                enforce_page_limit(user, pages_to_add=cached_pages)
 
             analytics.track_event(
                 "cache_hit",
@@ -303,7 +284,7 @@ async def extract_document(
                 file_size_bytes=len(content),
                 content_hash=content_hash,
                 status="completed",
-                page_count=cached_result["metadata"]["pages"],
+                page_count=cached_pages,
                 from_cache=True,
                 context=context
             )
@@ -328,6 +309,26 @@ async def extract_document(
                     "user_id": user.id
                 })
 
+            if extraction:
+                user_repo = UserRepository()
+                usage_updated = user_repo.update_page_usage(
+                    user_id=user.id,
+                    pages_to_add=cached_pages,
+                    update_monthly=True
+                )
+                if not usage_updated:
+                    logger.warning(
+                        "Failed to update page usage for cache-hit extraction",
+                        extra={"request_id": request_id, "user_id": user.id, "pages": cached_pages}
+                    )
+
+                log_shadow_credits(
+                    user=user,
+                    operation_type="extraction_run",
+                    reference_id=request_id,
+                    metadata={"from_cache": True, "pages": cached_pages},
+                )
+
             # Return 200 OK with full result (sync behavior)
             return {
                 "success": True,
@@ -336,8 +337,8 @@ async def extract_document(
                     "extraction_id": request_id,
                     "request_id": request_id,
                     "filename": file.filename,
-                    "pages": cached_result["metadata"]["pages"],
-                    "characters_extracted": cached_result["metadata"]["characters_extracted"],
+                    "pages": cached_pages,
+                    "characters_extracted": cached_result.get("metadata", {}).get("characters_extracted", 0),
                     "processing_time_seconds": time.time() - start_time,
                     "timestamp": datetime.now().isoformat()
                 },
@@ -400,25 +401,33 @@ async def extract_document(
 
         logger.info(f"Created job {job_id} for extraction {request_id}", extra={"job_id": job_id})
 
+        reserve_shadow_credits(
+            user=user,
+            operation_type="extraction_run",
+            reference_id=request_id,
+            metadata={"from_cache": False, "filename": file.filename},
+        )
+
         # ============================================
         # STEP 6: Start background processing (Celery or asyncio)
         if settings.use_celery:
-            # Persist uploaded file to a shared volume path so worker container can access
-            # Use /shared_uploads (ensure this directory is a bind/volume mount in docker-compose)
-            shared_root = os.getenv("SHARED_UPLOAD_ROOT", "/shared_uploads")
-            try:
-                os.makedirs(shared_root, exist_ok=True)
-            except Exception:
-                # Fallback to system temp if shared dir cannot be created
-                import tempfile
-                shared_root = tempfile.gettempdir()
-
+            import tempfile
+            from app.core.storage.storage_factory import get_storage_backend
             safe_filename = file.filename.replace("/", "_").replace("\\", "_")
-            temp_path = os.path.join(shared_root, f"{request_id}_{safe_filename}")
-            with open(temp_path, "wb") as f_out:
-                f_out.write(content)
-            logger.info("Saved uploaded file for Celery processing", extra={"job_id": job_id, "path": temp_path})
-            start_extraction_chain(temp_path, file.filename, job_id, request_id, user.id, context)
+            # Write to local temp then upload to storage so worker can access without a shared volume.
+            # This makes the extraction pipeline compatible with multi-replica deployments (Railway).
+            with tempfile.NamedTemporaryFile(delete=False, suffix=f"_{safe_filename}") as tmp:
+                tmp.write(content)
+                tmp_path = tmp.name
+            try:
+                storage = get_storage_backend()
+                # extractions/{extraction_id}/source_{filename} keeps upload and result.json as siblings
+                r2_key = f"extractions/{request_id}/source_{safe_filename}"
+                storage.upload(tmp_path, r2_key)
+                logger.info("Uploaded extraction file to storage", extra={"job_id": job_id, "storage_key": r2_key})
+                start_extraction_chain(r2_key, file.filename, job_id, request_id, user.id, context)
+            finally:
+                os.unlink(tmp_path)  # Local temp no longer needed after upload
 
         # ============================================
         # STEP 7: Return 202 Accepted with job_id (async behavior)
@@ -556,15 +565,21 @@ async def extract_temp_document(
         document_processor.validate_file(file.filename, content)
         content_hash = hashlib.sha256(content).hexdigest()
 
-        # Save temp file for processing
-        temp_dir = os.getenv("SHARED_UPLOAD_ROOT", tempfile.gettempdir())
-        os.makedirs(temp_dir, exist_ok=True)
+        # Upload file to storage so worker can access without a shared volume.
+        from app.core.storage.storage_factory import get_storage_backend
         safe_filename = file.filename.replace("/", "_").replace("\\", "_")
         request_id = generate_id()
-        temp_path = os.path.join(temp_dir, f"{request_id}_{safe_filename}")
-
-        with open(temp_path, "wb") as f:
-            f.write(content)
+        with tempfile.NamedTemporaryFile(delete=False, suffix=f"_{safe_filename}") as tmp:
+            tmp.write(content)
+            tmp_path = tmp.name
+        try:
+            storage = get_storage_backend()
+            # extractions/{extraction_id}/source_{filename} — consistent with result.json sibling
+            r2_key = f"extractions/{request_id}/source_{safe_filename}"
+            storage.upload(tmp_path, r2_key)
+            logger.info("Uploaded temp extraction file to storage", extra={"storage_key": r2_key})
+        finally:
+            os.unlink(tmp_path)
 
         # Create temporary document record
         document_id = generate_id()
@@ -574,7 +589,7 @@ async def extract_temp_document(
             user_id=user.id,
             document_id=document_id,
             filename=file.filename,
-            file_path=temp_path,
+            file_path=r2_key,
             content_hash=content_hash,
             file_size_bytes=len(content),
             status="temp"
@@ -618,6 +633,8 @@ async def extract_temp_document(
                 }
             }
 
+        enforce_extraction_limit(user)
+
         # Create extraction record
         extraction_id = generate_id()
 
@@ -650,9 +667,16 @@ async def extract_temp_document(
 
         logger.info("Created temp extraction job", extra={"job_id": job_id, "extraction_id": extraction_id})
 
+        reserve_shadow_credits(
+            user=user,
+            operation_type="extraction_run",
+            reference_id=extraction_id,
+            metadata={"from_cache": False, "source": "temp_upload"},
+        )
+
         # Trigger full extraction pipeline
         start_extraction_chain(
-            file_path=temp_path,
+            file_path=r2_key,
             filename=file.filename,
             job_id=job_id,
             extraction_id=extraction_id,
@@ -762,6 +786,9 @@ async def extract_from_document(
                 }
             }
 
+        enforce_extraction_limit(user)
+        enforce_page_limit(user, pages_to_add=int(doc.page_count or 0))
+
         # Verify document has chunks
         chunks_count = document_repo.get_chunk_count(document_id)
         if chunks_count == 0:
@@ -804,6 +831,13 @@ async def extract_from_document(
             "extraction_id": extraction_id,
             "document_id": document_id
         })
+
+        reserve_shadow_credits(
+            user=user,
+            operation_type="extraction_run",
+            reference_id=extraction_id,
+            metadata={"from_cache": False, "source": "library_document", "document_id": document_id},
+        )
 
         # Trigger extraction from chunks pipeline
         start_extraction_from_chunks_chain(

@@ -37,17 +37,25 @@ export function createAuthenticatedApi(getToken) {
     timeout: 500_000,
   });
 
-  // Add auth token to all requests
+  // Add auth token to all requests.
+  // getToken() contacts Clerk's servers — wrap in a timeout so a slow/unreachable
+  // Clerk doesn't hang every API request indefinitely.
   authenticatedApi.interceptors.request.use(async (config) => {
     try {
-      const token = await getToken();
+      const token = await Promise.race([
+        getToken(),
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('getToken timeout')), 10_000)
+        ),
+      ]);
       if (token) {
         config.headers.Authorization = `Bearer ${token}`;
       } else {
         console.warn('⚠️ [Auth] No token returned from getToken()');
       }
     } catch (error) {
-      console.error('❌ [Auth] Failed to get auth token:', error);
+      // Log quietly — request proceeds without auth and server returns 401
+      console.warn('⚠️ [Auth] Token fetch failed:', error.message);
     }
     return config;
   });

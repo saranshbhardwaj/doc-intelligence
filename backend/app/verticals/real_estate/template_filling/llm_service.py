@@ -22,7 +22,7 @@ class DetectedField(BaseModel):
     """Schema for a single detected field from PDF."""
     name: str = Field(description="Clear, descriptive field name")
     type: str = Field(description="Data type: text, number, currency, percentage, date")
-    sample_value: str = Field(description="Actual value found in the PDF")
+    extracted_value: str = Field(description="Actual value found in the PDF")
     confidence: float = Field(ge=0.0, le=1.0, description="Confidence in extraction (0.0-1.0)")
     citations: List[str] = Field(description="Citation tokens where field was found (e.g., ['[D1:p2]'])")
     description: str = Field(description="Brief explanation of what this field represents")
@@ -231,7 +231,7 @@ Each chunk has metadata in the header:
 **For each field, provide:**
 - name: Clear, descriptive field name using standard real estate terminology
 - type: Data type (text, number, currency, percentage, date)
-- sample_value: The EXACT value found in the PDF (preserve original formatting)
+- extracted_value: The EXACT value found in the PDF (preserve original formatting)
 - confidence: Your confidence in the extraction (0.0-1.0)
 - citations: Array of citation tokens where this field was found
 - description: Brief explanation of what this field represents
@@ -533,13 +533,13 @@ Each chunk has metadata in the header:
         Remove unnecessary fields from PDF field to reduce tokens (~26% reduction).
 
         Removes: description, source (not used by mapping logic)
-        Keeps: id, name, type, sample_value, confidence, citations (all required)
+        Keeps: id, name, type, extracted_value, confidence, citations (all required)
         """
         return {
             "id": field.get("id"),
             "name": field.get("name"),
             "type": field.get("type"),
-            "sample_value": field.get("sample_value"),
+            "extracted_value": field.get("extracted_value"),
             "confidence": field.get("confidence"),
             "citations": field.get("citations", []),
         }
@@ -678,7 +678,8 @@ Terms in each row are EQUIVALENT. Match in EITHER direction. Case-insensitive.
    - **0.85-0.94**: Strong semantic match with same data type
    - **0.70-0.84**: Moderate match, terminology differs but meaning is clear
    - **0.50-0.69**: Weak match, may need user review
-   - **Below 0.50**: Do NOT create mapping
+   - **0.10-0.49**: Low confidence, user should review
+   - **Below 0.10**: Do NOT create mapping
 
 3. **For each mapping, provide:**
    - `pdf_field_id`: ID of the PDF field
@@ -691,7 +692,7 @@ Terms in each row are EQUIVALENT. Match in EITHER direction. Case-insensitive.
    - `reasoning`: Brief explanation (e.g., "NOI maps to Net Operating Income - standard terminology")
 
 4. **CRITICAL Matching Rules:**
-   - Only create mappings with confidence >= 0.50
+   - Only create mappings with confidence >= 0.10
    - ALWAYS preserve the "citations" array from the PDF field
    - Do NOT map the same PDF field to multiple Excel cells (choose best match)
    - Do NOT map to cells that appear to be formula cells (calculated fields)
@@ -704,27 +705,27 @@ Terms in each row are EQUIVALENT. Match in EITHER direction. Case-insensitive.
 5. **CONCRETE MAPPING EXAMPLES:**
 
    **Example 1 - Terminology Table Match (0.95+ confidence):**
-   - PDF field: `{{"name": "Listing Price", "sample_value": "$2,500,000"}}`
+   - PDF field: `{{"name": "Listing Price", "extracted_value": "$2,500,000"}}`
    - Excel cell: `{{"cell": "C8", "label": "Asking Price", "type": "currency"}}`
    - Result: MAP with confidence 0.95 (terminology table: Price ↔ Asking Price)
 
    **Example 2 - Terminology Table Match (0.95+ confidence):**
-   - PDF field: `{{"name": "Down Payment", "sample_value": "35%"}}`
+   - PDF field: `{{"name": "Down Payment", "extracted_value": "35%"}}`
    - Excel cell: `{{"cell": "D10", "label": "Down Payment %", "type": "percentage"}}`
    - Result: MAP with confidence 0.98 (terminology table: Down Payment ↔ Down Payment %)
 
    **Example 3 - Abbreviation Match (0.95+ confidence):**
-   - PDF field: `{{"name": "Interest Rate", "sample_value": "6.50%"}}`
+   - PDF field: `{{"name": "Interest Rate", "extracted_value": "6.50%"}}`
    - Excel cell: `{{"cell": "E12", "label": "Rate", "type": "percentage"}}`
    - Result: MAP with confidence 0.95 (terminology table: Interest Rate ↔ Rate)
 
    **Example 4 - Semantic Match (0.85 confidence):**
-   - PDF field: `{{"name": "Property Address", "sample_value": "123 Main St"}}`
+   - PDF field: `{{"name": "Property Address", "extracted_value": "123 Main St"}}`
    - Excel cell: `{{"cell": "B3", "label": "Address", "type": "text"}}`
    - Result: MAP with confidence 0.85 (semantic: Property Address → Address)
 
    **Example 5 - Investment Structure (0.95 confidence):**
-   - PDF field: `{{"name": "LP Share", "sample_value": "70%"}}`
+   - PDF field: `{{"name": "LP Share", "extracted_value": "70%"}}`
    - Excel cell: `{{"cell": "F20", "label": "Pre Hurdle Member/LP Split", "type": "percentage"}}`
    - Result: MAP with confidence 0.95 (terminology table: LP Split ↔ Member/LP Split)
 

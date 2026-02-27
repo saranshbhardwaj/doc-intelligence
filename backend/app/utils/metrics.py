@@ -33,6 +33,19 @@ Chat:
 Extractions:
     - extractions_completed_total
     - extractions_failed_total
+External APIs (OpenAI Embeddings):
+    - embedding_requests_total
+    - embedding_failures_total
+    - embedding_retries_total
+    - embedding_latency_seconds
+    - embedding_token_usage_total
+External APIs (Azure Document Intelligence):
+    - azure_di_requests_total
+    - azure_di_failures_total
+    - azure_di_retries_total
+    - azure_di_latency_seconds
+    - azure_di_pages_processed_total
+    - azure_di_cost_usd_total
 """
 from prometheus_client import Counter, Histogram, Gauge
 
@@ -192,6 +205,76 @@ SUMMARY_CACHE_MISSES = Counter(
     "Conversation summary cache misses"
 )
 
+# --- External API observability: OpenAI Embeddings ---
+EMBEDDING_REQUESTS_TOTAL = Counter(
+    "embedding_requests_total",
+    "Total OpenAI embedding API requests",
+    ["model"],
+)
+
+EMBEDDING_FAILURES_TOTAL = Counter(
+    "embedding_failures_total",
+    "Total OpenAI embedding API failures",
+    ["model", "error_type"],  # error_type: rate_limit, overload, timeout, other
+)
+
+EMBEDDING_RETRIES_TOTAL = Counter(
+    "embedding_retries_total",
+    "Total OpenAI embedding API retries",
+    ["model"],
+)
+
+EMBEDDING_LATENCY_SECONDS = Histogram(
+    "embedding_latency_seconds",
+    "OpenAI embedding API call latency in seconds",
+    ["model"],
+    buckets=(0.1, 0.25, 0.5, 1, 2, 5, 10, 30),
+)
+
+EMBEDDING_TOKEN_USAGE = Counter(
+    "embedding_token_usage_total",
+    "Total tokens used by OpenAI embedding API",
+    ["model"],
+)
+
+# --- External API observability: Azure Document Intelligence ---
+AZURE_DI_REQUESTS_TOTAL = Counter(
+    "azure_di_requests_total",
+    "Total Azure Document Intelligence API requests",
+    ["model"],
+)
+
+AZURE_DI_FAILURES_TOTAL = Counter(
+    "azure_di_failures_total",
+    "Total Azure Document Intelligence API failures",
+    ["model", "error_type"],  # error_type: rate_limit, timeout, azure_error, other
+)
+
+AZURE_DI_RETRIES_TOTAL = Counter(
+    "azure_di_retries_total",
+    "Total Azure Document Intelligence API retries",
+    ["model"],
+)
+
+AZURE_DI_LATENCY_SECONDS = Histogram(
+    "azure_di_latency_seconds",
+    "Azure Document Intelligence API call latency in seconds",
+    ["model"],
+    buckets=(1, 2, 5, 10, 30, 60, 120, 300),
+)
+
+AZURE_DI_PAGES_PROCESSED = Counter(
+    "azure_di_pages_processed_total",
+    "Total pages processed by Azure Document Intelligence",
+    ["model"],
+)
+
+AZURE_DI_COST_USD = Counter(
+    "azure_di_cost_usd_total",
+    "Total Azure Document Intelligence cost in USD",
+    ["model"],
+)
+
 # Security metrics
 HTTP_REQUESTS_RATE_LIMITED = Counter(
     "http_requests_rate_limited_total",
@@ -244,6 +327,18 @@ def init_labeled_metrics():
     DOC_CACHE_MISSES.labels(cache_type="redis")
     HTTP_REQUESTS_RATE_LIMITED.labels(path="unknown")
     HTTP_SUSPICIOUS_REQUESTS.labels(pattern="unknown")
+    # External API metrics pre-registration
+    EMBEDDING_REQUESTS_TOTAL.labels(model="text-embedding-3-small")
+    EMBEDDING_FAILURES_TOTAL.labels(model="text-embedding-3-small", error_type="other")
+    EMBEDDING_RETRIES_TOTAL.labels(model="text-embedding-3-small")
+    EMBEDDING_LATENCY_SECONDS.labels(model="text-embedding-3-small")
+    EMBEDDING_TOKEN_USAGE.labels(model="text-embedding-3-small")
+    AZURE_DI_REQUESTS_TOTAL.labels(model="prebuilt-layout")
+    AZURE_DI_FAILURES_TOTAL.labels(model="prebuilt-layout", error_type="other")
+    AZURE_DI_RETRIES_TOTAL.labels(model="prebuilt-layout")
+    AZURE_DI_LATENCY_SECONDS.labels(model="prebuilt-layout")
+    AZURE_DI_PAGES_PROCESSED.labels(model="prebuilt-layout")
+    AZURE_DI_COST_USD.labels(model="prebuilt-layout")
 
 
 __all__ = [
@@ -276,6 +371,17 @@ __all__ = [
     "SUMMARY_CACHE_MISSES",
     "HTTP_REQUESTS_RATE_LIMITED",
     "HTTP_SUSPICIOUS_REQUESTS",
+    "EMBEDDING_REQUESTS_TOTAL",
+    "EMBEDDING_FAILURES_TOTAL",
+    "EMBEDDING_RETRIES_TOTAL",
+    "EMBEDDING_LATENCY_SECONDS",
+    "EMBEDDING_TOKEN_USAGE",
+    "AZURE_DI_REQUESTS_TOTAL",
+    "AZURE_DI_FAILURES_TOTAL",
+    "AZURE_DI_RETRIES_TOTAL",
+    "AZURE_DI_LATENCY_SECONDS",
+    "AZURE_DI_PAGES_PROCESSED",
+    "AZURE_DI_COST_USD",
     "ANTHROPIC_REPORTED_TOKENS",
     "ANTHROPIC_REPORTED_COST_USD",
     "ANTHROPIC_USAGE_LAST_SYNC",

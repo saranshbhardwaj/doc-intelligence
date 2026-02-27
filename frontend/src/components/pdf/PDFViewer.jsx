@@ -76,22 +76,29 @@ export default function PDFViewer({
 
   // Measure container width for responsive sizing using ResizeObserver
   useEffect(() => {
-    const updateWidth = () => {
-      if (containerRef.current) {
-        // Use 90% of container width for padding
-        const width = containerRef.current.offsetWidth * 0.9;
-        setContainerWidth(width);
-      }
+    let debounceTimer = null;
+
+    // Direct set — used only for initial measurement on mount
+    const applyWidth = (width) => setContainerWidth(width);
+
+    // Debounced set — used for all resize events to prevent flash caused by
+    // the Sheet drawer opening/closing (Radix removes the scrollbar ~17px change)
+    const applyWidthDebounced = (width) => {
+      clearTimeout(debounceTimer);
+      debounceTimer = setTimeout(() => applyWidth(width), 150);
     };
 
     // Initial measurement with slight delay to ensure container is rendered
-    const initialTimer = setTimeout(updateWidth, 50);
+    const initialTimer = setTimeout(() => {
+      if (containerRef.current) {
+        applyWidth(containerRef.current.offsetWidth * 0.9);
+      }
+    }, 50);
 
-    // Use ResizeObserver for responsive updates
+    // Use ResizeObserver for responsive updates (debounced)
     const resizeObserver = new ResizeObserver((entries) => {
       for (const entry of entries) {
-        const width = entry.contentRect.width * 0.9;
-        setContainerWidth(width);
+        applyWidthDebounced(entry.contentRect.width * 0.9);
       }
     });
 
@@ -99,13 +106,19 @@ export default function PDFViewer({
       resizeObserver.observe(containerRef.current);
     }
 
-    // Fallback for window resize
-    window.addEventListener('resize', updateWidth);
+    // Fallback for window resize (debounced)
+    const handleWindowResize = () => {
+      if (containerRef.current) {
+        applyWidthDebounced(containerRef.current.offsetWidth * 0.9);
+      }
+    };
+    window.addEventListener('resize', handleWindowResize);
 
     return () => {
       clearTimeout(initialTimer);
+      clearTimeout(debounceTimer);
       resizeObserver.disconnect();
-      window.removeEventListener('resize', updateWidth);
+      window.removeEventListener('resize', handleWindowResize);
     };
   }, []);
 

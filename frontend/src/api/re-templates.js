@@ -44,27 +44,32 @@ export async function getRETemplate(getToken, templateId) {
 }
 
 /**
- * Poll template until schema_metadata is populated (template analysis complete)
- * Returns the populated template or throws timeout error
+ * Poll template until schema_metadata is populated (template analysis complete).
+ *
+ * Uses exponential backoff: 1s → 2s → 4s → 8s (capped), so we check quickly
+ * at first and back off if analysis is slow. Appropriate for background use
+ * where nothing is blocking the UI.
+ *
+ * Returns the populated template or throws on timeout.
  */
-export async function waitForTemplateAnalysis(getToken, templateId, maxWaitMs = 10000) {
+export async function waitForTemplateAnalysis(getToken, templateId, maxWaitMs = 30_000) {
   const startTime = Date.now();
-  const pollInterval = 500; // Check every 500ms
+  let delay = 1_000; // Start at 1s
+  const maxDelay = 8_000; // Cap at 8s
 
   while (Date.now() - startTime < maxWaitMs) {
     const template = await getRETemplate(getToken, templateId);
 
-    // Check if schema_metadata exists and has data
     if (template.schema_metadata && Object.keys(template.schema_metadata).length > 0) {
       return template;
     }
 
-    // Wait before next poll
-    await new Promise(resolve => setTimeout(resolve, pollInterval));
+    await new Promise(resolve => setTimeout(resolve, delay));
+    delay = Math.min(delay * 2, maxDelay); // Exponential backoff
   }
 
-  // Timeout - return what we have
-  console.warn('⚠️ Template analysis timeout, returning current state');
+  // Timeout — return whatever state the template is in now
+  console.warn('Template analysis timeout — returning current state');
   return await getRETemplate(getToken, templateId);
 }
 

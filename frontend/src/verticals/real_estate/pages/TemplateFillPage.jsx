@@ -20,7 +20,7 @@ import { Progress } from '../../../components/ui/progress';
 import { Card } from '../../../components/ui/card';
 import { Alert, AlertDescription, AlertTitle } from '../../../components/ui/alert';
 import AppLayout from '../../../components/layout/AppLayout';
-import { streamTemplateFillProgress, continueFillRun, downloadFilledExcel } from '../../../api/re-templates';
+import { streamTemplateFillProgress, continueFillRun, downloadFilledExcel, startTemplateFill } from '../../../api/re-templates';
 import FeedbackButton from '../../../components/feedback/FeedbackButton';
 import CompletionFeedbackModal from '../../../components/feedback/CompletionFeedbackModal';
 import { shouldPromptForFeedback } from '../../../utils/feedbackRules';
@@ -65,6 +65,7 @@ export default function TemplateFillPage() {
   const [jobProgress, setJobProgress] = useState(0);
   const [jobMessage, setJobMessage] = useState('');
   const [jobStatus, setJobStatus] = useState('idle'); // idle, processing, completed, failed
+  const [isRetrying, setIsRetrying] = useState(false);
 
   // Zustand store
   const {
@@ -284,7 +285,8 @@ export default function TemplateFillPage() {
         }, 100);
       } catch (err) {
         console.error('❌ Failed to download Excel file:', err);
-        alert(`Failed to download Excel file: ${err.message}`);
+        setJobStatus('failed');
+        setJobMessage(`Failed to download Excel file: ${err.message}`);
       }
     } else if (fillRun.status === 'awaiting_review') {
       // Continue with filling the template
@@ -315,6 +317,22 @@ export default function TemplateFillPage() {
     }
   }
 
+  async function handleRetry() {
+    if (!fillRun?.template_id || !fillRun?.document_id) {
+      navigate('/app/re/templates');
+      return;
+    }
+    try {
+      setIsRetrying(true);
+      const newFillRun = await startTemplateFill(getToken, fillRun.template_id, fillRun.document_id);
+      navigate(`/app/re/fills/${newFillRun.fill_run_id}`);
+    } catch (err) {
+      console.error('Failed to retry fill run:', err);
+      setJobMessage('Failed to start new fill: ' + (err.message || 'Unknown error'));
+      setIsRetrying(false);
+    }
+  }
+
   if (isLoading) {
     return (
       <AppLayout>
@@ -331,21 +349,21 @@ export default function TemplateFillPage() {
   if (error) {
     return (
       <AppLayout>
-        <div className="flex items-center justify-center flex-1">
-          <div className="bg-destructive/10 p-6 rounded-lg max-w-md border border-destructive/20">
-            <div className="flex items-center mb-4">
-              <AlertCircle className="h-6 w-6 text-destructive mr-2" />
-              <h2 className="text-lg font-semibold text-foreground">Error</h2>
-            </div>
-            <p className="text-destructive text-sm mb-4">{error}</p>
-            <Button
-              variant="destructive"
-              size="sm"
-              onClick={() => window.location.reload()}
-            >
-              Reload Page
-            </Button>
-          </div>
+        <div className="flex items-center justify-center flex-1 p-6">
+          <Alert variant="destructive" className="max-w-md">
+            <AlertCircle className="h-4 w-4" />
+            <AlertTitle>Failed to load fill run</AlertTitle>
+            <AlertDescription className="mt-2 space-y-3">
+              <p>{error}</p>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => window.location.reload()}
+              >
+                Reload Page
+              </Button>
+            </AlertDescription>
+          </Alert>
         </div>
       </AppLayout>
     );
@@ -408,13 +426,31 @@ export default function TemplateFillPage() {
               <AlertDescription className="mt-2">
                 <div className="space-y-2">
                   <p>{jobMessage}</p>
-                  <Button
-                    variant="outline"
-                    size="sm"
-                    onClick={() => window.location.reload()}
-                  >
-                    Retry
-                  </Button>
+                  {fillRun?.template_id && fillRun?.document_id ? (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={handleRetry}
+                      disabled={isRetrying}
+                    >
+                      {isRetrying ? (
+                        <>
+                          <Loader2 className="h-3 w-3 mr-1.5 animate-spin" />
+                          Starting...
+                        </>
+                      ) : (
+                        'Retry'
+                      )}
+                    </Button>
+                  ) : (
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => navigate('/app/re/templates')}
+                    >
+                      Back to Templates
+                    </Button>
+                  )}
                 </div>
               </AlertDescription>
             </Alert>

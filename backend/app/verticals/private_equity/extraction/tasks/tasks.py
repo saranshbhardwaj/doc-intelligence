@@ -40,6 +40,7 @@ from app.models import ExtractedData
 from app.repositories.extraction_repository import ExtractionRepository
 from app.repositories.document_repository import DocumentRepository
 from app.repositories.user_repository import UserRepository
+from app.services.beta_limits import commit_shadow_credits, reverse_shadow_credits
 from app.utils.logging import logger
 from app.utils.metrics_recorder import record_extraction_completed, record_extraction_failed
 from app.utils.metrics import EXTRACTION_LATENCY_SECONDS
@@ -61,6 +62,15 @@ _DEF_LLMC = lambda: LLMClient(
     max_input_chars=settings.llm_max_input_chars,
     timeout_seconds=settings.synthesis_llm_timeout_seconds,
 )
+
+
+def _reverse_extraction_shadow(extraction_id: str, reason: str, stage: str) -> None:
+    reverse_shadow_credits(
+        operation_type="extraction_run",
+        reference_id=extraction_id,
+        reason=reason,
+        metadata={"stage": stage},
+    )
 
 
 # ============================================================================
@@ -99,6 +109,22 @@ def parse_document_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
     repo = ExtractionRepository()
 
     from PyPDF2 import PdfReader
+    from pathlib import Path
+
+    # Download from storage if file_path is a storage key (R2) rather than a local path.
+    # This supports multi-replica deployments where the API and worker run on separate instances.
+    _local_file_path = None
+    if not Path(file_path).exists():
+        from app.core.storage.storage_factory import get_storage_backend
+        storage = get_storage_backend()
+        _local_file_path = f"/tmp/extraction_{extraction_id}_{filename.replace('/', '_')}"
+        try:
+            storage.download(file_path, _local_file_path)
+            file_path = _local_file_path
+        except Exception as dl_err:
+            tracker.mark_error(error_stage="parsing", error_message=f"Failed to download file from storage: {dl_err}", error_type="storage_error", is_retryable=False)
+            repo.mark_failed(extraction_id, f"Storage download failed: {dl_err}")
+            return {"status": "failed", "error": str(dl_err), "extraction_id": extraction_id}
 
     try:
         # --- ENFORCE USER PAGE LIMITS AT PIPELINE START ---
@@ -107,6 +133,7 @@ def parse_document_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         if not user:
             tracker.mark_error(error_stage="parsing", error_message="User not found", error_type="user_error", is_retryable=False)
             repo.mark_failed(extraction_id, "User not found")
+            _reverse_extraction_shadow(extraction_id, "user_not_found", "parsing")
             return {"status": "failed", "error": "User not found", "extraction_id": extraction_id}
 
         # Edge case: Ensure user has valid tier and limits
@@ -126,46 +153,48 @@ def parse_document_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         except Exception as pdf_err:
             tracker.mark_error(error_stage="parsing", error_message=f"PDF page count error: {pdf_err}", error_type="pdf_error", is_retryable=False)
             repo.mark_failed(extraction_id, f"PDF page count error: {pdf_err}")
+            _reverse_extraction_shadow(extraction_id, "pdf_page_count_error", "parsing")
             return {"status": "failed", "error": f"PDF page count error: {pdf_err}", "extraction_id": extraction_id}
 
         default_limit = getattr(settings, "default_pages_limit", 100)
         pages_limit = user.pages_limit if user.pages_limit is not None else default_limit
 
-        # Edge case: Ensure page limit is positive
-        if pages_limit <= 0:
-            logger.warning(f"User {user_id} has invalid page limit {pages_limit}, using default", extra={"user_id": user_id})
+        # Negative values are invalid. Zero means unlimited.
+        if pages_limit < 0:
+            logger.warning(f"User {user_id} has invalid negative page limit {pages_limit}, using default", extra={"user_id": user_id})
             pages_limit = default_limit
 
         # Edge case: Check for page limit exceeded BEFORE processing
-        if user.tier == "free" and user.total_pages_processed + pre_parse_page_count > pages_limit:
-            error_msg = f"Free tier page limit exceeded (limit: {pages_limit}, requested: {pre_parse_page_count})"
-            tracker.mark_error(
-                error_stage="parsing",
-                error_message=error_msg,
-                error_type="limit_error",
-                is_retryable=False
-            )
-            repo.mark_failed(extraction_id, error_msg)
-            return {"status": "failed", "error": "Free tier page limit exceeded", "extraction_id": extraction_id}
-        elif user.tier != "free" and user.pages_this_month + pre_parse_page_count > pages_limit:
-            error_msg = f"Monthly page limit exceeded (limit: {pages_limit}, requested: {pre_parse_page_count})"
-            tracker.mark_error(
-                error_stage="parsing",
-                error_message=error_msg,
-                error_type="limit_error",
-                is_retryable=False
-            )
-            repo.mark_failed(extraction_id, error_msg)
-            return {"status": "failed", "error": "Monthly page limit exceeded", "extraction_id": extraction_id}
+        if user.tier != "admin" and pages_limit > 0:
+            if user.tier == "free" and user.total_pages_processed + pre_parse_page_count > pages_limit:
+                error_msg = f"Free tier page limit exceeded (limit: {pages_limit}, requested: {pre_parse_page_count})"
+                tracker.mark_error(
+                    error_stage="parsing",
+                    error_message=error_msg,
+                    error_type="limit_error",
+                    is_retryable=False
+                )
+                repo.mark_failed(extraction_id, error_msg)
+                _reverse_extraction_shadow(extraction_id, "free_page_limit_exceeded", "parsing")
+                return {"status": "failed", "error": "Free tier page limit exceeded", "extraction_id": extraction_id}
+            elif user.tier != "free" and user.pages_this_month + pre_parse_page_count > pages_limit:
+                error_msg = f"Monthly page limit exceeded (limit: {pages_limit}, requested: {pre_parse_page_count})"
+                tracker.mark_error(
+                    error_stage="parsing",
+                    error_message=error_msg,
+                    error_type="limit_error",
+                    is_retryable=False
+                )
+                repo.mark_failed(extraction_id, error_msg)
+                _reverse_extraction_shadow(extraction_id, "monthly_page_limit_exceeded", "parsing")
+                return {"status": "failed", "error": "Monthly page limit exceeded", "extraction_id": extraction_id}
 
         # --- CONTINUE WITH PARSING ---
         tracker.update_progress(status="parsing", current_stage="parsing", progress_percent=5, message="Parsing document...")
         pdf_type = detect_pdf_type(file_path)
         tracker.update_progress(progress_percent=8, message=f"Detected {pdf_type} PDF")
 
-        parser = ParserFactory.get_parser(settings.force_user_tier or "free", pdf_type)
-        if not parser:
-            raise ValueError("No parser available for detected PDF type")
+        parser = ParserFactory.get_parser()
 
         # Run async parser in sync Celery task using asyncio.run
         parser_output = asyncio.run(parser.parse(file_path, pdf_type))
@@ -189,6 +218,7 @@ def parse_document_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                 f"Document exceeds extraction page limit: {parser_output.page_count} > {settings.max_pages_per_extraction}",
                 extra={"extraction_id": extraction_id, "page_count": parser_output.page_count}
             )
+            _reverse_extraction_shadow(extraction_id, "document_too_large", "parsing")
             return {
                 "status": "failed",
                 "error": "document_too_large",
@@ -250,9 +280,14 @@ def parse_document_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
     except Exception as e:
         tracker.mark_error(error_stage="parsing", error_message=str(e), error_type="parsing_error", is_retryable=False)
         repo.mark_failed(extraction_id, str(e)[:500])
+        _reverse_extraction_shadow(extraction_id, f"parsing_exception:{type(e).__name__}", "parsing")
         raise
     finally:
         db.close()
+        # Clean up the local temp file we downloaded from storage (if any)
+        if _local_file_path and Path(_local_file_path).exists():
+            import os as _os
+            _os.unlink(_local_file_path)
 
 
 @shared_task(bind=True)
@@ -345,6 +380,7 @@ def chunk_document_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
             repo.mark_failed(extraction_id, str(e)[:500])
         except Exception:
             pass
+        _reverse_extraction_shadow(extraction_id, f"chunking_exception:{type(e).__name__}", "chunking")
         raise
     finally:
         db.close()
@@ -454,6 +490,7 @@ def summarize_context_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
             repo.mark_failed(extraction_id, str(e)[:500])
         except Exception:
             pass
+        _reverse_extraction_shadow(extraction_id, f"summarizing_exception:{type(e).__name__}", "summarizing")
         raise
     finally:
         db.close()
@@ -487,6 +524,7 @@ def extract_structured_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         if not user:
             tracker.mark_error(error_stage="extracting", error_message="User not found", error_type="user_error", is_retryable=False)
             repo.mark_failed(extraction_id, "User not found")
+            _reverse_extraction_shadow(extraction_id, "user_not_found", "extracting")
             return {"status": "failed", "error": "User not found", "extraction_id": extraction_id}
 
         # Re-query extraction via repository to avoid detached instance issues
@@ -548,11 +586,13 @@ def extract_structured_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
 
         # --- UPDATE USAGE AND LOG ---
         try:
+            pages_processed = int(getattr(extraction, "page_count", 0) or 0)
+
             # Use UserRepository for consistent data access
             user_repo_usage = UserRepository()
             success = user_repo_usage.update_page_usage(
                 user_id=user_id,
-                pages_to_add=0,
+                pages_to_add=pages_processed,
                 update_monthly=True
             )
 
@@ -565,12 +605,12 @@ def extract_structured_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                     user_id=user_id,
                     org_id=org_id,
                     extraction_id=extraction_id,
-                    pages_processed=0,
+                    pages_processed=pages_processed,
                     operation_type="extraction",
                     cost_usd=cost_usd
                 )
                 if log_created:
-                    logger.debug(f"Updated user usage: 0 pages", extra={
+                    logger.debug(f"Updated user usage: {pages_processed} pages", extra={
                         "user_id": user_id,
                         "extraction_id": extraction_id
                     })
@@ -614,6 +654,7 @@ def extract_structured_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
     except Exception as e:
         tracker.mark_error(error_stage="extracting", error_message=str(e), error_type="llm_error", is_retryable=True)
         repo.mark_failed(extraction_id, str(e)[:500])
+        _reverse_extraction_shadow(extraction_id, f"extracting_exception:{type(e).__name__}", "extracting")
         # Record metrics
         record_extraction_failed(org_id=extraction.org_id if extraction else None)
 
@@ -715,6 +756,7 @@ def store_extraction_result_task(self, payload: Dict[str, Any]) -> Dict[str, Any
             "Extraction result stored successfully",
             extra={"extraction_id": extraction_id, "artifact_backend": artifact_pointer.get("backend", "inline")}
         )
+        commit_shadow_credits(operation_type="extraction_run", reference_id=extraction_id)
 
         return {
             **payload,
@@ -741,6 +783,7 @@ def store_extraction_result_task(self, payload: Dict[str, Any]) -> Dict[str, Any
                 error_type="storage_error",
                 is_retryable=True
             )
+        _reverse_extraction_shadow(extraction_id, "store_result_failed", "storing")
 
         return {
             **payload,
@@ -856,6 +899,7 @@ def start_extraction_from_chunks_task(self, payload: Dict[str, Any]) -> Dict[str
             error_type="chunk_load_error",
             is_retryable=True
         )
+        _reverse_extraction_shadow(extraction_id, "load_chunks_failed", "loading_chunks")
 
         return {
             **payload,

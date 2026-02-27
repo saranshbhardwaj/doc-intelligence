@@ -8,7 +8,8 @@
 import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "@clerk/clerk-react";
-import { FileText, Sparkles, ArrowLeft, Settings, Plus, X, Clock } from "lucide-react";
+import { FileText, Sparkles, ArrowLeft, Settings, Plus, X, Clock, AlertCircle } from "lucide-react";
+import { toast } from "sonner";
 
 // Only these workflow names are fully functional. All others show as "Coming Soon".
 const WORKING_WORKFLOWS = new Set(["Investment Memo"]);
@@ -26,6 +27,63 @@ import { streamWorkflowProgress } from "../api/workflows";
 import axios from "axios";
 
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
+
+/**
+ * Format workflow error messages for user-friendly display
+ * @param {Error|Object} error - Axios error or error object
+ * @returns {Object} { title: string, message: string }
+ */
+function formatWorkflowError(error) {
+  // Log the full error for debugging
+  console.error("Full error object:", error);
+  console.error("Error response data:", error.response?.data);
+  console.error("Error response status:", error.response?.status);
+
+  const errorData = error.response?.data || {};
+  const status = error.response?.status;
+  const errorType = errorData.error_type || errorData.error;
+
+  switch (errorType) {
+    case "workflow_limit_exceeded":
+      return {
+        title: "Workflow Limit Reached",
+        message: `You've reached the workflow run limit (${errorData.used || "?"} of ${errorData.limit || "?"} runs used on this beta account). Contact your admin to increase the limit.`,
+      };
+    case "not_found":
+      return {
+        title: "Workflow Not Found",
+        message: "The workflow you're trying to run no longer exists.",
+      };
+    case "unauthorized":
+      return {
+        title: "Access Denied",
+        message: "You don't have permission to run this workflow.",
+      };
+    default:
+      // Handle different status codes
+      if (status === 403) {
+        return {
+          title: "Permission Denied",
+          message: "You don't have permission to run workflows. Contact your admin to enable this feature.",
+        };
+      }
+      if (status === 401) {
+        return {
+          title: "Authentication Required",
+          message: "Your session has expired. Please refresh the page.",
+        };
+      }
+      return {
+        title: "Workflow Error",
+        message: String(
+          errorData.detail ||
+          errorData.message ||
+          error.message ||
+          "Failed to start workflow"
+        ),
+      };
+  }
+}
 
 export default function WorkflowSimplePage() {
   const navigate = useNavigate();
@@ -200,12 +258,12 @@ export default function WorkflowSimplePage() {
       startWorkflowExecution(jobId, runId, cleanup);
     } catch (error) {
       console.error("Failed to start workflow:", error);
-      const errorMsg =
-        error.response?.data?.detail ||
-        error.message ||
-        "Failed to start workflow";
-      failWorkflowExecution(errorMsg);
-      alert(`Error: ${errorMsg}`);
+      const { title, message } = formatWorkflowError(error);
+      failWorkflowExecution(message);
+      toast.error(message, {
+        description: title,
+        duration: 6000,
+      });
     }
   };
 
@@ -466,7 +524,7 @@ export default function WorkflowSimplePage() {
                 )}
               </Button>
 
-              {/* Elegant Progress Indicator */}
+              {/* Progress Indicator */}
               {execution && execution.isProcessing && (
                 <div className="mt-4 p-4 bg-primary/5 rounded-lg border border-primary/20">
                   <div className="flex items-center justify-between mb-2">
@@ -483,11 +541,21 @@ export default function WorkflowSimplePage() {
                     className="h-2"
                     showShimmer={true}
                   />
-                  {execution.stage === "failed" && (
-                    <p className="mt-2 text-xs text-destructive">
-                      {execution.message}
-                    </p>
-                  )}
+                </div>
+              )}
+
+              {/* Error state — shown after failure, persists until next run */}
+              {execution && !execution.isProcessing && execution.stage === "failed" && (
+                <div className="mt-4 p-4 bg-destructive/10 rounded-lg border border-destructive/30">
+                  <div className="flex items-start gap-2">
+                    <AlertCircle className="h-4 w-4 text-destructive mt-0.5 flex-shrink-0" />
+                    <div>
+                      <p className="text-sm font-medium text-destructive">Workflow failed</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        {execution.message || "An unexpected error occurred. Please try again."}
+                      </p>
+                    </div>
+                  </div>
                 </div>
               )}
 

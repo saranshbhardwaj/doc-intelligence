@@ -22,26 +22,15 @@ import {
   MessageSquare,
   FileText,
   CheckCircle,
-  Clock,
-  XCircle,
   X,
-  ChevronDown,
   Sparkles,
   Folder,
   Search,
-  Filter,
 } from "lucide-react";
 import { Button } from "../ui/button";
 import { Card } from "../ui/card";
 import { Checkbox } from "../ui/checkbox";
 import { Input } from "../ui/input";
-import {
-  Select,
-  SelectTrigger,
-  SelectValue,
-  SelectContent,
-  SelectItem,
-} from "../ui/select";
 import { Combobox } from "../ui/combobox";
 import Spinner from "../common/Spinner";
 import { getCollection } from "../../api/chat";
@@ -60,9 +49,8 @@ export default function EmptyState({
   const [localSelectedDocs, setLocalSelectedDocs] = useState(selectedDocumentIds);
   const [selectedDocsInfo, setSelectedDocsInfo] = useState([]); // Store {id, name, collection} for display
 
-  // Search and filter state
+  // Search state
   const [documentSearchQuery, setDocumentSearchQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState("all");
 
   // Auto-select first collection
   useEffect(() => {
@@ -141,30 +129,44 @@ export default function EmptyState({
     }
   };
 
-  // Filter and process documents
+  const handleSelectAll = () => {
+    const selectedCollection = collections.find((c) => c.id === selectedCollectionId);
+    const allInView = filteredDocuments.map((doc) => doc.id);
+    const allSelected = allInView.every((id) => localSelectedDocs.includes(id));
+
+    if (allSelected) {
+      const newSelection = localSelectedDocs.filter((id) => !allInView.includes(id));
+      const newDocsInfo = selectedDocsInfo.filter((d) => !allInView.includes(d.id));
+      setLocalSelectedDocs(newSelection);
+      setSelectedDocsInfo(newDocsInfo);
+      onSelectDocuments?.(newSelection);
+    } else {
+      const toAdd = filteredDocuments.filter((doc) => !localSelectedDocs.includes(doc.id));
+      const newSelection = [...localSelectedDocs, ...toAdd.map((d) => d.id)];
+      const newDocsInfo = [
+        ...selectedDocsInfo,
+        ...toAdd.map((d) => ({
+          id: d.id,
+          name: d.filename,
+          collection: selectedCollection?.name || "Unknown",
+        })),
+      ];
+      setLocalSelectedDocs(newSelection);
+      setSelectedDocsInfo(newDocsInfo);
+      onSelectDocuments?.(newSelection);
+    }
+  };
+
+  // Only show completed documents, filtered by search
   const filteredDocuments = useMemo(() => {
-    let filtered = [...collectionDocuments];
-
-    // Search filter
-    if (documentSearchQuery.trim()) {
-      const query = documentSearchQuery.toLowerCase();
-      filtered = filtered.filter((doc) =>
-        doc.filename.toLowerCase().includes(query)
+    return collectionDocuments
+      .filter((doc) => doc.status === "completed")
+      .filter((doc) =>
+        documentSearchQuery.trim()
+          ? doc.filename.toLowerCase().includes(documentSearchQuery.toLowerCase())
+          : true
       );
-    }
-
-    // Status filter
-    if (statusFilter !== "all") {
-      filtered = filtered.filter((doc) => doc.status === statusFilter);
-    }
-
-    return filtered;
-  }, [collectionDocuments, documentSearchQuery, statusFilter]);
-
-  // Completed documents only (for old logic)
-  const completedDocuments = filteredDocuments.filter(
-    (doc) => doc.status === "completed"
-  );
+  }, [collectionDocuments, documentSearchQuery]);
 
   return (
     <div className="flex-1 flex flex-col bg-background">
@@ -289,15 +291,20 @@ export default function EmptyState({
                       Select Documents
                     </label>
                   </div>
-                  {completedDocuments.length > 0 && (
-                    <span className="text-xs text-muted-foreground">
-                      {completedDocuments.length} available
-                    </span>
+                  {filteredDocuments.length > 0 && (
+                    <button
+                      onClick={handleSelectAll}
+                      className="text-xs text-primary hover:text-primary/80 font-medium transition-colors"
+                    >
+                      {filteredDocuments.every((doc) => localSelectedDocs.includes(doc.id))
+                        ? "Deselect all"
+                        : `Select all (${filteredDocuments.length})`}
+                    </button>
                   )}
                 </div>
 
-                {/* Document Search and Filter */}
-                <div className="space-y-2 mb-3">
+                {/* Document Search */}
+                <div className="mb-3">
                   <div className="relative">
                     <Search className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
                     <Input
@@ -307,32 +314,19 @@ export default function EmptyState({
                       className="pl-9 h-10"
                     />
                   </div>
-
-                  <div className="flex items-center gap-2">
-                    <Filter className="w-4 h-4 text-muted-foreground" />
-                    <Select
-                      value={statusFilter}
-                      onValueChange={setStatusFilter}
-                    >
-                      <SelectTrigger className="h-9 text-sm bg-background">
-                        <SelectValue placeholder="Filter by status..." />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all">All Status</SelectItem>
-                        <SelectItem value="completed">Completed</SelectItem>
-                        <SelectItem value="processing">Processing</SelectItem>
-                        <SelectItem value="failed">Failed</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-
-                  {/* Results count */}
-                  {(documentSearchQuery || statusFilter !== "all") && (
-                    <p className="text-xs text-muted-foreground">
-                      Showing {filteredDocuments.length} of {collectionDocuments.length} documents
+                  {documentSearchQuery && (
+                    <p className="text-xs text-muted-foreground mt-1.5">
+                      Showing {filteredDocuments.length} of {collectionDocuments.filter((d) => d.status === "completed").length} documents
                     </p>
                   )}
                 </div>
+
+                {/* Change Collection Helper */}
+                {collectionDocuments.filter((d) => d.status === "completed").length > 0 && collections.length > 1 && (
+                  <p className="text-xs text-muted-foreground mb-3">
+                    Switch collection above to add documents from other collections.
+                  </p>
+                )}
 
                 {loadingDocuments ? (
                   <div className="flex items-center justify-center py-12">
@@ -342,59 +336,45 @@ export default function EmptyState({
                   <div className="text-center py-12 bg-muted/30 rounded-lg border border-dashed border-border">
                     <FileText className="w-12 h-12 text-muted-foreground mx-auto mb-3 opacity-40" />
                     <p className="text-sm text-muted-foreground mb-1">
-                      {documentSearchQuery || statusFilter !== "all"
-                        ? "No documents match your filters"
-                        : "No documents in this collection"}
+                      {documentSearchQuery
+                        ? "No documents match your search"
+                        : "No completed documents in this collection"}
                     </p>
                     <p className="text-xs text-muted-foreground">
-                      {documentSearchQuery || statusFilter !== "all"
-                        ? "Try adjusting your search or filter"
-                        : "Upload documents from the Library page"}
+                      {documentSearchQuery
+                        ? "Try a different search term"
+                        : "Upload and index documents from the Library page"}
                     </p>
                   </div>
                 ) : (
                   <div className="space-y-2 max-h-[400px] overflow-y-auto pr-2 scrollbar-thin">
                     {filteredDocuments.map((doc) => {
                       const isSelected = localSelectedDocs.includes(doc.id);
-                      const isCompleted = doc.status === "completed";
 
                       return (
                         <div
                           key={doc.id}
-                          className={`group p-4 rounded-lg border transition-all ${
+                          className={`group p-4 rounded-lg border transition-all cursor-pointer ${
                             isSelected
                               ? "border-primary bg-primary/5"
-                              : isCompleted
-                              ? "border-border hover:border-muted-foreground/30 hover:bg-muted/30"
-                              : "border-border bg-muted/20 opacity-60"
-                          } ${isCompleted ? "cursor-pointer" : "cursor-not-allowed"}`}
-                          onClick={() => isCompleted && handleToggleDocument(doc)}
+                              : "border-border hover:border-muted-foreground/30 hover:bg-muted/30"
+                          }`}
+                          onClick={() => handleToggleDocument(doc)}
                         >
                           <div className="flex items-start gap-3">
-                            {/* Checkbox */}
-                            {isCompleted ? (
-                              <Checkbox
-                                id={`doc-${doc.id}`}
-                                checked={isSelected}
-                                onCheckedChange={() => handleToggleDocument(doc)}
-                                className="mt-1"
-                                onClick={(e) => e.stopPropagation()}
-                              />
-                            ) : (
-                              <div className="w-4 h-4 mt-1" />
-                            )}
+                            <Checkbox
+                              id={`doc-${doc.id}`}
+                              checked={isSelected}
+                              onCheckedChange={() => handleToggleDocument(doc)}
+                              className="mt-1"
+                              onClick={(e) => e.stopPropagation()}
+                            />
 
                             {/* Document Info */}
                             <div className="flex-1 min-w-0">
                               <div className="flex items-start justify-between gap-3">
                                 <div className="flex-1 min-w-0">
-                                  <h4
-                                    className={`text-sm font-medium truncate ${
-                                      isCompleted
-                                        ? "text-foreground"
-                                        : "text-muted-foreground"
-                                    }`}
-                                  >
+                                  <h4 className="text-sm font-medium truncate text-foreground">
                                     {doc.filename}
                                   </h4>
                                   <div className="flex items-center gap-3 mt-1.5">
@@ -407,24 +387,11 @@ export default function EmptyState({
                                   </div>
                                 </div>
 
-                                {/* Status Badge */}
                                 <div className="flex-shrink-0">
-                                  {doc.status === "completed" ? (
-                                    <div className="flex items-center gap-1.5 px-2 py-1 bg-success/10 text-success rounded text-xs font-medium">
-                                      <CheckCircle className="w-3 h-3" />
-                                      Ready
-                                    </div>
-                                  ) : doc.status === "processing" ? (
-                                    <div className="flex items-center gap-1.5 px-2 py-1 bg-warning/10 text-warning rounded text-xs font-medium">
-                                      <Clock className="w-3 h-3" />
-                                      Processing
-                                    </div>
-                                  ) : (
-                                    <div className="flex items-center gap-1.5 px-2 py-1 bg-destructive/10 text-destructive rounded text-xs font-medium">
-                                      <XCircle className="w-3 h-3" />
-                                      Failed
-                                    </div>
-                                  )}
+                                  <div className="flex items-center gap-1.5 px-2 py-1 bg-success/10 text-success rounded text-xs font-medium">
+                                    <CheckCircle className="w-3 h-3" />
+                                    Ready
+                                  </div>
                                 </div>
                               </div>
                             </div>
@@ -435,14 +402,6 @@ export default function EmptyState({
                   </div>
                 )}
 
-                {/* Change Collection Helper */}
-                {completedDocuments.length > 0 && (
-                  <div className="mt-4 p-3 bg-muted/30 rounded-lg border border-border">
-                    <p className="text-xs text-muted-foreground">
-                      💡 <strong>Tip:</strong> Select a different collection from the dropdown above to add more documents from other collections.
-                    </p>
-                  </div>
-                )}
               </div>
             )}
           </Card>

@@ -88,9 +88,13 @@ def create_embedding_provider(settings: Settings) -> EmbeddingProvider:
                 f"Set OPENAI_EMBEDDING_MODEL in your .env file."
             )
 
+        # Pass custom dimensions if configured (Matryoshka dimensionality reduction)
+        dimensions = getattr(settings, 'openai_embedding_dimensions', None)
+
         return OpenAIEmbedding(
             api_key=settings.openai_api_key,
-            model_name=model_name
+            model_name=model_name,
+            dimensions=dimensions
         )
 
     else:

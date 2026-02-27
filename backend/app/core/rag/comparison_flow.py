@@ -7,6 +7,7 @@ import logging
 
 from app.config import settings
 from app.repositories.document_repository import DocumentRepository
+from app.database import AsyncSessionLocal
 
 logger = logging.getLogger(__name__)
 
@@ -51,16 +52,34 @@ class ComparisonChatHandler:
             }
         )
 
-        comparison_context = await self.comparison_retriever.retrieve_for_comparison(
-            query=user_message,
-            document_ids=document_ids,
-            collection_id=collection_id,
-            chunks_per_doc=getattr(settings, "comparison_chunks_per_doc", 10),
-            similarity_threshold=getattr(settings, "comparison_similarity_threshold", 0.6),
-            max_documents=getattr(settings, "comparison_max_documents", 5),
-            query_understanding=query_understanding,
-            async_session=None
+        # Compute per-doc chunk budget proportional to page count so larger
+        # documents get more representation than short ones.
+        base_chunks = getattr(settings, "comparison_chunks_per_doc", 10)
+        doc_meta = self.document_repo.get_doc_metadata_by_ids(document_ids)
+        page_counts = {m["id"]: (m["page_count"] or 1) for m in doc_meta}
+        total_pages = sum(page_counts.values()) or 1
+        chunks_per_doc_map: Dict[str, int] = {}
+        for doc_id in document_ids:
+            pages = page_counts.get(doc_id, 1)
+            allocated = round((pages / total_pages) * base_chunks * len(document_ids))
+            chunks_per_doc_map[doc_id] = max(3, min(base_chunks * 2, allocated))
+        logger.info(
+            "Adaptive comparison chunk allocation",
+            extra={"session_id": session_id, "chunks_per_doc_map": chunks_per_doc_map}
         )
+
+        async with AsyncSessionLocal() as async_session:
+            comparison_context = await self.comparison_retriever.retrieve_for_comparison(
+                query=user_message,
+                document_ids=document_ids,
+                collection_id=collection_id,
+                chunks_per_doc=base_chunks,
+                chunks_per_doc_map=chunks_per_doc_map,
+                similarity_threshold=getattr(settings, "comparison_similarity_threshold", 0.6),
+                max_documents=getattr(settings, "comparison_max_documents", 5),
+                query_understanding=query_understanding,
+                async_session=async_session
+            )
 
         num_paired = len(comparison_context.paired_chunks) if comparison_context.paired_chunks else 0
         num_clustered = len(comparison_context.clustered_chunks) if comparison_context.clustered_chunks else 0
@@ -75,6 +94,41 @@ class ComparisonChatHandler:
                 "document_names": [doc.filename for doc in comparison_context.documents]
             }
         )
+
+        # Detect asymmetric context: any document with zero paired/clustered/unpaired chunks
+        # signals that entity matching or retrieval failed for that document.
+        all_represented: set = set()
+        for pair in (comparison_context.paired_chunks or []):
+            all_represented.add(pair.chunk_a.get("document_id"))
+            all_represented.add(pair.chunk_b.get("document_id"))
+        for cluster in (comparison_context.clustered_chunks or []):
+            all_represented.update(cluster.chunks.keys())
+        for doc_id, chunks in (comparison_context.unpaired_chunks or {}).items():
+            if chunks:
+                all_represented.add(doc_id)
+
+        missing_docs = [
+            {"id": d.id, "filename": d.filename}
+            for d in comparison_context.documents
+            if d.id not in all_represented
+        ]
+        if missing_docs:
+            logger.warning(
+                "Comparison asymmetry: documents with no matching chunks",
+                extra={
+                    "session_id": session_id,
+                    "missing": [m["filename"] for m in missing_docs],
+                }
+            )
+            yield ("comparison_warning", {
+                "missing_documents": missing_docs,
+                "message": "No relevant content found for: "
+                    + ", ".join(m["filename"] for m in missing_docs)
+                    + ". Comparison may be incomplete.",
+            })
+            # Continue — partial comparison is better than nothing
+
+        yield ("thinking", "Extracting key facts from each document...")
 
         # Extract facts (optional)
         document_facts = None
@@ -228,6 +282,8 @@ class ComparisonChatHandler:
         assistant_message = ""
         usage_info = {}
 
+        yield ("thinking", "Generating comparison response...")
+
         try:
             logger.info("Streaming comparison response from LLM", extra={"session_id": session_id, "user_id": user_id})
 
@@ -235,7 +291,7 @@ class ComparisonChatHandler:
                 if event["type"] == "chunk":
                     chunk_text = event["text"]
                     assistant_message += chunk_text
-                    yield chunk_text
+                    yield ("chunk", chunk_text)
                 elif event["type"] == "usage":
                     usage_info = event["data"]
                     logger.debug(

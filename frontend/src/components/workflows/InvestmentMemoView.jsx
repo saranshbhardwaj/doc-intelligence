@@ -37,7 +37,7 @@ export default function InvestmentMemoView({ artifact, run, onCitationClick }) {
   return (
     <div className="space-y-6">
       {/* Hero Header */}
-      <Card className="bg-gradient-to-r from-primary via-primary/90 to-primary/80 rounded-xl shadow-2xl overflow-hidden">
+      <Card className="bg-gradient-to-r from-primary via-primary/90 to-primary/80 rounded-xl shadow-2xl overflow-hidden print:break-inside-avoid">
         <div className="p-8 text-primary-foreground">
           <div className="flex items-start justify-between gap-6">
             <div className="flex-1">
@@ -115,7 +115,7 @@ export default function InvestmentMemoView({ artifact, run, onCitationClick }) {
 
       {/* Management & Culture */}
       {data.management && (
-        <Card className="rounded-xl shadow-lg overflow-hidden border-l-4 border-primary">
+        <Card className="rounded-xl shadow-lg overflow-hidden border-l-4 border-primary print:break-inside-avoid">
           <div className="px-6 py-4 bg-gradient-to-r from-primary/5 to-primary/10 dark:from-primary/10 dark:to-primary/20 border-b border-border">
             <div className="flex items-center gap-3">
               <div className="p-2 bg-primary/10 rounded-lg">
@@ -240,7 +240,7 @@ export default function InvestmentMemoView({ artifact, run, onCitationClick }) {
 
       {/* ESG Snapshot */}
       {data.esg && (
-        <Card className="rounded-xl shadow-lg overflow-hidden border-l-4 border-success">
+        <Card className="rounded-xl shadow-lg overflow-hidden border-l-4 border-success print:break-inside-avoid">
           <div className="px-6 py-4 bg-gradient-to-r from-success/5 to-success/10 dark:from-success/10 dark:to-success/20 border-b border-border">
             <div className="flex items-center gap-3">
               <div className="p-2 bg-success/10 rounded-lg">
@@ -294,7 +294,7 @@ export default function InvestmentMemoView({ artifact, run, onCitationClick }) {
 
       {/* Inconsistencies */}
       {data.inconsistencies && data.inconsistencies.length > 0 && (
-        <Card className="rounded-xl shadow-lg overflow-hidden border-l-4 border-warning">
+        <Card className="rounded-xl shadow-lg overflow-hidden border-l-4 border-warning print:break-inside-avoid">
           <div className="px-6 py-4 bg-gradient-to-r from-warning/5 to-warning/10 dark:from-warning/10 dark:to-warning/20 border-b border-border">
             <div className="flex items-center gap-3">
               <div className="p-2 bg-warning/10 rounded-lg">
@@ -318,7 +318,7 @@ export default function InvestmentMemoView({ artifact, run, onCitationClick }) {
       )}
 
       {/* Footer */}
-      <Card className="rounded-xl p-6 text-center text-sm text-muted-foreground bg-gradient-to-br from-background to-muted/20">
+      <Card className="rounded-xl p-6 text-center text-sm text-muted-foreground bg-gradient-to-br from-background to-muted/20 print:break-inside-avoid">
         <p className="font-medium">
           This is a confidential document prepared for investment evaluation
           purposes.

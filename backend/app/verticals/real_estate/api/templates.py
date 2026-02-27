@@ -24,6 +24,7 @@ from app.repositories.document_repository import DocumentRepository
 from app.repositories.job_repository import JobRepository
 from app.repositories.template_repository import TemplateRepository
 from app.core.storage.storage_factory import get_storage_backend
+from app.services.beta_limits import enforce_template_fill_limit, reserve_shadow_credits
 from app.utils.logging import logger
 from app.utils.id_generator import generate_id
 from app.verticals.real_estate.template_filling.excel_handler import ExcelHandler
@@ -207,8 +208,15 @@ async def upload_template(
             category=category,
         )
 
-        # Now upload to storage using the real template ID WITH CORRECT EXTENSION
-        storage_key = f"templates/{user.id}/{template.id}{file_ext}"
+        # Generate storage key: templates/{YYYY}/{MM}/{DD}/{template_id}_{filename}
+        # Date-partitioned, consistent with workflow-artifacts. Readable in R2 browser.
+        from datetime import datetime as _dt
+        _now = _dt.utcnow()
+        safe_template_filename = file.filename.replace("/", "_").replace("\\", "_")
+        storage_key = (
+            f"templates/{_now.year}/{_now.month:02d}/{_now.day:02d}"
+            f"/{template.id}_{safe_template_filename}"
+        )
         storage.upload(temp_path, storage_key)
 
         # Update template with correct file path
@@ -542,12 +550,21 @@ async def start_fill(
         if not template or template.user_id != user.id:
             raise HTTPException(status_code=404, detail="Template not found")
 
+        enforce_template_fill_limit(user)
+
         # Start async pipeline (worker will create JobState and TemplateFillRun)
         fill_run_id = start_fill_run_chain.delay(
             template_id=template_id,
             document_id=request.document_id,
             user_id=user.id,
         ).get()  # Wait for initial setup to complete
+
+        reserve_shadow_credits(
+            user=user,
+            operation_type="template_fill_run",
+            reference_id=fill_run_id,
+            metadata={"template_id": template_id, "document_id": request.document_id},
+        )
 
         logger.info(f"Fill run started: {fill_run_id}")
 

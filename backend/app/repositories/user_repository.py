@@ -115,6 +115,10 @@ class UserRepository:
                     extra={"user_id": user_id, "org_id": org_id, "email": email, "tier": tier, "status": status}
                 )
 
+                if status == "pending_approval":
+                    from app.utils.notifications import send_pending_user_notification
+                    send_pending_user_notification(email=email, user_id=user_id)
+
                 return user
 
             except IntegrityError:

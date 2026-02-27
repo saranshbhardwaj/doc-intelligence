@@ -6,6 +6,7 @@ Enables gradual migration from local storage to cloud storage without breaking e
 
 import os
 import shutil
+import tempfile
 from abc import ABC, abstractmethod
 from pathlib import Path
 from typing import Optional
@@ -94,6 +95,22 @@ class StorageBackend(ABC):
             Should not raise if file doesn't exist (idempotent)
         """
         pass
+
+    def download_to_temp(self, storage_key: str) -> str:
+        """
+        Download storage_key to an auto-named temp file.
+
+        Uses mkstemp for atomic file creation (no race conditions, works on all OS).
+        Caller is responsible for deleting the file when done.
+
+        Returns:
+            Absolute path to the temp file (e.g. /tmp/tmpXXXXXX.xlsx)
+        """
+        ext = os.path.splitext(storage_key)[1]  # e.g. ".xlsx"
+        fd, temp_path = tempfile.mkstemp(suffix=ext)
+        os.close(fd)  # close fd — self.download() will write via its own file handle
+        self.download(storage_key, temp_path)
+        return temp_path
 
     @abstractmethod
     def get_storage_type(self) -> str:
@@ -344,7 +361,7 @@ def is_legacy_path(file_path: str) -> bool:
         True if legacy local path, False if R2 storage key
     """
     # R2 storage keys start with specific prefixes
-    r2_prefixes = ["documents/", "templates/", "fills/"]
+    r2_prefixes = ["documents/", "templates/", "fills/", "extractions/", "workflow-artifacts/"]
 
     return not any(file_path.startswith(prefix) for prefix in r2_prefixes)
 

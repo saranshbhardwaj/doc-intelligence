@@ -5,6 +5,7 @@ from sqlalchemy.orm import Session
 from app.auth import get_current_user, get_current_org_role, is_admin_role
 from app.db_models_users import User
 from app.repositories.extraction_repository import ExtractionRepository
+from app.services.beta_limits import get_usage_snapshot
 from app.utils.logging import logger
 from pathlib import Path
 from app.config import settings
@@ -25,6 +26,7 @@ def get_current_user_info(user: User = Depends(get_current_user)):
         pages_remaining = max(0, user.pages_limit - user.pages_this_month)
 
     percentage_used = (pages_used / user.pages_limit * 100) if user.pages_limit > 0 else 0
+    limits = get_usage_snapshot(user)
 
     return {
         "id": user.id,
@@ -38,6 +40,7 @@ def get_current_user_info(user: User = Depends(get_current_user)):
             "pages_this_month": user.pages_this_month,
             "percentage_used": round(percentage_used, 1)
         },
+        "limits": limits,
         "subscription": {
             "status": user.subscription_status,
             "billing_period_end": user.billing_period_end.isoformat() if user.billing_period_end else None

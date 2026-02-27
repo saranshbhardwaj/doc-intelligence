@@ -10,6 +10,7 @@ from app.db_models_workflows import Workflow, WorkflowRun
 from app.repositories.document_repository import DocumentRepository
 from app.auth import get_current_user, get_current_org_role, is_admin_role
 from app.db_models_users import User
+from app.services.beta_limits import enforce_workflow_limit, reserve_shadow_credits
 from app.utils.logging import logger
 from app.verticals.private_equity.workflows.tasks import start_workflow_chain
 from app.schemas.workflows import (
@@ -232,6 +233,8 @@ def create_workflow_run(payload: CreateWorkflowRunRequest, user: User = Depends(
     mode = "multi_doc"
     strategy = payload.strategy or ("retrieval")
 
+    enforce_workflow_limit(user)
+
     run = repo.create_run(
         workflow=workflow,
         user_id=user.id,
@@ -248,6 +251,13 @@ def create_workflow_run(payload: CreateWorkflowRunRequest, user: User = Depends(
     job_repo = JobRepository()
     job = job_repo.create_job(workflow_run_id=run.id, status="queued", current_stage="queued", message="Workflow queued")
     job_id = job.job_id if job else None  # FIXED: Use job.job_id instead of job.id
+
+    reserve_shadow_credits(
+        user=user,
+        operation_type="workflow_run",
+        reference_id=run.id,
+        metadata={"workflow_id": workflow.id, "document_count": len(doc_ids), "route": "create"},
+    )
 
     logger.info("Workflow run created", extra={"workflow_id": workflow.id, "run_id": run.id, "job_id": job_id, "user_id": user.id})
     try:
@@ -609,8 +619,16 @@ def export_workflow_run(
 
             b, filename, ctype = exporter.export_to_excel(full_artifact, run_metadata)
 
+        elif format in ['pdf']:
+            # PDF export is handled client-side (browser print).
+            # Reject server-side PDF requests with a clear error.
+            raise HTTPException(
+                status_code=501,
+                detail="PDF export is handled in the browser. Use the Export → PDF button in the UI."
+            )
+
         else:
-            # Use old exporter for PDF and MD
+            # Markdown and any other legacy formats
             from app.services.exporter import export_bytes
             b, filename, ctype = export_bytes(obj, fmt=format)
 
@@ -745,6 +763,8 @@ def rerun_workflow(
     mode = "single_doc" if len(doc_ids) == 1 else "multi_doc"
     strategy = payload.strategy or ("full_context" if mode == "single_doc" else "retrieval")
 
+    enforce_workflow_limit(user)
+
     # Create new run
     run = repo.create_run(
         workflow=workflow,
@@ -780,6 +800,13 @@ def rerun_workflow(
     # Kick off workflow chain
     from app.verticals.private_equity.workflows.tasks import start_workflow_chain
     start_workflow_chain(run.id, job_id, custom_prompt=payload.custom_prompt)
+
+    reserve_shadow_credits(
+        user=user,
+        operation_type="workflow_run",
+        reference_id=run.id,
+        metadata={"workflow_id": workflow.id, "document_count": len(doc_ids), "route": "rerun", "original_run_id": run_id},
+    )
 
     # Return response
     return WorkflowRunOut(

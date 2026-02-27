@@ -102,14 +102,14 @@ class DocumentChunk(Base):
     tables = Column(JSONB, nullable=True)  # Structured table metadata: [{"table_id": 0, "text": "...", "row_count": 2, "column_count": 3}]
     chunk_index = Column(Integer, nullable=False)  # Order within document (0, 1, 2, ...)
 
-    # Full-text search vector (auto-generated from text column)
-    # PostgreSQL tsvector for keyword/lexical search (BM25-like ranking)
-    # Automatically maintained by PostgreSQL trigger (see migration)
+    # Full-text search vector for keyword/lexical search (BM25-like ranking via ts_rank_cd).
+    # AUTO-POPULATED by PostgreSQL trigger `tsvector_update` (migration c4d5e6f7a8b9).
+    # Do NOT set this column in application code — the DB trigger handles it on every INSERT/UPDATE.
     text_search_vector = Column(TSVECTOR, nullable=True)
 
-    # Embedding vector (384 dimensions for all-MiniLM-L6-v2)
-    # NOTE: If you change embedding models, you'll need a new migration
-    embedding = Column(Vector(384), nullable=True)
+    # Embedding vector (768 dimensions for text-embedding-3-small with dimensions=768)
+    # NOTE: If you change embedding dimensions, you'll need a new migration
+    embedding = Column(Vector(768), nullable=True)
     embedding_model = Column(String(100), nullable=True)  # Track which model created this embedding
     embedding_version = Column(String(20), nullable=True)  # Model version for gradual migration
 

@@ -6,11 +6,12 @@
 import React, { useState, useEffect } from 'react';
 import { useAuth } from '@clerk/clerk-react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
+import { toast } from 'sonner';
 import AppLayout from '../../../components/layout/AppLayout';
 import { Button } from '../../../components/ui/button';
 import { Badge } from '../../../components/ui/badge';
 import { Input } from '../../../components/ui/input';
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '../../../components/ui/alert-dialog';
+import { AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '../../../components/ui/alert-dialog';
 import UploadTemplateModal from '../components/UploadTemplateModal';
 import DocumentSelectorDialog from '../components/DocumentSelectorDialog';
 import ExcelViewerDialog from '../components/ExcelViewerDialog';
@@ -136,19 +137,42 @@ export default function TemplatesPage() {
     try {
       setUploadError(null);
 
-      // Upload template
+      // Step 1: Upload the file (fast HTTP POST — modal stays open only for this)
       const uploadedTemplate = await uploadRETemplate(getToken, file, metadata);
 
-      // Poll until template analysis is complete
-      // This will wait for schema_metadata to be populated by the background task
-      await waitForTemplateAnalysis(getToken, uploadedTemplate.id, 10000);
+      // Step 2: Add to the list immediately with "analyzing" state so the user
+      // sees feedback right away. The modal will close after this function returns.
+      setTemplates(prev => [{ ...uploadedTemplate, _analyzing: true }, ...prev]);
 
-      // Reload templates to get updated list with analyzed template
-      await loadData();
+      // Step 3: Poll in the background — don't await, don't block modal close.
+      pollTemplateAnalysis(uploadedTemplate.id);
     } catch (err) {
       console.error('Upload failed:', err);
       setUploadError(err.message || 'Failed to upload template');
-      throw err; // Re-throw so modal can handle it
+      throw err; // Re-throw so modal shows the error and stays open
+    }
+  }
+
+  // Background polling — runs after modal closes.
+  async function pollTemplateAnalysis(templateId) {
+    try {
+      const analyzed = await waitForTemplateAnalysis(getToken, templateId, 30_000);
+      setTemplates(prev =>
+        prev.map(t => (t.id === templateId ? { ...analyzed, _analyzing: false } : t))
+      );
+      toast.success('Template ready', {
+        description: `${analyzed.total_fields || 0} fillable field${analyzed.total_fields !== 1 ? 's' : ''} detected.`,
+      });
+    } catch (err) {
+      console.error('Template analysis polling failed:', err);
+      setTemplates(prev =>
+        prev.map(t =>
+          t.id === templateId ? { ...t, _analyzing: false, _analysisFailed: true } : t
+        )
+      );
+      toast.error('Template analysis failed', {
+        description: 'The template was uploaded but could not be analyzed. Try deleting and re-uploading.',
+      });
     }
   }
 
@@ -177,19 +201,23 @@ export default function TemplatesPage() {
       setIsDeleting(true);
       const result = await deleteRETemplate(getToken, templateToDelete.id);
 
-      // Show success message if fill runs were affected
-      if (result.affected_fill_runs > 0) {
-        alert(`⚠️ ${result.affected_fill_runs} fill run(s) affected`);
-      }
-
       await loadData();
       setShowDeleteAlert(false);
       setTemplateToDelete(null);
       setTemplateUsage(null);
+
+      if (result.affected_fill_runs > 0) {
+        toast.success(`Template deleted`, {
+          description: `${result.affected_fill_runs} fill run(s) were also removed.`,
+        });
+      } else {
+        toast.success(`Template deleted`);
+      }
     } catch (err) {
       console.error('Delete failed:', err);
-      const errorMsg = err.response?.data?.detail || err.message || 'Failed to delete template';
-      alert(errorMsg);
+      toast.error('Failed to delete template', {
+        description: err.response?.data?.detail || err.message,
+      });
     } finally {
       setIsDeleting(false);
     }
@@ -247,7 +275,9 @@ export default function TemplatesPage() {
       setFillRunToDelete(null);
     } catch (err) {
       console.error('Delete failed:', err);
-      alert('Failed to delete fill run: ' + err.message);
+      toast.error('Failed to delete fill run', {
+        description: err.message,
+      });
     } finally {
       setIsDeleting(false);
     }
@@ -398,7 +428,18 @@ export default function TemplatesPage() {
       />
 
       {/* Delete Confirmation Dialog */}
-      <AlertDialog open={showDeleteAlert} onOpenChange={setShowDeleteAlert}>
+      <AlertDialog
+        open={showDeleteAlert}
+        onOpenChange={(open) => {
+          if (isDeleting) return; // Prevent closing while delete is in progress
+          setShowDeleteAlert(open);
+          if (!open) {
+            setTemplateToDelete(null);
+            setFillRunToDelete(null);
+            setTemplateUsage(null);
+          }
+        }}
+      >
         <AlertDialogContent>
           <AlertDialogHeader>
             <AlertDialogTitle>
@@ -476,9 +517,9 @@ export default function TemplatesPage() {
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel disabled={isDeleting}>Cancel</AlertDialogCancel>
-            <AlertDialogAction
+            <Button
               onClick={templateToDelete ? confirmDeleteTemplate : confirmDeleteFillRun}
-              disabled={isDeleting || (templateUsage && !templateUsage.can_delete)}
+              disabled={isDeleting || checkingUsage || (templateUsage && !templateUsage.can_delete)}
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
             >
               {isDeleting ? (
@@ -489,7 +530,7 @@ export default function TemplatesPage() {
               ) : (
                 templateToDelete ? 'Delete Template' : 'Delete Fill Run'
               )}
-            </AlertDialogAction>
+            </Button>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
@@ -543,12 +584,19 @@ function TemplatesGrid({ templates, searchQuery, onSearchChange, onView, onStart
 function TemplateCard({ template, onView, onStartFill, onDelete }) {
   const totalFields = template.total_fields || 0;
   const totalSheets = template.total_sheets || 0;
+  const isAnalyzing = template._analyzing;
+  const analysisFailed = template._analysisFailed;
 
   return (
-    <div className="bg-card rounded-lg border border-border hover:border-primary/50 transition-all overflow-hidden">
+    <div className={cn(
+      "bg-card rounded-lg border transition-all overflow-hidden",
+      isAnalyzing ? "border-primary/30" :
+      analysisFailed ? "border-destructive/30" :
+      "border-border hover:border-primary/50"
+    )}>
       {/* Header */}
       <div className="p-4 border-b bg-muted/30">
-        <div className="flex items-start justify-between">
+        <div className="flex items-start justify-between gap-2">
           <div className="flex-1 min-w-0">
             <h3 className="font-semibold text-foreground truncate">{template.name}</h3>
             {template.description && (
@@ -557,23 +605,42 @@ function TemplateCard({ template, onView, onStartFill, onDelete }) {
               </p>
             )}
           </div>
-          {template.category && (
-            <Badge variant="outline" className="ml-2 text-xs">
+          {isAnalyzing ? (
+            <Badge variant="secondary" className="text-xs flex-shrink-0 gap-1">
+              <Loader2 className="h-3 w-3 animate-spin" />
+              Analyzing…
+            </Badge>
+          ) : analysisFailed ? (
+            <Badge variant="destructive" className="text-xs flex-shrink-0 gap-1">
+              <AlertCircle className="h-3 w-3" />
+              Failed
+            </Badge>
+          ) : template.category ? (
+            <Badge variant="outline" className="ml-2 text-xs flex-shrink-0">
               {template.category}
             </Badge>
-          )}
+          ) : null}
         </div>
+        {analysisFailed && (
+          <p className="text-xs text-destructive mt-2">
+            Analysis failed — delete and re-upload to try again.
+          </p>
+        )}
       </div>
 
       {/* Stats */}
       <div className="p-4 space-y-3">
         <div className="flex items-center justify-between text-sm">
           <span className="text-muted-foreground">Fillable Fields</span>
-          <Badge variant="secondary">{totalFields}</Badge>
+          {isAnalyzing
+            ? <span className="text-xs text-muted-foreground italic">detecting…</span>
+            : <Badge variant="secondary">{totalFields}</Badge>}
         </div>
         <div className="flex items-center justify-between text-sm">
           <span className="text-muted-foreground">Sheets</span>
-          <Badge variant="secondary">{totalSheets}</Badge>
+          {isAnalyzing
+            ? <span className="text-xs text-muted-foreground italic">—</span>
+            : <Badge variant="secondary">{totalSheets}</Badge>}
         </div>
         <div className="flex items-center justify-between text-sm">
           <span className="text-muted-foreground">Times Used</span>
@@ -587,6 +654,7 @@ function TemplateCard({ template, onView, onStartFill, onDelete }) {
           size="sm"
           variant="outline"
           onClick={() => onView(template.id)}
+          disabled={isAnalyzing}
           className="px-2 sm:px-3"
         >
           <Eye className="h-3 w-3" />
@@ -594,10 +662,25 @@ function TemplateCard({ template, onView, onStartFill, onDelete }) {
         <Button
           size="sm"
           onClick={() => onStartFill(template.id)}
+          disabled={isAnalyzing || analysisFailed}
           className="flex-1"
+          title={
+            isAnalyzing ? 'Template is still being analyzed' :
+            analysisFailed ? 'Analysis failed — re-upload to use' :
+            undefined
+          }
         >
-          <Play className="h-3 w-3 mr-1.5" />
-          Start Fill
+          {isAnalyzing ? (
+            <>
+              <Loader2 className="h-3 w-3 mr-1.5 animate-spin" />
+              Analyzing…
+            </>
+          ) : (
+            <>
+              <Play className="h-3 w-3 mr-1.5" />
+              Start Fill
+            </>
+          )}
         </Button>
         <Button
           size="sm"

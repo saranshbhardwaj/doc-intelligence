@@ -40,6 +40,7 @@ const initialChatState = {
   messages: [],
   isStreaming: false,
   isThinking: false,
+  thinkingMessage: "",
   streamingMessage: "",
   chatError: null,
 

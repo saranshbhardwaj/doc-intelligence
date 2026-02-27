@@ -80,37 +80,39 @@ class MappingCoordinator:
         Filter generic schema to exclude cells already mapped by schema.
 
         Args:
-            generic_schema: Schema from TemplateAnalyzer.analyze()
-            schema_mapped_cells: Set from get_schema_mapped_cells()
+            generic_schema: Canonical schema from TemplateAnalyzer.analyze() —
+                            {"sheets": [{"name": str, "key_value_fields": [...], ...}], ...}
+            schema_mapped_cells: Set of "SHEET!CELL" strings from get_schema_mapped_cells()
 
         Returns:
-            Filtered schema dict
+            Same canonical format with schema-mapped cells removed from key_value_fields.
+            Passes directly to LLM service without further conversion.
         """
-        filtered_schema = {}
+        original_count = 0
+        filtered_count = 0
+        filtered_sheets = []
 
-        for sheet_name, sheet_data in generic_schema.items():
-            filtered_kv_pairs = []
-            for kv_pair in sheet_data.get("key_value_pairs", []):
-                cell_key = f"{sheet_name}!{kv_pair['cell']}"
-                if cell_key not in schema_mapped_cells:
-                    filtered_kv_pairs.append(kv_pair)
+        for sheet_data in generic_schema.get("sheets", []):
+            sheet_name = sheet_data.get("name", "")
+            kv_fields = sheet_data.get("key_value_fields", [])
+            original_count += len(kv_fields)
 
-            # Keep tables as-is (schema doesn't handle dynamic tables yet)
-            filtered_schema[sheet_name] = {
-                "key_value_pairs": filtered_kv_pairs,
-                "tables": sheet_data.get("tables", []),
-            }
+            kept = [
+                kv for kv in kv_fields
+                if f"{sheet_name}!{kv['cell']}" not in schema_mapped_cells
+            ]
+            filtered_count += len(kept)
 
-        # Count filtered cells
-        original_count = sum(len(sheet.get("key_value_pairs", [])) for sheet in generic_schema.values())
-        filtered_count = sum(len(sheet.get("key_value_pairs", [])) for sheet in filtered_schema.values())
+            # Preserve all other sheet keys (tables, formula_cells, etc.)
+            filtered_sheets.append({**sheet_data, "key_value_fields": kept})
 
         logger.info(
             f"Filtered generic schema: {original_count} → {filtered_count} cells "
             f"({original_count - filtered_count} excluded by schema)"
         )
 
-        return filtered_schema
+        # Preserve top-level keys (total_key_value_fields, total_tables, has_formulas)
+        return {**generic_schema, "sheets": filtered_sheets}
 
     def merge_mappings(
         self, schema_mappings: List[Dict[str, Any]], generic_mappings: List[Dict[str, Any]]

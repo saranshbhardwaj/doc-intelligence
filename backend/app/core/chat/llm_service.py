@@ -78,8 +78,9 @@ class ChatLLMService:
         try:
             # Stream summary from LLM
             summary = ""
-            async for chunk in self.llm_client.stream_chat(prompt):
-                summary += chunk
+            async for item in self.llm_client.stream_chat(prompt):
+                if item["type"] == "chunk":
+                    summary += item["text"]
 
             summary = summary.strip()
             logger.info(
@@ -129,8 +130,9 @@ class ChatLLMService:
         try:
             # Stream compressed summary from LLM
             compressed = ""
-            async for chunk in self.llm_client.stream_chat(prompt):
-                compressed += chunk
+            async for item in self.llm_client.stream_chat(prompt):
+                if item["type"] == "chunk":
+                    compressed += item["text"]
 
             compressed = compressed.strip()
 
@@ -200,8 +202,9 @@ class ChatLLMService:
         try:
             # Stream key facts from LLM
             facts_text = ""
-            async for chunk in self.llm_client.stream_chat(prompt):
-                facts_text += chunk
+            async for item in self.llm_client.stream_chat(prompt):
+                if item["type"] == "chunk":
+                    facts_text += item["text"]
 
             # Parse bullet points into list
             facts_text = facts_text.strip()
@@ -291,8 +294,9 @@ class ChatLLMService:
         try:
             # Stream updated summary from LLM
             updated_summary = ""
-            async for chunk in self.llm_client.stream_chat(prompt):
-                updated_summary += chunk
+            async for item in self.llm_client.stream_chat(prompt):
+                if item["type"] == "chunk":
+                    updated_summary += item["text"]
 
             updated_summary = updated_summary.strip()
 

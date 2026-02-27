@@ -317,7 +317,7 @@ async def _execute_map_reduce(
     map_end_percent = 75
 
     # Execute first section to prime cache
-    tracker.update_progress(progress_percent=map_start_percent, message=f"Summarizing sections (1/{total_sections})")
+    tracker.update_progress(progress_percent=map_start_percent, message=f"Analyzing sections (1/{total_sections})")
     first_key, first_summary = await summary_tasks[0]
     section_summaries[first_key] = first_summary
     logger.info(f"✅ Cache primed with first section: {first_key}", extra={"run_id": run_id})
@@ -325,7 +325,7 @@ async def _execute_map_reduce(
     # Update progress after first section
     sections_completed = 1
     current_percent = map_start_percent + int((sections_completed / total_sections) * (map_end_percent - map_start_percent))
-    tracker.update_progress(progress_percent=current_percent, message=f"Summarizing sections ({sections_completed}/{total_sections})")
+    tracker.update_progress(progress_percent=current_percent, message=f"Analyzing sections ({sections_completed}/{total_sections})")
 
     # Execute remaining sections in parallel (cache now exists)
     if len(summary_tasks) > 1:
@@ -345,7 +345,7 @@ async def _execute_map_reduce(
             # Update progress as each section completes
             sections_completed += 1
             current_percent = map_start_percent + int((sections_completed / total_sections) * (map_end_percent - map_start_percent))
-            tracker.update_progress(progress_percent=current_percent, message=f"Summarizing sections ({sections_completed}/{total_sections})")
+            tracker.update_progress(progress_percent=current_percent, message=f"Analyzing sections ({sections_completed}/{total_sections})")
 
     logger.info(
         f"Map phase complete: {len(section_summaries)} sections summarized (parallel)",

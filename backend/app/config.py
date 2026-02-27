@@ -43,36 +43,16 @@ class Settings(BaseSettings):
     excel_skip_schema: bool = False  # If True, skip schema (use generic analyzer only)
     # Default (both False) = Hybrid mode: schema first, generic fallback
 
-    # ===== PARSER CONFIGURATION =====
-    # Which parser to use for each tier + PDF type combination
-    parser_free_digital: str = "pymupdf"
-    parser_free_scanned: str = "none"  # "none" means not supported - will reject
-    parser_pro_digital: str = "pymupdf"
-    parser_pro_scanned: str = "none"  # Pro tier scanned PDF parser (e.g., "azure", "docai")
-    parser_enterprise_digital: str = "pymupdf"
-    parser_enterprise_scanned: str = "none"  # Enterprise tier scanned PDF parser
-
     # ===== PARSER TIMEOUTS =====
     parser_timeout_seconds: int = 300  # Generic parser timeout
 
-    # ===== GOOGLE DOCUMENT AI (Optional) =====
-    # Google Cloud settings for Document AI OCR
-    google_cloud_project_id: str = ""
-    google_application_credentials: str = ""
-    document_ai_processor_id: str = ""
-    document_ai_location: str = "us"
-    gcs_bucket_name: str = ""  # Required for batch processing (>15 pages)
-
     # ===== TESTING OVERRIDES (Development Only - DO NOT USE IN PRODUCTION) =====
-    # Force specific parser for all requests (overrides tier logic)
-    # Example: FORCE_PARSER=llmwhisperer to test OCR
+    # Force specific parser for all requests
+    # Example: FORCE_PARSER=azure_document_intelligence to override default
     force_parser: str = ""
 
     # Force specific user tier for all requests (overrides database lookup)
-    # Example: FORCE_USER_TIER=pro to test pro tier features
     force_user_tier: str = ""
-
-    document_ai_timeout_seconds: int = 900
 
     # File Upload Limits
     max_file_size_mb: int = 5
@@ -97,9 +77,10 @@ class Settings(BaseSettings):
     # ===== CHAT MEMORY SETTINGS =====
     # Number of most recent messages (user+assistant turns) to include verbatim
     chat_verbatim_message_count: int = 4
-    # Ratio of estimated token usage (history + current user message) to max input
-    # at which we trigger summarization of older history (0.50 - 0.60 per user guidance)
-    chat_summary_trigger_ratio: float = 0.55
+    # Compact conversation history when (summary + recent messages) exceed this char count.
+    # Keeps conversation portion of the prompt under budget so chunks are never trimmed.
+    # Budget breakdown: total=50k, chunks=~30k, instructions=~1.7k → ~15k for conversation.
+    chat_conversation_char_budget: int = 15_000
     # Minimum number of messages before we even consider summarization
     chat_summary_min_messages: int = 8
     # Hard cap on total messages examined when building context (for safety)
@@ -133,21 +114,18 @@ class Settings(BaseSettings):
     chunk_overlap_sentences: int = 2   # Sentences to repeat from previous chunk (unstructured/fallback docs)
 
     # ===== EMBEDDINGS CONFIGURATION =====
-    # Which embedding provider to use: "sentence-transformer" (free, local) or "openai" (paid, API)
-    embedding_provider: str = "sentence-transformer"
+    # Embedding provider: "openai" (API) or "sentence-transformer" (local, not currently used)
+    embedding_provider: str = "openai"
 
-    # Sentence Transformer settings (used if embedding_provider="sentence-transformer")
-    sentence_transformer_model: str = "all-MiniLM-L6-v2"  # Fast, good quality, 384 dimensions
-    # Other options: "all-mpnet-base-v2" (768d, slower but better), "multi-qa-MiniLM-L6-cos-v1" (384d, optimized for Q&A)
-
-    # OpenAI settings (used if embedding_provider="openai")
+    # OpenAI settings (active embedding provider)
     openai_api_key: str = ""  # Required if using OpenAI embeddings
-    openai_embedding_model: str = "text-embedding-3-small"  # 1536 dimensions, $0.02 per 1M tokens
-    # Other options: "text-embedding-3-large" (3072d, better quality, 2x price)
+    openai_embedding_model: str = "text-embedding-3-small"  # $0.02 per 1M tokens
+    # Other options: "text-embedding-3-large" (higher quality, 2x price)
+    openai_embedding_dimensions: int = 768  # Reduced from default 1536 via Matryoshka dimensionality reduction
 
-    # Vector dimension (auto-set based on model, but can override)
-    # all-MiniLM-L6-v2: 384, all-mpnet-base-v2: 768, text-embedding-3-small: 1536
-    embedding_dimension: int = 384
+    # Vector dimension (must match embedding model output)
+    # text-embedding-3-small with dimensions=768: 768, all-MiniLM-L6-v2: 384
+    embedding_dimension: int = 768
 
     # ===== RAG HYBRID SEARCH SETTINGS =====
     # Combines semantic (vector) search with keyword (BM25/FTS) search
@@ -172,10 +150,14 @@ class Settings(BaseSettings):
     # ===== DOCUMENT COMPARISON SETTINGS =====
     # Schema-based comparison system for multi-document analysis
     comparison_enabled: bool = True  # Enable document comparison feature
-    comparison_similarity_threshold: float = 0.6  # Min similarity for pairing chunks (0-1)
+    comparison_similarity_threshold: float = 0.40  # Min similarity for pairing chunks (0-1); tuned for embedding cosine (not cross-encoder)
     comparison_chunks_per_doc: int = 10  # Chunks to retrieve per document
     comparison_max_pairs: int = 8  # Max pairs/clusters to include in prompt
     comparison_max_documents: int = 3  # Max number of documents to compare (2-3)
+    # Early-exit pairing/clustering when retrieval signal is weak
+    # Set to 0 to disable score-based early-exit
+    comparison_pairing_min_top_score: float = 0.08
+    comparison_pairing_min_chunks_per_doc: int = 1
 
     # ===== RAG RE-RANKER SETTINGS =====
     # Cross-encoder re-ranking for improved relevance scoring
@@ -184,7 +166,8 @@ class Settings(BaseSettings):
     rag_use_reranker: bool = True
 
     # Cross-encoder model for re-ranking
-    # Options: "cross-encoder/ms-marco-MiniLM-L-6-v2", "BAAI/bge-reranker-base", "BAAI/bge-reranker-large"
+    # Options: "cross-encoder/ms-marco-MiniLM-L-6-v2" (22M params, ~3-5x faster on CPU)
+    #          "BAAI/bge-reranker-base" (110M params, higher quality, multilingual)
     rag_reranker_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
 
     # Batch size for re-ranking (process multiple query-doc pairs together)
@@ -196,6 +179,20 @@ class Settings(BaseSettings):
     # Apply metadata boosting to re-ranker scores (gentle nudge for tables/narrative)
     rag_reranker_apply_metadata_boost: bool = True
 
+    # Skip re-ranking when candidate pool is tiny (chat/general RAG)
+    rag_reranker_min_candidates_chat: int = 6
+
+    # Skip per-document re-ranking in comparison flow when candidate pool is tiny
+    rag_reranker_min_candidates_comparison: int = 6
+
+    # Per-mode reranker toggles.
+    # Comparison: disabled — embedding cosine pairing handles relevance; reranker adds ~76s with no benefit.
+    # Chat: enabled — improves precision for real-time queries (MiniLM-L-6 ~5-8s on CPU).
+    # Workflow: enabled — background Celery task, blocking is fine, quality matters for report generation.
+    rag_use_reranker_comparison: bool = False
+    rag_use_reranker_chat: bool = True
+    rag_use_reranker_workflow: bool = True
+
     # ===== CONTEXT EXPANSION SETTINGS =====
     # Expand retrieved chunks with related context (tables, narratives, parents)
 
@@ -203,8 +200,10 @@ class Settings(BaseSettings):
     rag_expansion_enabled: bool = True
 
     # Quality gate for expansion - only expand chunks above this rerank score (0.0-1.0)
-    # Lower = more expansion, higher = only expand high-quality chunks
-    rag_expansion_rerank_floor: float = 0.4
+    # Lowered from 0.4: MiniLM-L-6-v2 outputs lower raw scores than BAAI/bge-reranker-base
+    # (top scores of ~0.35 are still genuinely relevant). 0.2 lets expansion run for most
+    # queries while still filtering very low-confidence chunks.
+    rag_expansion_rerank_floor: float = 0.2
 
     # Score inheritance factors for expanded chunks (0.0-1.0)
     # Lower = expanded chunks rank below original chunks

@@ -21,6 +21,7 @@ import {
   CheckCircle,
   AlertCircle,
   Folder,
+  Loader2,
 } from "lucide-react";
 import {
   Dialog,
@@ -50,6 +51,7 @@ export default function UploadModal({
 }) {
   const [selectedFiles, setSelectedFiles] = useState([]);
   const [dragActive, setDragActive] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef(null);
 
   const handleDrag = useCallback((e) => {
@@ -121,7 +123,7 @@ export default function UploadModal({
     setSelectedFiles((prev) => prev.filter((f) => f.id !== fileId));
   };
 
-  const handleUpload = () => {
+  const handleUpload = async () => {
     if (!selectedCollectionId) {
       alert("Please select a collection");
       return;
@@ -133,9 +135,14 @@ export default function UploadModal({
       return;
     }
 
-    onUpload?.(validFiles.map((f) => f.file));
-    setSelectedFiles([]);
-    onOpenChange?.(false);
+    setUploading(true);
+    try {
+      await onUpload?.(validFiles.map((f) => f.file));
+      setSelectedFiles([]);
+      onOpenChange?.(false);
+    } finally {
+      setUploading(false);
+    }
   };
 
   const formatFileSize = (bytes) => {
@@ -147,7 +154,7 @@ export default function UploadModal({
   const validFilesCount = selectedFiles.filter((f) => f.errors.length === 0).length;
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={uploading ? undefined : onOpenChange}>
       <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle className="text-xl">Upload Documents</DialogTitle>
@@ -352,15 +359,28 @@ export default function UploadModal({
             )}
           </div>
           <div className="flex gap-2">
-            <Button variant="outline" onClick={() => onOpenChange?.(false)}>
+            <Button
+              variant="outline"
+              onClick={() => onOpenChange?.(false)}
+              disabled={uploading}
+            >
               Cancel
             </Button>
             <Button
               onClick={handleUpload}
-              disabled={!selectedCollectionId || validFilesCount === 0}
+              disabled={!selectedCollectionId || validFilesCount === 0 || uploading}
             >
-              <Upload className="w-4 h-4 mr-2" />
-              Upload {validFilesCount > 0 ? `(${validFilesCount})` : ""}
+              {uploading ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Uploading...
+                </>
+              ) : (
+                <>
+                  <Upload className="w-4 h-4 mr-2" />
+                  Upload {validFilesCount > 0 ? `(${validFilesCount})` : ""}
+                </>
+              )}
             </Button>
           </div>
         </div>

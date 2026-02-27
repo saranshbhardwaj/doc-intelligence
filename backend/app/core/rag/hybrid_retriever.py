@@ -305,8 +305,18 @@ class HybridRetriever:
         Returns:
             List of chunks with keyword_score (0-1, normalized)
         """
-        # Convert query to tsquery
-        tsquery = func.plainto_tsquery('english', query)
+        # Convert query to tsquery using OR logic for better recall.
+        # plainto_tsquery uses AND (all terms must appear in the same chunk), which
+        # is too strict for RAG: financial documents split across many chunks often
+        # have only one or two of the query terms per chunk.
+        # websearch_to_tsquery with "term1 OR term2 OR ..." gives any-term matching,
+        # maximising recall for the BM25 leg while semantic search handles precision.
+        query_terms = query.strip().split()
+        if len(query_terms) == 1:
+            tsquery = func.plainto_tsquery('english', query)
+        else:
+            or_query = ' OR '.join(query_terms)
+            tsquery = func.websearch_to_tsquery('english', or_query)
 
         # Use ts_rank_cd for ranking with document length normalization
         # Normalization flag 2: divide by document length (BM25-like behavior)

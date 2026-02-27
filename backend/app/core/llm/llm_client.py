@@ -610,12 +610,15 @@ class LLMClient:
         """Create extraction prompt using the new comprehensive format"""
         return create_extraction_prompt(text, context)
 
-    async def stream_chat(self, prompt: str):
+    async def stream_chat(self, prompt: str, system_prompt: str = None):
         """
         Stream chat response from Claude (for real-time RAG chat).
 
         Args:
-            prompt: Full prompt with context and question
+            prompt: User content (recent messages + chunks + question)
+            system_prompt: Optional stable system prompt. When provided, sent with
+                           cache_control: ephemeral for Anthropic prompt caching.
+                           Only pass this from rag_service; llm_service callers omit it.
 
         Yields:
             Dict with either:
@@ -623,18 +626,24 @@ class LLMClient:
             - {"type": "usage", "data": {...}} for final usage data
         """
         logger.info(
-            f"Streaming chat response (prompt: {len(prompt)} chars)",
-            extra={"prompt_length": len(prompt), "model": self.model}
+            f"Streaming chat response (prompt: {len(prompt)} chars, system: {len(system_prompt) if system_prompt else 0} chars)",
+            extra={"prompt_length": len(prompt), "model": self.model, "has_system_prompt": bool(system_prompt)}
         )
 
         try:
-            # Use async with on the AWAITED stream
-            async with self.async_client.messages.stream(
+            stream_kwargs = dict(
                 model=self.model,
                 max_tokens=self.max_tokens,
                 temperature=0.0,
                 messages=[{"role": "user", "content": prompt}]
-            ) as stream:
+            )
+            if system_prompt:
+                stream_kwargs["system"] = [
+                    {"type": "text", "text": system_prompt, "cache_control": {"type": "ephemeral"}}
+                ]
+
+            # Use async with on the AWAITED stream
+            async with self.async_client.messages.stream(**stream_kwargs) as stream:
                 # Stream text chunks
                 async for text in stream.text_stream:
                     yield {"type": "chunk", "text": text}

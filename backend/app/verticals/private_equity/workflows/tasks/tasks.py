@@ -47,6 +47,7 @@ from app.utils.metrics import (
     WORKFLOW_RUNS_FAILED,
     WORKFLOW_LATENCY_SECONDS,
 )
+from app.services.beta_limits import commit_shadow_credits, reverse_shadow_credits
 from app.utils.file_utils import save_raw_llm_response
 
 # Import from our new modules
@@ -64,6 +65,15 @@ from .map_reduce import (
 )
 
 
+def _reverse_workflow_shadow(run_id: str, reason: str, stage: str) -> None:
+    reverse_shadow_credits(
+        operation_type="workflow_run",
+        reference_id=run_id,
+        reason=reason,
+        metadata={"stage": stage},
+    )
+
+
 @shared_task(bind=True)
 def prepare_context_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
     """Assemble context for workflow run.
@@ -77,6 +87,7 @@ def prepare_context_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
     run = repo.get_run(run_id)
     if not run:
         logger.error("WorkflowRun not found", extra={"run_id": run_id})
+        _reverse_workflow_shadow(run_id, "run_not_found", "prepare_context")
         return {"status": "failed", "error": "run_not_found", **payload}
 
     tracker = JobProgressTracker(db, job_id) if job_id else JobProgressTracker(db, run_id)  # Fallback to run_id if job missing
@@ -164,6 +175,7 @@ def prepare_context_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                     latency_ms=int((time.time()-start)*1000)
                 )
                 tracker.mark_error(error_stage="context", error_message=error_msg, error_type="no_chunks_retrieved", is_retryable=False)
+                _reverse_workflow_shadow(run_id, "no_chunks_retrieved", "prepare_context")
                 return {"status": "failed", "run_id": run_id, "job_id": job_id, "error": "no_chunks_retrieved"}
 
             # ========== THRESHOLD-BASED EXECUTION: Direct vs Map-Reduce ==========
@@ -341,6 +353,12 @@ def prepare_context_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
             repo.update_run_status(run_id, status="failed", error_message=str(e))
         except Exception:
             logger.exception("Failed to update run status after prepare_context failure", extra={"run_id": run_id})
+        # Emit SSE error event so frontend stops waiting immediately
+        try:
+            tracker.mark_error(error_stage="context", error_message=str(e), error_type="context_error", is_retryable=True)
+        except Exception:
+            logger.exception("Failed to mark job error after prepare_context failure", extra={"run_id": run_id})
+        _reverse_workflow_shadow(run_id, f"context_error:{type(e).__name__}", "prepare_context")
         return {"status": "failed", "error": "context_error", **payload}
     finally:
         db.close()
@@ -356,6 +374,7 @@ def generate_artifact_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
     repo = WorkflowRepository(db)
     run = repo.get_run(run_id)
     if not run:
+        _reverse_workflow_shadow(run_id, "run_not_found", "generate_artifact")
         return {"status": "failed", "error": "run_not_found", **payload}
 
     tracker = JobProgressTracker(db, job_id) if job_id else JobProgressTracker(db, run_id)
@@ -421,6 +440,7 @@ def generate_artifact_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
             logger.error(error_msg, extra={"run_id": run_id, "workflow_name": workflow.name})
             repo.update_run_status(run_id, status="failed", error_message=error_msg)
             tracker.mark_error(error_stage="generating", error_message=error_msg, error_type="no_prompt_generator", is_retryable=False)
+            _reverse_workflow_shadow(run_id, "no_prompt_generator", "generate_artifact")
             return {"status": "failed", "error": "no_prompt_generator", **payload}
 
         # Generate prompt using caching-optimized architecture
@@ -460,6 +480,7 @@ def generate_artifact_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
             }, exc_info=True)
             repo.update_run_status(run_id, status="failed", error_message=error_msg)
             tracker.mark_error(error_stage="generating", error_message=error_msg, error_type="prompt_generation_error", is_retryable=False)
+            _reverse_workflow_shadow(run_id, "prompt_generation_failed", "generate_artifact")
             return {"status": "failed", "error": "prompt_generation_failed", **payload}
 
         # Safety check: ensure workflow_system_prompt is a string
@@ -537,6 +558,7 @@ def generate_artifact_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                         error_type="validation_error",
                         is_retryable=True  # Retry might work (LLM non-determinism)
                     )
+                    _reverse_workflow_shadow(run_id, "map_reduce_empty_data", "generate_artifact")
                     return {"status": "failed", "run_id": run_id, "job_id": job_id}
 
                 # Process result (same as direct execution)
@@ -560,6 +582,7 @@ def generate_artifact_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                 )
                 repo.update_run_status(run_id, status="failed", error_message=f"Map-reduce error: {map_reduce_err}")
                 tracker.mark_error(error_stage="generating", error_message=str(map_reduce_err), error_type="map_reduce_error", is_retryable=True)
+                _reverse_workflow_shadow(run_id, "map_reduce_failed", "generate_artifact")
                 return {"status": "failed", "error": "map_reduce_failed", **payload}
 
         else:
@@ -576,6 +599,7 @@ def generate_artifact_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                     logger.error(error_msg, extra={"run_id": run_id, "workflow_id": workflow.id})
                     repo.update_run_status(run_id, status="failed", error_message=error_msg)
                     tracker.mark_error(error_stage="generating", error_message=error_msg, error_type="configuration_error", is_retryable=False)
+                    _reverse_workflow_shadow(run_id, "missing_schema", "generate_artifact")
                     return {"status": "failed", "error": "missing_schema", **payload}
 
                 # Build user message with context
@@ -623,12 +647,14 @@ def generate_artifact_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                 logger.error(f"Direct generation failed: {e}", extra={"run_id": run_id})
                 repo.update_run_status(run_id, status="failed", error_message=str(e))
                 tracker.mark_error(error_stage="generating", error_message=str(e), error_type="llm_error", is_retryable=True)
+                _reverse_workflow_shadow(run_id, "direct_generation_failed", "generate_artifact")
                 return {"status": "failed", "error": "generation_error", **payload}
         # Safety check: If all attempts failed and we have no response, fail gracefully
         if raw_response is None:
             logger.error(f"All LLM attempts failed, no valid response received", extra={"run_id": run_id, "last_error": last_invalid_reason})
             repo.update_run_status(run_id, status="failed", error_message=last_invalid_reason or "All LLM attempts failed")
             tracker.mark_error(error_stage="generating", error_message=last_invalid_reason or "All LLM attempts failed", error_type="llm_error", is_retryable=True)
+            _reverse_workflow_shadow(run_id, "no_valid_response", "generate_artifact")
             return {"status": "failed", "error": "generation_error", **payload}
 
         # ---- Normalize LLM Output (comprehensive normalization) ----
@@ -702,6 +728,7 @@ def generate_artifact_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                 error_type="validation_error",
                 is_retryable=True  # Retry - LLM might get it right next time
             )
+            _reverse_workflow_shadow(run_id, "constraint_validation_failed", "generate_artifact")
             return {"status": "failed", "run_id": run_id, "job_id": job_id}
 
         # Build rich citations list for frontend (not part of schema-validated output)
@@ -808,6 +835,7 @@ def generate_artifact_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
             pass
         tracker.update_progress(progress_percent=100, message="Artifact generated & validated", artifact_completed=True, validation_completed=True)
         tracker.mark_completed()
+        commit_shadow_credits(operation_type="workflow_run", reference_id=run_id)
         return {"status": "completed", "run_id": run_id, "job_id": job_id}
     except Exception as e:
         # Record workflow failure metric
@@ -832,6 +860,7 @@ def generate_artifact_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
             tracker.mark_error(error_stage="generating", error_message=str(e), error_type="llm_error", is_retryable=True)
         except Exception:
             logger.exception("Failed to mark job error after generation failure", extra={"run_id": run_id})
+        _reverse_workflow_shadow(run_id, f"unhandled_exception:{type(e).__name__}", "generate_artifact")
         return {"status": "failed", "error": "generation_error", **payload}
     finally:
         db.close()

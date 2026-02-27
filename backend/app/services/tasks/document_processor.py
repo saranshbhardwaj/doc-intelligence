@@ -23,11 +23,12 @@ from app.core.parsers import ParserFactory
 from app.core.chunkers import ChunkerFactory
 from app.repositories.collection_repository import CollectionRepository
 from app.repositories.document_repository import DocumentRepository
+from app.repositories.user_repository import UserRepository
 from app.db_models_chat import DocumentChunk
+from app.services.beta_limits import enforce_page_limit, log_shadow_credits
 from app.utils.logging import logger
 from app.utils.pdf_utils import detect_pdf_type
 from app.utils.file_utils import save_raw_text, save_chunks
-from app.config import settings
 from app.core.storage.storage_factory import get_storage_backend
 
 
@@ -92,26 +93,20 @@ def parse_document_for_indexing_task(self, payload: Dict[str, Any]) -> Dict[str,
         # Determine file type from extension
         file_ext = os.path.splitext(filename)[1].lower()
 
-        # Detect document type and get parser
+        # Detect document type for metadata/logging (Azure DI handles both natively)
         if file_ext == '.docx':
-            # DOCX files: Azure DI supports DOCX natively, skip PDF type detection
             pdf_type = "digital"
             tracker.update_progress(
                 progress_percent=8,
                 message="Detected DOCX document"
             )
-            parser = ParserFactory.get_parser(settings.force_user_tier or "free", pdf_type)
         else:
-            # PDF files: detect type (digital vs scanned)
             pdf_type = detect_pdf_type(file_path)
             tracker.update_progress(
                 progress_percent=8,
                 message=f"Detected {pdf_type} PDF"
             )
-            parser = ParserFactory.get_parser(settings.force_user_tier or "free", pdf_type)
-
-        if not parser:
-            raise ValueError(f"No parser available for {file_ext} files")
+        parser = ParserFactory.get_parser()
 
         logger.info(
             f"Parsing document for indexing: {filename}",
@@ -420,6 +415,7 @@ def store_vectors_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
     job_id = payload["job_id"]
     document_id = payload["document_id"]
     collection_id = payload["collection_id"]
+    user_id = payload.get("user_id")
 
     db = _get_db_session()
     tracker = JobProgressTracker(db, job_id)
@@ -442,6 +438,15 @@ def store_vectors_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
 
         if not chunks:
             raise ValueError("No chunks to store")
+
+        parser_info = payload.get("parser_output", {})
+        page_count = int(parser_info.get("page_count", 0) or 0)
+
+        # Final gate before persistence: block storage if this indexing would exceed page quota.
+        user_repo = UserRepository()
+        user = user_repo.get_user(user_id) if user_id else None
+        if user and page_count > 0:
+            enforce_page_limit(user, pages_to_add=page_count)
 
         # Validate embedding dimensions if provided
         if embeddings and embedding_dimension:
@@ -509,6 +514,9 @@ def store_vectors_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
 
             chunk_metadata_json = json.dumps(chunk_metadata) if chunk_metadata else None
 
+            # Note: text_search_vector is NOT set here.
+            # It is auto-populated by the PostgreSQL trigger `tsvector_update` (migration c4d5e6f7a8b9)
+            # which fires BEFORE INSERT on document_chunks.
             db_chunk = DocumentChunk(
                 document_id=document_id,
                 text=chunk["text"],
@@ -545,8 +553,6 @@ def store_vectors_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
 
         # Update canonical Document status and stats
         doc_repo = DocumentRepository()
-        parser_info = payload.get("parser_output", {})
-        page_count = parser_info.get("page_count", 0)
         processing_time_ms = parser_info.get("processing_time_ms", 0)
         parser_used = parser_info.get("parser_name", "unknown")
 
@@ -592,6 +598,26 @@ def store_vectors_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
             f"Stored {len(db_chunks)} chunks with embeddings for document {document_id}",
             extra={"job_id": job_id, "collection_id": collection_id}
         )
+
+        if user and page_count > 0:
+            usage_updated = user_repo.update_page_usage(
+                user_id=user.id,
+                pages_to_add=page_count,
+                update_monthly=True,
+            )
+            if not usage_updated:
+                logger.warning(
+                    "Failed to increment page usage after indexing",
+                    extra={"user_id": user.id, "document_id": document_id, "page_count": page_count},
+                )
+
+            log_shadow_credits(
+                user=user,
+                operation_type="document_index_page",
+                units=page_count,
+                reference_id=document_id,
+                metadata={"collection_id": collection_id, "filename": payload.get("filename")},
+            )
 
         return {
             "status": "completed",

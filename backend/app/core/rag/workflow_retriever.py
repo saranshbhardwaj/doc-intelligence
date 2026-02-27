@@ -13,7 +13,7 @@ from typing import List, Dict
 import logging
 from sqlalchemy.orm import Session
 from app.core.rag.hybrid_retriever import HybridRetriever
-from app.core.rag.reranker import Reranker
+from app.services.service_locator import get_reranker
 from app.config import settings
 
 logger = logging.getLogger(__name__)
@@ -56,7 +56,7 @@ class WorkflowRetriever:
         self.use_reranker = use_reranker if use_reranker is not None else settings.rag_use_reranker
         self.reranker = None
         if self.use_reranker:
-            self.reranker = Reranker()
+            self.reranker = get_reranker()
 
         logger.info(
             f"WorkflowRetriever initialized: reranker={self.use_reranker}, "
@@ -141,7 +141,7 @@ class WorkflowRetriever:
         # Note: Reranker handles compression internally, no need to pre-compress
         candidates_list = list(all_candidates.values())
 
-        if self.reranker and len(candidates_list) > 5:
+        if self.reranker and settings.rag_use_reranker_workflow and len(candidates_list) > 5:
             try:
                 # Combine queries for re-ranking intent
                 combined_query = " ".join(queries[:3])  # Use first 3 queries

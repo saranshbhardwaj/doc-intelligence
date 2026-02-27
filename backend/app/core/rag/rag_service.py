@@ -44,6 +44,8 @@ _RETRIEVAL_SIZING = {
     QueryType.SUMMARIZATION:   (15, 20, 8, 10),
     QueryType.ENTITY_LOOKUP:   (12, 20, 6, 10),
 }
+import asyncio
+import functools
 import json
 import time
 from app.services.service_locator import get_reranker
@@ -172,13 +174,19 @@ class RAGService:
 
         # STEP 1: History & optional summarization via memory component
         start_time = time.monotonic()
+        stage_timings_ms: Dict[str, float] = {}
         history_messages = self.memory.load_history(session_id)
-        summary_text, recent_messages, key_facts = await self.memory.maybe_summarize(session_id, history_messages, user_message)
+
+        # Summarization happens silently — don't surface internal detail to users
+        if self.memory.will_summarize(session_id, history_messages):
+            pass
+
+        summary_text, recent_messages, key_facts = await self.memory.maybe_summarize(session_id, history_messages)
 
         # STEP 2: Short-circuit low-signal messages (skip retrieval/rerank)
         if is_low_signal_message(user_message):
             assistant_message = low_signal_response(user_message)
-            yield assistant_message
+            yield ("chunk", assistant_message)
             await self.persistence.save_chat_messages(
                 session_id=session_id,
                 user_message=user_message,
@@ -191,6 +199,8 @@ class RAGService:
             return
 
         # STEP 3: Query Understanding (LLM-powered analysis)
+        yield ("thinking", "Understanding your question...")
+
         # Load document metadata for query understanding context
         doc_info = []
         if document_ids:
@@ -199,9 +209,20 @@ class RAGService:
         doc_filenames = [d["filename"] for d in doc_info]
 
         # Analyze query with LLM (cheap Haiku call)
+        query_understanding_start = time.monotonic()
         understanding = await self.query_understanding.understand(
             query=user_message,
             document_filenames=doc_filenames
+        )
+        query_understanding_ms = round((time.monotonic() - query_understanding_start) * 1000, 2)
+        stage_timings_ms["query_understanding"] = query_understanding_ms
+        logger.info(
+            "Query understanding latency",
+            extra={
+                "session_id": session_id,
+                "query_understanding_ms": query_understanding_ms,
+                "query_type": understanding.query_type.value
+            }
         )
 
         # STEP 4: Adaptive retrieval sizing based on query intent
@@ -283,7 +304,7 @@ class RAGService:
                         "original_query": user_message,
                         "message": f"You mentioned {len(matched_ids)} documents. Please select up to 3 to compare:"
                     }
-                    yield f"event: comparison_selection\ndata: {json.dumps(selection_event)}\n\n"
+                    yield ("comparison_selection", selection_event)
                     return  # Wait for user selection
 
                 # No specific docs mentioned: ask user to select from all session docs
@@ -309,7 +330,7 @@ class RAGService:
                         "original_query": user_message,
                         "message": "Select 2-3 documents to compare:"
                     }
-                    yield f"event: comparison_selection\ndata: {json.dumps(selection_event)}\n\n"
+                    yield ("comparison_selection", selection_event)
                     return  # Wait for user selection
 
             logger.debug(
@@ -322,7 +343,9 @@ class RAGService:
                 }
             )
 
-            async for chunk in self.comparison_handler.handle(
+            yield ("thinking", "Finding relevant context...")
+            
+            async for event in self.comparison_handler.handle(
                 session_id=session_id,
                 collection_id=collection_id,
                 user_message=user_message,
@@ -332,12 +355,43 @@ class RAGService:
                 recent_messages=recent_messages,
                 query_understanding=understanding  # For HyDE enhancement
             ):
-                yield chunk
+                yield event  # Already a (event_type, data) tuple
             self.last_comparison_context = None
             return  # Exit after comparison flow
 
         # ------------------------------------------------------------------
+        # STEP 5b: Document-scoped retrieval for entity-targeted queries.
+        # When the user asks about a specific named document (SUMMARIZATION /
+        # ENTITY_LOOKUP) and exactly one document matches with high confidence,
+        # restrict retrieval to that document so short/sparse docs aren't
+        # outranked by denser documents in the reranker.
+        scoped_doc_ids = document_ids
+        if (
+            document_ids
+            and len(document_ids) > 1
+            and understanding.query_type in (QueryType.SUMMARIZATION, QueryType.ENTITY_LOOKUP)
+            and understanding.entities
+        ):
+            matches = self.document_matcher.match_entities_with_scores(
+                understanding.entities, doc_info
+            )
+            high_conf = [m for m in matches if m["score"] >= 0.70]
+            if len(high_conf) == 1:
+                scoped_doc_ids = [high_conf[0]["id"]]
+                logger.info(
+                    "Document-scoped retrieval activated",
+                    extra={
+                        "session_id": session_id,
+                        "matched_doc": high_conf[0]["filename"],
+                        "score": high_conf[0]["score"],
+                        "query_type": understanding.query_type.value,
+                    }
+                )
+
+        # ------------------------------------------------------------------
         # STEP 1: Hybrid retrieval (semantic + keyword search) - STANDARD FLOW
+        yield ("thinking", "Finding relevant context...")
+
         logger.info(
             f"Starting hybrid retrieval for user query",
             extra={"user_id": user_id, "session_id": session_id}
@@ -351,10 +405,12 @@ class RAGService:
             query=understanding.reformulated_query,  # Use reformulated query for keyword search
             collection_id=collection_id,
             top_k=retrieval_candidates,
-            document_ids=document_ids,
+            document_ids=scoped_doc_ids,  # May be narrowed to a single matched document
             query_understanding=understanding,  # For HyDE enhancement
             min_semantic_similarity=settings.rag_chat_semantic_similarity_floor
         )
+        retrieval_ms = round((time.monotonic() - retrieval_start) * 1000, 2)
+        stage_timings_ms["retrieval"] = retrieval_ms
 
         logger.info(
             f"Hybrid retrieval complete: {len(hybrid_results)} candidates retrieved",
@@ -364,42 +420,67 @@ class RAGService:
                 "document_count": len(document_ids) if document_ids else 0,
                 "retrieval_candidates": retrieval_candidates,
                 "query_type": understanding.query_type.value,
-                "retrieval_ms": round((time.monotonic() - retrieval_start) * 1000, 2)
+                "retrieval_ms": retrieval_ms
             }
         )
 
         # ------------------------------------------------------------------
         # STEP 2: Re-ranking (optional, cross-encoder based)
-        if self.reranker and hybrid_results:
+        rerank_min_candidates = max(1, settings.rag_reranker_min_candidates_chat)
+        should_rerank = (
+            bool(self.reranker)
+            and settings.rag_use_reranker_chat
+            and len(hybrid_results) >= rerank_min_candidates
+        )
+        if should_rerank:
             logger.info(
                 f"Starting re-ranking of {len(hybrid_results)} candidates",
                 extra={"session_id": session_id}
             )
             rerank_start = time.monotonic()
 
-            # Re-rank with compression and metadata boosting
-            relevant_chunks = self.reranker.rerank(
-                query=user_message,
-                chunks=hybrid_results,
-                query_understanding=understanding,
-                top_k=final_top_k
+            # Re-rank with compression and metadata boosting.
+            # Run in thread pool to avoid blocking the asyncio event loop during CPU-bound inference.
+            relevant_chunks = await asyncio.get_running_loop().run_in_executor(
+                None,
+                functools.partial(
+                    self.reranker.rerank,
+                    query=user_message,
+                    chunks=hybrid_results,
+                    query_understanding=understanding,
+                    top_k=final_top_k,
+                )
             )
+            rerank_ms = round((time.monotonic() - rerank_start) * 1000, 2)
+            stage_timings_ms["rerank"] = rerank_ms
 
             logger.info(
                 f"Re-ranking complete: {len(relevant_chunks)} final chunks selected",
                 extra={
                     "session_id": session_id,
                     "top_rerank_score": relevant_chunks[0]["rerank_score"] if relevant_chunks else 0,
-                    "rerank_ms": round((time.monotonic() - rerank_start) * 1000, 2)
+                    "rerank_ms": rerank_ms
                 }
             )
         else:
             # No re-ranker: use hybrid results directly
             relevant_chunks = hybrid_results[:final_top_k]
-            logger.info(
-                f"Re-ranker disabled, using top {len(relevant_chunks)} hybrid results",
-                extra={"session_id": session_id}
-            )
+            stage_timings_ms["rerank"] = 0.0
+            if self.reranker and hybrid_results:
+                logger.info(
+                    "Skipping re-ranking for tiny candidate pool",
+                    extra={
+                        "session_id": session_id,
+                        "candidate_count": len(hybrid_results),
+                        "min_candidates_for_rerank": rerank_min_candidates,
+                        "selected_chunks": len(relevant_chunks)
+                    }
+                )
+            else:
+                logger.info(
+                    f"Re-ranker disabled, using top {len(relevant_chunks)} hybrid results",
+                    extra={"session_id": session_id}
+                )
 
         # Edge case: Handle when no relevant chunks are found
         if not relevant_chunks:
@@ -417,11 +498,13 @@ class RAGService:
         # ------------------------------------------------------------------
         # STEP 3: Validate and normalize chunk metadata
         if relevant_chunks:
+            validation_start = time.monotonic()
             logger.debug(
                 f"Validating {len(relevant_chunks)} chunks before budget enforcement",
                 extra={"session_id": session_id}
             )
             relevant_chunks = validate_and_normalize_chunks(relevant_chunks)
+            stage_timings_ms["validation"] = round((time.monotonic() - validation_start) * 1000, 2)
             logger.debug(
                 f"Chunk validation complete: {len(relevant_chunks)} valid chunks",
                 extra={"session_id": session_id}
@@ -435,15 +518,16 @@ class RAGService:
             from app.database import AsyncSessionLocal
 
             async with AsyncSessionLocal() as async_session:
-                # Quality gate: Only expand chunks above rerank score threshold
+                # Quality gate: Only expand chunks above rerank score threshold.
+                # Fall back to hybrid_score when reranker is disabled (no rerank_score on chunks).
                 rerank_floor = settings.rag_expansion_rerank_floor
                 chunks_to_expand = [
                     c for c in relevant_chunks
-                    if c.get('rerank_score', 0) >= rerank_floor
+                    if c.get('rerank_score', c.get('hybrid_score', 0)) >= rerank_floor
                 ]
                 chunks_below_floor = [
                     c for c in relevant_chunks
-                    if c.get('rerank_score', 0) < rerank_floor
+                    if c.get('rerank_score', c.get('hybrid_score', 0)) < rerank_floor
                 ]
 
                 max_expansion = self._get_max_expansion(understanding.query_type)
@@ -470,15 +554,18 @@ class RAGService:
                 relevant_chunks = relevant_chunks[:max_total]
 
                 expanded_count = len([c for c in relevant_chunks if c.get('_is_expanded')])
+                stage_timings_ms["expansion"] = round((time.monotonic() - expansion_start) * 1000, 2)
                 logger.info(
                     "Context expansion complete",
                     extra={
                         "session_id": session_id,
                         "expanded_count": expanded_count,
                         "total_chunks": len(relevant_chunks),
-                        "expansion_ms": round((time.monotonic() - expansion_start) * 1000, 2)
+                        "expansion_ms": stage_timings_ms["expansion"]
                     }
                 )
+
+        yield ("thinking", "Preparing context...")
 
         # ------------------------------------------------------------------
         # STEP 5: Budget enforcement
@@ -490,12 +577,13 @@ class RAGService:
             recent_messages=recent_messages,
             relevant_chunks=relevant_chunks
         )
+        stage_timings_ms["budget"] = round((time.monotonic() - budget_start) * 1000, 2)
         logger.info(
             "Budget enforcement complete",
             extra={
                 "session_id": session_id,
                 "remaining_chunks": len(relevant_chunks),
-                "budget_ms": round((time.monotonic() - budget_start) * 1000, 2)
+                "budget_ms": stage_timings_ms["budget"]
             }
         )
 
@@ -518,47 +606,52 @@ class RAGService:
         if relevant_chunks:
             citation_start = time.monotonic()
             self.last_citation_context = self._build_citation_context(relevant_chunks)
+            stage_timings_ms["citations"] = round((time.monotonic() - citation_start) * 1000, 2)
             logger.info(
                 "Citation context built",
                 extra={
                     "session_id": session_id,
                     "citation_count": len(self.last_citation_context.get("citations", [])),
-                    "citation_ms": round((time.monotonic() - citation_start) * 1000, 2)
+                    "citation_ms": stage_timings_ms["citations"]
                 }
             )
         else:
             self.last_citation_context = None
 
         # ------------------------------------------------------------------
-        # STEP 4: Build prompt
+        # STEP 4: Build prompt (split for Anthropic prompt caching)
         prompt_start = time.monotonic()
-        prompt = self.prompt_builder.build(
+        system_prompt, user_content = self.prompt_builder.build_split(
             user_message=user_message,
             relevant_chunks=relevant_chunks,
             recent_messages=recent_messages,
             summary_text=summary_text
         )
+        stage_timings_ms["prompt_build"] = round((time.monotonic() - prompt_start) * 1000, 2)
         logger.info(
             "Prompt built",
             extra={
                 "session_id": session_id,
-                "prompt_length": len(prompt),
-                "prompt_ms": round((time.monotonic() - prompt_start) * 1000, 2)
+                "system_prompt_length": len(system_prompt),
+                "user_content_length": len(user_content),
+                "prompt_ms": stage_timings_ms["prompt_build"]
             }
         )
 
         # ------------------------------------------------------------------
         # STEP 5: Stream response from Claude with error handling
+        yield ("thinking", "Composing response...")
+
         full_response = ""
         usage_data = None
         llm_start = time.monotonic()
         try:
-            async for item in self.llm_client.stream_chat(prompt):
+            async for item in self.llm_client.stream_chat(user_content, system_prompt=system_prompt):
                 # Handle different stream item types
                 if item["type"] == "chunk":
                     text_chunk = item["text"]
                     full_response += text_chunk
-                    yield text_chunk
+                    yield ("chunk", text_chunk)
                 elif item["type"] == "usage":
                     # Capture usage data for persistence
                     usage_data = item["data"]
@@ -584,13 +677,15 @@ class RAGService:
             )
 
             total_latency = time.monotonic() - start_time
+            stage_timings_ms["llm_stream"] = round((time.monotonic() - llm_start) * 1000, 2)
             logger.info(
                 "Chat response complete",
                 extra={
                     "session_id": session_id,
                     "response_length": len(full_response),
-                    "llm_ms": round((time.monotonic() - llm_start) * 1000, 2),
-                    "total_ms": round(total_latency * 1000, 2)
+                    "llm_ms": stage_timings_ms["llm_stream"],
+                    "total_ms": round(total_latency * 1000, 2),
+                    "stage_timings_ms": stage_timings_ms
                 }
             )
 

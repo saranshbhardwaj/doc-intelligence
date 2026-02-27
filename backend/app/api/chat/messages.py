@@ -17,6 +17,7 @@ from app.database import get_db
 from app.core.rag import RAGService
 from app.repositories.session_repository import SessionRepository
 from app.repositories.rag_repository import RAGRepository
+from app.services.beta_limits import enforce_chat_message_limit, log_shadow_credits
 from app.utils.logging import logger
 from app.api.chat.schemas import ComparisonConfirmRequest
 
@@ -110,6 +111,8 @@ async def chat_with_session(
             detail="Documents haven't been indexed yet. Please wait for document processing to complete before chatting."
         )
 
+    enforce_chat_message_limit(user)
+
     logger.info(
         "Starting chat in session",
         extra={
@@ -124,6 +127,13 @@ async def chat_with_session(
     # Initialize RAG service (still needs db session for vector search)
     rag_service = RAGService(db)
 
+    log_shadow_credits(
+        user=user,
+        operation_type="chat_message",
+        reference_id=session_id,
+        metadata={"route": "chat_with_session", "document_count": len(document_ids)},
+    )
+
     # Stream chat response
     async def event_generator():
         """Stream chat response chunks as SSE events (manually formatted)"""
@@ -131,9 +141,6 @@ async def chat_with_session(
 
         # Send session_id first
         yield f"event: session\ndata: {json.dumps({'session_id': session_id})}\n\n"
-
-        # Send thinking event to show progress feedback
-        yield f"event: thinking\ndata: {json.dumps({'message': 'Analyzing documents...'})}\n\n"
 
         # Check session length and send warning if needed
         from app.repositories.chat_repository import ChatRepository
@@ -153,13 +160,13 @@ async def chat_with_session(
             }
             yield f"event: session_warning\ndata: {json.dumps(warning_data)}\n\n"
 
-        # Stream response chunks from RAG
+        # Stream response from RAG — dispatches on tagged tuples from rag_service.chat()
         try:
             chunk_count = 0
             comparison_context_sent = False
             citation_context_sent = False
 
-            async for chunk in rag_service.chat(
+            async for event in rag_service.chat(
                 session_id=session_id,
                 collection_id=None,  # Sessions are independent of collections
                 user_message=message,
@@ -167,20 +174,34 @@ async def chat_with_session(
                 org_id=user.org_id,
                 document_ids=document_ids  # Use session's documents
             ):
-                # Send comparison context before first chunk (if available)
+                # Dispatch on tagged tuples from rag_service
+                if isinstance(event, tuple):
+                    tag, data = event
+                    if tag == "thinking":
+                        yield f"event: thinking\ndata: {json.dumps({'message': data})}\n\n"
+                        continue
+                    elif tag == "comparison_selection":
+                        yield f"event: comparison_selection\ndata: {json.dumps(data)}\n\n"
+                        continue
+                    else:
+                        # tag == "chunk"
+                        chunk_data = data
+                else:
+                    # Legacy fallback: bare string = chunk
+                    chunk_data = event
+
+                # Send comparison context before first content chunk (if available)
                 if not comparison_context_sent and rag_service.last_comparison_context:
                     yield f"event: comparison_context\ndata: {json.dumps(rag_service.last_comparison_context)}\n\n"
                     comparison_context_sent = True
-                    # Don't clear yet - needed for message saving after streaming completes
 
-                # Send citation context before first chunk (if available)
+                # Send citation context before first content chunk (if available)
                 if not citation_context_sent and rag_service.last_citation_context:
                     yield f"event: citation_context\ndata: {json.dumps(rag_service.last_citation_context)}\n\n"
                     citation_context_sent = True
-                    # Don't clear yet - needed for message saving after streaming completes
 
                 chunk_count += 1
-                yield f"event: chunk\ndata: {json.dumps({'chunk': chunk})}\n\n"
+                yield f"event: chunk\ndata: {json.dumps({'chunk': chunk_data})}\n\n"
 
             yield f"event: done\ndata: {json.dumps({'status': 'completed'})}\n\n"
 
@@ -306,8 +327,21 @@ async def confirm_comparison_selection(
             detail="Selected documents haven't been indexed yet"
         )
 
+    enforce_chat_message_limit(user)
+
     # Initialize RAG service
     rag_service = RAGService(db)
+
+    log_shadow_credits(
+        user=user,
+        operation_type="chat_message",
+        reference_id=session_id,
+        metadata={
+            "route": "confirm_comparison_selection",
+            "force_comparison": force_comparison,
+            "document_count": len(document_ids),
+        },
+    )
 
     # Stream chat response
     async def event_generator():
@@ -317,15 +351,12 @@ async def confirm_comparison_selection(
         # Send session_id first
         yield f"event: session\ndata: {json.dumps({'session_id': session_id})}\n\n"
 
-        # Send thinking event
-        yield f"event: thinking\ndata: {json.dumps({'message': 'Processing your request...'})}\n\n"
-
         # Stream response from RAG with force_comparison flag
         try:
             chunk_count = 0
             comparison_context_sent = False
 
-            async for chunk in rag_service.chat(
+            async for event in rag_service.chat(
                 session_id=session_id,
                 collection_id=None,
                 user_message=original_query,
@@ -333,13 +364,27 @@ async def confirm_comparison_selection(
                 document_ids=document_ids,
                 force_comparison=force_comparison  # Force comparison mode on/off
             ):
-                # Send comparison context before first chunk (if comparison mode)
+                # Dispatch on tagged tuples from rag_service
+                if isinstance(event, tuple):
+                    tag, data = event
+                    if tag == "thinking":
+                        yield f"event: thinking\ndata: {json.dumps({'message': data})}\n\n"
+                        continue
+                    elif tag == "comparison_selection":
+                        yield f"event: comparison_selection\ndata: {json.dumps(data)}\n\n"
+                        continue
+                    else:
+                        chunk_data = data
+                else:
+                    chunk_data = event
+
+                # Send comparison context before first content chunk (if comparison mode)
                 if not comparison_context_sent and rag_service.last_comparison_context:
                     yield f"event: comparison_context\ndata: {json.dumps(rag_service.last_comparison_context)}\n\n"
                     comparison_context_sent = True
 
                 chunk_count += 1
-                yield f"event: chunk\ndata: {json.dumps({'chunk': chunk})}\n\n"
+                yield f"event: chunk\ndata: {json.dumps({'chunk': chunk_data})}\n\n"
 
             yield f"event: done\ndata: {json.dumps({'status': 'completed'})}\n\n"
 

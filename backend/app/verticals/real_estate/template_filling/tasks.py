@@ -25,6 +25,7 @@ from app.repositories.document_repository import DocumentRepository
 from app.repositories.job_repository import JobRepository
 from app.repositories.template_repository import TemplateRepository
 from app.services.artifacts import persist_artifact
+from app.services.beta_limits import commit_shadow_credits, reverse_shadow_credits
 from app.services.job_tracker import JobProgressTracker
 from app.core.storage.storage_factory import get_storage_backend
 from app.utils.costs import compute_llm_cost
@@ -39,6 +40,15 @@ from app.verticals.real_estate.template_filling.excel.mapping_coordinator import
 def _get_db_session() -> Session:
     """Get a new database session."""
     return SessionLocal()
+
+
+def _reverse_template_fill_shadow(fill_run_id: str, reason: str, stage: str) -> None:
+    reverse_shadow_credits(
+        operation_type="template_fill_run",
+        reference_id=fill_run_id,
+        reason=reason,
+        metadata={"stage": stage},
+    )
 
 
 
@@ -237,7 +247,7 @@ def detect_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                     "id": f"kv_{field_id_counter}",
                     "name": key,
                     "type": "text",
-                    "sample_value": value or "",
+                    "extracted_value": value or "",
                     "confidence": confidence,
                     "citations": [citation],
                     "description": f"Key-value field from page {kv_page_number}",
@@ -274,14 +284,14 @@ def detect_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                     continue
 
                 # Get sample value from first row if available
-                sample_value = ""
+                extracted_value = ""
                 table_data = metadata.get("table_data", [])
                 if table_data and len(table_data) > 0:
                     # Find column index
                     try:
                         col_idx = column_headers.index(col_header)
                         if col_idx < len(table_data[0]):
-                            sample_value = table_data[0][col_idx]
+                            extracted_value = table_data[0][col_idx]
                     except (ValueError, IndexError):
                         pass
 
@@ -289,7 +299,7 @@ def detect_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                     "id": f"tbl_{field_id_counter}",
                     "name": col_header,
                     "type": "text",
-                    "sample_value": sample_value,
+                    "extracted_value": extracted_value,
                     # NOTE: Hardcoded confidence for table columns.
                     # Unlike key-value pairs (which get per-pair confidence from Azure DI),
                     # Azure DI does NOT provide per-column/per-cell confidence for tables.
@@ -378,6 +388,7 @@ def detect_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
             current_stage="field_detection",
             message=f"Field detection failed: {str(e)}"
         )
+        _reverse_template_fill_shadow(fill_run_id, "field_detection_failed", "field_detection")
 
         db.close()
         return {"status": "failed", "error": str(e), **payload}
@@ -450,10 +461,11 @@ def auto_map_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
 
         # === STEP 1: Try schema-based mapping (unless skipped) ===
         if not skip_schema:
+            template_path = None
             try:
                 from openpyxl import load_workbook
 
-                # Download template file temporarily
+                # Download template file from R2 to worker-local /tmp
                 storage = get_storage_backend()
                 template_path = storage.download_to_temp(template.file_path)
 
@@ -497,12 +509,13 @@ def auto_map_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                 else:
                     logger.info("Template not recognized by schema system - will use generic analyzer")
 
-                # Clean up temp file
-                Path(template_path).unlink(missing_ok=True)
-
             except Exception as e:
                 logger.warning(f"Schema mapping failed (will fall back to generic): {e}")
                 schema_mappings = []
+            finally:
+                # Always clean up — even if load_workbook or identify_template throws
+                if template_path:
+                    Path(template_path).unlink(missing_ok=True)
 
         # === STEP 2: Generic + LLM mapping for remaining cells (unless schema-only mode) ===
         if not use_schema_only:
@@ -698,6 +711,7 @@ def auto_map_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
             current_stage="auto_mapping",
             message=f"Auto-mapping failed: {str(e)}"
         )
+        _reverse_template_fill_shadow(fill_run_id, "auto_mapping_failed", "auto_mapping")
 
         db.close()
         return {"status": "failed", "error": str(e), **payload}
@@ -706,7 +720,7 @@ def auto_map_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
 @shared_task(bind=True)
 def fill_excel_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Fill Excel template with data from Azure DI (sample_value).
+    Fill Excel template with data from Azure DI (extracted_value).
 
     Phase 5 (LLM extraction) has been removed - we use Azure DI values directly!
 
@@ -800,7 +814,7 @@ def fill_excel_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         pdf_fields = field_mapping.get('pdf_fields', [])
         for pdf_field in pdf_fields:
             field_id = pdf_field.get('id')
-            auto_mapped_value = pdf_field.get('sample_value')
+            auto_mapped_value = pdf_field.get('extracted_value')
 
             # Only add if not already in llm_extracted (user edits take precedence)
             if field_id and field_id not in llm_extracted and auto_mapped_value:
@@ -841,8 +855,15 @@ def fill_excel_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
             extracted_data=extracted_data
         )
 
-        # Upload filled file to storage WITH CORRECT EXTENSION
-        storage_key = f"fills/{fill_run_id}{file_ext}"
+        # Generate storage key: fills/{YYYY}/{MM}/{DD}/{fill_run_id}_{template_name}_filled{ext}
+        # Date-partitioned, consistent with workflow-artifacts. Readable in R2 browser.
+        from datetime import datetime as _dt
+        _now = _dt.utcnow()
+        safe_template_name = template.name.replace("/", "_").replace("\\", "_")
+        storage_key = (
+            f"fills/{_now.year}/{_now.month:02d}/{_now.day:02d}"
+            f"/{fill_run_id}_{safe_template_name}_filled{file_ext}"
+        )
         storage.upload(output_local_path, storage_key)
 
         # Create artifact metadata WITH CORRECT EXTENSION
@@ -850,7 +871,7 @@ def fill_excel_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
             "backend": settings.storage_backend,
             "key": storage_key,
             "size": Path(output_local_path).stat().st_size,
-            "filename": f"{template.name}_filled{file_ext}"
+            "filename": f"{fill_run_id}_{safe_template_name}_filled{file_ext}"
         }
 
         # Update fill run
@@ -878,6 +899,7 @@ def fill_excel_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         logger.info(
             f"Excel filling complete: {fill_summary['total_cells_filled']} cells filled"
         )
+        commit_shadow_credits(operation_type="template_fill_run", reference_id=fill_run_id)
 
         # Use mark_completed() to send proper SSE termination events ("complete" + "end")
         # NOT just update_progress() which only sends "progress" event
@@ -916,6 +938,7 @@ def fill_excel_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
             error_type="fill_error",
             is_retryable=False
         )
+        _reverse_template_fill_shadow(fill_run_id, "excel_filling_failed", "excel_filling")
 
         db.close()
         return {"status": "failed", "error": str(e), **payload}
@@ -1058,7 +1081,7 @@ def continue_fill_run_chain(
         db.close()
 
         # Execute fill task directly (no extraction needed!)
-        # Phase 5 removed - we use Azure DI sample_value directly
+        # Phase 5 removed - we use Azure DI extracted_value directly
         fill_excel_task.apply_async(
             kwargs={
                 "payload": {
@@ -1081,6 +1104,7 @@ def continue_fill_run_chain(
             current_stage="continuation",
             message=f"Failed to continue fill run: {str(e)}"
         )
+        _reverse_template_fill_shadow(fill_run_id, "continue_fill_failed", "continuation")
 
         db.close()
         raise

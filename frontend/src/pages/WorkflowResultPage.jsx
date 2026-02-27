@@ -150,20 +150,23 @@ export default function WorkflowResultPage() {
   }, [run?.status, runId]);
 
   const handleExport = async (format) => {
+    // PDF: trigger browser print dialog — renders the live UI exactly as-is
+    if (format === "pdf") {
+      window.print();
+      return;
+    }
+
     setExporting(true);
     try {
-      // Handle Word export locally
       if (format === "word") {
         await exportWorkflowAsWord(artifact, run);
       } else {
-        // PDF and Excel use backend export
+        // Excel and other backend exports
         const res = await exportRun(getToken, runId, format, "url");
 
         if (res.data?.url) {
-          // R2 signed URL
           window.open(res.data.url, "_blank");
         } else if (res.data instanceof Blob) {
-          // Direct download
           const url = window.URL.createObjectURL(res.data);
           const a = document.createElement("a");
           a.href = url;
@@ -293,7 +296,7 @@ export default function WorkflowResultPage() {
         entitySummary={run?.workflow?.name}
       />
 
-      <ResizablePanelGroup direction="horizontal" className="hidden md:flex flex-1">
+      <ResizablePanelGroup direction="horizontal" className="hidden md:flex flex-1 print:hidden">
         {/* Left panel: Workflow content */}
         <ResizablePanel defaultSize={showPdfPanel ? 55 : 100} minSize={35}>
           <div className="max-w-7xl mx-auto px-6 py-8 overflow-y-auto h-full">
@@ -563,7 +566,7 @@ export default function WorkflowResultPage() {
         )}
       </ResizablePanelGroup>
 
-      <div className="md:hidden h-full overflow-y-auto px-4 py-4">
+      <div className="md:hidden h-full overflow-y-auto px-4 py-4 print:hidden">
         <div className="space-y-4">
             {/* Back Button */}
             <Button
@@ -760,6 +763,26 @@ export default function WorkflowResultPage() {
               </div>
             )}
           </div>
+        </div>
+      )}
+
+      {/* Print-only view — hidden in browser, shown when printing via window.print() */}
+      {artifact?.artifact && (
+        <div className="hidden print:block px-8 py-6">
+          {run?.workflow_name === "Investment Memo" ? (
+            <InvestmentMemoView artifact={artifact} run={run} onCitationClick={() => {}} />
+          ) : (
+            <div className="space-y-4">
+              <h1 className="text-2xl font-bold text-foreground">
+                {run?.workflow_name || "Workflow Output"}
+              </h1>
+              {renderArtifact(
+                artifact.artifact.parsed ||
+                  artifact.artifact.partial_parsed ||
+                  artifact.artifact
+              )}
+            </div>
+          )}
         </div>
       )}
 

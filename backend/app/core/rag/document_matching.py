@@ -32,6 +32,51 @@ class DocumentMatcher:
 
         return matched_ids
 
+    def match_entities_with_scores(
+        self,
+        entities: List,
+        documents: List[Dict]
+    ) -> List[Dict]:
+        """
+        Like match_entities_to_documents but returns score alongside each match.
+
+        Returns [{id, filename, score}] for document entities with score >= 0.65.
+        Used by callers that need confidence-gated filtering (e.g. document-scoped retrieval).
+        """
+        results = []
+        seen_ids: set = set()
+        doc_entities = [e for e in entities if e.entity_type == "document"]
+
+        for entity in doc_entities:
+            extracted_clean = entity.name.lower().strip()
+            best_match = None
+            best_score = 0.0
+
+            for doc in documents:
+                fn_no_ext = doc["filename"].rsplit(".", 1)[0].lower().strip() if "." in doc["filename"] else doc["filename"].lower()
+                s1 = difflib.SequenceMatcher(None, extracted_clean, fn_no_ext).ratio()
+                s2 = difflib.SequenceMatcher(None, extracted_clean, doc["filename"].lower()).ratio()
+                score = max(s1, s2)
+                if extracted_clean in fn_no_ext or fn_no_ext in extracted_clean:
+                    score = max(score, 0.8)
+                if score > best_score:
+                    best_score = score
+                    best_match = doc
+
+            if best_match and best_score >= 0.65 and best_match["id"] not in seen_ids:
+                results.append({
+                    "id": best_match["id"],
+                    "filename": best_match["filename"],
+                    "score": best_score,
+                })
+                seen_ids.add(best_match["id"])
+                logger.debug(
+                    f"match_entities_with_scores: '{entity.name}' → '{best_match['filename']}' (score={best_score:.2f})",
+                    extra={"entity": entity.name, "matched_filename": best_match["filename"], "score": best_score}
+                )
+
+        return results
+
     def filter_documents_by_query(
         self,
         user_message: str,

@@ -224,7 +224,7 @@ export default function ChatPage() {
 
         {/* Left: Session Sidebar (scrollable, collapsible) */}
         <div
-          className={`hidden md:block flex-shrink-0 overflow-hidden scrollbar-thin transition-all duration-300 ${
+          className={`hidden md:flex flex-col h-full flex-shrink-0 overflow-hidden transition-all duration-300 ${
             sidebarCollapsed ? "w-0" : "w-80"
           }`}
         >
@@ -278,6 +278,7 @@ export default function ChatPage() {
               messages={chat.messages}
               isStreaming={chat.isStreaming}
               isThinking={chat.isThinking}
+              thinkingMessage={chat.thinkingMessage}
               streamingMessage={chat.streamingMessage}
               chatError={chat.chatError}
               collections={chat.collections}

@@ -98,8 +98,8 @@ services:
     deploy:
       resources:
         limits:
-          memory: 1536M  # Reduced from 2G (API needs more than workers)
-          cpus: '2'
+          memory: 2G     # 1 uvicorn worker + reranker model (~85MB) + request headroom
+          cpus: '4'      # All 4 CPUs go to 1 reranker instance (no competition between workers)
     restart: unless-stopped
 
   # ─── Celery workers (pool=solo, horizontal scaling) ─────────────

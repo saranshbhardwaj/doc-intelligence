@@ -5,6 +5,7 @@ import os
 import shutil
 import uuid
 import hashlib
+from io import BytesIO
 from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, Request
 
 from app.auth import get_current_user, get_current_org_role, is_admin_role
@@ -14,6 +15,7 @@ from app.services.tasks import start_document_indexing_chain
 from app.repositories.collection_repository import CollectionRepository
 from app.repositories.document_repository import DocumentRepository
 from app.repositories.job_repository import JobRepository
+from app.services.beta_limits import enforce_page_limit
 from app.utils.logging import logger
 from app.config import settings
 
@@ -135,6 +137,23 @@ async def upload_document(
     existing_doc = doc_repo.get_by_hash(content_hash, user.org_id)
     reuse_mode = existing_doc is not None and existing_doc.is_ready()
 
+    # Enforce page limits only for new indexing jobs.
+    # Reused documents are already indexed and do not consume additional pages.
+    if not reuse_mode and file_ext == ".pdf":
+        estimated_pages = 0
+        try:
+            from PyPDF2 import PdfReader
+
+            estimated_pages = len(PdfReader(BytesIO(file_bytes)).pages)
+        except Exception as e:
+            logger.warning(
+                "Failed to estimate PDF page count before upload; deferring to pipeline check",
+                extra={"filename": file.filename, "error": str(e)},
+            )
+
+        if estimated_pages > 0:
+            enforce_page_limit(user, pages_to_add=estimated_pages)
+
     # Initialize storage backend
     from app.core.storage.storage_factory import get_storage_backend
     storage = get_storage_backend()
@@ -223,8 +242,14 @@ async def upload_document(
             # Upload to storage using document's ID (ensures ID match)
             file_path = None
             try:
-                # Generate storage key: documents/{user_id}/{document.id}.{ext}
-                storage_key = f"documents/{user.id}/{document.id}{file_ext}"
+                # Generate storage key: documents/{YYYY}/{MM}/{DD}/{document_id}_{filename}
+                # Date-partitioned, consistent with workflow-artifacts. Readable in R2 browser.
+                from datetime import datetime as _dt
+                _now = _dt.utcnow()
+                storage_key = (
+                    f"documents/{_now.year}/{_now.month:02d}/{_now.day:02d}"
+                    f"/{document.id}_{safe_filename}"
+                )
                 storage.upload(temp_path, storage_key)
                 file_path = storage_key  # Store storage key (not local path)
 

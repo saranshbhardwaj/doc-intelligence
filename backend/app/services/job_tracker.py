@@ -185,7 +185,11 @@ class JobProgressTracker:
             })
             publish_event(self.job_id, "end", {"reason": "failed", "job_id": self.job_id})
         except Exception:
-            pass
+            logger.warning(
+                f"Failed to publish error/end SSE event for job {self.job_id} — "
+                "DB state is failed but frontend may not receive notification",
+                extra={"job_id": self.job_id}
+            )
 
     def mark_completed(self):
         """Mark job as successfully completed"""
@@ -220,7 +224,11 @@ class JobProgressTracker:
             })
             publish_event(self.job_id, "end", {"reason": "completed", "job_id": self.job_id})
         except Exception:
-            pass
+            logger.warning(
+                f"Failed to publish complete/end SSE event for job {self.job_id} — "
+                "DB state is completed but frontend may not receive notification",
+                extra={"job_id": self.job_id}
+            )
 
     def save_intermediate_result(
         self,

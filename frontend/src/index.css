@@ -256,3 +256,27 @@
 .scroll-smooth {
   scroll-behavior: smooth;
 }
+
+/* ===== Print Styles (Workflow PDF Export) ===== */
+@media print {
+  /* Page setup — A4, generous margins */
+  @page {
+    margin: 1.5cm 2cm;
+    size: A4;
+  }
+
+  /* Force background colors, gradients, and images to print.
+     Without this, browsers strip all backgrounds in print mode. */
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+
+  /* Hide app chrome: header/nav, body decorative gradient */
+  header {
+    display: none !important;
+  }
+  body {
+    background-image: none !important;
+  }
+}

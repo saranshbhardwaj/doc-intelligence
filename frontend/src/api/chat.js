@@ -161,7 +161,13 @@ export function sendChatMessage(
 ) {
   const { onSession, onChunk, onComplete, onError, onComparisonContext, onCitationContext, onThinking, onSessionWarning, onComparisonSelection } = callbacks;
 
-  getToken().then((token) => {
+  Promise.race([
+    getToken(),
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('Authentication timed out. Please check your connection.')), 10_000)
+    ),
+  ])
+    .then((token) => {
     const formData = new FormData();
     formData.append("message", message);
     formData.append("num_chunks", numChunks.toString());
@@ -249,7 +255,11 @@ export function sendChatMessage(
         console.error("Chat streaming error:", error);
         onError?.(error);
       });
-  });
+  })
+    .catch((error) => {
+      console.warn('⚠️ [Chat] Token fetch failed:', error.message);
+      onError?.(error);
+    });
 }
 
 /**
@@ -418,7 +428,13 @@ export function confirmComparison(
     onThinking,
   } = callbacks;
 
-  getToken().then((token) => {
+  Promise.race([
+    getToken(),
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('Authentication timed out. Please check your connection.')), 10_000)
+    ),
+  ])
+    .then((token) => {
     fetch(
       `${import.meta.env.VITE_API_URL}/api/chat/sessions/${sessionId}/chat/comparison`,
       {
@@ -492,5 +508,9 @@ export function confirmComparison(
         console.error("Comparison confirmation error:", error);
         onError?.(error);
       });
-  });
+  })
+    .catch((error) => {
+      console.warn('⚠️ [Chat] Token fetch failed:', error.message);
+      onError?.(error);
+    });
 }

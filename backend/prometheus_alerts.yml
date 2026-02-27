@@ -156,6 +156,81 @@ groups:
           summary: "High token usage rate"
           description: "Token usage exceeding 1M tokens/5min for 10 minutes ({{ $value }} tokens/5min)"
 
+  - name: docint_external_apis
+    interval: 30s
+    rules:
+      # === EMBEDDING API ALERTS ===
+      - alert: HighEmbeddingFailureRate
+        expr: rate(embedding_failures_total[5m]) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+          component: embeddings
+        annotations:
+          summary: "High OpenAI embedding failure rate"
+          description: "Embedding failures exceeding 0.1/sec for 5 minutes ({{ $value }} failures/sec)"
+
+      - alert: HighEmbeddingLatency
+        expr: histogram_quantile(0.95, rate(embedding_latency_seconds_bucket[5m])) > 10
+        for: 5m
+        labels:
+          severity: warning
+          component: embeddings
+        annotations:
+          summary: "High OpenAI embedding p95 latency"
+          description: "Embedding p95 latency exceeding 10 seconds for 5 minutes ({{ $value }}s)"
+
+      - alert: EmbeddingRateLimitSpike
+        expr: rate(embedding_retries_total[5m]) > 0.5
+        for: 5m
+        labels:
+          severity: warning
+          component: embeddings
+        annotations:
+          summary: "OpenAI embedding API rate limiting detected"
+          description: "Embedding retries exceeding 0.5/sec for 5 minutes - hitting OpenAI rate limits"
+
+      # === AZURE DOCUMENT INTELLIGENCE ALERTS ===
+      - alert: HighAzureDIFailureRate
+        expr: rate(azure_di_failures_total[5m]) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+          component: azure_di
+        annotations:
+          summary: "High Azure Document Intelligence failure rate"
+          description: "Azure DI failures exceeding 0.05/sec for 5 minutes ({{ $value }} failures/sec)"
+
+      - alert: HighAzureDILatency
+        expr: histogram_quantile(0.95, rate(azure_di_latency_seconds_bucket[5m])) > 120
+        for: 10m
+        labels:
+          severity: warning
+          component: azure_di
+        annotations:
+          summary: "High Azure DI p95 latency"
+          description: "Azure DI p95 latency exceeding 120 seconds for 10 minutes ({{ $value }}s)"
+
+      - alert: AzureDIRateLimitSpike
+        expr: rate(azure_di_retries_total[5m]) > 0.2
+        for: 5m
+        labels:
+          severity: warning
+          component: azure_di
+        annotations:
+          summary: "Azure Document Intelligence rate limiting detected"
+          description: "Azure DI retries exceeding 0.2/sec for 5 minutes - hitting Azure throttling limits"
+
+      - alert: HighAzureDICostRate
+        expr: rate(azure_di_cost_usd_total[1h]) > 50
+        for: 1h
+        labels:
+          severity: warning
+          component: azure_di
+        annotations:
+          summary: "Azure DI costs exceeding $50/hour"
+          description: "Azure Document Intelligence costs are ${{ $value }}/hour"
+
   - name: docint_infrastructure
     interval: 30s
     rules:

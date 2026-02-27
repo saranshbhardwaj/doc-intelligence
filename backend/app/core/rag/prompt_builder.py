@@ -79,6 +79,19 @@ class PromptBuilder:
             sections.append("=== RECENT MESSAGES ===\n" + "\n".join(recent_lines) + "\n")
         return "\n".join(sections) if sections else "[No prior conversation]"
 
+    def _format_chunks(self, relevant_chunks: List[Dict[str, Any]]) -> str:
+        """Format retrieved chunks into a numbered source block for the LLM prompt."""
+        context_sections: List[str] = []
+        for i, chunk in enumerate(relevant_chunks, 1):
+            chunk_id = str(chunk.get('id', ''))[:8]  # First 8 chars of UUID
+            page = chunk.get('page_number', 1)
+            citation_hint = f"[Citation: ref:{chunk_id}:p{page}]"
+            source_info = f"Source {i}: {chunk['document_id']} (Page {page}) {citation_hint}"
+            if chunk.get('section_heading'):
+                source_info += f" - {chunk['section_heading']}"
+            context_sections.append(f"{source_info}\n{chunk['text']}\n")
+        return "\n---\n\n".join(context_sections)
+
     def build(
         self,
         user_message: str,
@@ -94,20 +107,7 @@ class PromptBuilder:
                 "DOCUMENT EXCERPTS:\n\n[No relevant document excerpts found for this query]\n\n---\n\n"
                 f"USER QUESTION: {user_message}\n\nANSWER:" )
 
-        context_sections: List[str] = []
-        for i, chunk in enumerate(relevant_chunks, 1):
-            chunk_id = str(chunk.get('id', ''))[:8]  # First 8 chars of UUID
-            page = chunk.get('page_number', 1)
-
-            # Include citation hint for LLM
-            citation_hint = f"[Citation: ref:{chunk_id}:p{page}]"
-            source_info = f"Source {i}: {chunk['document_id']} (Page {page}) {citation_hint}"
-
-            if chunk.get('section_heading'):
-                source_info += f" - {chunk['section_heading']}"
-            context_sections.append(f"{source_info}\n{chunk['text']}\n")
-
-        context = "\n---\n\n".join(context_sections)
+        context = self._format_chunks(relevant_chunks)
         convo_sections = self.format_conversation(recent_messages, summary_text)
         return (
             f"{self.SYSTEM_INSTRUCTIONS_WITH_CHUNKS}\n"
@@ -115,6 +115,62 @@ class PromptBuilder:
             "DOCUMENT EXCERPTS:\n\n"
             f"{context}\n\n---\n\n"
             f"USER QUESTION: {user_message}\n\nANSWER:" )
+
+    def build_split(
+        self,
+        user_message: str,
+        relevant_chunks: List[Dict[str, Any]],
+        recent_messages: List[Dict[str, Any]],
+        summary_text: Optional[str] = None
+    ) -> tuple:
+        """
+        Return (system_prompt, user_content) for Anthropic prompt caching.
+
+        System prompt (stable between compaction points — cached by Anthropic):
+          - Role instructions
+          - Conversation summary (if any)
+
+        User content (changes every turn — not cached):
+          - Recent verbatim messages
+          - Document chunks
+          - User question
+
+        The system prompt is marked with cache_control: ephemeral by the LLM client,
+        giving a 5-minute cache TTL. Between compaction points the system prompt is
+        byte-identical → cache hits → ~10x cheaper input token cost.
+        """
+        # --- System prompt (cached) ---
+        instructions = (
+            self.SYSTEM_INSTRUCTIONS_WITH_CHUNKS
+            if relevant_chunks
+            else self.SYSTEM_INSTRUCTIONS_NO_CHUNKS
+        )
+        system_parts = [instructions]
+        if summary_text:
+            system_parts.append(f"\n=== CONVERSATION SUMMARY ===\n{summary_text.strip()}")
+        system_prompt = "\n".join(system_parts)
+
+        # --- User content (dynamic, not cached) ---
+        recent_section = ""
+        if recent_messages:
+            lines = [f"{m['role'].title()}: {m['content']}" for m in recent_messages]
+            recent_section = "=== RECENT MESSAGES ===\n" + "\n".join(lines) + "\n\n"
+
+        if relevant_chunks:
+            context = self._format_chunks(relevant_chunks)
+            user_content = (
+                f"{recent_section}"
+                f"DOCUMENT EXCERPTS:\n\n{context}\n\n---\n\n"
+                f"USER QUESTION: {user_message}\n\nANSWER:"
+            )
+        else:
+            user_content = (
+                f"{recent_section}"
+                "DOCUMENT EXCERPTS:\n\n[No relevant document excerpts found for this query]\n\n---\n\n"
+                f"USER QUESTION: {user_message}\n\nANSWER:"
+            )
+
+        return system_prompt, user_content
 
     def build_comparison_prompt(
         self,

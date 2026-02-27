@@ -14,6 +14,7 @@ import { UserButton } from "@clerk/clerk-react";
 import { Library, MessageSquare, Play, Zap, FileSpreadsheet, LayoutDashboard, Menu } from "lucide-react";
 import { useState } from "react";
 import DarkModeToggle from "../common/DarkModeToggle";
+import NetworkStatus from "../common/NetworkStatus";
 import { useDarkMode } from "../../hooks/useDarkMode";
 import VerticalDropdown from "../navigation/VerticalDropdown";
 import { getVerticalNavigation } from "../../config/verticals";
@@ -77,7 +78,7 @@ export default function AppLayout({ children }) {
     <div className="min-h-screen bg-background flex flex-col">
       {/* Header */}
       <header className="bg-card border-b border-border sticky top-0 z-40">
-        <div className="max-w-7xl mx-auto px-6 py-2">
+        <div className="w-full px-4 md:px-6 py-2">
           <div className="flex items-center justify-between">
             {/* Logo / Home Link */}
             <Link
@@ -261,6 +262,9 @@ export default function AppLayout({ children }) {
           </div>
         </SheetContent>
       </Sheet>
+
+      {/* Network health banner — shown when /api/health is unreachable */}
+      <NetworkStatus />
 
       {/* Main Content */}
       <main className="flex-1 flex flex-col">{children}</main>

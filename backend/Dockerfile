@@ -51,4 +51,4 @@ HEALTHCHECK --interval=30s --timeout=5s --retries=3 CMD curl -f http://localhost
 
 # Run uvicorn with 2 workers for concurrent request handling.
 # Prometheus multiproc cleanup is handled by Python code in metrics_setup.py (PID-based)
-CMD ["python", "-Xfrozen_modules=off", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "2"]
+CMD ["python", "-Xfrozen_modules=off", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]

@@ -11,12 +11,14 @@
  */
 
 import { useState, useRef, useCallback } from "react";
+import { toast } from "sonner";
 import {
   Upload,
   X,
   FileSpreadsheet,
   CheckCircle,
   AlertCircle,
+  Loader2,
 } from "lucide-react";
 import {
   Dialog,
@@ -146,7 +148,7 @@ export default function UploadTemplateModal({
         category,
       });
 
-      // Reset form
+      // Reset form and close — analysis continues in background
       setSelectedFile(null);
       setTemplateName("");
       setDescription("");
@@ -154,7 +156,7 @@ export default function UploadTemplateModal({
       onOpenChange?.(false);
     } catch (error) {
       console.error("Upload failed:", error);
-      alert(`Upload failed: ${error.message}`);
+      toast.error("Upload failed", { description: error.message });
     } finally {
       setUploading(false);
     }
@@ -169,7 +171,7 @@ export default function UploadTemplateModal({
   const isValid = selectedFile && selectedFile.errors.length === 0;
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <Dialog open={open} onOpenChange={uploading ? undefined : onOpenChange}>
       <DialogContent className="sm:max-w-2xl max-h-[90vh] flex flex-col">
         <DialogHeader className="flex-shrink-0">
           <DialogTitle className="text-xl">Upload Excel Template</DialogTitle>
@@ -376,8 +378,8 @@ export default function UploadTemplateModal({
             <Button onClick={handleUpload} disabled={!isValid || uploading}>
               {uploading ? (
                 <>
-                  <Upload className="w-4 h-4 mr-2 animate-spin" />
-                  Uploading...
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Uploading…
                 </>
               ) : (
                 <>

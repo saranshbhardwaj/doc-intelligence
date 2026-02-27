@@ -1,12 +1,16 @@
 # backend/app/db_models_users.py
-"""Database models for user management and authentication"""
-from sqlalchemy import Boolean, Column, String, Integer, DateTime, Float, ForeignKey
+"""Database models for user management and authentication."""
+import uuid
 from datetime import datetime
+
+from sqlalchemy import Boolean, Column, DateTime, Float, ForeignKey, Integer, String, Text
+from sqlalchemy.dialects.postgresql import JSONB
+
 from app.database import Base
 
 
 class User(Base):
-    """User accounts synced from Clerk"""
+    """User accounts synced from Clerk."""
     __tablename__ = "users"
 
     id = Column(String(36), primary_key=True)  # Clerk user ID
@@ -20,6 +24,10 @@ class User(Base):
     total_pages_processed = Column(Integer, default=0)
     pages_this_month = Column(Integer, default=0)
     pages_limit = Column(Integer, default=100)  # Based on tier
+    workflow_runs_limit = Column(Integer, default=2)  # Closed beta cap (0 = unlimited)
+    extractions_limit = Column(Integer, default=1)  # Closed beta cap (0 = unlimited)
+    template_fill_runs_limit = Column(Integer, default=2)  # Closed beta cap (0 = unlimited)
+    chat_messages_limit = Column(Integer, default=30)  # Closed beta cap (0 = unlimited)
 
     # Billing
     subscription_id = Column(String(255), nullable=True)
@@ -34,7 +42,7 @@ class User(Base):
 
 
 class UsageLog(Base):
-    """Track per-extraction usage for billing and analytics"""
+    """Track per-extraction usage for billing and analytics."""
     __tablename__ = "usage_logs"
 
     id = Column(String(36), primary_key=True)
@@ -54,10 +62,28 @@ class UsageLog(Base):
 
 
 class AllowedEmail(Base):
-    """Pre-approved emails that can use the app (invite-only access control)"""
+    """Pre-approved emails that can use the app (invite-only access control)."""
     __tablename__ = "allowed_emails"
 
     id = Column(String(36), primary_key=True)
     email = Column(String(255), unique=True, nullable=False, index=True)
     added_by = Column(String(36), nullable=True)  # admin user_id who added this
     created_at = Column(DateTime, default=datetime.now, nullable=False)
+
+
+class ShadowCreditLog(Base):
+    """Best-effort shadow credit ledger for pricing simulation (not enforced)."""
+    __tablename__ = "shadow_credit_logs"
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
+    org_id = Column(String(64), nullable=False, index=True)
+    operation_type = Column(String(50), nullable=False, index=True)
+    reference_id = Column(String(64), nullable=True, index=True)  # run/extraction/session/document id
+    units = Column(Integer, nullable=False, default=1)  # e.g., pages for indexing
+    shadow_credits = Column(Float, nullable=False, default=0.0)
+    status = Column(String(20), nullable=False, default="committed", index=True)  # reserved | committed | reversed
+    reversed_at = Column(DateTime, nullable=True)
+    reverse_reason = Column(Text, nullable=True)
+    shadow_metadata = Column("metadata", JSONB, nullable=True)
+    created_at = Column(DateTime, default=datetime.now, nullable=False, index=True)

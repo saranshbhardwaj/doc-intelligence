@@ -20,6 +20,14 @@ from azure.core.exceptions import AzureError
 from app.core.parsers.base import DocumentParser, ParserOutput
 from app.config import settings
 from app.utils.logging import logger
+from app.utils.metrics import (
+    AZURE_DI_REQUESTS_TOTAL,
+    AZURE_DI_FAILURES_TOTAL,
+    AZURE_DI_RETRIES_TOTAL,
+    AZURE_DI_LATENCY_SECONDS,
+    AZURE_DI_PAGES_PROCESSED,
+    AZURE_DI_COST_USD,
+)
 
 
 @dataclass
@@ -137,65 +145,103 @@ class AzureDocumentIntelligenceParser(DocumentParser):
             else:
                 logger.info(f"Skipping KEY_VALUE_PAIRS feature for {file_ext} file (not supported)")
 
-            # Attempt calling SDK using new AnalyzeDocumentRequest signature.
-            # Some releases of azure-ai-documentintelligence (including 1.0.0) expect a positional 'body'
-            # and can mis-handle keyword usage, producing a TypeError about missing positional 'body'.
-            analyze_request = AnalyzeDocumentRequest(bytes_source=pdf_bytes)
-            poller = None
-            try:
-                # Prefer positional invocation to avoid signature mismatch issues.
-                # Conditionally add KEY_VALUE_PAIRS feature (only for PDF/images, not DOCX)
-                if features:
-                    poller = self.client.begin_analyze_document(
-                        self.model_name,
-                        body=analyze_request,
-                        features=features
-                    )
-                else:
-                    # No features for DOCX/XLSX
-                    poller = self.client.begin_analyze_document(
-                        self.model_name,
-                        body=analyze_request
-                    )
-            except TypeError as te:
-                # Retry using raw bytes (older/alternate signature accepting the document directly)
-                logger.warning(
-                    "Azure begin_analyze_document signature mismatch; retrying with raw bytes",
-                    extra={"error": str(te)}
-                )
-                try:
-                    if features:
-                        poller = self.client.begin_analyze_document(
-                            self.model_name,
-                            pdf_bytes,
-                            features=features
-                        )
-                    else:
-                        poller = self.client.begin_analyze_document(
-                            self.model_name,
-                            pdf_bytes
-                        )
-                except Exception as e:
-                    raise RuntimeError(f"parse_error: Azure begin_analyze_document failed after fallback: {e}") from e
-            except AzureError as ae:
-                raise RuntimeError(f"parse_error: Azure analyze call failed: {ae}") from ae
-            except Exception as e:
-                # Any unexpected failure during invocation – classify as parse_error
-                raise RuntimeError(f"parse_error: Unexpected Azure analyze invocation failure: {e}") from e
-            try:
-                # Apply explicit timeout; Azure SDK raises TimeoutError on wait expiry
-                result: AnalyzeResult = poller.result(timeout=self.timeout_seconds)
-            except TimeoutError as te:
-                processing_time_ms = int((time.time() - start_time) * 1000)
-                logger.error(
-                    f"Azure Document Intelligence timeout after {self.timeout_seconds}s (elapsed {processing_time_ms}ms)",
-                    extra={"timeout_seconds": self.timeout_seconds},
-                )
-                raise RuntimeError(
-                    f"Azure Document Intelligence processing exceeded timeout of {self.timeout_seconds}s"
-                ) from te
+            # Retry logic for transient Azure API errors (rate limits, throttling)
+            max_retries = 3
+            retry_delay = 2  # seconds base delay
+            result = None
 
-            # Edge case: Validate result is not None
+            for attempt in range(max_retries):
+                api_start = time.time()
+                try:
+                    analyze_request = AnalyzeDocumentRequest(bytes_source=pdf_bytes)
+                    poller = None
+                    try:
+                        if features:
+                            poller = self.client.begin_analyze_document(
+                                self.model_name,
+                                body=analyze_request,
+                                features=features
+                            )
+                        else:
+                            poller = self.client.begin_analyze_document(
+                                self.model_name,
+                                body=analyze_request
+                            )
+                    except TypeError as te:
+                        logger.warning(
+                            "Azure begin_analyze_document signature mismatch; retrying with raw bytes",
+                            extra={"error": str(te)}
+                        )
+                        try:
+                            if features:
+                                poller = self.client.begin_analyze_document(
+                                    self.model_name,
+                                    pdf_bytes,
+                                    features=features
+                                )
+                            else:
+                                poller = self.client.begin_analyze_document(
+                                    self.model_name,
+                                    pdf_bytes
+                                )
+                        except Exception as e:
+                            raise RuntimeError(f"parse_error: Azure begin_analyze_document failed after fallback: {e}") from e
+
+                    try:
+                        result = poller.result(timeout=self.timeout_seconds)
+                    except TimeoutError as te:
+                        processing_time_ms = int((time.time() - start_time) * 1000)
+                        logger.error(
+                            f"Azure Document Intelligence timeout after {self.timeout_seconds}s (elapsed {processing_time_ms}ms)",
+                            extra={"timeout_seconds": self.timeout_seconds},
+                        )
+                        AZURE_DI_REQUESTS_TOTAL.labels(model=self.model_name).inc()
+                        AZURE_DI_FAILURES_TOTAL.labels(model=self.model_name, error_type="timeout").inc()
+                        raise RuntimeError(
+                            f"Azure Document Intelligence processing exceeded timeout of {self.timeout_seconds}s"
+                        ) from te
+
+                    # Success — record metrics
+                    api_elapsed = time.time() - api_start
+                    AZURE_DI_REQUESTS_TOTAL.labels(model=self.model_name).inc()
+                    AZURE_DI_LATENCY_SECONDS.labels(model=self.model_name).observe(api_elapsed)
+                    break  # Exit retry loop
+
+                except AzureError as ae:
+                    error_str = str(ae)
+                    is_retryable = (
+                        "429" in error_str or
+                        "Too Many Requests" in error_str or
+                        "throttled" in error_str.lower() or
+                        "503" in error_str or
+                        "Temporarily Unavailable" in error_str
+                    )
+
+                    if "429" in error_str or "Too Many Requests" in error_str or "throttled" in error_str.lower():
+                        error_type = "rate_limit"
+                    elif "503" in error_str:
+                        error_type = "service_unavailable"
+                    else:
+                        error_type = "azure_error"
+
+                    if is_retryable and attempt < max_retries - 1:
+                        AZURE_DI_RETRIES_TOTAL.labels(model=self.model_name).inc()
+                        wait_time = retry_delay * (2 ** attempt)  # 2s, 4s, 8s
+                        logger.warning(
+                            f"Azure DI API error ({error_type}), retrying in {wait_time}s "
+                            f"(attempt {attempt + 1}/{max_retries}): {ae}"
+                        )
+                        time.sleep(wait_time)
+                    else:
+                        AZURE_DI_REQUESTS_TOTAL.labels(model=self.model_name).inc()
+                        AZURE_DI_FAILURES_TOTAL.labels(model=self.model_name, error_type=error_type).inc()
+                        raise RuntimeError(f"parse_error: Azure analyze call failed: {ae}") from ae
+
+                except RuntimeError:
+                    # Don't retry RuntimeErrors (timeout, parse_error, fallback failures)
+                    raise
+
+            # Validate result is not None
             if result is None:
                 raise RuntimeError("parse_error: Azure API returned None result")
 
@@ -232,6 +278,10 @@ class AzureDocumentIntelligenceParser(DocumentParser):
                 raise ValueError("parse_error: No pages extracted from PDF")
 
             cost = page_count * self.cost_per_page
+
+            # Record page and cost metrics
+            AZURE_DI_PAGES_PROCESSED.labels(model=self.model_name).inc(page_count)
+            AZURE_DI_COST_USD.labels(model=self.model_name).inc(cost)
 
             logger.info(
                 f"Azure parser extracted {len(full_text)} chars from {page_count} pages in {processing_time_ms}ms (cost=${cost:.2f})"
@@ -373,6 +423,7 @@ class AzureDocumentIntelligenceParser(DocumentParser):
             raise
         except AzureError as e:
             processing_time_ms = int((time.time() - start_time) * 1000)
+            AZURE_DI_FAILURES_TOTAL.labels(model=self.model_name, error_type="azure_error").inc()
             logger.error(
                 f"Azure Document Intelligence API error after {processing_time_ms}ms: {e}",
                 extra={"error_type": type(e).__name__},
@@ -380,6 +431,7 @@ class AzureDocumentIntelligenceParser(DocumentParser):
             raise RuntimeError(f"Azure Document Intelligence parsing failed: {e}") from e
         except Exception as e:
             processing_time_ms = int((time.time() - start_time) * 1000)
+            AZURE_DI_FAILURES_TOTAL.labels(model=self.model_name, error_type="other").inc()
             logger.exception(
                 f"Unexpected Azure parser failure after {processing_time_ms}ms: {e}",
             )

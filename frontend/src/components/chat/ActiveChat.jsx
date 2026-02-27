@@ -82,6 +82,7 @@ export default function ActiveChat({
   messages = [],
   isStreaming = false,
   isThinking = false,
+  thinkingMessage = "",
   streamingMessage = "",
   chatError = null,
   collections = [],
@@ -765,13 +766,19 @@ export default function ActiveChat({
                 return (
                   <div
                     key={index}
-                    className="flex justify-start animate-message-slide-left w-full"
+                    className="group flex justify-start animate-message-slide-left w-full"
                   >
                     <div className="w-full">
                       <ComparisonMessage
                         message={msg}
                         onOpenComparisonPanel={handleOpenComparisonPanel}
                       />
+                      {msg.id && (
+                        <ChatMessageFeedback
+                          messageId={msg.id}
+                          sessionId={currentSession?.id}
+                        />
+                      )}
                     </div>
                   </div>
                 );
@@ -883,7 +890,7 @@ export default function ActiveChat({
                 <div className="max-w-[80%] rounded-2xl px-5 py-3 bg-card border border-border">
                   <div className="flex items-center gap-2 text-muted-foreground">
                     <Loader2 className="h-4 w-4 animate-spin" />
-                    <span className="text-sm">Thinking...</span>
+                    <span className="text-sm">{thinkingMessage || "Thinking..."}</span>
                   </div>
                 </div>
               </div>

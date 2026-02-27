@@ -27,10 +27,10 @@ def metrics_root():
         data = generate_latest()
 
     # METRICS_DEBUG: log workflow-related lines from scrape output
-    workflow_lines = [l for l in data.decode().split('\n') if 'workflow_runs' in l]
-    if workflow_lines:
-        _metrics_logger.info(f"METRICS_DEBUG /metrics scrape: {workflow_lines}")
-    else:
-        _metrics_logger.info("METRICS_DEBUG /metrics scrape: NO workflow_runs lines found")
+    # workflow_lines = [l for l in data.decode().split('\n') if 'workflow_runs' in l]
+    # if workflow_lines:
+    #     _metrics_logger.info(f"METRICS_DEBUG /metrics scrape: {workflow_lines}")
+    # else:
+    #     _metrics_logger.info("METRICS_DEBUG /metrics scrape: NO workflow_runs lines found")
 
     return Response(content=data, media_type=CONTENT_TYPE_LATEST)

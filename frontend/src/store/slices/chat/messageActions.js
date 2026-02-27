@@ -49,9 +49,9 @@ export const createChatMessageActions = (set, get) => ({
       numChunks,
       {
         onSession: () => {},
-        onThinking: () => {
+        onThinking: (data) => {
           set((state) => ({
-            chat: { ...state.chat, isThinking: true },
+            chat: { ...state.chat, isThinking: true, thinkingMessage: data?.message || "Thinking..." },
           }));
         },
         onComparisonContext: (context) => {
@@ -103,6 +103,7 @@ export const createChatMessageActions = (set, get) => ({
             chat: {
               ...state.chat,
               isThinking: false,
+              thinkingMessage: "",
               streamingMessage: state.chat.streamingMessage + chunk,
             },
           }));

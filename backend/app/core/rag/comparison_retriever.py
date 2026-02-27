@@ -11,16 +11,22 @@ ensuring high-quality matches between related content across documents.
 from typing import List, Dict, Optional, Tuple, TYPE_CHECKING
 from dataclasses import dataclass
 import asyncio
+import functools
 import numpy as np
 import logging
+import time
 
 from app.core.rag.hybrid_retriever import HybridRetriever
 from app.core.rag.reranker import Reranker
+from app.services.service_locator import get_reranker
+from app.config import settings
 from app.core.rag.metadata_booster import MetadataBooster
 from app.core.rag.context_expander import ContextExpander
 from app.repositories.document_repository import DocumentRepository
 from sqlalchemy.orm import Session
 from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.core.rag.query_understanding import QueryType
 
 if TYPE_CHECKING:
     from app.core.rag.query_understanding import QueryUnderstanding
@@ -95,7 +101,10 @@ class ComparisonRetriever:
         """
         self.db = db
         self.hybrid_retriever = hybrid_retriever or HybridRetriever(db)
-        self.reranker = reranker or Reranker()
+        if reranker is not None:
+            self.reranker = reranker
+        else:
+            self.reranker = get_reranker() if settings.rag_use_reranker else None
         self.metadata_booster = metadata_booster or MetadataBooster.for_reranker()
         self.context_expander = context_expander or ContextExpander()
         self.document_repo = DocumentRepository()
@@ -106,6 +115,7 @@ class ComparisonRetriever:
         document_ids: List[str],
         collection_id: Optional[str] = None,
         chunks_per_doc: int = 10,
+        chunks_per_doc_map: Optional[Dict[str, int]] = None,  # Per-doc override (adaptive allocation)
         similarity_threshold: float = 0.6,
         max_documents: int = 5,
         query_understanding=None,  # QueryUnderstanding object (optional, for HyDE)
@@ -130,6 +140,8 @@ class ComparisonRetriever:
         Returns:
             ComparisonContext with paired/clustered chunks and document metadata
         """
+        overall_start = time.monotonic()
+
         # Limit number of documents
         document_ids = document_ids[:max_documents]
         num_docs = len(document_ids)
@@ -142,12 +154,14 @@ class ComparisonRetriever:
         # Step 1: Retrieve from each document with full pipeline (in parallel)
         async def retrieve_doc(doc_id):
             """Helper to retrieve chunks for a single document."""
+            # Use per-doc allocation if provided (adaptive sizing by page count)
+            doc_k = chunks_per_doc_map.get(doc_id, chunks_per_doc) if chunks_per_doc_map else chunks_per_doc
             chunks = await self._retrieve_single_doc(
                 query=query,
                 doc_id=doc_id,
                 collection_id=collection_id,
                 query_understanding=query_understanding,
-                chunks_per_doc=chunks_per_doc,
+                chunks_per_doc=doc_k,
                 async_session=async_session
             )
             logger.debug(
@@ -157,18 +171,68 @@ class ComparisonRetriever:
             return (doc_id, chunks)
 
         # Parallel retrieval - saves 1-2 seconds for multi-document comparisons
+        retrieval_start = time.monotonic()
         results = await asyncio.gather(*[
             retrieve_doc(doc_id) for doc_id in document_ids
         ])
+        retrieval_ms = round((time.monotonic() - retrieval_start) * 1000, 2)
 
         doc_chunks = dict(results)
+        doc_signal = {}
+        for doc_id, chunks in doc_chunks.items():
+            top_score = max(
+                (float(c.get("rerank_score", c.get("hybrid_score", 0.0)) or 0.0) for c in chunks),
+                default=0.0
+            )
+            doc_signal[doc_id] = {
+                "chunk_count": len(chunks),
+                "top_score": top_score
+            }
+
+        logger.info(
+            "Comparison retrieval stage complete",
+            extra={
+                "num_documents": num_docs,
+                "retrieval_ms": retrieval_ms,
+                "doc_signal": doc_signal
+            }
+        )
 
         # Step 2: Get document metadata
         documents = self._get_doc_metadata(document_ids)
 
+        # Early-exit: skip expensive pairing/clustering if retrieval signal is weak
+        min_top_score = max(0.0, float(getattr(settings, "comparison_pairing_min_top_score", 0.0)))
+        min_chunks_per_doc = max(1, int(getattr(settings, "comparison_pairing_min_chunks_per_doc", 1)))
+        low_signal_docs = [
+            doc_id for doc_id, info in doc_signal.items()
+            if info["chunk_count"] < min_chunks_per_doc
+            or (min_top_score > 0.0 and info["top_score"] < min_top_score)
+        ]
+        if low_signal_docs:
+            logger.info(
+                "Comparison pairing early-exit: weak retrieval signal",
+                extra={
+                    "num_documents": num_docs,
+                    "low_signal_docs": low_signal_docs,
+                    "min_chunks_per_doc": min_chunks_per_doc,
+                    "min_top_score": min_top_score,
+                    "retrieval_ms": retrieval_ms,
+                    "total_ms": round((time.monotonic() - overall_start) * 1000, 2)
+                }
+            )
+            return ComparisonContext(
+                documents=documents,
+                paired_chunks=[],
+                clustered_chunks=[],
+                unpaired_chunks=doc_chunks,
+                num_documents=num_docs
+            )
+
         # Step 3: Pair or cluster chunks based on number of documents
         paired_chunks = []
         clustered_chunks = []
+        pair_cluster_start = time.monotonic()
 
         if num_docs == 2:
             # Use pairwise matching for 2 documents
@@ -185,6 +249,17 @@ class ComparisonRetriever:
                 f"Clustered {len(clustered_chunks)} chunk clusters across {num_docs} documents",
                 extra={"avg_cluster_size": np.mean([len(c.chunks) for c in clustered_chunks]) if clustered_chunks else 0}
             )
+        pair_cluster_ms = round((time.monotonic() - pair_cluster_start) * 1000, 2)
+        logger.info(
+            "Comparison pairing/clustering stage complete",
+            extra={
+                "num_documents": num_docs,
+                "paired_count": len(paired_chunks),
+                "clustered_count": len(clustered_chunks),
+                "pair_or_cluster_ms": pair_cluster_ms,
+                "total_ms": round((time.monotonic() - overall_start) * 1000, 2)
+            }
+        )
 
         # Step 4: Get unpaired chunks
         unpaired = self._get_unpaired_multi(doc_chunks, paired_chunks, clustered_chunks)
@@ -221,42 +296,96 @@ class ComparisonRetriever:
             Top-k chunks with rerank scores, optionally expanded with related context
         """
         # Step 1: Hybrid retrieval (semantic + BM25 + RRF) with optional HyDE
+        retrieval_start = time.monotonic()
         candidates = self.hybrid_retriever.retrieve(
             query=query,
             collection_id=collection_id,
             document_ids=[doc_id],
-            top_k=20,  # Get 20 candidates for re-ranking
+            top_k=max(chunks_per_doc * 2, 20),  # Scale candidate pool with allocation
             query_understanding=query_understanding  # For HyDE enhancement
         )
+        retrieval_ms = round((time.monotonic() - retrieval_start) * 1000, 2)
 
         if not candidates:
-            logger.warning(f"No candidates found for document {doc_id}")
+            logger.warning(
+                f"No candidates found for document {doc_id}",
+                extra={"doc_id": doc_id, "retrieval_ms": retrieval_ms}
+            )
             return []
 
-        # Step 2: Re-rank with cross-encoder
-        reranked = self.reranker.rerank(
-            query=query,
-            chunks=candidates,
-            query_understanding=query_understanding,
-            top_k=chunks_per_doc
-        )
+        # Step 2: Re-rank with cross-encoder (disabled for comparison by default).
+        # Comparison pairs chunks by embedding cosine similarity after retrieval, so
+        # the reranker adds ~76s of CPU inference with minimal benefit. Controlled by
+        # rag_use_reranker_comparison (default False).
+        rerank_min_candidates = max(1, settings.rag_reranker_min_candidates_comparison)
+        if self.reranker and settings.rag_use_reranker_comparison and len(candidates) >= rerank_min_candidates:
+            rerank_start = time.monotonic()
+            loop = asyncio.get_running_loop()
+            reranked = await loop.run_in_executor(
+                None,
+                functools.partial(
+                    self.reranker.rerank,
+                    query=query,
+                    chunks=candidates,
+                    query_understanding=query_understanding,
+                    top_k=chunks_per_doc,
+                )
+            )
+            rerank_ms = round((time.monotonic() - rerank_start) * 1000, 2)
+            logger.debug(
+                "Comparison doc rerank complete",
+                extra={
+                    "doc_id": doc_id,
+                    "retrieval_ms": retrieval_ms,
+                    "rerank_ms": rerank_ms,
+                    "candidate_count": len(candidates),
+                    "selected_count": len(reranked)
+                }
+            )
+        else:
+            reranked = candidates[:chunks_per_doc]
+            logger.debug(
+                "Skipping comparison doc rerank for tiny candidate pool",
+                extra={
+                    "doc_id": doc_id,
+                    "retrieval_ms": retrieval_ms,
+                    "candidate_count": len(candidates),
+                    "min_candidates_for_rerank": rerank_min_candidates,
+                    "selected_count": len(reranked)
+                }
+            )
 
-        # Step 3: Expand context if async_session available
+        # Step 3: Expand context if async_session available.
+        # Expansion runs BEFORE embedding cosine pairing so that expanded narrative chunks
+        # pair correctly with narrative chunks from other documents (table ↔ narrative pairing
+        # has lower raw cosine similarity than narrative ↔ narrative).
         if async_session and reranked:
             try:
-                reranked = await self.context_expander.expand(
+                before_expansion = len(reranked)
+                reranked = await self.context_expander.expand_with_batch(
                     chunks=reranked,
                     session=async_session,
-                    max_expansion_per_chunk=2
+                    max_expansion_per_chunk=2,
+                    query_type=QueryType.COMPARISON
                 )
                 logger.debug(
-                    f"Context expansion for {doc_id}: {len(reranked) - chunks_per_doc} additional chunks"
+                    f"Context expansion for {doc_id}: {len(reranked) - before_expansion} additional chunks"
                 )
             except Exception as e:
                 logger.warning(f"Context expansion failed for {doc_id}: {e}. Using original chunks.")
                 # Continue with unexpanded chunks
 
         return reranked
+
+    def _fetch_chunk_embeddings(self, chunk_ids: List[str]) -> Dict[str, List[float]]:
+        """Fetch stored embedding vectors for a set of chunk IDs (single batch query)."""
+        from app.db_models_chat import DocumentChunk as DC
+        rows = (
+            self.db.query(DC.id, DC.embedding)
+            .filter(DC.id.in_(chunk_ids))
+            .all()
+        )
+        return {str(row.id): row.embedding for row in rows if row.embedding is not None}
 
     def _pair_chunks(
         self,
@@ -338,64 +467,67 @@ class ComparisonRetriever:
         chunks_b: List[Dict]
     ) -> List[List[float]]:
         """
-        Compute pairwise semantic similarities using cross-encoder model.
+        Compute pairwise semantic similarities using stored embedding vectors.
 
-        Creates all (chunk_a, chunk_b) pairs and scores them in batch.
-        Returns matrix where similarity_matrix[i][j] = similarity(chunks_a[i], chunks_b[j])
+        Cross-encoders are designed for (query, document) relevance scoring, not
+        (document, document) similarity — using them for pairing was both semantically
+        incorrect and ~2s per inference on CPU. Embedding cosine similarity is the
+        right tool: vectors are already stored in the DB and comparison is O(microseconds).
+
+        Falls back to Jaccard similarity if embeddings are missing (e.g. un-embedded chunks).
 
         Args:
             chunks_a: List of chunks from document A
             chunks_b: List of chunks from document B
 
         Returns:
-            2D list of similarity scores (normalized to 0-1 range)
+            2D list of cosine similarity scores (0-1 range)
         """
-        # Build all pairs for batch scoring
-        pairs = []
-        pair_indices = []  # Track which (i, j) each pair corresponds to
-
-        for i, chunk_a in enumerate(chunks_a):
-            for j, chunk_b in enumerate(chunks_b):
-                text_a = chunk_a.get('text', '')
-                text_b = chunk_b.get('text', '')
-                pairs.append([text_a, text_b])
-                pair_indices.append((i, j))
-
-        if not pairs:
+        if not chunks_a or not chunks_b:
             logger.warning("No chunk pairs to score")
             return [[0.0] * len(chunks_b) for _ in chunks_a]
 
-        # Score all pairs with cross-encoder
+        # Collect all chunk IDs and batch-fetch their embedding vectors
+        ids_a = [c["id"] for c in chunks_a]
+        ids_b = [c["id"] for c in chunks_b]
+        all_ids = list(set(ids_a + ids_b))
+
         try:
-            scores = self.reranker.model.predict(
-                pairs,
-                batch_size=self.reranker.batch_size,
-                show_progress_bar=False
-            )
+            emb_map = self._fetch_chunk_embeddings(all_ids)
+            missing = [cid for cid in all_ids if cid not in emb_map]
+            if missing:
+                logger.warning(
+                    f"Missing embeddings for {len(missing)} chunks, falling back to Jaccard",
+                    extra={"missing_ids": missing[:5]}
+                )
+                return self._compute_jaccard_similarities(chunks_a, chunks_b)
 
-            # Normalize scores to 0-1 range using sigmoid
-            # Cross-encoder outputs can be negative, sigmoid maps to [0,1]
-            normalized_scores = [1 / (1 + np.exp(-score)) for score in scores]
+            # Build (N_a, dim) and (N_b, dim) float32 matrices
+            emb_a = np.array([emb_map[c["id"]] for c in chunks_a], dtype=np.float32)
+            emb_b = np.array([emb_map[c["id"]] for c in chunks_b], dtype=np.float32)
 
-            # Build similarity matrix
-            similarity_matrix = [[0.0] * len(chunks_b) for _ in chunks_a]
-            for (i, j), score in zip(pair_indices, normalized_scores):
-                similarity_matrix[i][j] = score
+            # L2-normalise rows, then dot product gives cosine similarity
+            norm_a = np.linalg.norm(emb_a, axis=1, keepdims=True)
+            norm_b = np.linalg.norm(emb_b, axis=1, keepdims=True)
+            emb_a_norm = emb_a / np.maximum(norm_a, 1e-9)
+            emb_b_norm = emb_b / np.maximum(norm_b, 1e-9)
+            similarity_matrix = (emb_a_norm @ emb_b_norm.T).tolist()  # shape (N_a, N_b)
 
+            n_pairs = len(chunks_a) * len(chunks_b)
+            flat = [similarity_matrix[i][j] for i in range(len(chunks_a)) for j in range(len(chunks_b))]
             logger.debug(
-                f"Computed {len(pairs)} cross-encoder similarities for pairing",
+                f"Computed {n_pairs} embedding cosine similarities for pairing",
                 extra={
-                    "avg_score": np.mean(normalized_scores),
-                    "max_score": np.max(normalized_scores)
+                    "avg_score": float(np.mean(flat)),
+                    "max_score": float(np.max(flat))
                 }
             )
 
             return similarity_matrix
 
         except Exception as e:
-            logger.error(f"Cross-encoder similarity computation failed: {e}", exc_info=True)
+            logger.error(f"Embedding similarity computation failed: {e}", exc_info=True)
             logger.warning("Falling back to Jaccard similarity")
-            # Fallback: use Jaccard similarity
             return self._compute_jaccard_similarities(chunks_a, chunks_b)
 
     def _compute_jaccard_similarities(
@@ -550,7 +682,7 @@ class ComparisonRetriever:
             )
 
         for anchor_idx, anchor_chunk in enumerate(anchor_chunks):
-            if id(anchor_chunk) in used_chunks[anchor_doc_id]:
+            if str(anchor_chunk["id"]) in used_chunks[anchor_doc_id]:
                 continue
 
             # Try to find matching chunk from each other document
@@ -566,7 +698,7 @@ class ComparisonRetriever:
                 similarity_matrix = similarity_cache[other_doc_id]
 
                 for other_idx, other_chunk in enumerate(other_chunks):
-                    if id(other_chunk) in used_chunks[other_doc_id]:
+                    if str(other_chunk["id"]) in used_chunks[other_doc_id]:
                         continue
 
                     sim = similarity_matrix[anchor_idx][other_idx]
@@ -584,7 +716,7 @@ class ComparisonRetriever:
             if len(cluster_chunks) >= 2:
                 # Mark chunks as used
                 for doc_id, chunk in cluster_chunks.items():
-                    used_chunks[doc_id].add(id(chunk))
+                    used_chunks[doc_id].add(str(chunk["id"]))
 
                 # Infer topic from anchor chunk
                 topic = self._infer_topic_from_chunk(anchor_chunk)
@@ -644,12 +776,12 @@ class ComparisonRetriever:
             return doc_chunks
 
         doc_ids = list(doc_chunks.keys())
-        paired_a_ids = {id(p.chunk_a) for p in paired_chunks}
-        paired_b_ids = {id(p.chunk_b) for p in paired_chunks}
+        paired_a_ids = {str(p.chunk_a["id"]) for p in paired_chunks}
+        paired_b_ids = {str(p.chunk_b["id"]) for p in paired_chunks}
 
         unpaired = {
-            doc_ids[0]: [c for c in doc_chunks[doc_ids[0]] if id(c) not in paired_a_ids],
-            doc_ids[1]: [c for c in doc_chunks[doc_ids[1]] if id(c) not in paired_b_ids]
+            doc_ids[0]: [c for c in doc_chunks[doc_ids[0]] if str(c["id"]) not in paired_a_ids],
+            doc_ids[1]: [c for c in doc_chunks[doc_ids[1]] if str(c["id"]) not in paired_b_ids]
         }
 
         return unpaired
@@ -671,17 +803,17 @@ class ComparisonRetriever:
         # From pairs (2-doc comparison)
         if paired_chunks and len(doc_chunks) == 2:
             doc_ids = list(doc_chunks.keys())
-            used_ids[doc_ids[0]] = {id(p.chunk_a) for p in paired_chunks}
-            used_ids[doc_ids[1]] = {id(p.chunk_b) for p in paired_chunks}
+            used_ids[doc_ids[0]] = {str(p.chunk_a["id"]) for p in paired_chunks}
+            used_ids[doc_ids[1]] = {str(p.chunk_b["id"]) for p in paired_chunks}
 
         # From clusters (3+ doc comparison)
         for cluster in clustered_chunks:
             for doc_id, chunk in cluster.chunks.items():
-                used_ids[doc_id].add(id(chunk))
+                used_ids[doc_id].add(str(chunk["id"]))
 
         # Find unpaired
         unpaired = {}
         for doc_id, chunks in doc_chunks.items():
-            unpaired[doc_id] = [c for c in chunks if id(c) not in used_ids.get(doc_id, set())]
+            unpaired[doc_id] = [c for c in chunks if str(c["id"]) not in used_ids.get(doc_id, set())]
 
         return unpaired

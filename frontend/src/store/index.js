@@ -200,6 +200,9 @@ export const useChatActions = () =>
       clearComparison: state.clearComparison,
       setComparisonViewMode: state.setComparisonViewMode,
       toggleComparisonTopic: state.toggleComparisonTopic,
+      setComparisonSelectionNeeded: state.setComparisonSelectionNeeded,
+      clearComparisonSelection: state.clearComparisonSelection,
+      confirmComparisonSelection: state.confirmComparisonSelection,
       // PDF viewer actions
       highlightChunk: state.highlightChunk,
       clearHighlight: state.clearHighlight,
