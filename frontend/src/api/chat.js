@@ -12,6 +12,8 @@
 import { createAuthenticatedApi } from "./client";
 import { streamJobProgress } from "./sse-utils";
 
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
+
 /**
  * Collections API
  */
@@ -174,7 +176,7 @@ export function sendChatMessage(
 
     // Use fetch for SSE streaming
     fetch(
-      `${import.meta.env.VITE_API_URL}/api/chat/sessions/${sessionId}/chat`,
+      `${API_URL}/api/chat/sessions/${sessionId}/chat`,
       {
         method: "POST",
         headers: {
@@ -436,7 +438,7 @@ export function confirmComparison(
   ])
     .then((token) => {
     fetch(
-      `${import.meta.env.VITE_API_URL}/api/chat/sessions/${sessionId}/chat/comparison`,
+      `${API_URL}/api/chat/sessions/${sessionId}/chat/comparison`,
       {
         method: "POST",
         headers: {

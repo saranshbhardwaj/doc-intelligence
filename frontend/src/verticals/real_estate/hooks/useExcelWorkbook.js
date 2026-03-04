@@ -5,7 +5,7 @@
 
 import { useState, useEffect } from 'react';
 import * as XLSX from 'xlsx';
-import { useAuth } from '@clerk/clerk-react';
+import { useAppAuth } from "@/hooks/useAppAuth";
 import { downloadRETemplate } from '../../../api/re-templates';
 import { useTemplateFillActions } from '../../../store';
 
@@ -16,7 +16,7 @@ import { useTemplateFillActions } from '../../../store';
  * @returns {Object} { workbook, loading, error }
  */
 export function useExcelWorkbook(templateId) {
-  const { getToken } = useAuth();
+  const { getToken } = useAppAuth();
   const { cacheExcelWorkbook, getCachedExcelWorkbook } = useTemplateFillActions();
 
   const [workbook, setWorkbook] = useState(null);

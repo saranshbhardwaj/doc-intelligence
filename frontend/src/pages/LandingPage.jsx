@@ -1,12 +1,6 @@
 // src/pages/LandingPage.jsx
 import { useNavigate } from "react-router-dom";
-import {
-  SignedIn,
-  SignedOut,
-  SignInButton,
-  UserButton,
-  useAuth,
-} from "@clerk/clerk-react";
+import { useAppAuth } from "@/hooks/useAppAuth";
 import { useEffect, useState } from "react";
 import Hero from "../components/landing/Hero";
 import Features from "../components/landing/Features";
@@ -14,14 +8,14 @@ import WorkflowShowcase from "../components/landing/WorkflowShowcase";
 import FAQ from "../components/landing/FAQ";
 import DarkModeToggle from "../components/common/DarkModeToggle";
 import { useDarkMode } from "../hooks/useDarkMode";
+import { Menu, X } from "lucide-react";
 
 export default function LandingPage() {
   const navigate = useNavigate();
   const { isDark, toggle } = useDarkMode();
-  const { isSignedIn, isLoaded } = useAuth();
+  const { isSignedIn, isLoaded } = useAppAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
 
-  // Redirect signed-in users to library (only after Clerk finishes loading)
   useEffect(() => {
     if (isLoaded && isSignedIn) {
       navigate("/app/library");
@@ -29,350 +23,226 @@ export default function LandingPage() {
   }, [isLoaded, isSignedIn, navigate]);
 
   const handleGetStarted = () => {
-    // Navigate to sign-up page
     navigate("/sign-up");
   };
 
-  const handleTryDemo = () => {
-    // Navigate to app with demo flag
-    navigate("/app?demo=true");
-  };
-
-
   return (
-    <div className="min-h-screen bg-background  transition-colors duration-200">
-      {/* Navigation */}
-      <nav className="sticky top-0 z-50 bg-background/80 backdrop-blur-lg border-b border-border dark:border-gray-800">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex justify-between items-center h-16">
-            {/* Logo */}
-            <div className="flex items-center gap-3">
-              <span className="relative h-8 w-8 shrink-0 overflow-hidden rounded-md">
-                <img
-                  src="/Freara%20ai%20logo.png"
-                  alt="frearaAI"
-                  className="absolute inset-0 h-full w-full scale-[1.78] object-cover"
-                />
-              </span>
-              <span className="text-xl font-extrabold tracking-tight bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
-                frearaAI
-              </span>
-            </div>
-
-            {/* Nav links */}
-            <div className="hidden md:flex items-center gap-8">
-              <a
-                href="#features"
-                className="text-muted-foreground dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
-              >
-                Features
-              </a>
-              <a
-                href="#workflows"
-                className="text-muted-foreground dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
-              >
-                Workflows
-              </a>
-              <a
-                href="#faq"
-                className="text-muted-foreground dark:text-gray-300 hover:text-blue-600 dark:hover:text-blue-400 transition-colors"
-              >
-                FAQ
-              </a>
-              <DarkModeToggle
-                isDark={isDark}
-                toggle={toggle}
-                variant="inline"
+    <div className="min-h-screen bg-background transition-colors duration-200">
+      {/* Floating Glass Nav */}
+      <div className="fixed top-4 left-1/2 -translate-x-1/2 w-[92%] max-w-4xl z-50">
+        <div className="glass-card rounded-full px-5 py-2.5 shadow-lg flex items-center justify-between">
+          {/* Logo */}
+          <div className="flex items-center gap-2.5">
+            <span className="relative h-8 w-8 shrink-0 overflow-hidden rounded-md">
+              <img
+                src="/Freara%20ai%20logo.png"
+                alt="frearaAI"
+                className="absolute inset-0 h-full w-full scale-[1.78] object-cover"
               />
+            </span>
+            <span className="text-xl font-extrabold tracking-tight bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
+              frearaAI
+            </span>
+          </div>
 
-              {/* Authentication buttons */}
-              <SignedOut>
-                <SignInButton mode="modal">
-                  <button className="px-4 py-2 text-muted-foreground dark:text-gray-300 hover:text-foreground dark:hover:text-foreground font-medium transition-colors">
-                    Sign In
-                  </button>
-                </SignInButton>
+          {/* Desktop Nav links */}
+          <div className="hidden md:flex items-center gap-7 text-sm font-medium text-muted-foreground">
+            <a href="#features" className="hover:text-primary transition-colors">Features</a>
+            <a href="#workflows" className="hover:text-primary transition-colors">Workflows</a>
+            <a href="#faq" className="hover:text-primary transition-colors">FAQ</a>
+          </div>
+
+          {/* Desktop Auth + dark mode */}
+          <div className="hidden md:flex items-center gap-2">
+            <DarkModeToggle isDark={isDark} toggle={toggle} variant="inline" />
+            {isLoaded && !isSignedIn && (
+              <>
+                <button
+                  onClick={() => navigate("/sign-in", { state: { autoSignIn: true } })}
+                  className="px-4 py-2 text-sm font-semibold text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  Sign In
+                </button>
                 <button
                   onClick={handleGetStarted}
-                  className="px-6 py-2 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-foreground font-semibold rounded-lg transition-all duration-200"
+                  className="px-5 py-2 bg-primary text-primary-foreground text-sm font-semibold rounded-full shadow-md hover:bg-primary/90 hover:scale-105 transition-all duration-200"
                 >
                   Get Started Free
                 </button>
-              </SignedOut>
-              <SignedIn>
-                <button
-                  onClick={() => navigate("/app/library")}
-                  className="px-6 py-2 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-foreground font-semibold rounded-lg transition-all duration-200"
-                >
-                  Go to App
-                </button>
-                <UserButton />
-              </SignedIn>
-            </div>
-
-            {/* Mobile menu button + dark mode */}
-            <div className="md:hidden flex items-center gap-4">
-              <DarkModeToggle
-                isDark={isDark}
-                toggle={toggle}
-                variant="inline"
-              />
+              </>
+            )}
+            {isSignedIn && (
               <button
-                type="button"
-                onClick={() => setMobileMenuOpen((prev) => !prev)}
-                className="text-muted-foreground dark:text-gray-300"
-                aria-label="Toggle mobile menu"
-                aria-expanded={mobileMenuOpen}
+                onClick={() => navigate("/app/library")}
+                className="px-5 py-2 bg-primary text-primary-foreground text-sm font-semibold rounded-full shadow-md hover:bg-primary/90 transition-all duration-200"
               >
-                <svg
-                  className="w-6 h-6"
-                  fill="none"
-                  stroke="currentColor"
-                  viewBox="0 0 24 24"
-                >
-                  <path
-                    strokeLinecap="round"
-                    strokeLinejoin="round"
-                    strokeWidth={2}
-                    d="M4 6h16M4 12h16M4 18h16"
-                  />
-                </svg>
+                Go to App
               </button>
-            </div>
+            )}
+          </div>
+
+          {/* Mobile: dark mode + hamburger */}
+          <div className="md:hidden flex items-center gap-2">
+            <DarkModeToggle isDark={isDark} toggle={toggle} variant="inline" />
+            <button
+              type="button"
+              onClick={() => setMobileMenuOpen((prev) => !prev)}
+              className="p-2 rounded-full text-muted-foreground hover:bg-muted transition-colors"
+              aria-label="Toggle mobile menu"
+            >
+              {mobileMenuOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
+            </button>
           </div>
         </div>
 
-        {/* Mobile Menu Panel */}
+        {/* Mobile dropdown */}
         {mobileMenuOpen && (
-          <div className="md:hidden border-t border-border bg-background/95 backdrop-blur">
-            <div className="max-w-7xl mx-auto px-4 py-3 flex flex-col gap-3">
-              <a
-                href="#features"
-                className="text-sm text-muted-foreground hover:text-foreground transition-colors"
-                onClick={() => setMobileMenuOpen(false)}
-              >
-                Features
-              </a>
-              <a
-                href="#workflows"
-                className="text-sm text-muted-foreground hover:text-foreground transition-colors"
-                onClick={() => setMobileMenuOpen(false)}
-              >
-                Workflows
-              </a>
-              <a
-                href="#faq"
-                className="text-sm text-muted-foreground hover:text-foreground transition-colors"
-                onClick={() => setMobileMenuOpen(false)}
-              >
-                FAQ
-              </a>
-
-              <SignedOut>
-                <SignInButton mode="modal">
-                  <button className="w-full text-left px-3 py-2 rounded-md text-sm text-muted-foreground hover:bg-muted transition-colors">
+          <div className="mt-2 glass-card rounded-2xl px-4 py-3 flex flex-col gap-2 shadow-lg md:hidden">
+            <a
+              href="#features"
+              className="text-sm text-muted-foreground hover:text-foreground py-2 transition-colors"
+              onClick={() => setMobileMenuOpen(false)}
+            >
+              Features
+            </a>
+            <a
+              href="#workflows"
+              className="text-sm text-muted-foreground hover:text-foreground py-2 transition-colors"
+              onClick={() => setMobileMenuOpen(false)}
+            >
+              Workflows
+            </a>
+            <a
+              href="#faq"
+              className="text-sm text-muted-foreground hover:text-foreground py-2 transition-colors"
+              onClick={() => setMobileMenuOpen(false)}
+            >
+              FAQ
+            </a>
+            <div className="border-t border-border pt-2 flex flex-col gap-2">
+              {isLoaded && !isSignedIn && (
+                <>
+                  <button
+                    onClick={() => {
+                      setMobileMenuOpen(false);
+                      navigate("/sign-in", { state: { autoSignIn: true } });
+                    }}
+                    className="w-full text-left px-3 py-2 rounded-xl text-sm text-muted-foreground hover:bg-muted transition-colors"
+                  >
                     Sign In
                   </button>
-                </SignInButton>
+                  <button
+                    onClick={() => { setMobileMenuOpen(false); handleGetStarted(); }}
+                    className="w-full px-4 py-2.5 bg-primary text-primary-foreground text-sm font-semibold rounded-full"
+                  >
+                    Get Started Free
+                  </button>
+                </>
+              )}
+              {isSignedIn && (
                 <button
-                  onClick={() => {
-                    setMobileMenuOpen(false);
-                    handleGetStarted();
-                  }}
-                  className="w-full px-4 py-2 bg-gradient-to-r from-blue-600 to-purple-600 text-foreground font-semibold rounded-lg"
-                >
-                  Get Started Free
-                </button>
-              </SignedOut>
-
-              <SignedIn>
-                <button
-                  onClick={() => {
-                    setMobileMenuOpen(false);
-                    navigate("/app/library");
-                  }}
-                  className="w-full px-4 py-2 bg-gradient-to-r from-blue-600 to-purple-600 text-foreground font-semibold rounded-lg"
+                  onClick={() => { setMobileMenuOpen(false); navigate("/app/library"); }}
+                  className="w-full px-4 py-2.5 bg-primary text-primary-foreground text-sm font-semibold rounded-full"
                 >
                   Go to App
                 </button>
-              </SignedIn>
+              )}
             </div>
           </div>
         )}
-      </nav>
-
-      {/* Hero Section */}
-      <Hero onGetStarted={handleGetStarted} onTryDemo={handleTryDemo} />
-
-      {/* Features Section */}
-      <div id="features">
-        <Features />
       </div>
 
-      {/* Workflow Showcase Section */}
-      <div id="workflows">
-        <WorkflowShowcase />
-      </div>
+      {/* Main content — offset for floating nav */}
+      <main className="pt-24">
+        <Hero onGetStarted={handleGetStarted} />
 
-      {/* FAQ Section */}
-      <FAQ />
-
-      {/* CTA Section */}
-      <div className="py-24 bg-gradient-to-r from-blue-600 to-purple-600">
-        <div className="max-w-4xl mx-auto text-center px-4">
-          <h2 className="text-4xl sm:text-5xl font-bold text-foreground mb-6">
-            Ready to 10x Your Deal Analysis?
-          </h2>
-          <p className="text-xl text-blue-100 mb-8">
-            Join PE and real estate analysts who are saving hours on every deal.
-          </p>
-          <SignedOut>
-            <button
-              onClick={handleGetStarted}
-              className="px-10 py-4 bg-background hover:bg-popover text-blue-600 font-bold rounded-xl shadow-xl hover:shadow-2xl transform hover:scale-105 transition-all duration-200"
-            >
-              Get Started Free
-            </button>
-          </SignedOut>
-          <SignedIn>
-            <button
-              onClick={() => navigate("/app/library")}
-              className="px-10 py-4 bg-background hover:bg-popover text-blue-600 font-bold rounded-xl shadow-xl hover:shadow-2xl transform hover:scale-105 transition-all duration-200"
-            >
-              Go to App
-            </button>
-          </SignedIn>
+        <div id="features">
+          <Features />
         </div>
-      </div>
+
+        <div id="workflows">
+          <WorkflowShowcase />
+        </div>
+
+        <FAQ />
+
+        {/* CTA Section */}
+        <div className="py-28 bg-gradient-to-br from-primary to-accent relative overflow-hidden">
+          <div className="absolute top-0 right-0 w-96 h-96 bg-white/10 rounded-full -mr-20 -mt-20 blur-3xl pointer-events-none" />
+          <div className="absolute bottom-0 left-0 w-96 h-96 bg-black/10 rounded-full -ml-20 -mb-20 blur-3xl pointer-events-none" />
+          <div className="max-w-4xl mx-auto text-center px-4 relative z-10">
+            <h2 className="text-4xl sm:text-5xl font-bold text-primary-foreground mb-6">
+              Ready to 10x Your Deal Analysis?
+            </h2>
+            <p className="text-xl text-primary-foreground/80 mb-10">
+              Join PE and real estate analysts who are saving hours on every deal.
+            </p>
+            <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
+              {isSignedIn ? (
+                <button
+                  onClick={() => navigate("/app/library")}
+                  className="px-10 py-4 bg-background text-primary font-bold rounded-full shadow-xl hover:bg-popover hover:scale-105 transition-all duration-200"
+                >
+                  Go to App
+                </button>
+              ) : (
+                <button
+                  onClick={handleGetStarted}
+                  className="px-10 py-4 bg-background text-primary font-bold rounded-full shadow-xl hover:bg-popover hover:scale-105 transition-all duration-200"
+                >
+                  Get Started Free
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      </main>
 
       {/* Footer */}
-      <footer className="bg-background dark:bg-black text-muted-foreground py-12">
+      <footer className="bg-background border-t border-border text-muted-foreground py-12">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
-            {/* Company */}
             <div>
-              <div className="mb-4">
-                <span className="text-2xl font-extrabold tracking-tight bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
-                  frearaAI
-                </span>
-              </div>
-              <p className="text-sm">
+              <span className="text-2xl font-extrabold tracking-tight bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
+                frearaAI
+              </span>
+              <p className="text-sm mt-3">
                 AI-powered document intelligence for PE and real estate.
               </p>
             </div>
 
-            {/* Product */}
             <div>
               <h3 className="text-foreground font-semibold mb-4">Product</h3>
               <ul className="space-y-2 text-sm">
-                <li>
-                  <a
-                    href="#features"
-                    className="hover:text-foreground transition-colors"
-                  >
-                    Features
-                  </a>
-                </li>
-                {/* <li>
-                  <a
-                    href="#pricing"
-                    className="hover:text-foreground transition-colors"
-                  >
-                    Pricing
-                  </a>
-                </li> */}
-                <li>
-                  <a
-                    href="#"
-                    className="hover:text-foreground transition-colors"
-                  >
-                    Changelog
-                  </a>
-                </li>
-                <li>
-                  <a
-                    href="#"
-                    className="hover:text-foreground transition-colors"
-                  >
-                    Roadmap
-                  </a>
-                </li>
+                <li><a href="#features" className="hover:text-foreground transition-colors">Features</a></li>
+                <li><a href="#" className="hover:text-foreground transition-colors">Changelog</a></li>
+                <li><a href="#" className="hover:text-foreground transition-colors">Roadmap</a></li>
               </ul>
             </div>
 
-            {/* Company */}
             <div>
               <h3 className="text-foreground font-semibold mb-4">Company</h3>
               <ul className="space-y-2 text-sm">
-                <li>
-                  <a
-                    href="#"
-                    className="hover:text-foreground transition-colors"
-                  >
-                    About
-                  </a>
-                </li>
-                <li>
-                  <a
-                    href="#"
-                    className="hover:text-foreground transition-colors"
-                  >
-                    Blog
-                  </a>
-                </li>
-                <li>
-                  <a
-                    href="#"
-                    className="hover:text-foreground transition-colors"
-                  >
-                    Careers
-                  </a>
-                </li>
-                <li>
-                  <a
-                    href="#"
-                    className="hover:text-foreground transition-colors"
-                  >
-                    Contact
-                  </a>
-                </li>
+                <li><a href="#" className="hover:text-foreground transition-colors">About</a></li>
+                <li><a href="#" className="hover:text-foreground transition-colors">Blog</a></li>
+                <li><a href="#" className="hover:text-foreground transition-colors">Careers</a></li>
+                <li><a href="#" className="hover:text-foreground transition-colors">Contact</a></li>
               </ul>
             </div>
 
-            {/* Legal */}
             <div>
               <h3 className="text-foreground font-semibold mb-4">Legal</h3>
               <ul className="space-y-2 text-sm">
-                <li>
-                  <a
-                    href="#"
-                    className="hover:text-foreground transition-colors"
-                  >
-                    Privacy Policy
-                  </a>
-                </li>
-                <li>
-                  <a
-                    href="#"
-                    className="hover:text-foreground transition-colors"
-                  >
-                    Terms of Service
-                  </a>
-                </li>
-                <li>
-                  <a
-                    href="#"
-                    className="hover:text-foreground transition-colors"
-                  >
-                    Security
-                  </a>
-                </li>
+                <li><a href="#" className="hover:text-foreground transition-colors">Privacy Policy</a></li>
+                <li><a href="#" className="hover:text-foreground transition-colors">Terms of Service</a></li>
+                <li><a href="#" className="hover:text-foreground transition-colors">Security</a></li>
               </ul>
             </div>
           </div>
 
-          <div className="border-t border-gray-800 mt-12 pt-8 text-center text-sm">
+          <div className="border-t border-border mt-12 pt-8 flex flex-col md:flex-row items-center justify-between gap-4 text-sm">
             <p>&copy; 2026 frearaAI. All rights reserved.</p>
+            <p className="text-xs text-muted-foreground/60">Built for high-stakes deal intelligence.</p>
           </div>
         </div>
       </footer>

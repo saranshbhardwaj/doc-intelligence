@@ -6,7 +6,7 @@
  */
 
 import { useState, useEffect } from "react";
-import { useAuth } from "@clerk/clerk-react";
+import { useAppAuth } from "@/hooks/useAppAuth";
 import {
   Dialog,
   DialogContent,
@@ -39,7 +39,7 @@ export default function ExtractionDocumentSelectorModal({
   onOpenChange,
   onSelect,
 }) {
-  const { getToken } = useAuth();
+  const { getToken } = useAppAuth();
   const [collections, setCollections] = useState([]);
   const [documentsByCollection, setDocumentsByCollection] = useState({});
   const [loading, setLoading] = useState(true);

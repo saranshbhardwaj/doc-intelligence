@@ -110,15 +110,31 @@ export async function deleteRETemplate(getToken, templateId) {
 }
 
 /**
- * Download Excel template file (streams through backend to avoid CORS)
- * Returns ArrayBuffer for XLSX parsing
+ * Download Excel template file. Returns ArrayBuffer for XLSX parsing.
+ *
+ * R2 storage: backend returns { url } JSON — we fetch directly from the presigned
+ * URL to avoid the Origin: null CORS error that occurs when browsers follow
+ * cross-origin 307 redirects.
+ * Local dev: backend streams binary directly.
  */
 export async function downloadRETemplate(getToken, templateId) {
   const api = createAuthenticatedApi(getToken);
   const response = await api.get(`/api/v1/re/templates/${templateId}/download`, {
-    responseType: 'arraybuffer',
+    responseType: 'blob',
   });
-  return response.data; // ArrayBuffer
+
+  const contentType = response.headers['content-type'] || '';
+  if (contentType.includes('application/json')) {
+    // R2: parse the presigned URL from the JSON blob, then fetch directly
+    const text = await response.data.text();
+    const { url } = JSON.parse(text);
+    const fileResponse = await fetch(url);
+    if (!fileResponse.ok) throw new Error(`Template fetch failed: ${fileResponse.status}`);
+    return await fileResponse.arrayBuffer();
+  }
+
+  // Local dev: blob is the binary file
+  return await response.data.arrayBuffer();
 }
 
 /**
@@ -171,6 +187,15 @@ export async function downloadFilledExcel(getToken, fillRunId) {
     responseType: 'blob',
   });
   return response.data;
+}
+
+/**
+ * Get total fill run count for the current user (lightweight — no row data)
+ */
+export async function getFillRunCount(getToken) {
+  const api = createAuthenticatedApi(getToken);
+  const response = await api.get(`/api/v1/re/templates/fills/count`);
+  return response.data.count;
 }
 
 /**

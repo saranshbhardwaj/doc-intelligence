@@ -7,14 +7,12 @@ import React from 'react';
 import * as XLSX from 'xlsx';
 import { Badge } from '../../../components/ui/badge';
 import { Button } from '../../../components/ui/button';
-import { AlertCircle, AlertTriangle, CheckCircle2, Info } from 'lucide-react';
+import { AlertCircle, AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, Columns3, Info, Rows3 } from 'lucide-react';
 import { getExcelCellStyle } from '../utils/excelCellStyles';
 
 export default function ExcelGrid({
   workbook,
   sheetName,
-  mappings,
-  pdfFields,
   getCellValue,
   getCellMapping,
   onCellClick,
@@ -58,7 +56,6 @@ export default function ExcelGrid({
   const range = XLSX.utils.decode_range(worksheet['!ref'] || 'A1');
 
   // Determine which rows to display (with buffer)
-  const totalRows = range.e.r - range.s.r + 1;
   const displayRowEnd = Math.min(visibleRowEnd, range.e.r);
   const rows = [];
   for (let R = range.s.r; R <= displayRowEnd; R++) {
@@ -66,7 +63,6 @@ export default function ExcelGrid({
   }
 
   // Determine which columns to display (with buffer)
-  const totalCols = range.e.c - range.s.c + 1;
   const displayColEnd = Math.min(visibleColEnd, range.e.c);
   const cols = [];
   for (let C = range.s.c; C <= displayColEnd; C++) {
@@ -75,13 +71,15 @@ export default function ExcelGrid({
 
   const hasMoreRows = displayRowEnd < range.e.r;
   const hasMoreCols = displayColEnd < range.e.c;
+  const rowBatchSize = 20;
+  const colBatchSize = 5;
 
   function handleLoadMoreRows() {
-    setVisibleRowEnd(prev => Math.min(prev + 20, range.e.r));
+    setVisibleRowEnd(prev => Math.min(prev + rowBatchSize, range.e.r));
   }
 
   function handleLoadMoreCols() {
-    setVisibleColEnd(prev => Math.min(prev + 5, range.e.c));
+    setVisibleColEnd(prev => Math.min(prev + colBatchSize, range.e.c));
   }
 
   function toggleCellExpansion(cellAddress) {
@@ -141,10 +139,13 @@ export default function ExcelGrid({
   }, [resizing]);
 
   return (
-    <div style={{ cursor: resizing ? 'col-resize' : 'default', userSelect: resizing ? 'none' : 'auto' }}>
-      <div className="flex items-stretch gap-2">
+    <div
+      className="h-full min-h-0 flex flex-col"
+      style={{ cursor: resizing ? 'col-resize' : 'default', userSelect: resizing ? 'none' : 'auto' }}
+    >
+      <div className="flex-1 min-h-0">
         {/* Table Container with thin scrollbar */}
-        <div className="border border-border rounded-lg overflow-auto bg-background shadow-sm flex-1 [&::-webkit-scrollbar]:h-1 [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-border [&::-webkit-scrollbar-thumb]:rounded-full hover:[&::-webkit-scrollbar-thumb]:bg-muted-foreground/50">
+        <div className="h-full border border-border rounded-lg overflow-auto bg-background shadow-sm flex-1 min-h-0 [&::-webkit-scrollbar]:h-1 [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-border [&::-webkit-scrollbar-thumb]:rounded-full hover:[&::-webkit-scrollbar-thumb]:bg-muted-foreground/50">
           <table className="border-collapse w-full min-w-fit">
           <thead>
             <tr className="bg-muted/50">
@@ -321,26 +322,30 @@ export default function ExcelGrid({
           </tbody>
         </table>
       </div>
-
-        {/* Right-side Load More Columns Button */}
-        {hasMoreCols && (
-          <div className="flex items-center">
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleLoadMoreCols}
-              className="text-xs px-2 py-3"
-              title={`Load 5 More Columns (${XLSX.utils.encode_col(displayColEnd)} / ${XLSX.utils.encode_col(range.e.c)})`}
-            >
-              →
-            </Button>
-          </div>
-        )}
       </div>
 
-      {/* Load More Controls - Bottom */}
-      <div className="mt-4 flex items-center justify-between gap-3">
-        <div className="flex items-center gap-3 flex-wrap">
+      {/* Bottom Bar: Legend + Expand Controls */}
+      <div className="mt-2 flex-shrink-0 relative z-10 bg-background flex items-center justify-between gap-3">
+        <div className="flex items-center gap-3 flex-wrap text-[11px] text-muted-foreground leading-none">
+          <div className="flex items-center gap-1">
+            <div className="w-2.5 h-2.5 rounded border-2 border-green-500" />
+            <span>High</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <div className="w-2.5 h-2.5 rounded border-2 border-yellow-500" />
+            <span>Medium</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <div className="w-2.5 h-2.5 rounded border-2 border-red-500" />
+            <span>Low</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <span className="bg-muted px-1 rounded text-[10px]">Formula</span>
+            <span>Read-only</span>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-2 flex-wrap">
           {hasMoreRows && (
             <Button
               variant="outline"
@@ -348,7 +353,9 @@ export default function ExcelGrid({
               onClick={handleLoadMoreRows}
               className="text-xs"
             >
-              Load 20 More Rows ({displayRowEnd + 1} / {range.e.r + 1})
+              <Rows3 className="h-3.5 w-3.5 mr-1.5" />
+              <ChevronDown className="h-3 w-3 mr-1" />
+              Show {rowBatchSize} more rows
             </Button>
           )}
           {hasMoreCols && (
@@ -358,13 +365,15 @@ export default function ExcelGrid({
               onClick={handleLoadMoreCols}
               className="text-xs"
             >
-              Load 5 More Columns ({XLSX.utils.encode_col(displayColEnd)} / {XLSX.utils.encode_col(range.e.c)})
+              <Columns3 className="h-3.5 w-3.5 mr-1.5" />
+              <ChevronRight className="h-3 w-3 mr-1" />
+              Show more columns
             </Button>
           )}
           {!hasMoreRows && !hasMoreCols && (
             <p className="text-xs text-muted-foreground">
               <Info className="h-3 w-3 inline mr-1" />
-              All rows and columns loaded ({totalRows} rows × {totalCols} columns)
+              All rows and columns loaded
             </p>
           )}
         </div>

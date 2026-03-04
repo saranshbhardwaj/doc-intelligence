@@ -114,6 +114,50 @@ class MappingCoordinator:
         # Preserve top-level keys (total_key_value_fields, total_tables, has_formulas)
         return {**generic_schema, "sheets": filtered_sheets}
 
+    def create_targeted_schema_mappings(
+        self,
+        unmapped_fields: List[Dict[str, Any]],
+        targeted_values: Dict[str, Any],
+    ) -> List[Dict[str, Any]]:
+        """
+        Convert Stage 2 LLM results into mapping dicts using schema cell positions.
+
+        Unlike generic LLM mappings (which find both which cell AND what value),
+        Stage 2 returns only values — cell positions come from the YAML schema.
+
+        Args:
+            unmapped_fields: Schema field defs from TemplateSchema.fields that weren't
+                             matched in Stage 1 alias matching.
+            targeted_values: {field_id: {"value": str, "confidence": float, "citations": list}}
+                             Return value of LLMService.extract_schema_field_values().
+
+        Returns:
+            List of mapping dicts with source="targeted_schema".
+        """
+        mappings = []
+        for field in unmapped_fields:
+            field_id = field["id"]
+            result = targeted_values.get(field_id)
+            if not result or not result.get("value"):
+                continue
+
+            mappings.append({
+                "pdf_field_id": f"targeted_{field_id}",
+                "pdf_field_name": field_id,
+                "excel_cell": field["value_cell"],
+                "excel_sheet": field["sheet"],
+                "excel_label": f"{field['sheet']}!{field.get('label_cell', '')}",
+                "confidence": result["confidence"],
+                "source": "targeted_schema",
+                "reasoning": f"Stage 2 targeted extraction for schema field '{field_id}'",
+                "citations": result.get("citations", []),
+            })
+
+        logger.info(
+            f"✓ Targeted schema mappings: {len(mappings)}/{len(unmapped_fields)} fields found by LLM"
+        )
+        return mappings
+
     def merge_mappings(
         self, schema_mappings: List[Dict[str, Any]], generic_mappings: List[Dict[str, Any]]
     ) -> List[Dict[str, Any]]:

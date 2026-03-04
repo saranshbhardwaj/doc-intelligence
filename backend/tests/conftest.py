@@ -168,7 +168,7 @@ def sample_pdf_fields() -> List[Dict[str, Any]]:
             "id": "kv_1",
             "name": "Property Name",
             "type": "text",
-            "sample_value": "Sunset Plaza",
+            "extracted_value": "Sunset Plaza",
             "confidence": 0.95,
             "citations": ["[D1:p1]"],
             "source": "key_value_pairs"
@@ -177,7 +177,7 @@ def sample_pdf_fields() -> List[Dict[str, Any]]:
             "id": "kv_2",
             "name": "Purchase Price",
             "type": "currency",
-            "sample_value": "$45,000,000",
+            "extracted_value": "$45,000,000",
             "confidence": 0.92,
             "citations": ["[D1:p1]"],
             "source": "key_value_pairs"
@@ -186,7 +186,7 @@ def sample_pdf_fields() -> List[Dict[str, Any]]:
             "id": "kv_3",
             "name": "Cap Rate",
             "type": "percentage",
-            "sample_value": "5.5%",
+            "extracted_value": "5.5%",
             "confidence": 0.88,
             "citations": ["[D1:p2]"],
             "source": "key_value_pairs"
@@ -195,7 +195,7 @@ def sample_pdf_fields() -> List[Dict[str, Any]]:
             "id": "kv_4",
             "name": "Acquisition Date",
             "type": "date",
-            "sample_value": "01/15/2024",
+            "extracted_value": "01/15/2024",
             "confidence": 0.91,
             "citations": ["[D1:p1]"],
             "source": "key_value_pairs"
@@ -250,14 +250,14 @@ def sample_field_mapping() -> Dict[str, Any]:
                 "id": "kv_1",
                 "name": "Property Name",
                 "type": "text",
-                "sample_value": "Sunset Plaza",
+                "extracted_value": "Sunset Plaza",
                 "confidence": 0.95
             },
             {
                 "id": "kv_2",
                 "name": "Purchase Price",
                 "type": "currency",
-                "sample_value": "$45,000,000",
+                "extracted_value": "$45,000,000",
                 "confidence": 0.92
             }
         ],

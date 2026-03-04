@@ -6,18 +6,17 @@ import shutil
 import uuid
 import hashlib
 from io import BytesIO
-from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, Request
+from typing import Optional
+from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, Request, Query
 
 from app.auth import get_current_user, get_current_org_role, is_admin_role
 from app.db_models_users import User
-from app.db_models_chat import CollectionDocument
 from app.services.tasks import start_document_indexing_chain
 from app.repositories.collection_repository import CollectionRepository
 from app.repositories.document_repository import DocumentRepository
 from app.repositories.job_repository import JobRepository
 from app.services.beta_limits import enforce_page_limit
 from app.utils.logging import logger
-from app.config import settings
 
 router = APIRouter()
 
@@ -482,21 +481,29 @@ async def download_document(
 @router.delete("/documents/{document_id}")
 async def delete_document(
     document_id: str,
+    collection_id: Optional[str] = Query(
+        default=None,
+        description="Collection context for safe delete. If document is linked to multiple collections, it will be unlinked from this collection only."
+    ),
     user: User = Depends(get_current_user),
     request: Request = None
 ):
     """
-    Delete a document from ALL collections (canonical deletion).
+    Delete or unlink a document depending on collection usage.
 
-    In the new schema, documents are canonical. Deleting a document
-    removes it from all collections and deletes all chunks.
+    Behavior:
+    - If `collection_id` is provided and the document is linked to multiple
+      collections, the document is unlinked from that collection only.
+    - If the document is linked to only one collection (or no collection
+      context is provided), perform canonical hard delete.
 
     Args:
         document_id: Canonical document ID to delete
+        collection_id: Optional collection context for safe scoped deletion
         user: Authenticated user
 
     Returns:
-        Success message
+        Success payload with action: "unlinked" or "deleted"
 
     Raises:
         HTTPException 403: User doesn't own the document
@@ -504,6 +511,7 @@ async def delete_document(
         HTTPException 500: Deletion failed
     """
     doc_repo = DocumentRepository()
+    collection_repo = CollectionRepository()
 
     # Get document and verify ownership via repository
     document = doc_repo.get_by_id(document_id, user.org_id)
@@ -520,15 +528,68 @@ async def delete_document(
                 detail="You don't have permission to delete this document"
             )
 
-    # Store info for response before deletion
+    # If collection context is provided, validate access + link first.
+    # When a document is shared across multiple collections, we unlink only.
+    if collection_id:
+        collection = collection_repo.get_collection(collection_id, user.id, user.org_id)
+        if not collection:
+            # Allow org admins to scope-delete from any collection in their org.
+            collection = collection_repo.get_collection_by_id(collection_id, org_id=user.org_id)
+            if not collection:
+                raise HTTPException(status_code=404, detail="Collection not found")
+            role = get_current_org_role(request)
+            if not is_admin_role(role):
+                raise HTTPException(
+                    status_code=403,
+                    detail="You don't have permission to modify this collection"
+                )
+
+        linked = doc_repo.is_linked_to_collection(document_id, collection_id, user.org_id)
+        if not linked:
+            raise HTTPException(
+                status_code=404,
+                detail="Document is not linked to this collection"
+            )
+
+        link_count = doc_repo.get_collection_link_count(document_id, user.org_id)
+        if link_count > 1:
+            success = collection_repo.remove_document_from_collection(collection_id, document_id)
+            if not success:
+                raise HTTPException(status_code=500, detail="Failed to unlink document from collection")
+
+            logger.info(
+                "Document unlinked from collection",
+                extra={
+                    "document_id": document_id,
+                    "collection_id": collection_id,
+                    "remaining_collections": link_count - 1,
+                    "user_id": user.id,
+                }
+            )
+            return {
+                "success": True,
+                "action": "unlinked",
+                "document_id": document_id,
+                "filename": document.filename,
+                "collection_id": collection_id,
+                "remaining_collections": max(link_count - 1, 0),
+                "message": f"Document '{document.filename}' removed from this collection",
+            }
+
+    # Store info for response before hard deletion
     filename = document.filename
     file_path = document.file_path
     chunk_count = document.chunk_count or 0
+    linked_collection_ids = doc_repo.get_linked_collection_ids(document_id, user.org_id)
 
     # Delete document (cascades to chunks, collection_documents, job_states)
     success = doc_repo.delete_document(document_id)
     if not success:
         raise HTTPException(status_code=500, detail="Failed to delete document")
+
+    # Recompute cached collection stats for affected collections.
+    for linked_collection_id in linked_collection_ids:
+        collection_repo.recompute_collection_stats(linked_collection_id)
 
     # Delete physical file from storage (R2 or local)
     if file_path:
@@ -561,8 +622,10 @@ async def delete_document(
 
     return {
         "success": True,
+        "action": "deleted",
         "document_id": document_id,
         "filename": filename,
+        "collections_removed": len(linked_collection_ids),
         "message": f"Document '{filename}' deleted successfully"
     }
 

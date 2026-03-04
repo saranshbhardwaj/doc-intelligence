@@ -291,7 +291,7 @@ def create_confidence_report(
 
     Args:
         mappings: List of field mappings with confidence scores
-        pdf_fields: List of PDF fields with sample_value
+        pdf_fields: List of PDF fields with extracted_value
         validation_errors: Optional list of validation errors
 
     Returns:
@@ -308,7 +308,7 @@ def create_confidence_report(
 
         pdf_field_id = mapping.get("pdf_field_id")
         pdf_field = pdf_field_lookup.get(pdf_field_id, {})
-        has_value = bool(pdf_field.get("sample_value"))
+        has_value = bool(pdf_field.get("extracted_value"))
 
         cell_info = {
             "excel_sheet": mapping.get("excel_sheet"),

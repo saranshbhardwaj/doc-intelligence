@@ -124,7 +124,7 @@ class AliasSuggester:
         Args:
             schema_fields: List of schema field definitions with pdf_aliases
             pdf_field_history: List of PDF fields from past fill runs
-                [{"name": "...", "sample_value": "...", "fill_run_id": "..."}, ...]
+                [{"name": "...", "extracted_value": "...", "fill_run_id": "..."}, ...]
             min_samples: Minimum times a field must appear to suggest
 
         Returns:
@@ -152,8 +152,8 @@ class AliasSuggester:
             name_key = name.lower()
             pdf_field_counts[name_key]["count"] += 1
             pdf_field_counts[name_key]["original_name"] = name
-            if pdf_field.get("sample_value"):
-                pdf_field_counts[name_key]["values"].append(pdf_field["sample_value"])
+            if pdf_field.get("extracted_value"):
+                pdf_field_counts[name_key]["values"].append(pdf_field["extracted_value"])
             if pdf_field.get("fill_run_id"):
                 pdf_field_counts[name_key]["fill_runs"].add(pdf_field["fill_run_id"])
 
@@ -285,7 +285,7 @@ def suggest_aliases_from_database(
                 for pdf_field in fill_run.field_mapping["pdf_fields"]:
                     pdf_field_history.append({
                         "name": pdf_field.get("name"),
-                        "sample_value": pdf_field.get("sample_value"),
+                        "extracted_value": pdf_field.get("extracted_value"),
                         "fill_run_id": fill_run.id
                     })
 

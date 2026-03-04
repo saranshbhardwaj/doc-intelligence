@@ -857,42 +857,50 @@ class AzureSmartChunker(DocumentChunker):
         """
         Calculate bounding box for a SINGLE key-value pair from its bounding regions.
 
-        This merges the bounding regions from both the key and value into one bbox.
+        Prefers the VALUE bounding region so PDF highlights show where the actual
+        data is, not the label. Falls back to merged key+value when no value region
+        is available (e.g., Azure DI found key only).
 
         Args:
-            kv: Single key-value pair with bounding_regions
+            kv: Single key-value pair with bounding_regions (and optionally
+                key_bounding_regions / value_bounding_regions from the parser)
 
         Returns:
             Dict with {page, x0, y0, x1, y1} or None if no bounding regions
         """
-        bounding_regions = kv.get("bounding_regions", [])
         page_num = kv.get("page_number")
-
-        if not bounding_regions or not page_num:
+        if not page_num:
             return None
 
-        all_bboxes = []
+        def _regions_to_bbox(regions: list) -> Optional[Dict]:
+            bboxes = []
+            for br in regions:
+                polygon = br.get("polygon", [])
+                br_page = br.get("page_number")
+                if len(polygon) == 8 and br_page == page_num:
+                    bboxes.append(self._polygon_to_bbox(polygon))
+            if not bboxes:
+                return None
+            return {
+                "page": page_num,
+                "x0": min(b["x0"] for b in bboxes),
+                "y0": min(b["y0"] for b in bboxes),
+                "x1": max(b["x1"] for b in bboxes),
+                "y1": max(b["y1"] for b in bboxes)
+            }
 
-        for br in bounding_regions:
-            polygon = br.get("polygon", [])
-            br_page = br.get("page_number")
+        # Prefer value regions (the data the user wants to verify)
+        value_regions = kv.get("value_bounding_regions", [])
+        if value_regions:
+            result = _regions_to_bbox(value_regions)
+            if result:
+                return result
 
-            # Only use bounding regions from the same page as the KV pair
-            if len(polygon) == 8 and br_page == page_num:
-                bbox = self._polygon_to_bbox(polygon)
-                all_bboxes.append(bbox)
-
-        if not all_bboxes:
+        # Fallback: merged key+value regions (backward compat / key-only KV pairs)
+        bounding_regions = kv.get("bounding_regions", [])
+        if not bounding_regions:
             return None
-
-        # Merge all bboxes (key + value regions) for this KV pair
-        return {
-            "page": page_num,
-            "x0": min(b["x0"] for b in all_bboxes),
-            "y0": min(b["y0"] for b in all_bboxes),
-            "x1": max(b["x1"] for b in all_bboxes),
-            "y1": max(b["y1"] for b in all_bboxes)
-        }
+        return _regions_to_bbox(bounding_regions)
 
     def _calculate_kv_chunk_bbox(self, kv_pairs: List[Dict]) -> Optional[Dict]:
         """

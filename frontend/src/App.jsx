@@ -15,6 +15,7 @@ import ExtractionHistoryPage from "./pages/ExtractionHistoryPage";
 import ExtractionDetailPage from "./pages/ExtractionDetailPage";
 import DashboardPage from "./pages/DashboardPage";
 import AccessPendingPage from "./pages/AccessPendingPage";
+import AuthCallbackPage from "./pages/AuthCallbackPage";
 import NotFound from "./pages/NotFound";
 import AppNotFound from "./components/layout/AppNotFound";
 import RequireAuth from "./components/common/RequireAuth";
@@ -34,6 +35,7 @@ export default function App() {
           <Route path="/" element={<LandingPage />} />
           <Route path="/sign-in/*" element={<SignInPage />} />
           <Route path="/sign-up/*" element={<SignUpPage />} />
+          <Route path="/callback" element={<AuthCallbackPage />} />
           <Route path="/access-pending" element={<AccessPendingPage />} />
 
           {/* Protected app area */}

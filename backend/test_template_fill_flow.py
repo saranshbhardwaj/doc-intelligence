@@ -138,7 +138,7 @@ async def test_pipeline():
             "id": "f1",
             "name": "Property Name",
             "type": "text",
-            "sample_value": "Tulsa Storage Center",
+            "extracted_value": "Tulsa Storage Center",
             "confidence": 0.95,
             "citations": ["[D1:p1]"],
             "description": "Name of the property"
@@ -147,7 +147,7 @@ async def test_pipeline():
             "id": "f2",
             "name": "Total SF",
             "type": "number",
-            "sample_value": "50000",
+            "extracted_value": "50000",
             "confidence": 0.90,
             "citations": ["[D1:p2]"],
             "description": "Total square footage"

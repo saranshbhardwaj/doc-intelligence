@@ -1,22 +1,103 @@
 /**
  * Simplified Workflow Page - Single Screen Experience
  *
- * Layout: 3-panel side-by-side (documents, workflow config, results)
- * UX: Professional, clean, deliverables.ai-inspired
+ * Layout: 3-panel side-by-side (documents, workflow grid, results)
+ * UX: Professional, clean, inspired by frearaAI mock-up
  */
 
 import { useState, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
-import { useAuth } from "@clerk/clerk-react";
-import { FileText, Sparkles, ArrowLeft, Settings, Plus, X, Clock, AlertCircle } from "lucide-react";
+import { useAppAuth } from "@/hooks/useAppAuth";
+import {
+  FileText,
+  FileSpreadsheet,
+  File,
+  Sparkles,
+  Settings,
+  Plus,
+  X,
+  Clock,
+  AlertCircle,
+  CheckCircle,
+  Flag,
+  TrendingUp,
+  Calculator,
+  Users,
+  Timer,
+  Play,
+  ArrowLeft,
+} from "lucide-react";
 import { toast } from "sonner";
 
 // Only these workflow names are fully functional. All others show as "Coming Soon".
 const WORKING_WORKFLOWS = new Set(["Investment Memo"]);
+
+const getDocFileIcon = (filename) => {
+  const ext = filename?.toLowerCase().split(".").pop();
+  if (ext === "pdf")
+    return {
+      Icon: FileText,
+      bg: "bg-red-50 dark:bg-red-900/20",
+      color: "text-red-500 dark:text-red-400",
+    };
+  if (["xlsx", "xls"].includes(ext))
+    return {
+      Icon: FileSpreadsheet,
+      bg: "bg-green-50 dark:bg-green-900/20",
+      color: "text-green-600 dark:text-green-400",
+    };
+  return {
+    Icon: File,
+    bg: "bg-blue-50 dark:bg-blue-900/20",
+    color: "text-blue-500 dark:text-blue-400",
+  };
+};
+
+const getWorkflowIcon = (name = "") => {
+  if (name.includes("Investment Memo")) return { Icon: FileText };
+  if (name.includes("Red Flag")) return { Icon: Flag };
+  if (name.includes("Revenue")) return { Icon: TrendingUp };
+  if (name.includes("Financial Model")) return { Icon: Calculator };
+  if (name.includes("Management")) return { Icon: Users };
+  return { Icon: Sparkles };
+};
+
+const getRelativeTime = (iso) => {
+  if (!iso) return "";
+  const diff = Date.now() - new Date(iso).getTime();
+  const h = Math.floor(diff / 3600000);
+  if (h < 1) return "Just now";
+  if (h < 24) return `${h}h ago`;
+  if (h < 48) return "Yesterday";
+  return new Date(iso).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+  });
+};
+
+/**
+ * Renders a prompt string with {{variable}} placeholders as inline teal chips.
+ */
+const renderPromptWithVariables = (text = "") => {
+  const parts = text.split(/(\{\{[^}]+\}\})/);
+  return parts.map((part, i) => {
+    const match = part.match(/^\{\{([^}]+)\}\}$/);
+    if (match) {
+      return (
+        <span
+          key={i}
+          className="inline-flex items-center px-1.5 py-0.5 rounded-md bg-primary/10 text-primary text-xs font-mono font-semibold mx-0.5 whitespace-nowrap"
+        >
+          {match[1]}
+        </span>
+      );
+    }
+    return <span key={i}>{part}</span>;
+  });
+};
+
 import AppLayout from "../components/layout/AppLayout";
 import { Button } from "../components/ui/button";
-import { Card } from "../components/ui/card";
-import { Badge } from "../components/ui/badge";
 import { Progress } from "../components/ui/progress";
 import Spinner from "../components/common/Spinner";
 import VariableConfigModal from "../components/workflows/VariableConfigModal";
@@ -30,11 +111,8 @@ const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
 /**
  * Format workflow error messages for user-friendly display
- * @param {Error|Object} error - Axios error or error object
- * @returns {Object} { title: string, message: string }
  */
 function formatWorkflowError(error) {
-  // Log the full error for debugging
   console.error("Full error object:", error);
   console.error("Error response data:", error.response?.data);
   console.error("Error response status:", error.response?.status);
@@ -60,11 +138,11 @@ function formatWorkflowError(error) {
         message: "You don't have permission to run this workflow.",
       };
     default:
-      // Handle different status codes
       if (status === 403) {
         return {
           title: "Permission Denied",
-          message: "You don't have permission to run workflows. Contact your admin to enable this feature.",
+          message:
+            "You don't have permission to run workflows. Contact your admin to enable this feature.",
         };
       }
       if (status === 401) {
@@ -77,9 +155,9 @@ function formatWorkflowError(error) {
         title: "Workflow Error",
         message: String(
           errorData.detail ||
-          errorData.message ||
-          error.message ||
-          "Failed to start workflow"
+            errorData.message ||
+            error.message ||
+            "Failed to start workflow"
         ),
       };
   }
@@ -87,9 +165,8 @@ function formatWorkflowError(error) {
 
 export default function WorkflowSimplePage() {
   const navigate = useNavigate();
-  const { getToken } = useAuth();
+  const { getToken } = useAppAuth();
 
-  // Zustand store for workflow draft (persisted in localStorage)
   const { selectedDocuments, selectedWorkflow, variables, execution } =
     useWorkflowDraft();
   const {
@@ -103,7 +180,6 @@ export default function WorkflowSimplePage() {
     failWorkflowExecution,
   } = useWorkflowDraftActions();
 
-  // Local state (not persisted)
   const [templates, setTemplates] = useState([]);
   const [runs, setRuns] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -111,17 +187,16 @@ export default function WorkflowSimplePage() {
   const [showDocSelector, setShowDocSelector] = useState(false);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [selectedRunId, setSelectedRunId] = useState(null);
-  const [mobilePanel, setMobilePanel] = useState("workflow"); // documents | workflow | results
+  const [mobilePanel, setMobilePanel] = useState("workflow");
+  const [showConfigView, setShowConfigView] = useState(false);
 
   useEffect(() => {
     fetchInitialData();
 
-    // Reconnect to active workflow execution if exists
     if (execution && execution.jobId && execution.runId) {
       reconnectWorkflowExecution(getToken);
     }
 
-    // Cleanup SSE on unmount
     return () => {
       if (execution && execution.cleanup) {
         execution.cleanup();
@@ -129,17 +204,17 @@ export default function WorkflowSimplePage() {
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Refresh runs list when execution finishes (success or failure)
-  // This handles both fresh executions and reconnections after page refresh
   const prevProcessingRef = useRef(execution?.isProcessing);
   useEffect(() => {
-    if (prevProcessingRef.current === true && execution?.isProcessing === false) {
+    if (
+      prevProcessingRef.current === true &&
+      execution?.isProcessing === false
+    ) {
       fetchInitialData();
     }
     prevProcessingRef.current = execution?.isProcessing;
   }, [execution?.isProcessing]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Fetch templates and recent runs (documents come from modal/store)
   const fetchInitialData = async () => {
     setLoading(true);
     try {
@@ -162,7 +237,6 @@ export default function WorkflowSimplePage() {
     }
   };
 
-  // Select workflow template
   const handleSelectTemplate = async (template) => {
     setLoading(true);
     try {
@@ -174,7 +248,6 @@ export default function WorkflowSimplePage() {
 
       setSelectedWorkflow(res.data);
 
-      // Initialize variables with defaults
       const initialVars = {};
       (res.data.variables_schema || []).forEach((v) => {
         if (v.default !== undefined && v.default !== null) {
@@ -182,6 +255,7 @@ export default function WorkflowSimplePage() {
         }
       });
       setWorkflowVariables(initialVars);
+      setShowConfigView(true);
     } catch (error) {
       console.error("Failed to load template:", error);
     } finally {
@@ -189,57 +263,39 @@ export default function WorkflowSimplePage() {
     }
   };
 
-  // Go back to template selection
-  const handleBack = () => {
-    setSelectedWorkflow(null);
-    setWorkflowVariables({});
-  };
-
-  // Generate workflow
   const handleGenerate = async () => {
-    if (!selectedWorkflow || selectedDocuments.length === 0) {
-      alert("Please select documents and configure the workflow");
-      return;
-    }
+    if (!selectedWorkflow || selectedDocuments.length === 0) return;
 
-    // Prevent duplicate starts
     if (execution && execution.isProcessing === true) {
       console.warn("⚠️ Workflow already in progress");
       return;
     }
 
-    // Start execution immediately with temporary values for instant UI feedback
     startWorkflowExecution(null, null, null);
 
     try {
       const token = await getToken();
 
-      // Prepare payload
       const payload = {
         workflow_id: selectedWorkflow.id,
         document_ids: selectedDocuments.map((doc) => doc.id),
         variables: variables || {},
       };
 
-      // Call API to create workflow run
       const response = await axios.post(
         `${API_BASE}/api/workflows/runs`,
         payload,
-        {
-          headers: { Authorization: `Bearer ${token}` },
-        }
+        { headers: { Authorization: `Bearer ${token}` } }
       );
 
       const { id: runId, job_id: jobId } = response.data;
 
-      // Connect to SSE stream for progress updates
       const cleanup = await streamWorkflowProgress(jobId, getToken, {
         onProgress: (progressData) => {
           updateWorkflowProgress(progressData);
         },
-        onComplete: (data) => {
+        onComplete: () => {
           completeWorkflowExecution();
-          // Refresh runs list to show new result
           fetchInitialData();
         },
         onError: (errorData) => {
@@ -254,32 +310,30 @@ export default function WorkflowSimplePage() {
         onEnd: () => {},
       });
 
-      // Update execution with real values
       startWorkflowExecution(jobId, runId, cleanup);
     } catch (error) {
       console.error("Failed to start workflow:", error);
       const { title, message } = formatWorkflowError(error);
       failWorkflowExecution(message);
-      toast.error(message, {
-        description: title,
-        duration: 6000,
-      });
+      toast.error(message, { description: title, duration: 6000 });
     }
   };
 
-  // Filter runs by selected workflow and separate orphaned runs
   const filteredRuns = selectedWorkflow
     ? runs.filter((r) => r.workflow_id === selectedWorkflow.id)
-    : runs.filter((r) => r.workflow_id !== null); // Exclude orphaned from main list
+    : runs.filter((r) => r.workflow_id !== null);
 
-  // Orphaned runs (workflow was deleted)
   const orphanedRuns = runs.filter((r) => r.workflow_id === null);
 
-  // Handle opening result sheet
   const handleOpenResult = (runId) => {
     setSelectedRunId(runId);
     setSheetOpen(true);
   };
+
+  const totalPages = selectedDocuments.reduce(
+    (s, d) => s + (d.page_count || 0),
+    0
+  );
 
   const breadcrumbs = [{ label: "Workflows" }];
 
@@ -295,48 +349,52 @@ export default function WorkflowSimplePage() {
 
   return (
     <AppLayout breadcrumbs={breadcrumbs}>
-      {/* Full-height three-pane layout with independent scrolls */}
       <div className="h-[calc(100vh-64px)] flex flex-col md:flex-row gap-3 md:gap-4 min-h-0">
         {/* Mobile panel switcher */}
         <div className="md:hidden grid grid-cols-3 gap-2 px-1">
-          <Button
-            size="sm"
-            variant={mobilePanel === "documents" ? "default" : "outline"}
-            onClick={() => setMobilePanel("documents")}
-          >
-            Documents
-          </Button>
-          <Button
-            size="sm"
-            variant={mobilePanel === "workflow" ? "default" : "outline"}
-            onClick={() => setMobilePanel("workflow")}
-          >
-            Workflow
-          </Button>
-          <Button
-            size="sm"
-            variant={mobilePanel === "results" ? "default" : "outline"}
-            onClick={() => setMobilePanel("results")}
-          >
-            Results
-          </Button>
+          {["documents", "workflow", "results"].map((panel) => (
+            <button
+              key={panel}
+              onClick={() => setMobilePanel(panel)}
+              className={`py-2 text-sm font-medium rounded-lg capitalize transition-colors ${
+                mobilePanel === panel
+                  ? "bg-primary text-secondary"
+                  : "bg-card border border-border text-foreground"
+              }`}
+            >
+              {panel}
+            </button>
+          ))}
         </div>
 
-        {/* LEFT PANEL: Selected Documents */}
+        {/* ── LEFT PANEL: Selected Documents ── */}
         <div
           className={`${
             mobilePanel === "documents" ? "flex" : "hidden"
-          } md:flex w-full md:w-64 flex-shrink-0 bg-card rounded-lg border border-border p-4 flex-col overflow-y-auto scrollbar-thin min-h-0`}
+          } md:flex w-full md:w-72 flex-shrink-0 bg-card rounded-xl border border-border flex-col overflow-hidden min-h-0`}
         >
-          <h3 className="font-semibold text-sm text-foreground mb-3 flex items-center gap-2">
-            <FileText className="w-4 h-4" />
-            Selected Documents
-          </h3>
+          {/* Header */}
+          <div className="p-4 border-b border-border flex-shrink-0">
+            <div className="flex items-center justify-between mb-1">
+              <h3 className="text-lg font-bold text-foreground">
+                Selected Docs
+              </h3>
+              {selectedDocuments.length > 0 && (
+                <span className="bg-primary/20 text-primary text-xs font-bold px-2 py-1 rounded-full">
+                  {selectedDocuments.length}
+                </span>
+              )}
+            </div>
+            <p className="text-sm text-muted-foreground">
+              Review files before processing
+            </p>
+          </div>
 
-          <div className="flex-1">
+          {/* Doc list */}
+          <div className="flex-1 overflow-y-auto p-4 space-y-2">
             {selectedDocuments.length === 0 ? (
-              <div className="text-center py-8">
-                <FileText className="w-10 h-10 text-muted-foreground mx-auto mb-2" />
+              <div className="flex flex-col items-center justify-center h-full py-4 text-center">
+                <FileText className="w-10 h-10 text-muted-foreground mx-auto mb-2 opacity-40" />
                 <p className="text-sm text-muted-foreground mb-1">
                   No documents selected
                 </p>
@@ -345,188 +403,146 @@ export default function WorkflowSimplePage() {
                 </p>
               </div>
             ) : (
-              <div className="space-y-2">
-                {selectedDocuments.map((doc) => (
+              selectedDocuments.map((doc) => {
+                const { Icon, bg, color } = getDocFileIcon(doc.filename);
+                return (
                   <div
                     key={doc.id}
-                    className="p-3 rounded-lg border border-border bg-background "
+                    className="group flex items-start gap-3 p-3 bg-background rounded-xl border border-transparent hover:border-primary/30 transition-all shadow-sm"
                   >
-                    <div className="flex items-start gap-2">
-                      <FileText className="w-4 h-4 text-primary mt-0.5 flex-shrink-0" />
-                      <div className="flex-1 min-w-0">
-                        <p className="text-sm font-medium text-foreground truncate">
-                          {doc.filename}
-                        </p>
-                        <p className="text-xs text-muted-foreground">
-                          {doc.page_count} pages
-                        </p>
-                      </div>
-                      <button
-                        onClick={() => removeDocumentFromDraft(doc.id)}
-                        className="flex-shrink-0 p-1 hover:bg-muted dark:hover:bg-gray-700 rounded transition-colors"
-                        title="Remove from workflow"
-                      >
-                        <X className="w-3.5 h-3.5 text-muted-foreground hover:text-red-600" />
-                      </button>
+                    <div
+                      className={`shrink-0 w-10 h-10 rounded-lg flex items-center justify-center ${bg}`}
+                    >
+                      <Icon className={`w-5 h-5 ${color}`} />
                     </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-foreground truncate">
+                        {doc.filename}
+                      </p>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        {doc.page_count || 0} pages
+                      </p>
+                    </div>
+                    <button
+                      onClick={() => removeDocumentFromDraft(doc.id)}
+                      className="opacity-0 group-hover:opacity-100 p-1 rounded hover:bg-destructive/10 hover:text-destructive text-muted-foreground transition-opacity"
+                      title="Remove from workflow"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
                   </div>
-                ))}
-              </div>
+                );
+              })
             )}
+
+            {/* Dashed add button */}
+            <button
+              onClick={() => setShowDocSelector(true)}
+              className="w-full py-3 border-2 border-dashed border-border rounded-xl flex items-center justify-center gap-2 text-muted-foreground hover:border-primary hover:text-primary hover:bg-primary/5 transition-all group mt-1"
+            >
+              <Plus className="w-4 h-4 group-hover:scale-110 transition-transform" />
+              <span className="text-sm font-medium">Add from Library</span>
+            </button>
           </div>
 
-          <div className="mt-4 pt-4 border-t border-border dark:border-gray-700 space-y-3">
-            <div className="text-xs text-muted-foreground dark:text-muted-foreground">
-              <p className="font-medium">
-                {selectedDocuments.length}{" "}
-                {selectedDocuments.length === 1 ? "document" : "documents"} •{" "}
-                {selectedDocuments.reduce(
-                  (sum, d) => sum + (d.page_count || 0),
-                  0
-                )}{" "}
-                pages
-              </p>
+          {/* Footer: pages used */}
+          <div className="p-4 bg-card border-t border-border flex-shrink-0">
+            <div className="flex justify-between text-xs text-muted-foreground mb-2">
+              <span>Pages Used</span>
+              <span className="font-medium text-foreground">
+                {totalPages} / 700
+              </span>
             </div>
-            <Button
-              onClick={() => setShowDocSelector(true)}
-              variant="outline"
-              size="sm"
-              className="w-full"
-            >
-              <Plus className="w-4 h-4 mr-2" />
-              Add Documents
-            </Button>
+            <div className="w-full bg-muted rounded-full h-1.5 overflow-hidden">
+              <div
+                className="bg-primary h-full rounded-full transition-all"
+                style={{
+                  width: `${Math.min((totalPages / 700) * 100, 100)}%`,
+                }}
+              />
+            </div>
           </div>
         </div>
 
-        {/* MIDDLE PANEL: Workflow Selection or Config */}
+        {/* ── CENTER PANEL: Workflow Grid ── */}
         <div
           className={`${
-            mobilePanel === "workflow" ? "block" : "hidden"
-          } md:block flex-1 bg-card rounded-lg border border-border p-4 md:p-6 overflow-y-auto scrollbar-chat min-h-0`}
+            mobilePanel === "workflow" ? "flex" : "hidden"
+          } md:flex flex-1 bg-card rounded-xl border border-border flex-col overflow-hidden min-h-0 relative`}
         >
-          {!selectedWorkflow ? (
-            /* Workflow Selection */
-            <div>
-              <h2 className="text-xl font-bold text-foreground mb-1">
-                Select a Workflow
-              </h2>
-              <p className="text-sm text-muted-foreground mb-6">
-                Choose a workflow template to generate insights from your
-                documents
-              </p>
-
-              <div className="grid grid-cols-1 gap-4">
-                {templates.map((template) => {
-                  const isAvailable = WORKING_WORKFLOWS.has(template.name);
-                  return (
-                    <Card
-                      key={template.id}
-                      className={`p-5 border-2 transition-shadow ${
-                        isAvailable
-                          ? "hover:shadow-lg cursor-pointer hover:border-primary"
-                          : "opacity-50 cursor-not-allowed border-border"
-                      }`}
-                      onClick={() => isAvailable && handleSelectTemplate(template)}
-                    >
-                      <div className="flex items-start justify-between">
-                        <div className="flex-1">
-                          <div className="flex items-center gap-2 mb-2">
-                            <Sparkles className={`w-5 h-5 ${isAvailable ? "text-primary" : "text-muted-foreground"}`} />
-                            <h3 className="text-lg font-semibold text-foreground">
-                              {template.name}
-                            </h3>
-                            {!isAvailable && (
-                              <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium bg-muted text-muted-foreground border border-border">
-                                <Clock className="w-3 h-3" />
-                                Coming Soon
-                              </span>
-                            )}
-                          </div>
-                          <p className="text-sm text-muted-foreground mb-3">
-                            {template.description}
-                          </p>
-                          <div className="flex items-center gap-2">
-                            <Badge variant="outline" className="text-xs">
-                              {template.category}
-                            </Badge>
-                            <span className="text-xs text-muted-foreground">
-                              {template.min_documents}-
-                              {template.max_documents || "∞"} docs
-                            </span>
-                          </div>
-                        </div>
-                      </div>
-                    </Card>
-                  );
-                })}
-              </div>
-            </div>
-          ) : (
-            /* Workflow Config */
-            <div>
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={handleBack}
-                className="mb-4"
+          {showConfigView && selectedWorkflow ? (
+            /* ── CONFIG VIEW ── */
+            <div className="flex-1 overflow-y-auto p-6 md:p-8">
+              {/* Back link */}
+              <button
+                onClick={() => setShowConfigView(false)}
+                className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground mb-6 transition-colors"
               >
-                <ArrowLeft className="w-4 h-4 mr-2" />
+                <ArrowLeft className="w-4 h-4" />
                 Back to workflows
-              </Button>
+              </button>
 
-              <div className="flex items-start gap-3 mb-6">
-                <Sparkles className="w-6 h-6 text-blue-600 flex-shrink-0 mt-1" />
-                <div className="flex-1">
-                  <h2 className="text-xl font-bold text-foreground mb-1">
-                    {selectedWorkflow.name}
-                  </h2>
-                  <p className="text-sm text-muted-foreground dark:text-gray-300">
-                    {selectedWorkflow.description}
-                  </p>
+              {/* Analysis Prompt Card */}
+              {selectedWorkflow.user_prompt_template && (
+                <div className="bg-background rounded-xl border border-border shadow-sm p-6 mb-6">
+                  <div className="flex items-start justify-between gap-4 mb-4">
+                    <div>
+                      <h3 className="text-sm font-semibold text-foreground">
+                        {selectedWorkflow.name}
+                      </h3>
+                      <p className="text-xs text-muted-foreground mt-0.5">
+                        {(selectedWorkflow.variables_schema || []).length > 0
+                          ? `${(selectedWorkflow.variables_schema || []).length} configurable parameter${(selectedWorkflow.variables_schema || []).length !== 1 ? "s" : ""}`
+                          : "Ready to run"}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      {(selectedWorkflow.variables_schema || []).length > 0 && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => setShowConfigModal(true)}
+                          className="gap-1.5"
+                        >
+                          <Settings className="w-3.5 h-3.5" />
+                          Configure
+                        </Button>
+                      )}
+                      <Button
+                        size="sm"
+                        onClick={handleGenerate}
+                        disabled={
+                          selectedDocuments.length === 0 || execution?.isProcessing
+                        }
+                        className="gap-2"
+                      >
+                        {execution?.isProcessing ? (
+                          <>
+                            <Spinner size="sm" />
+                            Running
+                          </>
+                        ) : (
+                          <>
+                            <Play className="w-4 h-4" />
+                            Run
+                          </>
+                        )}
+                      </Button>
+                    </div>
+                  </div>
+
+                  {/* Prompt body with inline variable chips */}
+                  <div className="bg-muted/30 border border-border rounded-xl p-4 text-sm text-foreground leading-7 font-mono">
+                    {renderPromptWithVariables(
+                      selectedWorkflow.user_prompt_template
+                    )}
+                  </div>
                 </div>
-              </div>
+              )}
 
-              <div className="bg-background  rounded-lg p-4 mb-6">
-                <p className="text-sm text-muted-foreground dark:text-gray-300 font-mono leading-relaxed">
-                  {selectedWorkflow.user_prompt_template ||
-                    selectedWorkflow.prompt_template?.slice(0, 200) + "..."}
-                </p>
-              </div>
-
-              <Button
-                onClick={() => setShowConfigModal(true)}
-                variant="outline"
-                className="w-full mb-4"
-              >
-                <Settings className="w-4 h-4 mr-2" />
-                Configure Variables
-              </Button>
-
-              <Button
-                onClick={handleGenerate}
-                disabled={
-                  (execution && execution.isProcessing) ||
-                  selectedDocuments.length === 0
-                }
-                className="w-full bg-blue-600 hover:bg-blue-700 text-foreground"
-              >
-                {execution && execution.isProcessing ? (
-                  <>
-                    <Spinner size="sm" className="mr-2" />
-                    Generating...
-                  </>
-                ) : (
-                  <>
-                    <Sparkles className="w-4 h-4 mr-2" />
-                    Generate
-                  </>
-                )}
-              </Button>
-
-              {/* Progress Indicator */}
-              {execution && execution.isProcessing && (
-                <div className="mt-4 p-4 bg-primary/5 rounded-lg border border-primary/20">
+              {/* Progress indicator */}
+              {execution?.isProcessing && (
+                <div className="p-4 bg-primary/5 rounded-xl border border-primary/20 mb-4">
                   <div className="flex items-center justify-between mb-2">
                     <span className="text-sm font-medium text-foreground">
                       {execution.message}
@@ -538,114 +554,256 @@ export default function WorkflowSimplePage() {
                   <Progress
                     value={execution.progress || 0}
                     variant="primary"
-                    className="h-2"
-                    showShimmer={true}
+                    className="h-1.5"
+                    showShimmer
                   />
                 </div>
               )}
 
-              {/* Error state — shown after failure, persists until next run */}
-              {execution && !execution.isProcessing && execution.stage === "failed" && (
-                <div className="mt-4 p-4 bg-destructive/10 rounded-lg border border-destructive/30">
+              {/* Error state */}
+              {!execution?.isProcessing && execution?.stage === "failed" && (
+                <div className="p-4 bg-destructive/10 rounded-xl border border-destructive/30 mb-4">
                   <div className="flex items-start gap-2">
-                    <AlertCircle className="h-4 w-4 text-destructive mt-0.5 flex-shrink-0" />
+                    <AlertCircle className="w-4 h-4 text-destructive mt-0.5 shrink-0" />
                     <div>
-                      <p className="text-sm font-medium text-destructive">Workflow failed</p>
+                      <p className="text-sm font-medium text-destructive">
+                        Workflow failed
+                      </p>
                       <p className="text-xs text-muted-foreground mt-0.5">
-                        {execution.message || "An unexpected error occurred. Please try again."}
+                        {execution.message || "An unexpected error occurred."}
                       </p>
                     </div>
                   </div>
                 </div>
               )}
-
-              {selectedDocuments.length === 0 &&
-                !(execution && execution.isProcessing) && (
-                  <p className="mt-3 text-sm text-warning">
-                    ⚠️ Please select at least one document
-                  </p>
-                )}
             </div>
+          ) : (
+            <>
+              {/* ── GRID VIEW ── */}
+              <div className="flex-1 overflow-y-auto p-6 md:p-8 pb-32">
+                {/* Header */}
+                <div className="mb-8">
+                  <h1 className="text-3xl font-extrabold text-foreground tracking-tight mb-2">
+                    Select a Workflow
+                  </h1>
+                  <p className="text-muted-foreground text-sm">
+                    Choose the type of analysis you want to generate from your
+                    documents.
+                  </p>
+                </div>
+
+                {/* Workflow grid */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 mb-6">
+                  {templates.map((template) => {
+                    const isActive = selectedWorkflow?.id === template.id;
+                    const isAvailable = WORKING_WORKFLOWS.has(template.name);
+                    const { Icon } = getWorkflowIcon(template.name);
+
+                    return (
+                      <div
+                        key={template.id}
+                        onClick={() =>
+                          isAvailable && handleSelectTemplate(template)
+                        }
+                        className={`relative p-5 rounded-2xl border-2 bg-card transition-all select-none
+                          ${
+                            isActive
+                              ? "border-primary shadow-[0_4px_20px_-4px_rgba(19,236,218,0.15)] cursor-pointer"
+                              : isAvailable
+                              ? "border-border hover:border-primary/40 hover:shadow-md cursor-pointer hover:scale-[1.01]"
+                              : "border-border opacity-70 cursor-not-allowed"
+                          }`}
+                      >
+                        {/* Top-right badge */}
+                        {isActive && (
+                          <CheckCircle className="absolute top-4 right-4 w-5 h-5 text-primary" />
+                        )}
+                        {!isAvailable && (
+                          <span className="absolute top-4 right-4 px-2 py-0.5 bg-muted text-muted-foreground rounded text-[10px] font-bold uppercase tracking-wide">
+                            Coming Soon
+                          </span>
+                        )}
+
+                        {/* Icon */}
+                        <div
+                          className={`w-12 h-12 rounded-xl flex items-center justify-center mb-4 ${
+                            isAvailable
+                              ? "bg-primary/10 text-primary"
+                              : "bg-muted text-muted-foreground"
+                          }`}
+                        >
+                          <Icon className="w-7 h-7" />
+                        </div>
+
+                        {/* Name + description */}
+                        <h3
+                          className={`text-lg font-bold mb-1 ${
+                            isAvailable
+                              ? "text-foreground"
+                              : "text-muted-foreground"
+                          }`}
+                        >
+                          {template.name}
+                        </h3>
+                        <p
+                          className={`text-sm mb-4 line-clamp-2 ${
+                            isAvailable
+                              ? "text-muted-foreground"
+                              : "text-muted-foreground/70"
+                          }`}
+                        >
+                          {template.description}
+                        </p>
+
+                        {/* Tags */}
+                        <div className="flex flex-wrap gap-2">
+                          <span
+                            className={`px-2.5 py-1 rounded-md text-xs font-semibold ${
+                              isAvailable
+                                ? "bg-muted text-muted-foreground"
+                                : "bg-muted/50 text-muted-foreground/70"
+                            }`}
+                          >
+                            {template.category}
+                          </span>
+                          <span
+                            className={`px-2.5 py-1 rounded-md text-xs font-semibold ${
+                              isAvailable
+                                ? "bg-muted text-muted-foreground"
+                                : "bg-muted/50 text-muted-foreground/70"
+                            }`}
+                          >
+                            {template.min_documents}–
+                            {template.max_documents || "∞"} docs
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* Progress indicator */}
+                {execution?.isProcessing && (
+                  <div className="p-4 bg-primary/5 rounded-xl border border-primary/20 mb-4">
+                    <div className="flex items-center justify-between mb-2">
+                      <span className="text-sm font-medium text-foreground">
+                        {execution.message}
+                      </span>
+                      <span className="text-xs text-muted-foreground">
+                        {execution.progress}%
+                      </span>
+                    </div>
+                    <Progress
+                      value={execution.progress || 0}
+                      variant="primary"
+                      className="h-1.5"
+                      showShimmer
+                    />
+                  </div>
+                )}
+
+                {/* Error state */}
+                {!execution?.isProcessing &&
+                  execution?.stage === "failed" && (
+                    <div className="p-4 bg-destructive/10 rounded-xl border border-destructive/30 mb-4">
+                      <div className="flex items-start gap-2">
+                        <AlertCircle className="w-4 h-4 text-destructive mt-0.5 shrink-0" />
+                        <div>
+                          <p className="text-sm font-medium text-destructive">
+                            Workflow failed
+                          </p>
+                          <p className="text-xs text-muted-foreground mt-0.5">
+                            {execution.message || "An unexpected error occurred."}
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                {/* No docs warning */}
+                {selectedWorkflow &&
+                  selectedDocuments.length === 0 &&
+                  !execution?.isProcessing && (
+                    <p className="text-sm text-warning flex items-center gap-1.5">
+                      <Clock className="w-4 h-4" />
+                      Add at least one document to run this workflow
+                    </p>
+                  )}
+              </div>
+            </>
           )}
         </div>
 
-        {/* RIGHT PANEL: Results */}
+        {/* ── RIGHT PANEL: Recent Results ── */}
         <div
           className={`${
             mobilePanel === "results" ? "block" : "hidden"
-          } md:block w-full md:w-96 flex-shrink-0 bg-card rounded-lg border border-border p-4 overflow-y-auto scrollbar-thin min-h-0`}
+          } md:block w-full md:w-80 flex-shrink-0 bg-card rounded-xl border border-border flex-col overflow-hidden min-h-0 flex`}
         >
-          <div className="flex items-center justify-between mb-3">
-            <h3 className="font-semibold text-sm text-foreground">
+          {/* Header */}
+          <div className="p-5 border-b border-border flex items-center justify-between flex-shrink-0">
+            <h3 className="text-lg font-bold text-foreground">
               {selectedWorkflow
                 ? `${selectedWorkflow.name} Results`
                 : "Recent Results"}
             </h3>
-            <Button
-              variant="ghost"
-              size="sm"
+            <button
               onClick={() => navigate("/app/workflows/history?tab=runs")}
-              className="text-xs"
+              className="text-xs text-muted-foreground hover:text-primary transition-colors font-medium"
             >
               View All
-            </Button>
+            </button>
           </div>
 
-          {filteredRuns.length === 0 && orphanedRuns.length === 0 ? (
-            <div className="text-center py-12">
-              <Sparkles className="w-12 h-12 text-muted-foreground mx-auto mb-3" />
-              <p className="text-sm text-muted-foreground">No results yet</p>
-              <p className="text-xs text-muted-foreground mt-1">
-                Generate a workflow to see results here
-              </p>
-            </div>
-          ) : (
-            <div className="space-y-4">
-              {/* Active Runs */}
-              {filteredRuns.length > 0 && (
-                <div className="space-y-3">
-                  {filteredRuns.slice(0, 5).map((run) => (
-                    <ResultPreviewCard
-                      key={run.id}
-                      run={run}
-                      onOpenSheet={handleOpenResult}
-                    />
-                  ))}
-                </div>
-              )}
+          {/* Results list */}
+          <div className="flex-1 overflow-y-auto p-4 space-y-3">
+            {filteredRuns.length === 0 && orphanedRuns.length === 0 ? (
+              <div className="flex flex-col items-center justify-center h-full text-center py-12">
+                <Sparkles className="w-12 h-12 text-muted-foreground mx-auto mb-3 opacity-40" />
+                <p className="text-sm text-muted-foreground">No results yet</p>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Generate a workflow to see results here
+                </p>
+              </div>
+            ) : (
+              <>
+                {filteredRuns.slice(0, 5).map((run) => (
+                  <ResultPreviewCard
+                    key={run.id}
+                    run={run}
+                    onOpenSheet={handleOpenResult}
+                  />
+                ))}
 
-              {/* Orphaned Runs Section */}
-              {orphanedRuns.length > 0 && (
-                <div className="mt-6 pt-4 border-t border-border dark:border-gray-700">
-                  <div className="flex items-center gap-2 mb-3">
-                    <Badge
-                      variant="outline"
-                      className="text-xs bg-amber-50 dark:bg-amber-950 text-amber-700 dark:text-amber-300 border-amber-200 dark:border-amber-800"
-                    >
-                      ⚠️ Previous Runs
-                    </Badge>
+                {orphanedRuns.length > 0 && (
+                  <div className="mt-4 pt-4 border-t border-border">
+                    <div className="flex items-center gap-2 mb-3">
+                      <span className="text-[10px] font-bold px-2 py-0.5 bg-amber-50 dark:bg-amber-950 text-amber-700 dark:text-amber-300 border border-amber-200 dark:border-amber-800 rounded-full">
+                        ⚠️ Previous Runs
+                      </span>
+                    </div>
+                    <p className="text-xs text-muted-foreground mb-3">
+                      These runs reference workflows that were deleted
+                    </p>
+                    <div className="space-y-3">
+                      {orphanedRuns.slice(0, 3).map((run) => (
+                        <ResultPreviewCard
+                          key={run.id}
+                          run={run}
+                          onOpenSheet={handleOpenResult}
+                          isOrphaned
+                        />
+                      ))}
+                    </div>
                   </div>
-                  <p className="text-xs text-muted-foreground dark:text-gray-400 mb-3">
-                    These runs reference workflows that were deleted
-                  </p>
-                  <div className="space-y-3">
-                    {orphanedRuns.slice(0, 3).map((run) => (
-                      <ResultPreviewCard
-                        key={run.id}
-                        run={run}
-                        onOpenSheet={handleOpenResult}
-                        isOrphaned={true}
-                      />
-                    ))}
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
+                )}
+              </>
+            )}
+          </div>
         </div>
       </div>
 
-      {/* Variable Config Modal */}
+      {/* Modals */}
       <VariableConfigModal
         open={showConfigModal}
         onOpenChange={setShowConfigModal}
@@ -656,13 +814,11 @@ export default function WorkflowSimplePage() {
         isProcessing={execution && execution.isProcessing}
       />
 
-      {/* Document Selector Modal */}
       <DocumentSelectorModal
         open={showDocSelector}
         onOpenChange={setShowDocSelector}
       />
 
-      {/* Workflow Result Sheet */}
       <WorkflowResultSheet
         open={sheetOpen}
         onOpenChange={setSheetOpen}
@@ -672,112 +828,90 @@ export default function WorkflowSimplePage() {
   );
 }
 
-// Placeholder for ResultPreviewCard - will create separate component
 function ResultPreviewCard({ run, onOpenSheet, isOrphaned = false }) {
-  const getStatusBadge = () => {
-    switch (run.status) {
-      case "completed":
-        return (
-          <Badge className="bg-success text-success-foreground text-xs">
-            ✓ Completed
-          </Badge>
-        );
-      case "running":
-        return (
-          <Badge className="bg-primary text-primary-foreground text-xs">
-            Running
-          </Badge>
-        );
-      case "failed":
-        return (
-          <Badge className="bg-destructive text-destructive-foreground text-xs">
-            Failed
-          </Badge>
-        );
-      default:
-        return (
-          <Badge variant="outline" className="text-xs">
-            {run.status}
-          </Badge>
-        );
-    }
-  };
-
-  // Get workflow name from workflow_snapshot if orphaned, otherwise from run
   const workflowName = isOrphaned
     ? run.workflow_snapshot?.name || "Unknown Workflow"
     : run.workflow_name || "Workflow";
 
-  // Extract company name from artifact if available
   const companyName =
     run.artifact_json?.parsed?.company_overview?.company_name ||
     run.artifact_json?.company_overview?.company_name;
 
-  // Format created date
-  const createdDate = run.created_at
-    ? new Date(run.created_at).toLocaleDateString("en-US", {
-        month: "short",
-        day: "numeric",
-        year: "numeric",
-      })
-    : null;
-
-  // Get document count
+  const displayTitle = companyName || workflowName;
   const docCount = run.document_ids?.length || 0;
 
-  // Create display title
-  const displayTitle = companyName || workflowName;
+  const statusConfig = {
+    completed: {
+      classes:
+        "bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400",
+      label: "✓ Completed",
+    },
+    running: {
+      classes: "bg-primary/10 text-primary",
+      label: "Running",
+    },
+    failed: {
+      classes:
+        "bg-red-100 dark:bg-red-900/30 text-destructive",
+      label: "Failed",
+    },
+  };
+  const status = statusConfig[run.status] || {
+    classes: "bg-muted text-muted-foreground",
+    label: run.status,
+  };
 
   return (
-    <Card
-      className={`p-4 hover:shadow-md transition-all cursor-pointer hover:border-primary/50 ${
+    <div
+      onClick={() => onOpenSheet(run.id)}
+      className={`group p-4 rounded-xl border border-border bg-muted/30 hover:shadow-md transition-shadow cursor-pointer ${
         isOrphaned ? "border-warning/50 bg-warning/5" : ""
       }`}
-      onClick={() => onOpenSheet(run.id)}
     >
-      <div className="flex items-start justify-between mb-3">
-        <div className="flex-1 min-w-0">
-          <p className="text-sm font-semibold text-foreground truncate">
-            {displayTitle}
-          </p>
-          {companyName && (
-            <p className="text-xs text-muted-foreground mt-0.5">
-              {workflowName}
-            </p>
-          )}
-          {isOrphaned && (
-            <p className="text-xs text-warning mt-1">⚠️ Workflow deleted</p>
-          )}
-        </div>
-        {getStatusBadge()}
+      {/* Top row: status + relative time */}
+      <div className="flex justify-between items-start mb-2">
+        <span
+          className={`text-[10px] font-bold px-2 py-0.5 rounded-full ${status.classes}`}
+        >
+          {status.label}
+        </span>
+        <span className="text-[10px] text-muted-foreground">
+          {getRelativeTime(run.created_at)}
+        </span>
       </div>
+
+      {/* Title + workflow name */}
+      <h4 className="font-bold text-foreground text-sm mb-1 group-hover:text-primary transition-colors truncate">
+        {displayTitle}
+      </h4>
+      {companyName && (
+        <p className="text-xs text-muted-foreground mb-3">{workflowName}</p>
+      )}
+      {isOrphaned && (
+        <p className="text-xs text-warning mb-3">⚠️ Workflow deleted</p>
+      )}
 
       {/* Metadata row */}
-      <div className="flex items-center gap-3 text-xs text-muted-foreground mb-3">
-        {createdDate && <span>📅 {createdDate}</span>}
-        {docCount > 0 && (
-          <span>
-            📄 {docCount} {docCount === 1 ? "doc" : "docs"}
-          </span>
-        )}
+      <div className="flex items-center gap-3 text-xs text-muted-foreground">
         {run.latency_ms && run.status === "completed" && (
-          <span>⏱️ {(run.latency_ms / 1000).toFixed(1)}s</span>
+          <div className="flex items-center gap-1">
+            <Timer className="w-3 h-3" />
+            {(run.latency_ms / 1000).toFixed(1)}s
+          </div>
+        )}
+        {docCount > 0 && (
+          <div className="flex items-center gap-1">
+            <FileText className="w-3 h-3" />
+            {docCount} {docCount === 1 ? "doc" : "docs"}
+          </div>
         )}
       </div>
 
-      {run.status === "failed" && (
-        <p className="text-xs text-destructive mb-2 line-clamp-2">
+      {run.status === "failed" && run.error_message && (
+        <p className="text-xs text-destructive mt-2 line-clamp-2">
           {run.error_message}
         </p>
       )}
-
-      <Button
-        variant="ghost"
-        size="sm"
-        className="mt-1 w-full text-xs hover:bg-primary/10"
-      >
-        View Results →
-      </Button>
-    </Card>
+    </div>
   );
 }

@@ -237,7 +237,14 @@ def detect_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                 # Use bbox page if available (physical PDF page from Azure DI bounding_regions)
                 # This is more accurate than page_number which may contain document's internal numbering
                 kv_bbox = kv.get("bbox", {})
-                kv_page_number = kv_bbox.get("page") or kv.get("page_number") or chunk.page_number
+                kv_page_number = (
+                    (kv_bbox.get("page") if isinstance(kv_bbox, dict) and kv_bbox else None)
+                    or kv.get("page_number")
+                    or metadata.get("page_number")
+                    or chunk.page_number
+                )
+                if isinstance(kv_page_number, str) and kv_page_number.isdigit():
+                    kv_page_number = int(kv_page_number)
                 citation = f"[D1:p{kv_page_number}]"
 
                 if not key:
@@ -276,7 +283,17 @@ def detect_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
             # Extract bbox from chunk metadata for PDF highlighting
             chunk_bbox = metadata.get("bbox", {})
             # Use bbox page if available (physical PDF page from Azure DI bounding_regions)
-            table_page = chunk_bbox.get("page") if chunk_bbox else chunk.page_number
+            page_range = metadata.get("page_range", [])
+            metadata_page = metadata.get("page_number")
+            range_page = page_range[0] if isinstance(page_range, list) and page_range else None
+            table_page = (
+                (chunk_bbox.get("page") if isinstance(chunk_bbox, dict) and chunk_bbox else None)
+                or metadata_page
+                or range_page
+                or chunk.page_number
+            )
+            if isinstance(table_page, str) and table_page.isdigit():
+                table_page = int(table_page)
             citation = f"[D1:p{table_page}]"
 
             for col_header in column_headers:
@@ -306,7 +323,7 @@ def detect_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                     # Future: Could calculate from table structure quality metrics.
                     "confidence": 0.9,
                     "citations": [citation],
-                    "description": f"Column from table '{table_name}' on page {chunk.page_number}",
+                    "description": f"Column from table '{table_name}' on page {table_page}",
                     "source": "table"
                 }
 
@@ -317,7 +334,7 @@ def detect_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                 # DEBUG: Log first table field's bbox
                 if len([f for f in detected_fields if f.get("source") == "table"]) == 0:
                     logger.info(f"[FIELD_DETECTION] First table field: '{col_header}', "
-                              f"page={chunk.page_number}, has bbox: {chunk_bbox is not None}, bbox={chunk_bbox}")
+                              f"page={table_page}, has bbox: {chunk_bbox is not None}, bbox={chunk_bbox}")
 
                 detected_fields.append(field_data)
                 field_id_counter += 1
@@ -455,9 +472,11 @@ def auto_map_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         if not excel_schema:
             raise ValueError(f"Template schema not found: {template_id}")
 
-        pdf_fields = detection_result.get("fields", [])
+        # Mutable copy — Stage 2 injects virtual pdf_fields for targeted values
+        pdf_fields = list(detection_result.get("fields", []))
         schema_mappings = []
         generic_mappings = []
+        schema_id = None  # Track for Stage 2
 
         # === STEP 1: Try schema-based mapping (unless skipped) ===
         if not skip_schema:
@@ -481,7 +500,7 @@ def auto_map_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                     # Create schema mappings (deterministic, instant)
                     schema_mappings = mapping_coordinator.create_schema_mappings(schema_id, pdf_fields)
 
-                    logger.info(f"Schema mapping: {len(schema_mappings)} fields mapped (confidence=1.0)")
+                    logger.info(f"Schema mapping: {len(schema_mappings)} fields mapped (confidence=0.98 baseline)")
 
                     # Log unmapped schema fields (diagnostics)
                     try:
@@ -503,8 +522,8 @@ def auto_map_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                     tracker.update_progress(
                         status="mapping",
                         current_stage="auto_mapping",
-                        progress_percent=55,
-                        message=f"Schema mapped {len(schema_mappings)} critical fields"
+                        progress_percent=50,
+                        message=f"Schema matched {len(schema_mappings)} fields by alias"
                     )
                 else:
                     logger.info("Template not recognized by schema system - will use generic analyzer")
@@ -512,14 +531,101 @@ def auto_map_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
             except Exception as e:
                 logger.warning(f"Schema mapping failed (will fall back to generic): {e}")
                 schema_mappings = []
+                schema_id = None
             finally:
                 # Always clean up — even if load_workbook or identify_template throws
                 if template_path:
                     Path(template_path).unlink(missing_ok=True)
 
+        # === STEP 1.5: Targeted LLM for unmapped YAML fields (Stage 2) ===
+        # Ask LLM specifically: "find values for these 63 named fields in the Azure DI data"
+        # Much cheaper and more accurate than the generic 6-batch sheet mapper for schema fields.
+        if schema_id and not use_schema_only:
+            try:
+                from app.verticals.real_estate.template_filling.excel.schema_based import SchemaMapper
+
+                schema_obj = mapping_coordinator.schema_loader.load_schema(schema_id)
+                if schema_obj:
+                    mapper_for_unmapped = SchemaMapper(schema_obj)
+                    unmapped_field_ids = mapper_for_unmapped.get_unmapped_schema_fields(schema_mappings)
+                    unmapped_fields = [
+                        schema_obj.get_field(fid)
+                        for fid in unmapped_field_ids
+                        if schema_obj.get_field(fid) is not None
+                    ]
+
+                    if unmapped_fields:
+                        logger.info(
+                            f"🎯 Stage 2: {len(unmapped_fields)} unmapped YAML fields → targeted LLM"
+                        )
+                        tracker.update_progress(
+                            status="mapping",
+                            current_stage="auto_mapping",
+                            progress_percent=55,
+                            message=f"Finding values for {len(unmapped_fields)} schema fields..."
+                        )
+
+                        llm_service_targeted = TemplateFillLLMService()
+                        targeted_values = asyncio.run(
+                            llm_service_targeted.extract_schema_field_values(
+                                unmapped_fields, pdf_fields
+                            )
+                        )
+
+                        targeted_mappings = mapping_coordinator.create_targeted_schema_mappings(
+                            unmapped_fields, targeted_values
+                        )
+
+                        # Inject virtual pdf_fields so fill_excel_task can look up extracted values.
+                        # TemplateFiller looks up: llm_extracted[pdf_field_id] = {value: ...}
+                        # fill_excel_task populates llm_extracted from pdf_fields[*].extracted_value
+                        for field_def in unmapped_fields:
+                            fid = field_def["id"]
+                            if fid in targeted_values:
+                                result = targeted_values[fid]
+                                pdf_fields.append({
+                                    "id": f"targeted_{fid}",
+                                    "name": fid,
+                                    "type": field_def.get("data_type", "text"),
+                                    "extracted_value": result["value"],
+                                    "confidence": result["confidence"],
+                                    "citations": result.get("citations", []),
+                                    "source": "targeted_schema",
+                                })
+
+                        # Merge targeted mappings into schema_mappings so they're
+                        # excluded from the Stage 3 generic pass automatically
+                        schema_mappings = schema_mappings + targeted_mappings
+
+                        # Celery heartbeat: yield to heartbeat handler between LLM calls
+                        self.update_state(
+                            state="PROGRESS",
+                            meta={"stage": "targeted_schema_mapping_done"}
+                        )
+
+                        tracker.update_progress(
+                            status="mapping",
+                            current_stage="auto_mapping",
+                            progress_percent=70,
+                            message=(
+                                f"Found {len(targeted_mappings)} additional fields via targeted LLM "
+                                f"({len(schema_mappings)} schema total)"
+                            )
+                        )
+                    else:
+                        logger.info("All YAML schema fields matched in Stage 1 — skipping Stage 2")
+                        tracker.update_progress(
+                            status="mapping",
+                            current_stage="auto_mapping",
+                            progress_percent=70,
+                            message=f"All schema fields matched ({len(schema_mappings)} total)"
+                        )
+            except Exception as e:
+                logger.warning(f"Stage 2 targeted mapping failed (continuing to Stage 3): {e}")
+
         # === STEP 2: Generic + LLM mapping for remaining cells (unless schema-only mode) ===
         if not use_schema_only:
-            # Get cells already mapped by schema
+            # Get cells already mapped by schema (Stage 1 + Stage 2)
             schema_mapped_cells = mapping_coordinator.get_schema_mapped_cells(schema_mappings)
 
             # Filter Excel schema to exclude schema-mapped cells
@@ -536,13 +642,18 @@ def auto_map_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                 # Progress callback for batch processing
                 def on_batch_complete(batch_num, total_batches, batch_mappings):
                     """Report progress after each batch is mapped."""
-                    # Progress from 60% (start) to 80% (end of mapping)
-                    batch_progress = 60 + int((batch_num / total_batches) * 20)
+                    # Stage 3 progress: 70% (start) → 85% (end)
+                    batch_progress = 70 + int((batch_num / total_batches) * 15)
                     tracker.update_progress(
                         status="mapping",
                         current_stage="auto_mapping",
                         progress_percent=batch_progress,
-                        message=f"Mapping remaining fields (batch {batch_num}/{total_batches})..."
+                        message=f"Mapping remaining cells (batch {batch_num}/{total_batches})..."
+                    )
+                    # Celery heartbeat: yield between batches to reset heartbeat timer
+                    self.update_state(
+                        state="PROGRESS",
+                        meta={"stage": f"generic_batch_{batch_num}_of_{total_batches}"}
                     )
                     logger.info(f"Batch {batch_num}/{total_batches} mapped: {len(batch_mappings)} fields")
 
@@ -599,9 +710,18 @@ def auto_map_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
             f"{generic_count} generic (LLM)"
         )
 
-        # Deduplicate by Excel cell only - one cell should have one source
-        # (Keep highest confidence mapping if multiple PDF fields map to the same cell)
-        # NOTE: Schema mappings already have confidence=1.0, so they will win ties
+        # Deduplicate by Excel cell only - one cell should have one source.
+        # Enforce strict tier precedence first, then confidence:
+        #   Tier 1 (schema) > Tier 2 (targeted_schema) > Tier 3 (generic LLM)
+        # This prevents lower tiers from overriding higher-tier mappings.
+        def _tier_priority(mapping: dict) -> int:
+            source = mapping.get("source")
+            if source == "schema":
+                return 3
+            if source == "targeted_schema":
+                return 2
+            return 1
+
         best_by_cell: dict[str, dict] = {}
         for m in raw_mappings:
             excel_sheet = m.get("excel_sheet", "")
@@ -611,10 +731,16 @@ def auto_map_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
 
             cell_key = f"{excel_sheet}!{excel_cell}"
             current_best = best_by_cell.get(cell_key)
+            current_best_tier = _tier_priority(current_best or {})
+            candidate_tier = _tier_priority(m)
             current_best_conf = float((current_best or {}).get("confidence") or 0)
             candidate_conf = float(m.get("confidence") or 0)
 
-            if current_best is None or candidate_conf > current_best_conf:
+            if (
+                current_best is None
+                or candidate_tier > current_best_tier
+                or (candidate_tier == current_best_tier and candidate_conf > current_best_conf)
+            ):
                 best_by_cell[cell_key] = m
 
         mappings = list(best_by_cell.values())
@@ -632,16 +758,20 @@ def auto_map_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         )
 
         # Build mapping_result for logging/UI consumers
+        targeted_count = sum(1 for m in mappings if m.get("source") == "targeted_schema")
+        generic_count = len(mappings) - schema_count - targeted_count
         mapping_result = {
             "mappings": mappings,
             "total_mapped": total_mapped_fields,
             "schema_mapped_count": schema_count,
-            "generic_mapped_count": len(mappings) - schema_count,
+            "targeted_schema_count": targeted_count,
+            "generic_mapped_count": generic_count,
             "high_confidence_count": sum(1 for m in mappings if m.get("confidence", 0) >= 0.85)
         }
 
         field_mapping = {
-            "pdf_fields": detection_result.get("fields", []),
+            # Use augmented pdf_fields (includes virtual entries for Stage 2 targeted values)
+            "pdf_fields": pdf_fields,
             "mappings": mappings
         }
 
@@ -675,20 +805,29 @@ def auto_map_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
 
         logger.info(
             f"Auto-mapping complete: {len(mappings)} Excel cells mapped "
-            f"(from {unique_pdf_fields_mapped} unique PDF fields) - "
-            f"{schema_count} via schema (100% accurate), {len(mappings) - schema_count} via LLM"
+            f"(from {unique_pdf_fields_mapped} unique PDF fields) — "
+            f"{schema_count} alias, {targeted_count} targeted LLM, {generic_count} generic LLM"
         )
 
+        # Reuse targeted_count and generic_count already computed above
+
         # Build user-friendly message
-        if schema_count > 0:
-            status_msg = f"Mapped {len(mappings)} cells ({schema_count} schema, {len(mappings) - schema_count} LLM)"
+        if schema_count > 0 or targeted_count > 0:
+            parts = []
+            if schema_count:
+                parts.append(f"{schema_count} alias")
+            if targeted_count:
+                parts.append(f"{targeted_count} targeted LLM")
+            if generic_count > 0:
+                parts.append(f"{generic_count} generic LLM")
+            status_msg = f"Mapped {len(mappings)} cells ({', '.join(parts)})"
         else:
             status_msg = f"Mapped {len(mappings)} cells ({mapping_result.get('high_confidence_count', 0)} high confidence)"
 
         tracker.update_progress(
             status="awaiting_review",
             current_stage="auto_mapping",
-            progress_percent=60,
+            progress_percent=85,
             message=status_msg
         )
 
@@ -816,8 +955,11 @@ def fill_excel_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
             field_id = pdf_field.get('id')
             auto_mapped_value = pdf_field.get('extracted_value')
 
-            # Only add if not already in llm_extracted (user edits take precedence)
-            if field_id and field_id not in llm_extracted and auto_mapped_value:
+            # Only add if not already in llm_extracted (user edits take precedence).
+            # Use `is not None` (not truthiness) so empty strings still populate the entry;
+            # an empty extracted_value means Azure DI found the key but not the value —
+            # the mapping confidence will reflect this via schema_mapper's has_value flag.
+            if field_id and field_id not in llm_extracted and auto_mapped_value is not None:
                 field_entry = {
                     'value': auto_mapped_value,
                     'confidence': pdf_field.get('confidence', 0.95),

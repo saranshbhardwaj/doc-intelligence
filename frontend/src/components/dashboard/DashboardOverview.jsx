@@ -6,7 +6,7 @@
  */
 
 import { useState } from "react";
-import { useAuth } from "@clerk/clerk-react";
+import { useAppAuth } from "@/hooks/useAppAuth";
 import { useQuery } from "@tanstack/react-query";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
@@ -21,7 +21,7 @@ import TemplateFillInsights from "./TemplateFillInsights";
 import UsageStats from "./UsageStats";
 
 export default function DashboardOverview() {
-  const { getToken } = useAuth();
+  const { getToken } = useAppAuth();
   const [period, setPeriod] = useState(30);
 
   // Fetch all 3 endpoints in parallel
@@ -78,7 +78,7 @@ export default function DashboardOverview() {
       {/* Header */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">
-          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Dashboard</h1>
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Overview</h1>
           <p className="text-muted-foreground mt-1">Your organization's activity overview</p>
           {!anyLoading && overview && (overview.documents.pages_analyzed > 0 || overview.template_fills.total_fields_populated > 0) && (
             <p className="text-sm text-primary font-medium mt-1">
@@ -129,6 +129,8 @@ export default function DashboardOverview() {
             ? `${overview.documents.pages_analyzed} pages analyzed`
             : `+${overview?.documents?.period || 0} this period`}
           loading={anyLoading}
+          iconBg="bg-primary/10"
+          iconColor="text-primary"
         />
         <StatCard
           icon={MessageSquare}
@@ -136,6 +138,8 @@ export default function DashboardOverview() {
           value={overview?.chat?.messages || 0}
           subtitle={`${overview?.chat?.sessions || 0} sessions`}
           loading={anyLoading}
+          iconBg="bg-blue-50 dark:bg-blue-900/20"
+          iconColor="text-blue-500"
         />
         <StatCard
           icon={FileSpreadsheet}
@@ -145,6 +149,8 @@ export default function DashboardOverview() {
             ? `${overview.template_fills.total_fields_populated} fields auto-filled`
             : `${overview?.template_fills?.completed || 0}/${overview?.template_fills?.total || 0} completed`}
           loading={anyLoading}
+          iconBg="bg-purple-50 dark:bg-purple-900/20"
+          iconColor="text-purple-500"
         />
         <StatCard
           icon={Database}
@@ -152,6 +158,8 @@ export default function DashboardOverview() {
           value={overview?.extractions?.total || 0}
           subtitle={`${overview?.extractions?.completed || 0} completed`}
           loading={anyLoading}
+          iconBg="bg-orange-50 dark:bg-orange-900/20"
+          iconColor="text-orange-500"
         />
       </div>
 
@@ -164,36 +172,32 @@ export default function DashboardOverview() {
 
         {/* Workflows & Active Users Sidebar (1 col) */}
         <div className="space-y-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-1">
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Play className="h-5 w-5" />
+          <Card className="rounded-2xl">
+            <CardHeader className="pb-2">
+              <CardTitle className="flex items-center gap-2 text-base">
+                <Play className="h-4 w-4 text-muted-foreground" />
                 Workflows
               </CardTitle>
             </CardHeader>
-            <CardContent className="space-y-3">
+            <CardContent className="space-y-2">
               {anyLoading ? (
-                <>
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm text-muted-foreground">Loading...</span>
-                  </div>
-                </>
+                <div className="text-sm text-muted-foreground">Loading...</div>
               ) : (
                 <>
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm text-muted-foreground">Total</span>
-                    <span className="text-2xl font-bold">{overview?.workflows?.total || 0}</span>
+                  <div className="flex items-end gap-1">
+                    <span className="text-3xl font-bold">{overview?.workflows?.total || 0}</span>
+                    <span className="text-sm text-muted-foreground mb-1">total</span>
                   </div>
-                  <div className="flex items-center justify-between">
-                    <span className="text-sm text-muted-foreground">Completed</span>
-                    <span className="text-sm font-medium text-green-600 dark:text-green-400">
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="text-muted-foreground">Completed</span>
+                    <span className="font-medium text-green-600 dark:text-green-400">
                       {overview?.workflows?.completed || 0}
                     </span>
                   </div>
                   {(overview?.workflows?.failed || 0) > 0 && (
-                    <div className="flex items-center justify-between">
-                      <span className="text-sm text-muted-foreground">Failed</span>
-                      <span className="text-sm font-medium text-red-600 dark:text-red-400">
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-muted-foreground">Failed</span>
+                      <span className="font-medium text-destructive">
                         {overview?.workflows?.failed}
                       </span>
                     </div>
@@ -203,20 +207,30 @@ export default function DashboardOverview() {
             </CardContent>
           </Card>
 
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Users className="h-5 w-5" />
-                Active Users
-              </CardTitle>
+          <Card className="rounded-2xl">
+            <CardHeader className="pb-2">
+              <div className="flex items-center justify-between">
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <Users className="h-4 w-4 text-muted-foreground" />
+                  Active Users
+                </CardTitle>
+                <span className="bg-primary/10 text-primary text-xs font-bold px-2 py-0.5 rounded border border-primary/20">
+                  Period
+                </span>
+              </div>
             </CardHeader>
             <CardContent>
               {anyLoading ? (
                 <div className="text-sm text-muted-foreground">Loading...</div>
               ) : (
-                <div className="text-3xl font-bold">{overview?.active_users || 0}</div>
+                <>
+                  <div className="flex items-end gap-1">
+                    <span className="text-3xl font-bold">{overview?.active_users || 0}</span>
+                    <span className="text-sm text-muted-foreground mb-1">users</span>
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-1">Active in this period</p>
+                </>
               )}
-              <p className="text-sm text-muted-foreground mt-1">In this period</p>
             </CardContent>
           </Card>
         </div>

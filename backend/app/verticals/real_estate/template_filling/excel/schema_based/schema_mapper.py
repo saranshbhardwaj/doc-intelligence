@@ -36,7 +36,7 @@ class SchemaMapper:
                 - excel_cell: Target cell (e.g., "C6")
                 - excel_sheet: Target sheet name
                 - excel_label: Field label from schema
-                - confidence: Always 1.0 (schema match = perfect)
+                - confidence: 0.98 if value was extracted, 0.5 if key matched but value empty
                 - source: "schema"
                 - reasoning: Match explanation
                 - citations: Copied from PDF field
@@ -49,7 +49,11 @@ class SchemaMapper:
         for pdf_field in pdf_fields:
             pdf_field_id = pdf_field.get("id")
             pdf_field_name = pdf_field.get("name")
-            pdf_value = pdf_field.get("value")
+            # Fields from detect_fields_task store data under "extracted_value";
+            # generic LLM mappings may use "value" — check both without losing numeric 0.
+            pdf_value = pdf_field.get("extracted_value")
+            if pdf_value is None:
+                pdf_value = pdf_field.get("value")
 
             if not pdf_field_name:
                 continue
@@ -69,6 +73,12 @@ class SchemaMapper:
                     )
                     continue
 
+                # Tier 1 confidence baseline:
+                # - 0.98 when alias matched and a value exists
+                # - 0.50 when alias matched but no value extracted
+                has_value = pdf_value is not None and str(pdf_value).strip() != ""
+                confidence = 0.98 if has_value else 0.5
+
                 # Create mapping
                 mapping = {
                     "pdf_field_id": pdf_field_id,
@@ -76,9 +86,14 @@ class SchemaMapper:
                     "excel_cell": schema_field["value_cell"],
                     "excel_sheet": schema_field["sheet"],
                     "excel_label": f"{schema_field['sheet']}!{schema_field['label_cell']}",
-                    "confidence": 1.0,  # Schema match = perfect confidence
+                    "confidence": confidence,
+                    "has_value": has_value,
                     "source": "schema",
-                    "reasoning": f"Schema match: '{pdf_field_name}' → field '{field_id}'",
+                    "reasoning": (
+                        f"Schema match: '{pdf_field_name}' → field '{field_id}'"
+                        if has_value
+                        else f"Schema match: '{pdf_field_name}' → field '{field_id}' (no value extracted)"
+                    ),
                     "citations": pdf_field.get("citations", []),
                 }
 
@@ -88,7 +103,7 @@ class SchemaMapper:
                 logger.debug(
                     f"✓ Schema mapping: '{pdf_field_name}' → "
                     f"{schema_field['sheet']}!{schema_field['value_cell']} "
-                    f"(field '{field_id}', value='{pdf_value}')"
+                    f"(field '{field_id}', value='{pdf_value}', confidence={confidence})"
                 )
 
         logger.info(

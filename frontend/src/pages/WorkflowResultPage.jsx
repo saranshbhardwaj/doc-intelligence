@@ -6,7 +6,7 @@
 
 import { useEffect, useState, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { useAuth } from "@clerk/clerk-react";
+import { useAppAuth } from "@/hooks/useAppAuth";
 import { useWorkflowDraft, useWorkflowDraftActions, useWorkflowPdfViewer } from "../store";
 import {
   Download,
@@ -59,7 +59,7 @@ import { shouldPromptForFeedback } from '../utils/feedbackRules';
 export default function WorkflowResultPage() {
   const { runId } = useParams();
   const navigate = useNavigate();
-  const { getToken } = useAuth();
+  const { getToken } = useAppAuth();
 
   // Zustand execution state for progress tracking
   const { execution } = useWorkflowDraft();

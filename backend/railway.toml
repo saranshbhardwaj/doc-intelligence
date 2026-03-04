@@ -72,6 +72,8 @@ restartPolicyMaxRetries = 10
 #   ANTHROPIC_API_KEY        → from Anthropic console
 #   CLERK_SECRET_KEY         → from Clerk dashboard
 #   CLERK_PUBLISHABLE_KEY    → from Clerk dashboard
+#   WORKOS_CLIENT_ID         
+#   WORKOS_API_KEY
 #   ENVIRONMENT              → production
 #   ADMIN_API_KEY            → run: openssl rand -hex 32
 #   CORS_ORIGINS             → ["https://your-app.vercel.app"]

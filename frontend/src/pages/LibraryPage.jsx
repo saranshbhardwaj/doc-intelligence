@@ -12,11 +12,11 @@
  * - Document usage tracking
  */
 
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
-import { useAuth } from "@clerk/clerk-react";
+import { useAppAuth } from "@/hooks/useAppAuth";
 import { toast } from "sonner";
-import { Menu } from "lucide-react";
+import { Menu, Plus, Upload, UploadCloud } from "lucide-react";
 import AppLayout from "../components/layout/AppLayout";
 import StatsHeader from "../components/library/StatsHeader";
 import CollectionsSidebar from "../components/library/CollectionsSidebar";
@@ -35,8 +35,15 @@ import {
 import { useChat, useChatActions } from "../store";
 
 export default function LibraryPage() {
-  const { getToken, isLoaded, isSignedIn } = useAuth();
+  const { getToken, isLoaded, isSignedIn } = useAppAuth();
   const [searchParams, setSearchParams] = useSearchParams();
+  // Ref so fetchCollections can read the latest searchParams without being
+  // in its useCallback deps (adding searchParams would cause it to re-create
+  // every time the URL changes, triggering a second fetch mid-flight).
+  const searchParamsRef = useRef(searchParams);
+  useEffect(() => {
+    searchParamsRef.current = searchParams;
+  }, [searchParams]);
 
   // Zustand store for document indexing
   const { indexingJobs } = useChat();
@@ -72,6 +79,7 @@ export default function LibraryPage() {
   const [uploadCollection, setUploadCollection] = useState(null);
   const [deletingDocId, setDeletingDocId] = useState(null);
   const [mobileCollectionsOpen, setMobileCollectionsOpen] = useState(false);
+  const [createRequestCount, setCreateRequestCount] = useState(0);
 
   // Calculate stats from current page of documents
   const stats = useMemo(() => {
@@ -94,7 +102,7 @@ export default function LibraryPage() {
       setCollections(cols);
 
       // Try to restore collection from URL params first
-      const collectionIdFromUrl = searchParams.get("collection");
+      const collectionIdFromUrl = searchParamsRef.current.get("collection");
       if (collectionIdFromUrl && cols.length > 0) {
         const restoredCol = cols.find((c) => c.id === collectionIdFromUrl);
         if (restoredCol) {
@@ -117,7 +125,7 @@ export default function LibraryPage() {
     } finally {
       setLoadingCollections(false);
     }
-  }, [getToken, searchParams, setSearchParams]);
+  }, [getToken, setSearchParams]);
 
   // Fetch documents for a collection
   const fetchDocuments = useCallback(
@@ -351,10 +359,16 @@ export default function LibraryPage() {
 
       // Make API call
       const token = await getToken();
+      const deleteParams = new URLSearchParams();
+      if (selectedCollection?.id) {
+        deleteParams.set("collection_id", selectedCollection.id);
+      }
+      const deleteUrl = `${
+        import.meta.env.VITE_API_URL || "http://localhost:8000"
+      }/api/chat/documents/${docId}${deleteParams.toString() ? `?${deleteParams.toString()}` : ""}`;
+
       const response = await fetch(
-        `${
-          import.meta.env.VITE_API_URL || "http://localhost:8000"
-        }/api/chat/documents/${docId}`,
+        deleteUrl,
         {
           method: "DELETE",
           headers: {
@@ -367,52 +381,61 @@ export default function LibraryPage() {
         throw new Error("Failed to delete document");
       }
 
-      // Success toast
-      toast.success(`Deleted ${docFilename}`, {
-        description: "Document has been permanently removed",
-      });
+      const result = await response.json();
+
+      if (result?.action === "unlinked") {
+        toast.success(`Removed ${docFilename}`, {
+          description: `Document removed from "${selectedCollection?.name || "this collection"}"`,
+        });
+      } else {
+        toast.success(`Deleted ${docFilename}`, {
+          description: "Document has been permanently removed",
+        });
+      }
 
       // Refresh collections (for counts) - don't refresh documents, already updated optimistically
       await fetchCollections();
 
-      // Purge document references from localStorage used by other pages
-      try {
-        // 1) ExtractPage quick access cache
-        const lastDocRaw = localStorage.getItem("extractionLastDoc");
-        if (lastDocRaw) {
-          const lastDoc = JSON.parse(lastDocRaw);
-          if (lastDoc?.id === docId) {
-            localStorage.removeItem("extractionLastDoc");
-          }
-        }
-
-        // 2) WorkflowSimplePage persisted draft (selectedDocuments array)
-        const storeKey = "sand-cloud-storage"; // zustand persist key
-        const persistedRaw = localStorage.getItem(storeKey);
-        if (persistedRaw) {
-          const persisted = JSON.parse(persistedRaw);
-          const wf = persisted?.state?.workflowDraft;
-          if (wf?.selectedDocuments && Array.isArray(wf.selectedDocuments)) {
-            const filtered = wf.selectedDocuments.filter(
-              (d) => d?.id !== docId
-            );
-            if (filtered.length !== wf.selectedDocuments.length) {
-              const next = {
-                ...persisted,
-                state: {
-                  ...persisted.state,
-                  workflowDraft: {
-                    ...wf,
-                    selectedDocuments: filtered,
-                  },
-                },
-              };
-              localStorage.setItem(storeKey, JSON.stringify(next));
+      // Purge document references only for hard delete.
+      if (result?.action === "deleted") {
+        try {
+          // 1) ExtractPage quick access cache
+          const lastDocRaw = localStorage.getItem("extractionLastDoc");
+          if (lastDocRaw) {
+            const lastDoc = JSON.parse(lastDocRaw);
+            if (lastDoc?.id === docId) {
+              localStorage.removeItem("extractionLastDoc");
             }
           }
+
+          // 2) WorkflowSimplePage persisted draft (selectedDocuments array)
+          const storeKey = "sand-cloud-storage"; // zustand persist key
+          const persistedRaw = localStorage.getItem(storeKey);
+          if (persistedRaw) {
+            const persisted = JSON.parse(persistedRaw);
+            const wf = persisted?.state?.workflowDraft;
+            if (wf?.selectedDocuments && Array.isArray(wf.selectedDocuments)) {
+              const filtered = wf.selectedDocuments.filter(
+                (d) => d?.id !== docId
+              );
+              if (filtered.length !== wf.selectedDocuments.length) {
+                const next = {
+                  ...persisted,
+                  state: {
+                    ...persisted.state,
+                    workflowDraft: {
+                      ...wf,
+                      selectedDocuments: filtered,
+                    },
+                  },
+                };
+                localStorage.setItem(storeKey, JSON.stringify(next));
+              }
+            }
+          }
+        } catch (e) {
+          console.warn("LocalStorage cleanup after delete failed:", e);
         }
-      } catch (e) {
-        console.warn("LocalStorage cleanup after delete failed:", e);
       }
     } catch (error) {
       console.error("Failed to delete document:", error);
@@ -452,6 +475,7 @@ export default function LibraryPage() {
               onSelectCollection={handleSelectCollection}
               onCreateCollection={handleCreateCollection}
               onDeleteCollection={handleDeleteCollection}
+              requestCreate={createRequestCount}
             />
           </div>
 
@@ -509,13 +533,36 @@ export default function LibraryPage() {
               </div>
             ) : (
               <div className="h-full flex items-center justify-center">
-                <div className="text-center">
-                  <h3 className="text-lg font-medium text-foreground mb-2">
+                <div className="text-center max-w-sm">
+                  <div className="w-20 h-20 mx-auto mb-6 bg-primary/10 rounded-3xl flex items-center justify-center shadow-lg border border-primary/10">
+                    <UploadCloud className="w-10 h-10 text-primary" />
+                  </div>
+                  <h3 className="text-xl font-bold text-foreground mb-2">
                     No Collection Selected
                   </h3>
-                  <p className="text-sm text-muted-foreground">
-                    Select a collection from the sidebar or create a new one
+                  <p className="text-sm text-muted-foreground mb-6">
+                    Select a collection from the sidebar or start by creating your first workspace.
                   </p>
+                  <div className="flex flex-col sm:flex-row gap-3 justify-center">
+                    <Button
+                      onClick={() => {
+                        setCreateRequestCount((c) => c + 1);
+                        setMobileCollectionsOpen(true);
+                      }}
+                      className="rounded-full gap-2"
+                    >
+                      <Plus className="w-4 h-4" />
+                      Create Collection
+                    </Button>
+                    <Button
+                      variant="outline"
+                      onClick={() => setShowUpload(true)}
+                      className="rounded-full gap-2"
+                    >
+                      <Upload className="w-4 h-4" />
+                      Upload Document
+                    </Button>
+                  </div>
                 </div>
               </div>
             )}
@@ -546,6 +593,7 @@ export default function LibraryPage() {
             onSelectCollection={handleSelectCollection}
             onCreateCollection={handleCreateCollection}
             onDeleteCollection={handleDeleteCollection}
+            requestCreate={createRequestCount}
           />
         </SheetContent>
       </Sheet>

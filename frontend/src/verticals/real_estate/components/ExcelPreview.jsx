@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { useAuth } from '@clerk/clerk-react';
+import { useAppAuth } from "@/hooks/useAppAuth";
 import { getRETemplate } from '../../../api/re-templates';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../../../components/ui/tabs';
 import { FileSpreadsheet, AlertCircle, Loader2 } from 'lucide-react';
@@ -17,7 +17,7 @@ export default function ExcelPreview({
   fieldMapping = {},
   templateId,
 }) {
-  const { getToken } = useAuth();
+  const { getToken } = useAppAuth();
   const [template, setTemplate] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -66,10 +66,10 @@ export default function ExcelPreview({
       return fieldData.value;
     }
 
-    // Fall back to sample_value from pdf_fields (available after field detection)
+    // Fall back to extracted_value from pdf_fields (available after field detection)
     const pdfFields = fieldMapping?.pdf_fields || [];
     const pdfField = pdfFields.find(f => f.id === mapping.pdf_field_id);
-    return pdfField?.sample_value || null;
+    return pdfField?.extracted_value || null;
   }
 
   function isCellMapped(sheetName, cellAddress) {

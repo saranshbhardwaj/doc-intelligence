@@ -281,16 +281,18 @@ export const createTemplateFillSlice = (set, get) => ({
     try {
       await updateFillMappings(getToken, fillRunId, mappings);
 
-      // Keep local state consistent with UI semantics: 1 mapping per pdf_field_id
-      const dedupedByFieldId = new Map();
+      // Keep local state consistent with server behavior: 1 mapping per Excel cell.
+      // A single PDF field can validly map to multiple cells (e.g., dashboard rollups).
+      const dedupedByCell = new Map();
       for (const mapping of mappings || []) {
-        const fieldId = mapping?.pdf_field_id;
-        if (!fieldId) continue;
-        // Prefer the last mapping provided (mirrors server behavior for user-edited input)
-        dedupedByFieldId.set(fieldId, mapping);
+        const sheet = mapping?.excel_sheet;
+        const cell = mapping?.excel_cell;
+        if (!sheet || !cell) continue;
+        // Prefer the last mapping provided for the same cell (mirrors backend behavior)
+        dedupedByCell.set(`${sheet}!${cell}`, mapping);
       }
 
-      const dedupedMappings = Array.from(dedupedByFieldId.values());
+      const dedupedMappings = Array.from(dedupedByCell.values());
 
       // Update local state
       set((state) => ({

@@ -3,9 +3,9 @@
  * Orchestrates the Excel template viewing experience with sheet navigation and cell mapping
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo, useCallback } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../../../components/ui/tabs';
-import { FileSpreadsheet, AlertCircle, Loader2, Info } from 'lucide-react';
+import { FileSpreadsheet, AlertCircle, Loader2 } from 'lucide-react';
 import { Badge } from '../../../components/ui/badge';
 import { Sheet, SheetContent, SheetTitle, SheetDescription } from '../../../components/ui/sheet';
 
@@ -26,87 +26,72 @@ export default function ExcelGridView({
   const [activeSheet, setActiveSheet] = useState(null);
   const [selectedCell, setSelectedCell] = useState(null);
 
-  const mappings = fieldMapping?.mappings || [];
-  const pdfFields = fieldMapping?.pdf_fields || [];
+  const mappings = useMemo(() => fieldMapping?.mappings || [], [fieldMapping?.mappings]);
+  const pdfFields = useMemo(() => fieldMapping?.pdf_fields || [], [fieldMapping?.pdf_fields]);
+  const llmExtractedByField = useMemo(() => extractedData?.llm_extracted || {}, [extractedData?.llm_extracted]);
+  const manualEditsBySheet = useMemo(() => extractedData?.manual_edits || {}, [extractedData?.manual_edits]);
 
-  // Debug logging for mapping issues
-  React.useEffect(() => {
-    if (mappings.length > 0) {
-      // Group by sheet
-      const bySheet = {};
-      mappings.forEach(m => {
-        if (!bySheet[m.excel_sheet]) {
-          bySheet[m.excel_sheet] = [];
-        }
-        bySheet[m.excel_sheet].push(m);
-      });
-
-      // Check for duplicates
-      const cellAddresses = mappings.map(m => `${m.excel_sheet}!${m.excel_cell}`);
-      const uniqueCells = new Set(cellAddresses);
-
-      if (uniqueCells.size < mappings.length) {
-        console.warn('⚠️ Duplicate cell mappings detected!');
-        const duplicates = {};
-        cellAddresses.forEach(cell => {
-          duplicates[cell] = (duplicates[cell] || 0) + 1;
-        });
-        const dups = Object.entries(duplicates).filter(([_, count]) => count > 1);
-
-        // Show which PDF fields are mapped to each duplicate cell
-        dups.forEach(([cellAddr, count]) => {
-          const fields = mappings.filter(m => `${m.excel_sheet}!${m.excel_cell}` === cellAddr);
-          const fieldNames = fields.map(f => {
-            const pdfField = pdfFields.find(p => p.id === f.pdf_field_id);
-            return pdfField?.name || f.excel_label || f.pdf_field_id;
-          });
-        });
-      }
-
-      // Check for null/empty cells
-      const invalidMappings = mappings.filter(m => !m.excel_cell || !m.excel_sheet);
-      if (invalidMappings.length > 0) {
-        console.warn('⚠️ Invalid mappings (null/empty cell or sheet):', invalidMappings.length);
-      }
+  const mappingByCell = useMemo(() => {
+    const lookup = new Map();
+    for (const mapping of mappings) {
+      if (!mapping?.excel_sheet || !mapping?.excel_cell) continue;
+      lookup.set(`${mapping.excel_sheet}::${mapping.excel_cell}`, mapping);
     }
+    return lookup;
   }, [mappings]);
+
+  const sheetMappingCounts = useMemo(() => {
+    const counts = {};
+    for (const mapping of mappings) {
+      if (!mapping?.excel_sheet) continue;
+      counts[mapping.excel_sheet] = (counts[mapping.excel_sheet] || 0) + 1;
+    }
+    return counts;
+  }, [mappings]);
+
+  const pdfFieldById = useMemo(() => {
+    const lookup = new Map();
+    for (const field of pdfFields) {
+      if (!field?.id) continue;
+      lookup.set(field.id, field);
+    }
+    return lookup;
+  }, [pdfFields]);
 
   // Set initial active sheet when workbook loads
   useEffect(() => {
     if (workbook && !activeSheet) {
       setActiveSheet(workbook.SheetNames[0]);
     }
-  }, [workbook]);
+  }, [workbook, activeSheet]);
 
   // Helper functions for cell operations
-  function getCellMapping(sheetName, cellAddress) {
-    return mappings.find(
-      (m) => m.excel_sheet === sheetName && m.excel_cell === cellAddress
-    );
-  }
+  const getCellMapping = useCallback((sheetName, cellAddress) => {
+    return mappingByCell.get(`${sheetName}::${cellAddress}`);
+  }, [mappingByCell]);
 
-  function getCellValue(sheetName, cellAddress) {
-    const mapping = getCellMapping(sheetName, cellAddress);
+  const getCellValue = useCallback((sheetName, cellAddress, mappingOverride = null) => {
+    const mapping = mappingOverride || getCellMapping(sheetName, cellAddress);
 
     // If mapped, get value from LLM extracted data
     if (mapping) {
       const fieldId = mapping.pdf_field_id;
-      const fieldData = extractedData?.llm_extracted?.[fieldId];
+      const fieldData = llmExtractedByField?.[fieldId];
       if (fieldData?.value !== undefined) return fieldData.value;
 
-      // Fall back to sample_value from pdf_fields
-      const pdfField = pdfFields.find(f => f.id === fieldId);
-      return pdfField?.sample_value || null;
+      // Fall back to extracted_value from pdf_fields
+      const pdfField = pdfFieldById.get(fieldId);
+      return pdfField?.extracted_value || null;
     }
 
     // For unmapped cells edited directly, check manual_edits
-    const manualValue = extractedData?.manual_edits?.[sheetName]?.[cellAddress];
+    const manualValue = manualEditsBySheet?.[sheetName]?.[cellAddress];
     if (manualValue?.value !== undefined) return manualValue.value;
 
     return null;
-  }
+  }, [getCellMapping, llmExtractedByField, manualEditsBySheet, pdfFieldById]);
 
-  function getCurrentCellData(sheetName, cellAddress) {
+  const getCurrentCellData = useCallback((sheetName, cellAddress) => {
     if (!workbook) return null;
 
     try {
@@ -127,9 +112,9 @@ export default function ExcelGridView({
       console.warn(`Error reading cell ${sheetName}!${cellAddress}:`, err);
       return null;
     }
-  }
+  }, [workbook]);
 
-  function handleCellClick(sheetName, cellAddress, cellData) {
+  const handleCellClick = useCallback((sheetName, cellAddress, cellData) => {
     const mapping = getCellMapping(sheetName, cellAddress);
 
     // Allow clicking on any non-formula cell (mapped or unmapped)
@@ -137,24 +122,34 @@ export default function ExcelGridView({
       sheetName,
       cellAddress,
       mapping,
-      pdfField: mapping ? pdfFields.find(f => f.id === mapping.pdf_field_id) : null,
-      value: mapping ? getCellValue(sheetName, cellAddress) : null,
+      pdfField: mapping ? pdfFieldById.get(mapping.pdf_field_id) : null,
+      value: mapping ? getCellValue(sheetName, cellAddress, mapping) : null,
       cellData,
     });
-  }
+  }, [getCellMapping, getCellValue, pdfFieldById]);
 
   // Refresh cellData when selectedCell changes (ensures we always show current value)
   useEffect(() => {
     if (selectedCell && workbook) {
       const currentCellData = getCurrentCellData(selectedCell.sheetName, selectedCell.cellAddress);
       if (currentCellData) {
-        setSelectedCell(prev => ({
-          ...prev,
-          cellData: currentCellData,
-        }));
+        setSelectedCell(prev => {
+          if (!prev) return prev;
+          const isSameData =
+            prev.cellData?.v === currentCellData.v &&
+            prev.cellData?.w === currentCellData.w &&
+            prev.cellData?.t === currentCellData.t &&
+            prev.cellData?.f === currentCellData.f;
+
+          if (isSameData) return prev;
+          return {
+            ...prev,
+            cellData: currentCellData,
+          };
+        });
       }
     }
-  }, [selectedCell?.cellAddress, selectedCell?.sheetName, workbook]);
+  }, [selectedCell, workbook, getCurrentCellData]);
 
   // Loading state
   if (loading) {
@@ -193,18 +188,18 @@ export default function ExcelGridView({
   }
 
   return (
-    <div className="flex flex-col h-full gap-4">
+    <div className="flex flex-col h-full min-h-0 overflow-hidden">
       {/* Sheet Navigation Tabs */}
-      <Tabs value={activeSheet} onValueChange={setActiveSheet} className="flex-1 flex flex-col">
+      <Tabs value={activeSheet} onValueChange={setActiveSheet} className="flex-1 min-h-0 flex flex-col overflow-hidden">
         <TabsList className="w-full justify-start overflow-x-auto [&::-webkit-scrollbar]:h-1 [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-border [&::-webkit-scrollbar-thumb]:rounded-full hover:[&::-webkit-scrollbar-thumb]:bg-muted-foreground/50">
           {workbook.SheetNames.map((sheetName) => {
-            const sheetMappings = mappings.filter(m => m.excel_sheet === sheetName);
+            const sheetMappingCount = sheetMappingCounts[sheetName] || 0;
             return (
               <TabsTrigger key={sheetName} value={sheetName} className="relative">
                 {sheetName}
-                {sheetMappings.length > 0 && (
+                {sheetMappingCount > 0 && (
                   <Badge variant="secondary" className="ml-2 text-xs">
-                    {sheetMappings.length}
+                    {sheetMappingCount}
                   </Badge>
                 )}
               </TabsTrigger>
@@ -213,20 +208,18 @@ export default function ExcelGridView({
         </TabsList>
 
         {/* Sheet Content */}
-        {workbook.SheetNames.map((sheetName) => (
-          <TabsContent key={sheetName} value={sheetName} className="flex-1 mt-4">
+        {activeSheet && (
+          <TabsContent key={activeSheet} value={activeSheet} className="flex-1 min-h-0 mt-0 overflow-hidden">
             <ExcelGrid
               workbook={workbook}
-              sheetName={sheetName}
-              mappings={mappings}
-              pdfFields={pdfFields}
+              sheetName={activeSheet}
               getCellValue={getCellValue}
               getCellMapping={getCellMapping}
               onCellClick={handleCellClick}
-              selectedCell={selectedCell?.sheetName === sheetName ? selectedCell : null}
+              selectedCell={selectedCell?.sheetName === activeSheet ? selectedCell : null}
             />
           </TabsContent>
-        ))}
+        )}
       </Tabs>
 
       {/* Mapping Details Drawer */}
@@ -249,31 +242,6 @@ export default function ExcelGridView({
         </SheetContent>
       </Sheet>
 
-      {/* Legend */}
-      <div className="border-t pt-2 px-2">
-        <div className="flex items-center gap-4 flex-wrap text-xs text-muted-foreground">
-          <div className="flex items-center gap-2">
-            <div className="w-3 h-3 rounded border-2 border-green-500" />
-            <span>High Confidence (80%+)</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="w-3 h-3 rounded border-2 border-yellow-500" />
-            <span>Medium Confidence (50-80%)</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <div className="w-3 h-3 rounded border-2 border-red-500" />
-            <span>Low Confidence (&lt;50%)</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <span className="bg-muted px-1.5 py-0.5 rounded text-xs">Formula</span>
-            <span>Formula Cell (Read-Only)</span>
-          </div>
-          <div className="flex items-center gap-2">
-            <Info className="h-3 w-3" />
-            <span>Click any cell to edit or add mapping</span>
-          </div>
-        </div>
-      </div>
     </div>
   );
 }

@@ -2,10 +2,10 @@
  * DocumentsTable Component
  *
  * Table view for documents with search, filter, and sort
- * ChatGPT-inspired design with compact rows
+ * Inspiration-aligned design with colored file icons, date column, and pill badges
  *
  * Input:
- *   - documents: Array<{id, filename, status, page_count, chunk_count, has_embeddings}>
+ *   - documents: Array<{id, filename, status, page_count, chunk_count, has_embeddings, created_at}>
  *   - loading: boolean
  *   - getToken: () => Promise<string>
  *   - onDeleteDocument: (docId, filename) => Promise<void>
@@ -16,6 +16,8 @@
 import { useState, useEffect } from "react";
 import {
   FileText,
+  FileSpreadsheet,
+  File,
   Search,
   Filter,
   Upload,
@@ -50,6 +52,27 @@ import Spinner from "../common/Spinner";
 import DocumentUsageBadge from "../common/DocumentUsageBadge";
 import EnhancedDeleteWarning from "../common/EnhancedDeleteWarning";
 
+// Returns colored icon config based on file extension
+function getFileIcon(filename) {
+  const ext = filename?.toLowerCase().split(".").pop();
+  if (ext === "pdf") {
+    return { Icon: FileText, bg: "bg-red-50 dark:bg-red-900/20", color: "text-red-500 dark:text-red-400" };
+  }
+  if (["xlsx", "xls"].includes(ext)) {
+    return { Icon: FileSpreadsheet, bg: "bg-green-50 dark:bg-green-900/20", color: "text-green-600 dark:text-green-400" };
+  }
+  return { Icon: File, bg: "bg-blue-50 dark:bg-blue-900/20", color: "text-blue-500 dark:text-blue-400" };
+}
+
+function formatDate(isoString) {
+  if (!isoString) return "—";
+  return new Date(isoString).toLocaleDateString("en-US", {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+  });
+}
+
 export default function DocumentsTable({
   documents = [],
   loading = false,
@@ -70,9 +93,6 @@ export default function DocumentsTable({
   statusFilter = null,
   setStatusFilter,
 }) {
-  // Server-driven state - no client-side filtering/sorting needed
-  // Documents are already filtered and sorted by the backend
-
   // Map UI sort names to API field names
   const sortFieldMap = {
     name: "filename",
@@ -104,8 +124,8 @@ export default function DocumentsTable({
   const getStatusBadge = (doc) => {
     if (doc.status === "completed" && doc.has_embeddings) {
       return (
-        <Badge variant="success" className="text-xs font-normal">
-          <CheckCircle className="w-3 h-3 mr-1" />
+        <Badge variant="success" className="text-xs font-medium rounded-full gap-1.5">
+          <span className="w-1.5 h-1.5 rounded-full bg-current" />
           Ready
         </Badge>
       );
@@ -133,15 +153,15 @@ export default function DocumentsTable({
       );
     } else if (doc.status === "failed") {
       return (
-        <Badge variant="destructive" className="text-xs font-normal">
-          <XCircle className="w-3 h-3 mr-1" />
+        <Badge variant="destructive" className="text-xs font-medium rounded-full gap-1.5">
+          <span className="w-1.5 h-1.5 rounded-full bg-current" />
           Failed
         </Badge>
       );
     } else {
       return (
-        <Badge variant="secondary" className="text-xs font-normal">
-          <AlertCircle className="w-3 h-3 mr-1" />
+        <Badge variant="secondary" className="text-xs font-medium rounded-full gap-1.5">
+          <AlertCircle className="w-3 h-3" />
           No Embeddings
         </Badge>
       );
@@ -160,16 +180,18 @@ export default function DocumentsTable({
   // Empty state (only show full empty state if not loading and no documents)
   if (!loading && documents.length === 0 && totalDocs === 0) {
     return (
-      <div className="flex flex-col items-center justify-center py-16 bg-muted/30 rounded-lg border-2 border-dashed border-border">
-        <FileText className="w-16 h-16 text-muted-foreground mb-4 opacity-40" />
-        <h3 className="text-lg font-medium text-foreground mb-2">
+      <div className="flex flex-col items-center justify-center py-16 rounded-2xl border-2 border-dashed border-border">
+        <div className="w-20 h-20 bg-primary/10 rounded-3xl flex items-center justify-center mb-5">
+          <FileText className="w-10 h-10 text-primary opacity-60" />
+        </div>
+        <h3 className="text-lg font-semibold text-foreground mb-2">
           No documents yet
         </h3>
         <p className="text-sm text-muted-foreground mb-6">
           Upload documents to get started
         </p>
-        <Button onClick={onUpload}>
-          <Upload className="w-4 h-4 mr-2" />
+        <Button onClick={onUpload} className="rounded-full gap-2">
+          <Upload className="w-4 h-4" />
           Upload Document
         </Button>
       </div>
@@ -231,8 +253,8 @@ export default function DocumentsTable({
         </Select>
 
         {/* Upload Button */}
-        <Button onClick={onUpload} className="h-10">
-          <Upload className="w-4 h-4 mr-2" />
+        <Button onClick={onUpload} className="h-10 rounded-full px-5 gap-2">
+          <Upload className="w-4 h-4" />
           Upload
         </Button>
       </div>
@@ -257,113 +279,120 @@ export default function DocumentsTable({
       )}
 
       {/* Table */}
-      <div className="rounded-lg border border-border overflow-hidden">
+      <div className="rounded-2xl border border-border overflow-hidden">
         <Table>
           <TableHeader>
             <TableRow className="bg-muted/50 hover:bg-muted/50">
               <TableHead
-                className="cursor-pointer hover:bg-muted/80 transition-colors"
+                className="cursor-pointer hover:bg-muted/80 transition-colors text-xs uppercase tracking-wide font-bold text-muted-foreground"
                 onClick={() => toggleSort("name")}
               >
                 <div className="flex items-center gap-2">
-                  Name
+                  Document Name
                   {sortBy === "filename" && <ArrowUpDown className="w-3.5 h-3.5" />}
                 </div>
               </TableHead>
-              <TableHead>
-                <div className="flex items-center gap-2">
-                  Status
-                </div>
+              <TableHead className="text-xs uppercase tracking-wide font-bold text-muted-foreground">
+                Status
               </TableHead>
               <TableHead
-                className="cursor-pointer hover:bg-muted/80 transition-colors text-right"
+                className="cursor-pointer hover:bg-muted/80 transition-colors text-right text-xs uppercase tracking-wide font-bold text-muted-foreground"
                 onClick={() => toggleSort("pages")}
               >
                 <div className="flex items-center justify-end gap-2">
                   Pages
-                  {sortBy === "page_count" && (
-                    <ArrowUpDown className="w-3.5 h-3.5" />
-                  )}
+                  {sortBy === "page_count" && <ArrowUpDown className="w-3.5 h-3.5" />}
                 </div>
               </TableHead>
               <TableHead
-                className="cursor-pointer hover:bg-muted/80 transition-colors text-right"
+                className="cursor-pointer hover:bg-muted/80 transition-colors text-right text-xs uppercase tracking-wide font-bold text-muted-foreground"
                 onClick={() => toggleSort("chunks")}
               >
                 <div className="flex items-center justify-end gap-2">
                   Chunks
-                  {sortBy === "chunk_count" && (
-                    <ArrowUpDown className="w-3.5 h-3.5" />
-                  )}
+                  {sortBy === "chunk_count" && <ArrowUpDown className="w-3.5 h-3.5" />}
                 </div>
               </TableHead>
-              <TableHead>Usage</TableHead>
-              <TableHead className="w-12"></TableHead>
+              <TableHead className="text-xs uppercase tracking-wide font-bold text-muted-foreground">
+                Date Added
+              </TableHead>
+              <TableHead className="text-xs uppercase tracking-wide font-bold text-muted-foreground">
+                Usage
+              </TableHead>
+              <TableHead className="w-12" />
             </TableRow>
           </TableHeader>
           <TableBody>
             {documents.length === 0 ? (
               <TableRow>
-                <TableCell colSpan={6} className="text-center py-8">
+                <TableCell colSpan={7} className="text-center py-8">
                   <p className="text-sm text-muted-foreground">
                     No documents match your filters
                   </p>
                 </TableCell>
               </TableRow>
             ) : (
-              documents.map((doc) => (
-                <TableRow
-                  key={doc.id}
-                  className={`transition-all duration-300 ${
-                    deletingDocId === doc.id
-                      ? "opacity-50 pointer-events-none bg-muted/50"
-                      : "hover:bg-muted/30"
-                  }`}
-                >
-                  <TableCell>
-                    <div className="flex items-center gap-2">
-                      <FileText className="w-4 h-4 text-muted-foreground flex-shrink-0" />
-                      <span className="font-medium text-sm truncate max-w-md">
-                        {doc.filename}
-                      </span>
-                    </div>
-                  </TableCell>
-                  <TableCell>{getStatusBadge(doc)}</TableCell>
-                  <TableCell className="text-right text-sm text-muted-foreground">
-                    {doc.page_count || 0}
-                  </TableCell>
-                  <TableCell className="text-right text-sm text-muted-foreground">
-                    {doc.chunk_count || 0}
-                  </TableCell>
-                  <TableCell>
-                    {doc.status === "completed" && doc.has_embeddings && (
-                      <DocumentUsageBadge
+              documents.map((doc) => {
+                const { Icon, bg, color } = getFileIcon(doc.filename);
+                return (
+                  <TableRow
+                    key={doc.id}
+                    className={`transition-all duration-300 ${
+                      deletingDocId === doc.id
+                        ? "opacity-50 pointer-events-none bg-muted/50"
+                        : "hover:bg-muted/30"
+                    }`}
+                  >
+                    <TableCell>
+                      <div className="flex items-center gap-3">
+                        <div className={`w-9 h-9 rounded-lg ${bg} flex items-center justify-center flex-shrink-0`}>
+                          <Icon className={`w-4 h-4 ${color}`} />
+                        </div>
+                        <span className="font-medium text-sm truncate max-w-xs">
+                          {doc.filename}
+                        </span>
+                      </div>
+                    </TableCell>
+                    <TableCell>{getStatusBadge(doc)}</TableCell>
+                    <TableCell className="text-right text-sm text-muted-foreground">
+                      {doc.page_count || 0}
+                    </TableCell>
+                    <TableCell className="text-right text-sm text-muted-foreground">
+                      {doc.chunk_count || 0}
+                    </TableCell>
+                    <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
+                      {formatDate(doc.created_at)}
+                    </TableCell>
+                    <TableCell>
+                      {doc.status === "completed" && doc.has_embeddings && (
+                        <DocumentUsageBadge
+                          documentId={doc.id}
+                          getToken={getToken}
+                        />
+                      )}
+                    </TableCell>
+                    <TableCell onClick={(e) => e.stopPropagation()}>
+                      <EnhancedDeleteWarning
                         documentId={doc.id}
+                        documentName={doc.filename}
                         getToken={getToken}
+                        onConfirmDelete={() =>
+                          onDeleteDocument?.(doc.id, doc.filename)
+                        }
+                        isDeleting={deletingDocId === doc.id}
+                        trigger={
+                          <button
+                            className="p-1.5 hover:bg-destructive/10 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                            disabled={deletingDocId === doc.id}
+                          >
+                            <Trash2 className="w-4 h-4 text-muted-foreground hover:text-destructive" />
+                          </button>
+                        }
                       />
-                    )}
-                  </TableCell>
-                  <TableCell onClick={(e) => e.stopPropagation()}>
-                    <EnhancedDeleteWarning
-                      documentId={doc.id}
-                      documentName={doc.filename}
-                      getToken={getToken}
-                      onConfirmDelete={() =>
-                        onDeleteDocument?.(doc.id, doc.filename)
-                      }
-                      isDeleting={deletingDocId === doc.id}
-                      trigger={
-                        <button
-                          className="p-1.5 hover:bg-destructive/10 rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-                          disabled={deletingDocId === doc.id}
-                        >
-                          <Trash2 className="w-4 h-4 text-muted-foreground hover:text-destructive" />
-                        </button>
-                      }
-                    />
-                  </TableCell>
-                </TableRow>
-              ))
+                    </TableCell>
+                  </TableRow>
+                );
+              })
             )}
           </TableBody>
         </Table>
@@ -371,9 +400,9 @@ export default function DocumentsTable({
 
       {/* Pagination */}
       {totalDocs > 0 && (
-        <div className="flex items-center justify-between pt-4">
+        <div className="flex items-center justify-between pt-2">
           <div className="text-sm text-muted-foreground">
-            Showing {page * pageSize + 1}-
+            Showing {page * pageSize + 1}–
             {Math.min((page + 1) * pageSize, totalDocs)} of {totalDocs} documents
           </div>
           <div className="flex items-center gap-2">
@@ -382,6 +411,7 @@ export default function DocumentsTable({
               size="sm"
               onClick={() => setPage?.(page - 1)}
               disabled={page === 0 || loading}
+              className="rounded-full"
             >
               Previous
             </Button>
@@ -390,6 +420,7 @@ export default function DocumentsTable({
               size="sm"
               onClick={() => setPage?.(page + 1)}
               disabled={(page + 1) * pageSize >= totalDocs || loading}
+              className="rounded-full"
             >
               Next
             </Button>

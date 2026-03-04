@@ -23,7 +23,7 @@ import { Textarea } from "../ui/textarea";
 import { Popover, PopoverContent, PopoverTrigger } from "../ui/popover";
 import { cn } from "@/lib/utils";
 import { submitFeedback, deleteChatFeedback } from "../../api/feedback";
-import { useAuth } from "@clerk/clerk-react";
+import { useAppAuth } from "@/hooks/useAppAuth";
 import { toast } from "sonner";
 
 export default function ChatMessageFeedback({ messageId, sessionId, initialFeedback }) {
@@ -31,7 +31,7 @@ export default function ChatMessageFeedback({ messageId, sessionId, initialFeedb
   const [comment, setComment] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [showCommentPopover, setShowCommentPopover] = useState(false);
-  const { getToken } = useAuth();
+  const { getToken } = useAppAuth();
 
   // Sync with initialFeedback when it changes (e.g. after message refresh)
   useEffect(() => {
@@ -97,7 +97,7 @@ export default function ChatMessageFeedback({ messageId, sessionId, initialFeedb
   };
 
   return (
-    <div className="flex items-center gap-1 mt-2 opacity-0 group-hover:opacity-60 hover:opacity-100 transition-opacity duration-200">
+    <div className="flex items-center gap-1 mt-2 opacity-50 hover:opacity-100 transition-opacity duration-200">
       {/* Thumbs Up */}
       <Button
         variant="ghost"

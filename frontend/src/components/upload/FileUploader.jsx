@@ -2,7 +2,7 @@
 // src/components/upload/FileUploader.jsx
 import { useRef, useState, useEffect } from "react";
 import classNames from "classnames";
-import { useAuth } from "@clerk/clerk-react";
+import { useAppAuth } from "@/hooks/useAppAuth";
 import { useExtraction, useExtractionActions } from "../../store";
 import ProgressTracker from "./ProgressTracker";
 
@@ -13,7 +13,7 @@ export default function FileUploader({ onResult, onError }) {
   const inputRef = useRef(null);
 
   // Get Clerk authentication token
-  const { getToken } = useAuth();
+  const { getToken } = useAppAuth();
 
   // Get extraction state and actions from Zustand store
   const {

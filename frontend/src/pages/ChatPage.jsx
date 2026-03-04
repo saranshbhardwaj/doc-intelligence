@@ -11,8 +11,8 @@
  */
 
 import { useEffect, useState } from "react";
-import { useAuth } from "@clerk/clerk-react";
-import { ChevronRight, PanelLeft } from "lucide-react";
+import { useAppAuth } from "@/hooks/useAppAuth";
+import { ChevronRight, PanelLeft, MessageSquare, Plus } from "lucide-react";
 import { useChat, useChatActions } from "../store";
 import { Button } from "../components/ui/button";
 import AppLayout from "../components/layout/AppLayout";
@@ -24,12 +24,13 @@ import { exportAsMarkdown, exportAsWord } from "../utils/exportChat";
 import { Sheet, SheetContent, SheetTitle, SheetDescription } from "../components/ui/sheet";
 
 export default function ChatPage() {
-  const { getToken, isLoaded } = useAuth();
+  const { getToken, isLoaded } = useAppAuth();
   const chat = useChat();
   const actions = useChatActions();
 
   const [selectedDocuments, setSelectedDocuments] = useState([]);
   const [isInitializing, setIsInitializing] = useState(true);
+  const [showNewChatDialog, setShowNewChatDialog] = useState(false);
   const [mobileSessionsOpen, setMobileSessionsOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     try {
@@ -64,13 +65,15 @@ export default function ChatPage() {
     })();
   }, [isLoaded, actions, getToken]);
 
+  // Auto-open dialog when there's no active session after init
+  useEffect(() => {
+    if (!isInitializing && !chat.currentSession) {
+      setShowNewChatDialog(true);
+    }
+  }, [isInitializing]);
+
   const handleNewChat = () => {
-    // Clear current session and show empty state
-    actions.startNewChat();
-    setSelectedDocuments([]);
-    try {
-      localStorage.removeItem("lastActiveChatSessionId");
-    } catch {}
+    setShowNewChatDialog(true);
   };
 
   const handleSelectSession = async (sessionId) => {
@@ -107,6 +110,7 @@ export default function ChatPage() {
         title: "New Chat",
         documentIds,
       });
+      setShowNewChatDialog(false);
       setSelectedDocuments([]);
       if (session?.id) {
         try {
@@ -262,15 +266,22 @@ export default function ChatPage() {
               <Spinner />
             </div>
           ) : !chat.currentSession ? (
-            /* Empty State - No Active Session */
-            <EmptyState
-              collections={chat.collections}
-              collectionsLoading={chat.collectionsLoading}
-              selectedDocumentIds={selectedDocuments}
-              onSelectDocuments={setSelectedDocuments}
-              onStartChat={handleStartChat}
-              getToken={getToken}
-            />
+            /* No active session placeholder — dialog opens automatically */
+            <div className="flex flex-col items-center justify-center h-full gap-4 text-center px-4">
+              <div className="w-16 h-16 bg-primary/10 rounded-2xl flex items-center justify-center">
+                <MessageSquare className="w-8 h-8 text-primary" />
+              </div>
+              <div>
+                <h3 className="text-lg font-semibold text-foreground">No active session</h3>
+                <p className="text-sm text-muted-foreground mt-1">
+                  Select a session from the sidebar or start a new chat
+                </p>
+              </div>
+              <Button onClick={() => setShowNewChatDialog(true)} className="gap-2">
+                <Plus className="w-4 h-4" />
+                New Chat
+              </Button>
+            </div>
           ) : (
             /* Active Chat */
             <ActiveChat
@@ -292,6 +303,18 @@ export default function ChatPage() {
           )}
         </div>
       </div>
+
+      {/* New Chat Dialog — always mounted, dialog controls visibility */}
+      <EmptyState
+        open={showNewChatDialog}
+        onOpenChange={setShowNewChatDialog}
+        collections={chat.collections}
+        collectionsLoading={chat.collectionsLoading}
+        selectedDocumentIds={selectedDocuments}
+        onSelectDocuments={setSelectedDocuments}
+        onStartChat={handleStartChat}
+        getToken={getToken}
+      />
     </AppLayout>
   );
 }

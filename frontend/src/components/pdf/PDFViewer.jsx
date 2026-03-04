@@ -21,55 +21,100 @@ export default function PDFViewer({
   highlightBbox = null,  // { page, x0, y0, x1, y1 } for highlighting
   onHighlightClick       // Callback when highlight is clicked
 }) {
+  const INITIAL_RENDERED_PAGES = 1;
+  const PAGE_LOAD_BATCH = 2;
+
   const [numPages, setNumPages] = useState(null);
   const [pageNumber, setPageNumber] = useState(defaultPage);
   const [scale, setScale] = useState(1.0);
-  const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
-  const [pageWidth, setPageWidth] = useState(null);
-  const [pageHeight, setPageHeight] = useState(null);
+  const [pageDimensions, setPageDimensions] = useState({});
   const [containerWidth, setContainerWidth] = useState(null);
-  const [loadedPages, setLoadedPages] = useState(3);  // Start with 3 pages
+  const [loadedPages, setLoadedPages] = useState(INITIAL_RENDERED_PAGES);
   const [pdfReady, setPdfReady] = useState(false);  // True after PDF document loads
-  const pageRef = useRef(null);
   const containerRef = useRef(null);
 
   useEffect(() => {
     setPageNumber(defaultPage);
   }, [defaultPage]);
 
-  // Scroll to page when highlight changes AND PDF is loaded
-  // Gated on pdfReady so that on first load (e.g. after page refresh),
-  // scrolling waits until the PDF document has finished loading.
+  // Scroll to page when highlight target changes (with retry until page is rendered).
   useEffect(() => {
     if (!pdfReady || !highlightBbox || !highlightBbox.page) return;
 
-    const targetPage = highlightBbox.page;
+    const targetPage = Number(highlightBbox.page);
+    if (!Number.isFinite(targetPage) || targetPage < 1) return;
+
+    setPageNumber(targetPage);
 
     // Ensure target page is loaded (lazy loading)
     if (targetPage > loadedPages) {
-      setLoadedPages(targetPage + 2);  // Load a bit extra
+      setLoadedPages((prev) => {
+        const desired = targetPage + 2;
+        const maxAllowed = numPages || desired;
+        return Math.min(Math.max(prev, desired), maxAllowed);
+      });
+      return;
     }
 
-    // Scroll to the page after a brief delay (for page rendering)
-    const timer = setTimeout(() => {
+    let attempts = 0;
+    const maxAttempts = 20;
+    const timer = setInterval(() => {
+      attempts += 1;
       const pageElement = containerRef.current?.querySelector(
         `[data-page-number="${targetPage}"]`
       );
       if (pageElement) {
         pageElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        clearInterval(timer);
+      } else if (attempts >= maxAttempts) {
+        clearInterval(timer);
       }
-    }, 300);
+    }, 100);
 
-    return () => clearTimeout(timer);
-  }, [highlightBbox, pdfReady, loadedPages]);
+    return () => clearInterval(timer);
+  }, [highlightBbox, pdfReady, loadedPages, numPages]);
+
+  // Scroll for page-only navigation (no bbox payload).
+  useEffect(() => {
+    if (!pdfReady || !defaultPage || (highlightBbox && highlightBbox.page)) return;
+
+    const targetPage = Number(defaultPage);
+    if (!Number.isFinite(targetPage) || targetPage < 1) return;
+
+    if (targetPage > loadedPages) {
+      setLoadedPages((prev) => {
+        const desired = targetPage + 2;
+        const maxAllowed = numPages || desired;
+        return Math.min(Math.max(prev, desired), maxAllowed);
+      });
+      return;
+    }
+
+    let attempts = 0;
+    const maxAttempts = 20;
+    const timer = setInterval(() => {
+      attempts += 1;
+      const pageElement = containerRef.current?.querySelector(
+        `[data-page-number="${targetPage}"]`
+      );
+      if (pageElement) {
+        pageElement.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        clearInterval(timer);
+      } else if (attempts >= maxAttempts) {
+        clearInterval(timer);
+      }
+    }, 100);
+
+    return () => clearInterval(timer);
+  }, [defaultPage, pdfReady, loadedPages, numPages, highlightBbox]);
 
   // Reset state when PDF URL changes
   useEffect(() => {
     setNumPages(null);
     setPageNumber(1);
-    setLoadedPages(3);  // Reset to initial 3 pages
-    setLoading(true);
+    setLoadedPages(INITIAL_RENDERED_PAGES);
+    setPageDimensions({});
     setError(null);
     setPdfReady(false);  // Wait for new PDF to load before scrolling
   }, [pdfUrl]);
@@ -130,8 +175,8 @@ export default function PDFViewer({
       (entries) => {
         // Check if the last page is visible
         if (entries[0].isIntersecting && loadedPages < numPages) {
-          // Load 3 more pages
-          setLoadedPages(prev => Math.min(prev + 3, numPages));
+          // Load a small batch to keep interactions responsive
+          setLoadedPages(prev => Math.min(prev + PAGE_LOAD_BATCH, numPages));
         }
       },
       {
@@ -151,7 +196,6 @@ export default function PDFViewer({
 
   function onDocumentLoadSuccess({ numPages }) {
     setNumPages(numPages);
-    setLoading(false);
     setError(null);
     setPdfReady(true);  // PDF loaded -- safe to scroll to highlights
   }
@@ -159,7 +203,6 @@ export default function PDFViewer({
   function onDocumentLoadError(error) {
     console.error('Error loading PDF:', error);
     setError('Failed to load PDF. Please try again.');
-    setLoading(false);
   }
 
   function handleTextSelection() {
@@ -188,13 +231,29 @@ export default function PDFViewer({
     setScale((prev) => Math.max(prev - 0.1, 0.5));
   }
 
-  function onPageLoadSuccess(page) {
-    // Get page dimensions for coordinate transformation
-    const { width, height } = page.originalWidth
-      ? { width: page.originalWidth, height: page.originalHeight }
-      : page;
-    setPageWidth(width);
-    setPageHeight(height);
+  function onPageLoadSuccess(pageNum, page) {
+    // Keep per-page dimensions to avoid mismatches when documents include mixed page sizes.
+    const width =
+      page?.originalWidth ||
+      page?.width ||
+      (Array.isArray(page?.view) ? Math.abs(page.view[2] - page.view[0]) : null);
+    const height =
+      page?.originalHeight ||
+      page?.height ||
+      (Array.isArray(page?.view) ? Math.abs(page.view[3] - page.view[1]) : null);
+
+    if (!width || !height) return;
+
+    setPageDimensions((prev) => {
+      const existing = prev[pageNum];
+      if (existing?.width === width && existing?.height === height) {
+        return prev;
+      }
+      return {
+        ...prev,
+        [pageNum]: { width, height },
+      };
+    });
   }
 
   function handleHighlightClick() {
@@ -212,7 +271,6 @@ export default function PDFViewer({
           size="sm"
           onClick={() => {
             setError(null);
-            setLoading(true);
           }}
         >
           Retry
@@ -276,25 +334,32 @@ export default function PDFViewer({
             {/* Render multiple pages */}
             {numPages && Array.from(new Array(Math.min(loadedPages, numPages)), (_, index) => {
               const currentPage = index + 1;
-              const pageWidth = containerWidth ? containerWidth * scale : undefined;
+              const renderedPageWidth = containerWidth ? containerWidth * scale : undefined;
+              const pageSize = pageDimensions[currentPage];
+              const hasRenderableBbox =
+                highlightBbox &&
+                Number.isFinite(Number(highlightBbox.x0)) &&
+                Number.isFinite(Number(highlightBbox.y0)) &&
+                Number.isFinite(Number(highlightBbox.x1)) &&
+                Number.isFinite(Number(highlightBbox.y1));
               return (
                 <div key={`page_${currentPage}`} data-page-number={currentPage} className="mb-4 relative">
                   <Page
                     pageNumber={currentPage}
-                    width={pageWidth}
+                    width={renderedPageWidth}
                     renderTextLayer={true}
                     renderAnnotationLayer={true}
                     onMouseUp={handleTextSelection}
-                    onLoadSuccess={onPageLoadSuccess}
+                    onLoadSuccess={(page) => onPageLoadSuccess(currentPage, page)}
                     className="shadow-md bg-card"
                   />
 
                   {/* Highlight overlay - show on correct page */}
-                  {highlightBbox && highlightBbox.page === currentPage && pageWidth && pageHeight && (
+                  {hasRenderableBbox && highlightBbox.page === currentPage && pageSize?.width && pageSize?.height && (
                     <HighlightOverlay
                       bbox={highlightBbox}
-                      pageWidth={pageWidth}
-                      pageHeight={pageHeight}
+                      pageWidth={pageSize.width}
+                      pageHeight={pageSize.height}
                       scale={scale}
                       onClick={handleHighlightClick}
                     />

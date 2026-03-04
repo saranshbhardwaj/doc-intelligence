@@ -1,20 +1,67 @@
 // src/components/landing/Hero.jsx
-import { ArrowRight, Zap, TrendingUp, Workflow } from "lucide-react";
+import { ArrowRight, Zap, TrendingUp, Workflow, FileText, BarChart3, FileSpreadsheet, Shield, MessageSquare } from "lucide-react";
 
 export default function Hero({ onGetStarted }) {
   return (
-    <div className="relative overflow-hidden bg-gradient-to-br from-blue-50 via-white to-purple-50 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900">
-      {/* Background decoration */}
-      <div className="absolute inset-0 overflow-hidden">
-        <div className="absolute -top-40 -right-40 w-80 h-80 bg-purple-300 rounded-full mix-blend-multiply filter blur-xl opacity-20 animate-blob"></div>
-        <div className="absolute -bottom-40 -left-40 w-80 h-80 bg-blue-300 rounded-full mix-blend-multiply filter blur-xl opacity-20 animate-blob animation-delay-2000"></div>
-        <div className="absolute top-1/2 left-1/2 transform -translate-x-1/2 -translate-y-1/2 w-80 h-80 bg-pink-300 rounded-full mix-blend-multiply filter blur-xl opacity-20 animate-blob animation-delay-4000"></div>
+    <div className="relative overflow-hidden bg-background py-24 sm:py-32">
+      {/* Background glow orbs */}
+      <div className="absolute top-0 left-1/4 w-96 h-96 bg-primary/10 rounded-full blur-3xl pointer-events-none" />
+      <div className="absolute top-10 right-1/4 w-96 h-96 bg-accent/10 rounded-full blur-3xl pointer-events-none" />
+
+      {/* Floating decorative icons */}
+      <div className="hidden md:block absolute top-24 left-[10%] animate-float opacity-70">
+        <div className="w-14 h-14 rounded-2xl bg-primary/10 border border-primary/20 backdrop-blur flex items-center justify-center shadow-lg">
+          <FileText className="w-6 h-6 text-primary" />
+        </div>
+      </div>
+      <div className="hidden md:block absolute top-40 left-[20%] animate-float-delayed opacity-60">
+        <div className="w-10 h-10 rounded-2xl bg-accent/10 border border-accent/20 backdrop-blur flex items-center justify-center shadow-md">
+          <BarChart3 className="w-5 h-5 text-accent" />
+        </div>
+      </div>
+      <div className="hidden md:block absolute bottom-32 left-[14%] animate-float-slow opacity-50">
+        <div className="w-12 h-12 rounded-2xl bg-primary/10 border border-primary/20 backdrop-blur flex items-center justify-center shadow-md">
+          <FileSpreadsheet className="w-5 h-5 text-primary" />
+        </div>
+      </div>
+      <div className="hidden md:block absolute top-24 right-[10%] animate-float-delayed opacity-70">
+        <div className="w-14 h-14 rounded-2xl bg-accent/10 border border-accent/20 backdrop-blur flex items-center justify-center shadow-lg">
+          <Shield className="w-6 h-6 text-accent" />
+        </div>
+      </div>
+      <div className="hidden md:block absolute top-44 right-[20%] animate-float opacity-60">
+        <div className="w-10 h-10 rounded-2xl bg-primary/10 border border-primary/20 backdrop-blur flex items-center justify-center shadow-md">
+          <MessageSquare className="w-5 h-5 text-primary" />
+        </div>
+      </div>
+      <div className="hidden md:block absolute bottom-32 right-[14%] animate-float-slow opacity-50">
+        <div className="w-12 h-12 rounded-2xl bg-accent/10 border border-accent/20 backdrop-blur flex items-center justify-center shadow-md">
+          <TrendingUp className="w-5 h-5 text-accent" />
+        </div>
       </div>
 
-      <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-24 sm:py-32">
+      {/* SVG connecting lines (desktop only) */}
+      <svg
+        className="hidden md:block absolute inset-0 w-full h-full pointer-events-none"
+        xmlns="http://www.w3.org/2000/svg"
+        preserveAspectRatio="none"
+      >
+        <line
+          x1="21%" y1="30%" x2="42%" y2="46%"
+          stroke="hsl(var(--primary) / 0.15)" strokeWidth="1"
+          className="animate-dash-flow"
+        />
+        <line
+          x1="79%" y1="30%" x2="58%" y2="46%"
+          stroke="hsl(var(--accent) / 0.15)" strokeWidth="1"
+          className="animate-dash-flow"
+        />
+      </svg>
+
+      <div className="relative max-w-6xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="text-center">
           {/* Badge */}
-          <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 text-sm font-medium mb-8">
+          <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary/10 text-primary border border-primary/20 text-sm font-medium mb-8">
             <Zap className="w-4 h-4" />
             AI-Powered Document Intelligence
           </div>
@@ -22,104 +69,81 @@ export default function Hero({ onGetStarted }) {
           {/* Main heading */}
           <h1 className="text-5xl sm:text-6xl lg:text-7xl font-extrabold text-foreground mb-6 leading-tight">
             AI-Powered Intelligence for
-            <span className="bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
-              {" "}
-              PE & Real Estate
+            <br className="hidden sm:block" />
+            <span className="bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
+              {" "}PE & Real Estate
             </span>
           </h1>
 
           {/* Subheading */}
-          <p className="text-xl sm:text-2xl text-muted-foreground dark:text-gray-300 mb-10 max-w-3xl mx-auto leading-relaxed">
+          <p className="text-xl sm:text-2xl text-muted-foreground mb-10 max-w-3xl mx-auto leading-relaxed">
             Stop spending hours on manual document review. Extract structured
             data, run AI workflows, and generate deal documents — in minutes.
           </p>
 
-          {/* Stats */}
-          <div className="flex flex-wrap justify-center gap-8 mb-12">
-            <div className="text-center">
-              <div className="text-4xl font-bold text-blue-600 dark:text-blue-400">
-                4 min
-              </div>
-              <div className="text-sm text-muted-foreground dark:text-muted-foreground">
-                Average processing time
-              </div>
-            </div>
-            <div className="text-center">
-              <div className="text-4xl font-bold text-purple-600 dark:text-purple-400">
-                95%+
-              </div>
-              <div className="text-sm text-muted-foreground dark:text-muted-foreground">
-                Extraction accuracy
-              </div>
-            </div>
-            <div className="text-center">
-              <div className="text-4xl font-bold text-pink-600 dark:text-pink-400">
-                10+
-              </div>
-              <div className="text-sm text-muted-foreground dark:text-muted-foreground">
-                AI workflow types
-              </div>
-            </div>
-          </div>
-
           {/* CTAs */}
-          <div className="flex flex-col sm:flex-row gap-4 justify-center items-center">
+          <div className="flex flex-col sm:flex-row gap-4 justify-center items-center mb-16">
             <button
               onClick={onGetStarted}
-              className="group px-8 py-4 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-foreground font-semibold rounded-xl shadow-lg hover:shadow-xl transform hover:scale-105 transition-all duration-200 flex items-center gap-2"
+              className="group px-10 py-4 bg-primary text-primary-foreground font-bold rounded-full shadow-xl shadow-primary/25 hover:bg-primary/90 hover:scale-105 active:scale-95 transition-all duration-200 flex items-center gap-2"
             >
               Get Started Free
               <ArrowRight className="w-5 h-5 group-hover:translate-x-1 transition-transform" />
             </button>
+            <a
+              href="#features"
+              className="px-10 py-4 rounded-full font-semibold border-2 border-border hover:bg-muted transition-colors text-foreground"
+            >
+              See How It Works
+            </a>
           </div>
 
-          {/* Trust badge */}
-          <p className="text-sm text-muted-foreground dark:text-muted-foreground mt-8">
-            Upload documents • Chat with AI • Run workflows • Export to Excel
-          </p>
+          {/* Glass stat cards */}
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-5 max-w-3xl mx-auto mb-20">
+            <div className="glass-card rounded-[2rem] p-6 text-center">
+              <div className="text-4xl font-extrabold text-primary mb-1">4 min</div>
+              <div className="text-sm text-muted-foreground">Average processing time</div>
+            </div>
+            <div className="glass-card rounded-[2rem] p-6 text-center">
+              <div className="text-4xl font-extrabold text-accent mb-1">95%+</div>
+              <div className="text-sm text-muted-foreground">Extraction accuracy</div>
+            </div>
+            <div className="glass-card rounded-[2rem] p-6 text-center">
+              <div className="text-4xl font-extrabold text-primary mb-1">10x</div>
+              <div className="text-sm text-muted-foreground">Faster than manual review</div>
+            </div>
+          </div>
         </div>
 
         {/* Feature highlights */}
-        <div className="mt-20 grid grid-cols-1 md:grid-cols-3 gap-8 max-w-5xl mx-auto">
-          <div className="flex items-start gap-4 p-6 rounded-xl bg-background/50 dark:bg-card/50 backdrop-blur border border-border dark:border-gray-700">
-            <div className="flex-shrink-0 w-12 h-12 bg-blue-100 dark:bg-blue-900/30 rounded-lg flex items-center justify-center">
-              <Zap className="w-6 h-6 text-blue-600 dark:text-blue-400" />
+        <div className="mt-16 grid grid-cols-1 md:grid-cols-3 gap-6 max-w-5xl mx-auto">
+          <div className="glass-card rounded-3xl flex items-start gap-4 p-6">
+            <div className="flex-shrink-0 w-12 h-12 bg-primary/10 rounded-xl flex items-center justify-center">
+              <Zap className="w-6 h-6 text-primary" />
             </div>
             <div>
-              <h3 className="font-semibold text-foreground mb-1">
-                Lightning Fast
-              </h3>
-              <p className="text-sm text-muted-foreground dark:text-muted-foreground">
-                Process 100+ page documents in under 5 minutes
-              </p>
+              <h3 className="font-semibold text-foreground mb-1">Lightning Fast</h3>
+              <p className="text-sm text-muted-foreground">Process 100+ page documents in under 5 minutes</p>
             </div>
           </div>
 
-          <div className="flex items-start gap-4 p-6 rounded-xl bg-background/50 dark:bg-card/50 backdrop-blur border border-border dark:border-gray-700">
-            <div className="flex-shrink-0 w-12 h-12 bg-purple-100 dark:bg-purple-900/30 rounded-lg flex items-center justify-center">
-              <TrendingUp className="w-6 h-6 text-purple-600 dark:text-purple-400" />
+          <div className="glass-card rounded-3xl flex items-start gap-4 p-6">
+            <div className="flex-shrink-0 w-12 h-12 bg-accent/10 rounded-xl flex items-center justify-center">
+              <TrendingUp className="w-6 h-6 text-accent" />
             </div>
             <div>
-              <h3 className="font-semibold text-foreground mb-1">
-                Excel Export
-              </h3>
-              <p className="text-sm text-muted-foreground dark:text-muted-foreground">
-                Structured data ready for your financial models
-              </p>
+              <h3 className="font-semibold text-foreground mb-1">Excel Export</h3>
+              <p className="text-sm text-muted-foreground">Structured data ready for your financial models</p>
             </div>
           </div>
 
-          <div className="flex items-start gap-4 p-6 rounded-xl bg-background/50 dark:bg-card/50 backdrop-blur border border-border dark:border-gray-700">
-            <div className="flex-shrink-0 w-12 h-12 bg-pink-100 dark:bg-pink-900/30 rounded-lg flex items-center justify-center">
-              <Workflow className="w-6 h-6 text-pink-600 dark:text-pink-400" />
+          <div className="glass-card rounded-3xl flex items-start gap-4 p-6">
+            <div className="flex-shrink-0 w-12 h-12 bg-primary/10 rounded-xl flex items-center justify-center">
+              <Workflow className="w-6 h-6 text-primary" />
             </div>
             <div>
-              <h3 className="font-semibold text-foreground mb-1">
-                AI Workflows
-              </h3>
-              <p className="text-sm text-muted-foreground dark:text-muted-foreground">
-                Investment memos, underwriting & more
-              </p>
+              <h3 className="font-semibold text-foreground mb-1">AI Workflows</h3>
+              <p className="text-sm text-muted-foreground">Investment memos, underwriting & more</p>
             </div>
           </div>
         </div>

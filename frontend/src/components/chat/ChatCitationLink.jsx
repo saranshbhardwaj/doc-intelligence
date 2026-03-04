@@ -5,7 +5,7 @@
 import { FileText } from "lucide-react";
 import { useMemo } from "react";
 import { useStore } from "../../store";
-import { useAuth } from "@clerk/clerk-react";
+import { useAppAuth } from "@/hooks/useAppAuth";
 import {
   Tooltip,
   TooltipContent,
@@ -15,7 +15,7 @@ import {
 
 export default function ChatCitationLink({ token, citationContext }) {
   const { setActivePdfDocument, highlightChunk } = useStore();
-  const { getToken } = useAuth();
+  const { getToken } = useAppAuth();
 
   // Parse [ref:a1b2c3d4:p5] -> { ref: "a1b2c3d4", page: 5 }
   const parsed = useMemo(() => parseCitation(token), [token]);
@@ -82,8 +82,8 @@ export default function ChatCitationLink({ token, citationContext }) {
             type="button"
             onClick={handleClick}
             className="inline-flex items-center gap-1 mx-0.5 px-1.5 py-0.5
-              rounded-full border text-[10px] font-medium
-              bg-muted/50 hover:bg-muted text-muted-foreground
+              rounded-md border text-[10px] font-bold
+              bg-primary/10 hover:bg-primary hover:text-primary-foreground text-primary border-primary/20
               transition-colors cursor-pointer"
           >
             <FileText className="h-3 w-3" />

@@ -5,7 +5,7 @@
  */
 
 import { useState } from 'react';
-import { useAuth } from '@clerk/clerk-react';
+import { useAppAuth } from "@/hooks/useAppAuth";
 import { useTemplateFillActions } from '../../../store';
 import {
   SheetHeader,
@@ -51,7 +51,7 @@ export default function MappingDetailsDialog({
   onClose,
   onCitationClick,
 }) {
-  const { getToken } = useAuth();
+  const { getToken } = useAppAuth();
   const { updateMappings, updateFieldData, loadFillRun } = useTemplateFillActions();
   const { mapping, pdfField, value, cellAddress, cellData, sheetName } = selectedCell;
 
@@ -74,7 +74,7 @@ export default function MappingDetailsDialog({
       const manualValue = extractedData?.manual_edits?.[sheetName]?.[cellAddress];
       if (manualValue?.value !== undefined) return manualValue.value;
     }
-    return pdfField?.sample_value || '';
+    return pdfField?.extracted_value || '';
   });
   const [open, setOpen] = useState(false);
 
@@ -91,11 +91,11 @@ export default function MappingDetailsDialog({
     setSelectedFieldId(mapping?.pdf_field_id);
     if (mapping?.pdf_field_id) {
       const fieldData = extractedData?.llm_extracted?.[mapping.pdf_field_id];
-      setEditedValue(fieldData?.value !== undefined ? fieldData.value : (pdfField?.sample_value || ''));
+      setEditedValue(fieldData?.value !== undefined ? fieldData.value : (pdfField?.extracted_value || ''));
     } else {
       // For unmapped cells, check manual_edits first
       const manualValue = extractedData?.manual_edits?.[sheetName]?.[cellAddress];
-      setEditedValue(manualValue?.value !== undefined ? manualValue.value : (pdfField?.sample_value || ''));
+      setEditedValue(manualValue?.value !== undefined ? manualValue.value : (pdfField?.extracted_value || ''));
     }
   }
 
@@ -104,7 +104,7 @@ export default function MappingDetailsDialog({
     setSelectedFieldId(newFieldId);
     const newField = allPdfFields.find(f => f.id === newFieldId);
     const fieldData = extractedData?.llm_extracted?.[newFieldId];
-    setEditedValue(fieldData?.value !== undefined ? fieldData.value : (newField?.sample_value || ''));
+    setEditedValue(fieldData?.value !== undefined ? fieldData.value : (newField?.extracted_value || ''));
   }
 
   async function handleSave() {
@@ -126,7 +126,7 @@ export default function MappingDetailsDialog({
 
         // If value changed, update extracted data
         const currentValue = extractedData?.llm_extracted?.[selectedFieldId]?.value ||
-                            allPdfFields.find(f => f.id === selectedFieldId)?.sample_value;
+                            allPdfFields.find(f => f.id === selectedFieldId)?.extracted_value;
 
         if (editedValue !== currentValue) {
           const updatedData = {
@@ -346,7 +346,7 @@ export default function MappingDetailsDialog({
                             <div className="flex flex-col flex-1 min-w-0">
                               <span className="text-xs font-medium truncate">{field.name}</span>
                               <span className="text-xs text-muted-foreground truncate">
-                                {field.sample_value}
+                                {field.extracted_value}
                               </span>
                             </div>
                           </CommandItem>
@@ -371,11 +371,11 @@ export default function MappingDetailsDialog({
                         <span className="text-xs font-medium text-muted-foreground block mb-0.5">Name</span>
                         <p className="text-xs text-foreground font-mono">{selectedField.name}</p>
                       </div>
-                      {selectedField.sample_value && (
+                      {selectedField.extracted_value && (
                         <div>
-                          <span className="text-xs font-medium text-muted-foreground block mb-1">Sample Value</span>
+                          <span className="text-xs font-medium text-muted-foreground block mb-1">Extracted Value</span>
                           <p className="text-xs text-foreground bg-background p-2 rounded-md border break-words">
-                            {selectedField.sample_value}
+                            {selectedField.extracted_value}
                           </p>
                         </div>
                       )}
@@ -541,7 +541,7 @@ export default function MappingDetailsDialog({
                             <div className="flex flex-col flex-1 min-w-0">
                               <span className="text-xs font-medium truncate">{field.name}</span>
                               <span className="text-xs text-muted-foreground truncate">
-                                {field.sample_value}
+                                {field.extracted_value}
                               </span>
                             </div>
                           </CommandItem>
@@ -577,7 +577,7 @@ export default function MappingDetailsDialog({
                             Extracted Value
                           </span>
                           <p className="text-xs text-foreground break-words bg-background p-2 rounded-md border font-medium">
-                            {selectedField.sample_value}
+                            {selectedField.extracted_value}
                           </p>
                         </div>
                         {selectedField.confidence && (

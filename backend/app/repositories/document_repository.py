@@ -265,6 +265,76 @@ class DocumentRepository:
                 )
                 return 0
 
+    def get_collection_link_count(self, document_id: str, org_id: Optional[str] = None) -> int:
+        """Get the number of collection links for a document."""
+        with self._get_session() as db:
+            try:
+                query = db.query(func.count(CollectionDocument.id)).join(
+                    Document, Document.id == CollectionDocument.document_id
+                ).filter(
+                    CollectionDocument.document_id == document_id
+                )
+                if org_id:
+                    query = query.filter(Document.org_id == org_id)
+                count = query.scalar()
+                return int(count or 0)
+            except SQLAlchemyError as e:
+                logger.error(
+                    "Failed to get collection link count",
+                    extra={"document_id": document_id, "org_id": org_id, "error": str(e)}
+                )
+                return 0
+
+    def is_linked_to_collection(
+        self,
+        document_id: str,
+        collection_id: str,
+        org_id: Optional[str] = None
+    ) -> bool:
+        """Check whether a document is linked to a specific collection."""
+        with self._get_session() as db:
+            try:
+                query = db.query(CollectionDocument.id).join(
+                    Document, Document.id == CollectionDocument.document_id
+                ).filter(
+                    CollectionDocument.document_id == document_id,
+                    CollectionDocument.collection_id == collection_id
+                )
+                if org_id:
+                    query = query.filter(Document.org_id == org_id)
+                return query.first() is not None
+            except SQLAlchemyError as e:
+                logger.error(
+                    "Failed to check document-collection link",
+                    extra={
+                        "document_id": document_id,
+                        "collection_id": collection_id,
+                        "org_id": org_id,
+                        "error": str(e),
+                    }
+                )
+                return False
+
+    def get_linked_collection_ids(self, document_id: str, org_id: Optional[str] = None) -> List[str]:
+        """Return collection IDs linked to a document."""
+        with self._get_session() as db:
+            try:
+                query = db.query(CollectionDocument.collection_id).join(
+                    Document, Document.id == CollectionDocument.document_id
+                ).filter(
+                    CollectionDocument.document_id == document_id
+                )
+                if org_id:
+                    query = query.filter(Document.org_id == org_id)
+                rows = query.all()
+                return [row[0] for row in rows]
+            except SQLAlchemyError as e:
+                logger.error(
+                    "Failed to get linked collection IDs",
+                    extra={"document_id": document_id, "org_id": org_id, "error": str(e)}
+                )
+                return []
+
     def get_chunks_for_document(self, document_id: str, order_by_index: bool = True) -> List[DocumentChunk]:
         """Get all chunks for a document, optionally ordered by chunk_index."""
         with self._get_session() as db:

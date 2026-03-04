@@ -14,7 +14,7 @@ import React, { useMemo } from "react";
 import { FileText } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useComparison, useChatActions } from "../../../store";
-import { useAuth } from "@clerk/clerk-react";
+import { useAppAuth } from "@/hooks/useAppAuth";
 import {
   Tooltip,
   TooltipTrigger,
@@ -38,7 +38,7 @@ function parseCitation(token) {
 export default function ComparisonCitationLink({ token, className, context }) {
   const comparison = useComparison();
   const { highlightChunk, setActivePdfDocument } = useChatActions();
-  const { getToken } = useAuth();
+  const { getToken } = useAppAuth();
 
   const parsed = parseCitation(token);
   const resolvedContext = context || comparison.context;

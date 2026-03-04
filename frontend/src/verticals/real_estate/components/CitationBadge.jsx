@@ -21,6 +21,21 @@ function parseCitationPage(citation) {
 }
 
 /**
+ * Build click payload for a citation badge.
+ * Prefer bbox payload when available (more precise than citation token page).
+ */
+function buildCitationPayload(pageNumber, bbox) {
+  if (!bbox || typeof bbox !== 'object') return pageNumber || null;
+
+  const bboxPage = Number(bbox.page);
+  if (Number.isFinite(bboxPage)) {
+    return { ...bbox, page: bboxPage };
+  }
+
+  return pageNumber || null;
+}
+
+/**
  * Single citation badge - ChatGPT inspired
  */
 export function CitationBadge({
@@ -31,17 +46,14 @@ export function CitationBadge({
   bbox = null  // Optional bbox for PDF highlighting: { page, x0, y0, x1, y1 }
 }) {
   const pageNumber = parseCitationPage(citation);
-  const displayText = pageNumber ? `Page ${pageNumber}` : citation;
+  const payload = buildCitationPayload(pageNumber, bbox);
+  const effectivePage = typeof payload === 'number' ? payload : Number(payload?.page);
+  const displayText = Number.isFinite(effectivePage) ? `Page ${effectivePage}` : citation;
 
   const handleClick = (e) => {
     e.stopPropagation();
-    if (onClick && pageNumber) {
-      // Pass bbox if available, otherwise just page number
-      if (bbox) {
-        onClick(bbox);
-      } else {
-        onClick(pageNumber);
-      }
+    if (onClick && payload) {
+      onClick(payload);
     }
   };
 
@@ -49,13 +61,13 @@ export function CitationBadge({
     <button
       type="button"
       onClick={handleClick}
-      disabled={!onClick || !pageNumber}
+      disabled={!onClick || !payload}
       className={cn(
         "inline-flex items-center gap-1 px-2 py-1 rounded-md text-xs font-medium",
         "bg-muted text-muted-foreground border border-border",
         "transition-all duration-200",
         "animate-chip-fade-in",
-        onClick && pageNumber && "hover:bg-accent hover:text-accent-foreground cursor-pointer",
+        onClick && payload && "hover:bg-accent hover:text-accent-foreground cursor-pointer",
         !onClick && "cursor-default",
         className
       )}

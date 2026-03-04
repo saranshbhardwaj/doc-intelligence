@@ -121,6 +121,15 @@ export default {
           from: { opacity: "0", transform: "scale(0.9)" },
           to: { opacity: "1", transform: "scale(1)" },
         },
+        // Landing page
+        "float": {
+          "0%, 100%": { transform: "translateY(0px)" },
+          "50%": { transform: "translateY(-12px)" },
+        },
+        "float-slow": {
+          "0%, 100%": { transform: "translateY(0px)" },
+          "50%": { transform: "translateY(-8px)" },
+        },
       },
       animation: {
         "accordion-down": "accordion-down 0.2s ease-out",
@@ -137,6 +146,9 @@ export default {
         "message-pulse": "message-pulse 1.5s ease-in-out infinite",
         "message-glow": "message-glow 0.6s ease-out",
         "chip-fade-in": "chip-fade-in 0.2s ease-out",
+        // Landing page
+        "float": "float 6s ease-in-out infinite",
+        "float-slow": "float-slow 8s ease-in-out infinite",
       },
       boxShadow: {
         panel:

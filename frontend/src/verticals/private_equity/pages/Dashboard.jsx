@@ -3,7 +3,7 @@
  * Main entry point for PE vertical
  */
 import { useEffect, useState } from 'react';
-import { useAuth } from '@clerk/clerk-react';
+import { useAppAuth } from "@/hooks/useAppAuth";
 import { Link } from 'react-router-dom';
 import { useVertical } from '../../../core/hooks/useVertical';
 import { peWorkflows, peExtraction } from '../../../api';
@@ -11,7 +11,7 @@ import AppLayout from '../../../components/layout/AppLayout';
 
 export default function PEDashboard() {
   const { config } = useVertical();
-  const { getToken } = useAuth();
+  const { getToken } = useAppAuth();
   const [templates, setTemplates] = useState([]);
   const [recentRuns, setRecentRuns] = useState([]);
   const [recentExtractions, setRecentExtractions] = useState([]);

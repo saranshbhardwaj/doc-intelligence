@@ -16,6 +16,7 @@ MultiProcessCollector can parse.
 Example: worker1 → counter_234567.db, worker2 → counter_278901.db
 """
 import os
+import time
 import hashlib
 from pathlib import Path
 import prometheus_client.values
@@ -24,6 +25,26 @@ from app.utils.logging import logger
 # Base offsets per container type to group .db files by range.
 # API: 100000-199999, Workers: 200000-299999, Beat: 300000-399999
 PID_OFFSETS = {'api': 100000, 'worker': 200000, 'beat': 300000}
+
+TRUE_VALUES = {"1", "true", "yes", "y", "on"}
+
+
+def _env_bool(name: str, default: bool) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return value.strip().lower() in TRUE_VALUES
+
+
+def _env_int(name: str, default: int, minimum: int = 0) -> int:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    try:
+        parsed = int(value)
+    except (TypeError, ValueError):
+        return default
+    return max(minimum, parsed)
 
 
 def _get_process_identifier(container_type: str) -> int:
@@ -86,6 +107,96 @@ def _cleanup_stale_files(metrics_dir: str, proc_id: int) -> int:
     return cleaned
 
 
+def _cleanup_retention_files(metrics_dir: str, container_type: str) -> int:
+    """Apply retention rules to multiprocess files.
+
+    Configurable via environment variables:
+      - PROMETHEUS_MULTIPROC_GC_ENABLED (default: true)
+      - PROMETHEUS_MULTIPROC_GC_LEADER_ONLY (default: true)
+      - PROMETHEUS_MULTIPROC_GC_MAX_AGE_DAYS (default: 3)
+      - PROMETHEUS_MULTIPROC_GC_MAX_FILES (default: 25000)
+      - PROMETHEUS_MULTIPROC_GC_MAX_SIZE_MB (default: 512)
+      - PROMETHEUS_MULTIPROC_GC_MIN_AGE_SECONDS (default: 3600)
+    """
+    if not _env_bool("PROMETHEUS_MULTIPROC_GC_ENABLED", True):
+        return 0
+
+    leader_only = _env_bool("PROMETHEUS_MULTIPROC_GC_LEADER_ONLY", True)
+    if leader_only and container_type != "api":
+        return 0
+
+    metrics_path = Path(metrics_dir)
+    if not metrics_path.exists():
+        return 0
+
+    max_age_days = _env_int("PROMETHEUS_MULTIPROC_GC_MAX_AGE_DAYS", 3, minimum=0)
+    max_files = _env_int("PROMETHEUS_MULTIPROC_GC_MAX_FILES", 25_000, minimum=0)
+    max_size_mb = _env_int("PROMETHEUS_MULTIPROC_GC_MAX_SIZE_MB", 512, minimum=0)
+    min_age_seconds = _env_int("PROMETHEUS_MULTIPROC_GC_MIN_AGE_SECONDS", 3_600, minimum=0)
+    max_size_bytes = max_size_mb * 1024 * 1024
+
+    now = time.time()
+    deleted = 0
+
+    candidates: list[tuple[Path, float, int]] = []
+    for file_path in metrics_path.glob("*.db"):
+        try:
+            stat = file_path.stat()
+            candidates.append((file_path, stat.st_mtime, stat.st_size))
+        except OSError:
+            continue
+
+    if not candidates:
+        return 0
+
+    # Step 1: hard age-based cleanup
+    if max_age_days > 0:
+        age_cutoff = now - (max_age_days * 86400)
+        for file_path, mtime, _size in list(candidates):
+            if mtime < age_cutoff:
+                try:
+                    file_path.unlink(missing_ok=True)
+                    deleted += 1
+                    candidates.remove((file_path, mtime, _size))
+                except OSError:
+                    continue
+
+    # Step 2: enforce size/file caps for "old enough" files only
+    total_size = sum(size for _path, _mtime, size in candidates)
+    removable = sorted(
+        [item for item in candidates if (now - item[1]) >= min_age_seconds],
+        key=lambda item: item[1],  # oldest first
+    )
+
+    while removable and (
+        (max_files > 0 and len(candidates) > max_files) or
+        (max_size_bytes > 0 and total_size > max_size_bytes)
+    ):
+        file_path, mtime, size = removable.pop(0)
+        try:
+            file_path.unlink(missing_ok=True)
+            deleted += 1
+            total_size -= size
+            candidates.remove((file_path, mtime, size))
+        except OSError:
+            continue
+
+    if deleted > 0:
+        logger.info(
+            "Prometheus multiprocess retention cleanup completed",
+            extra={
+                "deleted_files": deleted,
+                "remaining_files": len(candidates),
+                "remaining_size_mb": round(total_size / (1024 * 1024), 2),
+                "max_age_days": max_age_days,
+                "max_files": max_files,
+                "max_size_mb": max_size_mb,
+            },
+        )
+
+    return deleted
+
+
 def setup_prometheus_multiproc_dir(clear_on_startup: bool = True):
     """Initialize Prometheus multiprocess directory with PID offset.
 
@@ -121,6 +232,11 @@ def setup_prometheus_multiproc_dir(clear_on_startup: bool = True):
                 logger.debug(f"Cleaned {cleaned} stale Prometheus metric file(s)")
         except Exception as e:
             logger.warning(f"Stale file cleanup failed: {e}")
+
+        try:
+            _cleanup_retention_files(metrics_dir, container_type)
+        except Exception as e:
+            logger.warning(f"Retention cleanup failed: {e}")
 
     logger.info(
         f"Prometheus multiprocess directory: {metrics_dir} "

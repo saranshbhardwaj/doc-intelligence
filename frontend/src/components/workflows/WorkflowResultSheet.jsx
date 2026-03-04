@@ -6,7 +6,7 @@
  */
 
 import { useEffect, useState, useCallback } from "react";
-import { useAuth } from "@clerk/clerk-react";
+import { useAppAuth } from "@/hooks/useAppAuth";
 import { useWorkflowDraftActions, useWorkflowPdfViewer } from "../../store";
 import {
   Download,
@@ -56,7 +56,7 @@ import CompletionFeedbackModal from '../feedback/CompletionFeedbackModal';
 import { shouldPromptForFeedback } from '../../utils/feedbackRules';
 
 export default function WorkflowResultSheet({ open, onOpenChange, runId }) {
-  const { getToken } = useAuth();
+  const { getToken } = useAppAuth();
   const { workflowSetActivePdfDocument, workflowHighlightChunk, workflowClearPdfViewer } = useWorkflowDraftActions();
   const pdfViewerState = useWorkflowPdfViewer();
 

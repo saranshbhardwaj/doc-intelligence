@@ -313,37 +313,45 @@ class AzureDocumentIntelligenceParser(DocumentParser):
                     # Extract value (may be None)
                     value_content = kv.value.content if kv.value else None
 
-                    # Get page number and bounding regions from BOTH key AND value
+                    # Get page number and bounding regions from key and value separately.
+                    # Storing them separately lets downstream code highlight just the value
+                    # (what the user wants to verify) rather than the merged key+value area.
                     page_num = None
-                    bounding_regions = []
+                    key_bounding_regions = []
+                    value_bounding_regions = []
 
                     # Extract from key
                     if kv.key and kv.key.bounding_regions:
                         page_num = kv.key.bounding_regions[0].page_number
                         for br in kv.key.bounding_regions:
                             if br:
-                                bounding_regions.append({
+                                key_bounding_regions.append({
                                     "page_number": getattr(br, "page_number", None),
                                     "polygon": getattr(br, "polygon", [])
                                 })
 
-                    # Extract from value (merge with key regions)
+                    # Extract from value
                     if kv.value and kv.value.bounding_regions:
                         if not page_num:  # Use value's page if key had no page
                             page_num = kv.value.bounding_regions[0].page_number
                         for br in kv.value.bounding_regions:
                             if br:
-                                bounding_regions.append({
+                                value_bounding_regions.append({
                                     "page_number": getattr(br, "page_number", None),
                                     "polygon": getattr(br, "polygon", [])
                                 })
+
+                    # Merged list kept for backward compatibility
+                    bounding_regions = key_bounding_regions + value_bounding_regions
 
                     kv_data = {
                         "key": key_content,
                         "value": value_content,
                         "confidence": getattr(kv, "confidence", 1.0),
                         "page_number": page_num,
-                        "bounding_regions": bounding_regions,  # Contains both key + value regions
+                        "bounding_regions": bounding_regions,           # merged (backward compat)
+                        "key_bounding_regions": key_bounding_regions,   # just the key area
+                        "value_bounding_regions": value_bounding_regions,  # just the value area
                     }
                     key_value_pairs.append(kv_data)
 

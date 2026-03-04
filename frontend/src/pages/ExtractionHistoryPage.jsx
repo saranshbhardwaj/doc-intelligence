@@ -5,7 +5,7 @@
  */
 import { useEffect, useState, useCallback, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
-import { useAuth } from "@clerk/clerk-react";
+import { useAppAuth } from "@/hooks/useAppAuth";
 import AppLayout from "../components/layout/AppLayout";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
@@ -50,7 +50,7 @@ import { saveAs } from "file-saver";
 
 export default function ExtractionHistoryPage() {
   const navigate = useNavigate();
-  const { getToken } = useAuth();
+  const { getToken } = useAppAuth();
   const user = useUser();
   const { fetchExtractions, loadMoreExtractions } = useUserActions();
 

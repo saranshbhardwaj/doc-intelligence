@@ -53,51 +53,45 @@ export default function FAQ() {
   };
 
   return (
-    <div className="py-24 bg-background " id="faq">
+    <div className="py-24 bg-background" id="faq">
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8">
         {/* Section header */}
         <div className="text-center mb-12">
           <h2 className="text-4xl sm:text-5xl font-bold text-foreground mb-4">
             Frequently Asked
-            <span className="bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
-              {" "}
-              Questions
+            <span className="bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
+              {" "}Questions
             </span>
           </h2>
-          <p className="text-xl text-muted-foreground dark:text-gray-300">
+          <p className="text-xl text-muted-foreground">
             Everything you need to know about frearaAI
           </p>
         </div>
 
         {/* FAQ List */}
-        <div className="space-y-4">
+        <div className="space-y-3">
           {faqs.map((faq, index) => (
             <div
               key={index}
-              className="border border-border dark:border-gray-700 rounded-xl overflow-hidden bg-background dark:bg-card transition-all duration-200 hover:border-blue-500 dark:hover:border-blue-500"
+              className="glass-card rounded-2xl overflow-hidden hover:border-primary/40 transition-all duration-200"
             >
               <button
                 onClick={() => toggleFAQ(index)}
-                className="
-                  w-full px-6 py-5
-                  flex items-center justify-between text-left
-                  hover:bg-popover
-                  transition-colors
-                "
+                className="w-full px-6 py-5 flex items-center justify-between text-left hover:bg-muted/30 transition-colors"
               >
-                <span className="text-lg font-semibold text-foreground pr-8">
+                <span className="text-base font-semibold text-foreground pr-8">
                   {faq.question}
                 </span>
                 {openIndex === index ? (
-                  <ChevronUp className="w-5 h-5 text-blue-600 dark:text-blue-400 flex-shrink-0" />
+                  <ChevronUp className="w-5 h-5 text-primary flex-shrink-0" />
                 ) : (
                   <ChevronDown className="w-5 h-5 text-muted-foreground flex-shrink-0" />
                 )}
               </button>
 
               {openIndex === index && (
-                <div className="px-6 pb-5 pt-2 bg-card border-t border-border dark:border-gray-700">
-                  <p className="text-muted-foreground dark:text-gray-300 leading-relaxed">
+                <div className="px-6 pb-5 pt-2 border-t border-border/50">
+                  <p className="text-muted-foreground leading-relaxed">
                     {faq.answer}
                   </p>
                 </div>
@@ -107,16 +101,16 @@ export default function FAQ() {
         </div>
 
         {/* Contact CTA */}
-        <div className="mt-12 text-center p-8 bg-gradient-to-r from-blue-50 to-purple-50 dark:from-gray-800 dark:to-gray-800 rounded-xl border border-blue-200 dark:border-gray-700">
+        <div className="mt-12 text-center glass-card rounded-3xl p-8 border-primary/20">
           <h3 className="text-xl font-bold text-foreground mb-2">
             Still have questions?
           </h3>
-          <p className="text-muted-foreground dark:text-gray-300 mb-4">
+          <p className="text-muted-foreground mb-6">
             Can't find the answer you're looking for? Reach out to our team.
           </p>
           <a
             href="mailto:saranshbhardwaj@gmail.com"
-            className="inline-block px-6 py-3 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-foreground font-semibold rounded-lg transition-all duration-200"
+            className="inline-block px-8 py-3 bg-primary text-primary-foreground font-semibold rounded-full hover:bg-primary/90 hover:scale-105 transition-all duration-200 shadow-md shadow-primary/20"
           >
             Contact Us
           </a>

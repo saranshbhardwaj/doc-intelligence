@@ -11,7 +11,7 @@ import { useState, useEffect, useRef, useCallback } from "react";
 import { api } from "../../api/client";
 import { WifiOff } from "lucide-react";
 
-const POLL_INTERVAL_MS = 30_000;
+const POLL_INTERVAL_MS = 60_000;
 const HEALTH_TIMEOUT_MS = 8_000;
 
 export default function NetworkStatus() {
@@ -37,9 +37,14 @@ export default function NetworkStatus() {
   }, []);
 
   useEffect(() => {
-    check();
+    // Delay the first check by 5s so HMR remounts don't cause a request flood.
+    // The server must be up if it just served us the page, so this is safe.
+    const initial = setTimeout(check, 5_000);
     const id = setInterval(check, POLL_INTERVAL_MS);
-    return () => clearInterval(id);
+    return () => {
+      clearTimeout(initial);
+      clearInterval(id);
+    };
   }, [check]);
 
   if (!isDown || dismissed) return null;

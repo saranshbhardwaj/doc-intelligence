@@ -76,7 +76,7 @@ export async function streamJobProgress(
   const baseURL = api.defaults.baseURL || "";
 
   // Get auth token and pass as query parameter (EventSource doesn't support headers)
-  const token = await getToken();
+  const token = await getToken({ skipCache: true });
   const url = `${baseURL}/api/jobs/${jobId}/stream?token=${encodeURIComponent(
     token
   )}`;

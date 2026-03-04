@@ -6,7 +6,7 @@
 
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
-import { useAuth } from '@clerk/clerk-react';
+import { useAppAuth } from "@/hooks/useAppAuth";
 import PDFViewer from '../../../components/pdf/PDFViewer';
 import FieldsList from '../components/FieldsList';
 import ExcelGridView from '../components/ExcelGridView';
@@ -55,7 +55,7 @@ function formatStage(stage) {
 export default function TemplateFillPage() {
   const { fillRunId } = useParams();
   const navigate = useNavigate();
-  const { getToken } = useAuth();
+  const { getToken } = useAppAuth();
   const [currentPage, setCurrentPage] = useState(1);
   const [activeTab, setActiveTab] = useState('excel');
   const [highlightBbox, setHighlightBbox] = useState(null); // For PDF highlighting
@@ -85,6 +85,7 @@ export default function TemplateFillPage() {
     navigatePdfToPage,
     cleanupPopouts,
   } = useTemplateFillActions();
+  const progressStateToken = `${fillRun?.status || ''}|${fillRun?.artifact?.key || ''}|${fillRun?.artifact?.filename || ''}`;
 
   // Load fill run data on mount
   useEffect(() => {
@@ -217,7 +218,7 @@ export default function TemplateFillPage() {
     return () => {
       if (cleanup) cleanup();
     };
-  }, [fillRun?.status, fillRunId]);
+  }, [progressStateToken, fillRunId]);
 
   // Auto-show feedback modal on completion (with frequency rules)
   useEffect(() => {
@@ -235,15 +236,25 @@ export default function TemplateFillPage() {
   function handleCitationClick(pageNumberOrBbox) {
     // Support both old (page number only) and new (bbox object) formats
     if (typeof pageNumberOrBbox === 'number') {
-      // Legacy: just a page number
-      setCurrentPage(pageNumberOrBbox);
-      setHighlightBbox(null);
-      navigatePdfToPage(pageNumberOrBbox);
+      const targetPage = Number(pageNumberOrBbox);
+      if (!Number.isFinite(targetPage) || targetPage < 1) return;
+
+      // Page-only citation: trigger deterministic scroll without rendering a highlight.
+      setCurrentPage(targetPage);
+      setHighlightBbox({ page: targetPage, __scrollOnly: true, __ts: Date.now() });
+      navigatePdfToPage(targetPage);
     } else if (pageNumberOrBbox?.page) {
       // New: bbox object with { page, x0, y0, x1, y1 }
-      setCurrentPage(pageNumberOrBbox.page);
-      setHighlightBbox(pageNumberOrBbox);
-      navigatePdfToPage(pageNumberOrBbox.page);
+      const targetPage = Number(pageNumberOrBbox.page);
+      if (!Number.isFinite(targetPage) || targetPage < 1) return;
+
+      setCurrentPage(targetPage);
+      setHighlightBbox({
+        ...pageNumberOrBbox,
+        page: targetPage,
+        __ts: Date.now(),
+      });
+      navigatePdfToPage(targetPage);
     }
   }
 
@@ -380,8 +391,8 @@ export default function TemplateFillPage() {
   }
 
   return (
-    <AppLayout>
-      <div className="flex-1 flex flex-col bg-background relative">
+    <AppLayout lockViewport>
+      <div className="flex-1 flex flex-col bg-background relative overflow-hidden min-h-0">
         {/* Progress Overlay - Fixed to top */}
         {jobStatus === 'processing' && (
           <div className="absolute inset-0 bg-background/95 backdrop-blur-sm z-50 flex items-start justify-center pt-6">
@@ -546,10 +557,10 @@ export default function TemplateFillPage() {
         </div>
 
         {/* Horizontal Split Layout */}
-        <ResizablePanelGroup direction="horizontal" className="flex-1">
+        <ResizablePanelGroup direction="horizontal" className="flex-1 min-h-0 overflow-hidden">
           {/* Left Panel: PDF Viewer */}
-          <ResizablePanel defaultSize={50} minSize={30}>
-            <div className="h-full flex flex-col bg-background overflow-hidden">
+          <ResizablePanel defaultSize={50} minSize={30} className="min-h-0 overflow-hidden">
+            <div className="h-full min-h-0 flex flex-col bg-background overflow-hidden">
               <div className="bg-card px-4 py-2 border-b flex-shrink-0">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
@@ -584,7 +595,7 @@ export default function TemplateFillPage() {
                   </div>
                 </div>
               </div>
-              <div className="flex-1 overflow-auto">
+              <div className="flex-1 min-h-0 overflow-auto">
                 {pdfUrl ? (
                   <PDFViewer
                     pdfUrl={pdfUrl}
@@ -619,8 +630,8 @@ export default function TemplateFillPage() {
           <ResizableHandle withHandle />
 
           {/* Right Panel: Tabbed Fields/Excel */}
-          <ResizablePanel defaultSize={50} minSize={30}>
-            <Tabs value={activeTab} onValueChange={setActiveTab} className="h-full flex flex-col overflow-hidden">
+          <ResizablePanel defaultSize={50} minSize={30} className="min-h-0 overflow-hidden">
+            <Tabs value={activeTab} onValueChange={setActiveTab} className="h-full min-h-0 flex flex-col overflow-hidden">
               <div className="sticky top-0 z-10 bg-card border-b flex-shrink-0">
                 <div className="flex items-center justify-between px-4">
                   <TabsList className="bg-transparent rounded-none p-0 h-auto border-b-0">
@@ -669,7 +680,7 @@ export default function TemplateFillPage() {
                 </div>
               </div>
 
-              <TabsContent value="fields" className="flex-1 overflow-auto m-0">
+              <TabsContent value="fields" className="flex-1 min-h-0 overflow-auto m-0">
                 <FieldsList
                   fillRunId={fillRunId}
                   extractedData={fillRun.extracted_data}
@@ -679,7 +690,7 @@ export default function TemplateFillPage() {
                 />
               </TabsContent>
 
-              <TabsContent value="excel" className="flex-1 overflow-auto m-0">
+              <TabsContent value="excel" className="flex-1 min-h-0 overflow-auto m-0">
                 {!fillRun.template_id ? (
                   <div className="flex items-center justify-center h-full">
                     <div className="text-center space-y-3 p-8 max-w-md">

@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { useAuth } from '@clerk/clerk-react';
+import { useAppAuth } from "@/hooks/useAppAuth";
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import AppLayout from '../../../components/layout/AppLayout';
@@ -36,12 +36,13 @@ import {
   getTemplateUsage,
   startTemplateFill,
   listFillRuns,
+  getFillRunCount,
   deleteFillRun,
   waitForTemplateAnalysis,
 } from '../../../api/re-templates';
 
 export default function TemplatesPage() {
-  const { getToken } = useAuth();
+  const { getToken } = useAppAuth();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
 
@@ -49,6 +50,7 @@ export default function TemplatesPage() {
   const activeTab = searchParams.get('tab') || 'templates';
   const [templates, setTemplates] = useState([]);
   const [fillRuns, setFillRuns] = useState([]);
+  const [fillRunCount, setFillRunCount] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
@@ -93,8 +95,12 @@ export default function TemplatesPage() {
       setError(null);
 
       if (activeTab === 'templates') {
-        const data = await listRETemplates(getToken);
+        const [data, count] = await Promise.all([
+          listRETemplates(getToken),
+          getFillRunCount(getToken),
+        ]);
         setTemplates(data || []);
+        setFillRunCount(count);
       } else {
         const offset = reset ? 0 : fillRunsOffset;
         const data = await listFillRuns(getToken, 20, offset);
@@ -346,9 +352,9 @@ export default function TemplatesPage() {
               )}
             >
               Fill Runs
-              {fillRuns.length > 0 && (
+              {(fillRunCount ?? fillRuns.length) > 0 && (
                 <Badge variant="secondary" className="ml-2 text-xs">
-                  {fillRuns.length}
+                  {fillRunCount ?? fillRuns.length}
                 </Badge>
               )}
             </button>

@@ -13,8 +13,14 @@ x-worker-common: &worker-common
     CELERY_RESULT_BACKEND: redis://redis:6379/0
     DATABASE_URL: postgresql+psycopg://docint:docint@db:5432/docint
     PROMETHEUS_MULTIPROC_DIR: /tmp/prometheus_multiproc
+    PROMETHEUS_MULTIPROC_GC_ENABLED: ${PROMETHEUS_MULTIPROC_GC_ENABLED:-true}
+    PROMETHEUS_MULTIPROC_GC_LEADER_ONLY: ${PROMETHEUS_MULTIPROC_GC_LEADER_ONLY:-true}
+    PROMETHEUS_MULTIPROC_GC_MAX_AGE_DAYS: ${PROMETHEUS_MULTIPROC_GC_MAX_AGE_DAYS:-3}
+    PROMETHEUS_MULTIPROC_GC_MAX_FILES: ${PROMETHEUS_MULTIPROC_GC_MAX_FILES:-25000}
+    PROMETHEUS_MULTIPROC_GC_MAX_SIZE_MB: ${PROMETHEUS_MULTIPROC_GC_MAX_SIZE_MB:-512}
+    PROMETHEUS_MULTIPROC_GC_MIN_AGE_SECONDS: ${PROMETHEUS_MULTIPROC_GC_MIN_AGE_SECONDS:-3600}
     CONTAINER_TYPE: worker
-    DEBUG: ${DEBUG:-false}
+    DEBUG: ${DEBUG:-true}
     PYDEVD_DISABLE_FILE_VALIDATION: "1"
   depends_on:
     redis:
@@ -27,11 +33,7 @@ x-worker-common: &worker-common
     - logs_data:/worker/logs
     - prometheus_multiproc:/tmp/prometheus_multiproc
   healthcheck:
-    test: celery -A app.celery_app.celery_app inspect ping -d celery@$$HOSTNAME
-    interval: 30s
-    timeout: 10s
-    retries: 3
-    start_period: 40s
+    disable: true
   deploy:
     resources:
       limits:
@@ -78,9 +80,15 @@ services:
       DATABASE_URL: postgresql+psycopg://docint:docint@db:5432/docint
       HOME: /app
       HF_HOME: /app/.cache/huggingface
-      DEBUG: ${DEBUG:-false}
+      DEBUG: ${DEBUG:-true}
       PYDEVD_DISABLE_FILE_VALIDATION: "1"
       PROMETHEUS_MULTIPROC_DIR: /tmp/prometheus_multiproc
+      PROMETHEUS_MULTIPROC_GC_ENABLED: ${PROMETHEUS_MULTIPROC_GC_ENABLED:-true}
+      PROMETHEUS_MULTIPROC_GC_LEADER_ONLY: ${PROMETHEUS_MULTIPROC_GC_LEADER_ONLY:-true}
+      PROMETHEUS_MULTIPROC_GC_MAX_AGE_DAYS: ${PROMETHEUS_MULTIPROC_GC_MAX_AGE_DAYS:-3}
+      PROMETHEUS_MULTIPROC_GC_MAX_FILES: ${PROMETHEUS_MULTIPROC_GC_MAX_FILES:-25000}
+      PROMETHEUS_MULTIPROC_GC_MAX_SIZE_MB: ${PROMETHEUS_MULTIPROC_GC_MAX_SIZE_MB:-512}
+      PROMETHEUS_MULTIPROC_GC_MIN_AGE_SECONDS: ${PROMETHEUS_MULTIPROC_GC_MIN_AGE_SECONDS:-3600}
       CONTAINER_TYPE: api
     ports:
       - "127.0.0.1:8000:8000"
@@ -133,8 +141,14 @@ services:
       CELERY_RESULT_BACKEND: redis://redis:6379/0
       DATABASE_URL: postgresql+psycopg://docint:docint@db:5432/docint
       PROMETHEUS_MULTIPROC_DIR: /tmp/prometheus_multiproc
+      PROMETHEUS_MULTIPROC_GC_ENABLED: ${PROMETHEUS_MULTIPROC_GC_ENABLED:-true}
+      PROMETHEUS_MULTIPROC_GC_LEADER_ONLY: ${PROMETHEUS_MULTIPROC_GC_LEADER_ONLY:-true}
+      PROMETHEUS_MULTIPROC_GC_MAX_AGE_DAYS: ${PROMETHEUS_MULTIPROC_GC_MAX_AGE_DAYS:-3}
+      PROMETHEUS_MULTIPROC_GC_MAX_FILES: ${PROMETHEUS_MULTIPROC_GC_MAX_FILES:-25000}
+      PROMETHEUS_MULTIPROC_GC_MAX_SIZE_MB: ${PROMETHEUS_MULTIPROC_GC_MAX_SIZE_MB:-512}
+      PROMETHEUS_MULTIPROC_GC_MIN_AGE_SECONDS: ${PROMETHEUS_MULTIPROC_GC_MIN_AGE_SECONDS:-3600}
       CONTAINER_TYPE: beat
-      DEBUG: ${DEBUG:-false}
+      DEBUG: ${DEBUG:-true}
       PYDEVD_DISABLE_FILE_VALIDATION: "1"
     # No health check needed - Beat schedules tasks, doesn't handle requests
     # If Beat fails, Prometheus alerts will detect missing task executions

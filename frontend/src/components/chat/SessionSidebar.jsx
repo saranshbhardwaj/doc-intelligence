@@ -61,7 +61,7 @@ export default function SessionSidebar({
       {/* Header with Collapse Button and New Chat Button */}
       <div className="mb-2 space-y-2">
         <div className="flex items-center justify-between">
-          <h2 className="font-semibold text-sm text-foreground">Sessions</h2>
+          <h2 className="text-xs font-bold uppercase tracking-widest text-muted-foreground">Sessions</h2>
           <Button
             variant="ghost"
             size="icon"
@@ -72,8 +72,8 @@ export default function SessionSidebar({
             <ChevronLeft className="h-4 w-4" />
           </Button>
         </div>
-        <Button onClick={onNewChat} className="w-full h-9" size="default">
-          <Plus className="w-4 h-4 mr-2" />
+        <Button onClick={onNewChat} className="w-full h-9 rounded-xl gap-2" size="default">
+          <Plus className="w-4 h-4" />
           New Chat
         </Button>
       </div>
@@ -123,37 +123,39 @@ export default function SessionSidebar({
               return (
                 <div
                   key={session.id}
-                  className={`group relative rounded-lg transition-all ${
+                  className={`group relative rounded-xl transition-all ${
                     isActive
-                      ? "bg-primary/10 border border-primary/30"
-                      : "hover:bg-muted/70"
+                      ? "bg-primary/10"
+                      : "hover:bg-muted/50"
                   }`}
                 >
                   <button
                     onClick={() => onSelectSession(session.id)}
-                    className="w-full text-left p-2 pr-9 rounded-lg"
+                    className="w-full text-left px-3 py-2.5 pr-9 rounded-xl"
                   >
-                    {/* Session Title */}
-                    <div
-                      className={`font-medium text-sm truncate mb-1 ${
-                        isActive ? "text-primary" : "text-foreground"
-                      }`}
-                    >
-                      {session.title || "Untitled Chat"}
-                    </div>
+                    <div className="flex items-start gap-2.5">
+                      <MessageSquare className={`w-4 h-4 shrink-0 mt-0.5 ${isActive ? "text-primary" : "text-muted-foreground"}`} />
+                      <div className="flex-1 min-w-0">
+                        {/* Session Title */}
+                        <div
+                          className={`font-medium text-sm truncate mb-1 ${
+                            isActive ? "text-primary" : "text-foreground"
+                          }`}
+                        >
+                          {session.title || "Untitled Chat"}
+                        </div>
 
-                    {/* Session Metadata */}
-                    <div className="flex items-center gap-2.5 text-xs text-muted-foreground">
-                      {/* Message Count */}
-                      <div className="flex items-center gap-1">
-                        <MessageSquare className="w-3 h-3" />
-                        <span>{session.message_count || 0}</span>
-                      </div>
-
-                      {/* Document Count */}
-                      <div className="flex items-center gap-1">
-                        <FileText className="w-3 h-3" />
-                        <span>{documentCount}</span>
+                        {/* Session Metadata */}
+                        <div className="flex items-center gap-2.5 text-xs text-muted-foreground">
+                          <div className="flex items-center gap-1">
+                            <MessageSquare className="w-3 h-3" />
+                            <span>{session.message_count || 0}</span>
+                          </div>
+                          <div className="flex items-center gap-1">
+                            <FileText className="w-3 h-3" />
+                            <span>{documentCount}</span>
+                          </div>
+                        </div>
                       </div>
                     </div>
                   </button>

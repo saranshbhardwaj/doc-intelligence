@@ -2,14 +2,7 @@
  * StatsHeader Component
  *
  * Displays key metrics at the top of Library page
- * ChatGPT-inspired design with stat cards
- * Uses Tailwind tokenized animations from tailwind.config.js
- *
- * Input:
- *   - totalDocuments: number
- *   - totalCollections: number
- *   - processingCount: number
- *   - readyCount: number
+ * Inspiration-aligned design with larger rounded icons and extrabold values
  */
 
 import { FileText, Folder, Clock, CheckCircle } from "lucide-react";
@@ -59,20 +52,16 @@ export default function StatsHeader({
         return (
           <Card
             key={stat.label}
-            // Using Tailwind utilities instead of custom classes:
-            // - animate-scale-up from tailwind.config.js
-            // - transition-all for smooth hover
-            // - hover:shadow-md for hover effect
-            className="p-4 transition-all hover:shadow-md animate-scale-up"
+            className="rounded-2xl p-5 transition-all hover:shadow-md animate-scale-up"
             style={{ animationDelay: `${index * 50}ms` }}
           >
-            <div className="flex items-center gap-3">
-              <div className={`p-2.5 rounded-lg ${stat.bgColor}`}>
+            <div className="flex items-center gap-4">
+              <div className={`p-3 rounded-2xl ${stat.bgColor} flex-shrink-0`}>
                 <Icon className={`w-5 h-5 ${stat.color}`} />
               </div>
               <div className="flex-1">
                 <p className="text-sm text-muted-foreground">{stat.label}</p>
-                <p className="text-2xl font-semibold text-foreground">
+                <p className="text-2xl font-extrabold text-foreground">
                   {stat.value}
                 </p>
               </div>

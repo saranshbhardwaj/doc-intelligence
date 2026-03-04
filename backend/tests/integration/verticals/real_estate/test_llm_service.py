@@ -307,6 +307,48 @@ class TestTemplateFillLLMServiceErrorHandling:
         assert result["mappings"] == []
         assert result["total_mapped"] == 0
 
+
+class TestTemplateFillLLMServicePageResolution:
+    """Unit tests for chunk page resolution precedence."""
+
+    @patch("app.verticals.real_estate.template_filling.llm_service.Anthropic")
+    def test_resolve_chunk_page_prefers_bbox_page(self, mock_anthropic_class):
+        mock_anthropic_class.return_value = MagicMock()
+        service = TemplateFillLLMService()
+
+        chunk = {
+            "page_number": 2,
+            "chunk_metadata": {
+                "page_number": 4,
+                "bbox": {"page": 6}
+            }
+        }
+
+        assert service._resolve_chunk_page(chunk) == 6
+
+    @patch("app.verticals.real_estate.template_filling.llm_service.Anthropic")
+    def test_resolve_chunk_page_prefers_chunk_metadata_page_number(self, mock_anthropic_class):
+        mock_anthropic_class.return_value = MagicMock()
+        service = TemplateFillLLMService()
+
+        chunk = {
+            "page_number": 3,
+            "chunk_metadata": {
+                "page_number": 7
+            }
+        }
+
+        assert service._resolve_chunk_page(chunk) == 7
+
+    @patch("app.verticals.real_estate.template_filling.llm_service.Anthropic")
+    def test_resolve_chunk_page_falls_back_to_column_page_number(self, mock_anthropic_class):
+        mock_anthropic_class.return_value = MagicMock()
+        service = TemplateFillLLMService()
+
+        chunk = {"page_number": 5, "chunk_metadata": {}}
+
+        assert service._resolve_chunk_page(chunk) == 5
+
     @pytest.mark.integration
     @patch("app.verticals.real_estate.template_filling.llm_service.Anthropic")
     def test_auto_map_fields_with_empty_excel_schema(self, mock_anthropic_class):
@@ -314,7 +356,7 @@ class TestTemplateFillLLMServiceErrorHandling:
         service = TemplateFillLLMService()
 
         result = asyncio.run(service.auto_map_fields(
-            pdf_fields=[{"id": "1", "name": "Test", "type": "text", "sample_value": "Value"}],
+            pdf_fields=[{"id": "1", "name": "Test", "type": "text", "extracted_value": "Value"}],
             excel_schema={"sheets": []}
         ))
 

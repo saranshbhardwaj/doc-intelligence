@@ -2,13 +2,7 @@
 // Main upload and results page (moved from App.jsx)
 import { useState, useEffect } from "react";
 import { useSearchParams, useNavigate, Link } from "react-router-dom";
-import {
-  SignedIn,
-  SignedOut,
-  SignInButton,
-  UserButton,
-  useAuth,
-} from "@clerk/clerk-react";
+import { useAppAuth } from "@/hooks/useAppAuth";
 import {
   useExtraction,
   useExtractionActions,
@@ -25,7 +19,7 @@ export default function UploadPage() {
   const { isDark, toggle } = useDarkMode();
   const [searchParams] = useSearchParams();
   const navigate = useNavigate();
-  const { getToken, isSignedIn } = useAuth();
+  const { getToken, isSignedIn } = useAppAuth();
 
   const [isDemo, setIsDemo] = useState(false);
 
@@ -158,7 +152,7 @@ export default function UploadPage() {
               </button>
 
               {/* Navigation Links - Only show when signed in */}
-              <SignedIn>
+              {isSignedIn && (
                 <nav className="hidden md:flex gap-6">
                   <Link
                     to="/app"
@@ -179,7 +173,7 @@ export default function UploadPage() {
                     Dashboard
                   </Link>
                 </nav>
-              </SignedIn>
+              )}
             </div>
 
             {/* Right side actions */}
@@ -197,16 +191,14 @@ export default function UploadPage() {
               </button>
 
               {/* Authentication UI */}
-              <SignedOut>
-                <SignInButton mode="modal">
-                  <button className="px-4 py-2 bg-blue-600 text-foreground rounded-lg hover:bg-blue-700 transition-colors font-medium">
-                    Sign In
-                  </button>
-                </SignInButton>
-              </SignedOut>
-              <SignedIn>
-                <UserButton />
-              </SignedIn>
+              {!isSignedIn && (
+                <button
+                  onClick={() => navigate("/sign-in")}
+                  className="px-4 py-2 bg-blue-600 text-foreground rounded-lg hover:bg-blue-700 transition-colors font-medium"
+                >
+                  Sign In
+                </button>
+              )}
             </div>
           </div>
         </div>
@@ -224,8 +216,8 @@ export default function UploadPage() {
             </p>
 
             {/* Usage indicator for signed-in users */}
-            <SignedIn>
-              {userInfo && userInfo.usage ? (
+            {isSignedIn ? (
+              userInfo && userInfo.usage ? (
                 <div className="inline-flex items-center gap-3 mt-4">
                   <div className="text-sm text-muted-foreground dark:text-muted-foreground">
                     <span className="font-semibold text-foreground">
@@ -243,15 +235,12 @@ export default function UploadPage() {
                 <p className="text-sm text-muted-foreground dark:text-muted-foreground mt-4">
                   Loading usage info...
                 </p>
-              )}
-            </SignedIn>
-
-            {/* Static text for non-signed in users */}
-            <SignedOut>
+              )
+            ) : (
               <p className="text-sm text-muted-foreground dark:text-muted-foreground">
                 Free: 100 pages one-time • Max 5MB per document limit
               </p>
-            </SignedOut>
+            )}
           </div>
 
           {/* Demo Banner */}

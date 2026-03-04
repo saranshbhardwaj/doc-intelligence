@@ -11,7 +11,7 @@
  */
 
 import { useState, useMemo, useEffect } from "react";
-import { useAuth } from "@clerk/clerk-react";
+import { useAppAuth } from "@/hooks/useAppAuth";
 import {
   Sheet,
   SheetContent,
@@ -35,7 +35,7 @@ import {
 
 export default function ComparisonPanel({ isOpen, onClose }) {
   // 1. ALL HOOKS FIRST (no conditions before these)
-  const { getToken } = useAuth();
+  const { getToken } = useAppAuth();
   const comparison = useComparison();
   const pdfViewer = usePdfViewer();
   const { setComparisonViewMode, loadPdfUrlForDocument } = useChatActions();

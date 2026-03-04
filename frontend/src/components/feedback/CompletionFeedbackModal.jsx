@@ -36,7 +36,7 @@ import { cn } from "@/lib/utils";
 import { submitFeedback } from "../../api/feedback";
 import { useUser } from "../../store";
 import { toast } from "sonner";
-import { useAuth } from "@clerk/clerk-react";
+import { useAppAuth } from "@/hooks/useAppAuth";
 
 const OPERATION_TYPE_LABELS = {
   workflow: "workflow run",
@@ -64,7 +64,7 @@ export default function CompletionFeedbackModal({
   const [category, setCategory] = useState(null);
   const [comment, setComment] = useState("");
   const [isSubmitting, setIsSubmitting] = useState(false);
-  const { getToken } = useAuth();
+  const { getToken } = useAppAuth();
 
   const operationLabel = OPERATION_TYPE_LABELS[operationType] || operationType;
 

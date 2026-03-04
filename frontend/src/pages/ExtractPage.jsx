@@ -5,7 +5,7 @@
  */
 import { useState, useEffect, useRef } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { useAuth } from "@clerk/clerk-react";
+import { useAppAuth } from "@/hooks/useAppAuth";
 import {
   Upload,
   FileText,
@@ -34,7 +34,7 @@ import {
 const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
 export default function ExtractPage() {
-  const { getToken } = useAuth();
+  const { getToken } = useAppAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const fileInputRef = useRef(null);

@@ -9,9 +9,9 @@
  * - Breadcrumb support
  */
 
-import { Link, useLocation } from "react-router-dom";
-import { UserButton } from "@clerk/clerk-react";
-import { Library, MessageSquare, Play, Zap, FileSpreadsheet, LayoutDashboard, Menu } from "lucide-react";
+import { Link, useLocation, useNavigate } from "react-router-dom";
+import { useAppAuth } from "@/hooks/useAppAuth";
+import { Library, MessageSquare, Play, Zap, FileSpreadsheet, LayoutDashboard, Menu, LogOut } from "lucide-react";
 import { useState } from "react";
 import DarkModeToggle from "../common/DarkModeToggle";
 import NetworkStatus from "../common/NetworkStatus";
@@ -31,10 +31,13 @@ const ICON_MAP = {
   'dashboard': LayoutDashboard,
 };
 
-export default function AppLayout({ children }) {
+export default function AppLayout({ children, lockViewport = false }) {
   const location = useLocation();
+  const navigate = useNavigate();
   const { isDark, toggle } = useDarkMode();
+  const { user, signOut } = useAppAuth();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [userMenuOpen, setUserMenuOpen] = useState(false);
 
   // Detect current vertical from URL
   const currentVertical = (() => {
@@ -75,9 +78,9 @@ export default function AppLayout({ children }) {
   const navLinks = currentVertical ? verticalNavItems : coreNavLinks;
 
   return (
-    <div className="min-h-screen bg-background flex flex-col">
+    <div className={`${lockViewport ? "h-[100dvh] overflow-hidden" : "min-h-screen"} bg-background flex flex-col`}>
       {/* Header */}
-      <header className="bg-card border-b border-border sticky top-0 z-40">
+      <header className="bg-card/80 backdrop-blur-md border-b border-border sticky top-0 z-40">
         <div className="w-full px-4 md:px-6 py-2">
           <div className="flex items-center justify-between">
             {/* Logo / Home Link */}
@@ -159,13 +162,38 @@ export default function AppLayout({ children }) {
                 toggle={toggle}
                 variant="inline"
               />
-              <UserButton
-                appearance={{
-                  elements: {
-                    avatarBox: "w-10 h-10",
-                  },
-                }}
-              />
+              {/* User avatar / menu */}
+              <div className="relative">
+                <button
+                  type="button"
+                  onClick={() => setUserMenuOpen((o) => !o)}
+                  className="w-9 h-9 rounded-full bg-primary/10 text-primary font-semibold text-sm flex items-center justify-center hover:bg-primary/20 transition-colors"
+                  aria-label="User menu"
+                >
+                  {user?.firstName?.[0] ?? user?.email?.[0]?.toUpperCase() ?? "U"}
+                </button>
+                {userMenuOpen && (
+                  <div
+                    className="absolute right-0 mt-2 w-52 rounded-lg border border-border bg-card shadow-lg py-1 z-50"
+                    onBlur={() => setUserMenuOpen(false)}
+                  >
+                    <div className="px-3 py-2 border-b border-border">
+                      <p className="text-xs font-medium text-foreground truncate">
+                        {user?.firstName} {user?.lastName}
+                      </p>
+                      <p className="text-xs text-muted-foreground truncate">{user?.email}</p>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => { setUserMenuOpen(false); signOut?.(); }}
+                      className="w-full flex items-center gap-2 px-3 py-2 text-sm text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                    >
+                      <LogOut className="w-4 h-4" />
+                      Sign out
+                    </button>
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>
@@ -267,7 +295,9 @@ export default function AppLayout({ children }) {
       <NetworkStatus />
 
       {/* Main Content */}
-      <main className="flex-1 flex flex-col">{children}</main>
+      <main className={lockViewport ? "flex-1 min-h-0 flex flex-col overflow-hidden" : "flex-1 flex flex-col"}>
+        {children}
+      </main>
     </div>
   );
 }

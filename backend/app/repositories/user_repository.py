@@ -199,17 +199,21 @@ class UserRepository:
         # Try to get existing user
         user = self.get_user(user_id)
         if user:
-            # Update org_id if changed
-            if user.org_id != org_id:
+            # Update org_id or email if changed
+            needs_update = user.org_id != org_id or (email and not email.endswith("@unknown.com") and user.email != email)
+            if needs_update:
                 try:
                     with self._get_session() as db:
                         db_user = db.query(User).filter(User.id == user_id).first()
                         if db_user:
-                            db_user.org_id = org_id
+                            if db_user.org_id != org_id:
+                                db_user.org_id = org_id
+                            if email and not email.endswith("@unknown.com") and db_user.email != email:
+                                db_user.email = email
                             db.commit()
                 except SQLAlchemyError as e:
                     logger.error(
-                        "Failed to update user org_id",
+                        "Failed to update user",
                         extra={"user_id": user_id, "org_id": org_id, "error": str(e)}
                     )
             # Update last login and return

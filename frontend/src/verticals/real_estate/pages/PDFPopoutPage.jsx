@@ -7,7 +7,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
-import { useAuth } from '@clerk/clerk-react';
+import { useAppAuth } from "@/hooks/useAppAuth";
 import PDFViewer from '../../../components/pdf/PDFViewer';
 import { useTemplateFill, useTemplateFillActions } from '../../../store';
 import { Loader2, AlertCircle, FileText } from 'lucide-react';
@@ -15,7 +15,7 @@ import { Badge } from '../../../components/ui/badge';
 
 export default function PDFPopoutPage() {
   const { fillRunId } = useParams();
-  const { getToken } = useAuth();
+  const { getToken } = useAppAuth();
   const [currentPage, setCurrentPage] = useState(1);
 
   const { fillRun, pdfUrl, isLoading, error } = useTemplateFill();

@@ -110,7 +110,7 @@ class TemplateFillRun(Base):
     #       "id": "f1",
     #       "name": "Property Name",
     #       "type": "text",
-    #       "sample_value": "Sunset Plaza",
+    #       "extracted_value": "Sunset Plaza",
     #       "confidence": 0.95,
     #       "source_page": 1
     #     }

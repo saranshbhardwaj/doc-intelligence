@@ -1,12 +1,31 @@
 """Schema loader for YAML-defined Excel templates."""
 
 import os
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import yaml
 
 from app.utils.logging import logger
+
+
+def _normalize_field_name(name: str) -> str:
+    """
+    Normalize a field name for fuzzy alias matching.
+
+    Azure DI often returns labels with trailing colons, dollar signs, or
+    extra whitespace (e.g., "Gross Potential Rent:" instead of "Gross Potential Rent").
+    Normalizing both sides before comparison significantly increases match rate.
+    """
+    n = name.lower().strip()
+    # Strip trailing punctuation common in Azure DI labels (colon, period, comma, semicolon)
+    n = n.rstrip(':.,;!')
+    # Remove currency symbols and parentheses (e.g., "Price ($)" → "Price  ")
+    n = re.sub(r'[$()]', '', n)
+    # Collapse multiple whitespace to single space
+    n = re.sub(r'\s+', ' ', n).strip()
+    return n
 
 
 class TemplateSchema:
@@ -28,6 +47,10 @@ class TemplateSchema:
         """
         Build an index mapping lowercase aliases to field IDs.
 
+        Stores both the raw lowercase alias AND its normalized form so that
+        Azure DI labels like "Gross Potential Rent:" also match the alias
+        "Gross Potential Rent" (trailing colon stripped by normalization).
+
         Returns:
             Dict mapping alias → field_id
         """
@@ -36,9 +59,12 @@ class TemplateSchema:
             field_id = field["id"]
             for alias in field.get("pdf_aliases", []):
                 alias_lower = alias.lower().strip()
-                # Store all aliases pointing to this field
-                # If collision, last field wins (shouldn't happen with good schema design)
+                # Raw lowercase match (original behavior)
                 alias_index[alias_lower] = field_id
+                # Normalized match (handles trailing punctuation / special chars)
+                alias_normalized = _normalize_field_name(alias)
+                if alias_normalized != alias_lower:
+                    alias_index[alias_normalized] = field_id
 
         logger.debug(f"Built alias index with {len(alias_index)} entries for {len(self.fields)} fields")
         return alias_index
@@ -47,23 +73,38 @@ class TemplateSchema:
         """
         Find a schema field matching the PDF field name.
 
+        Matching order (highest to lowest priority):
+        1. Exact lowercase match
+        2. Normalized match (strips trailing colon/punctuation, collapses whitespace)
+        3. Partial substring match using normalized form
+
         Args:
             pdf_field_name: Name from PDF extraction
 
         Returns:
             Field definition dict, or None if no match
         """
-        normalized = pdf_field_name.lower().strip()
+        normalized_raw = pdf_field_name.lower().strip()
 
-        # Direct match (O(1))
-        if normalized in self._alias_index:
-            field_id = self._alias_index[normalized]
+        # 1. Direct match (O(1))
+        if normalized_raw in self._alias_index:
+            field_id = self._alias_index[normalized_raw]
             return self.get_field(field_id)
 
-        # Partial match - check if any alias is contained in PDF field name
-        # (e.g., "Purchase Price (Per Unit)" matches "Purchase Price")
+        # 2. Normalized match: strips trailing punctuation, removes $(), collapses spaces
+        #    Handles Azure DI labels like "Gross Potential Rent:" → matches alias "Gross Potential Rent"
+        normalized_clean = _normalize_field_name(pdf_field_name)
+        if normalized_clean != normalized_raw and normalized_clean in self._alias_index:
+            field_id = self._alias_index[normalized_clean]
+            logger.debug(
+                f"Normalized match: '{pdf_field_name}' → '{normalized_clean}' → field '{field_id}'"
+            )
+            return self.get_field(field_id)
+
+        # 3. Partial match - check if any alias is contained in PDF field name or vice versa
+        #    (e.g., "Purchase Price (Per Unit)" matches alias "Purchase Price")
         for alias, field_id in self._alias_index.items():
-            if alias in normalized or normalized in alias:
+            if alias in normalized_clean or normalized_clean in alias:
                 logger.debug(f"Partial match: '{pdf_field_name}' → alias '{alias}' → field '{field_id}'")
                 return self.get_field(field_id)
 

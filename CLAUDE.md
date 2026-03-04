@@ -48,7 +48,7 @@ Deployed on **Railway** (API + workers). Local dev via Docker Compose.
 | Database | PostgreSQL + pgvector (local Docker, Supabase in prod) |
 | Storage | Cloudflare R2 (S3-compatible) |
 | Frontend | React + Vite (ports 5174) |
-| Auth | Clerk (JWT) |
+| Auth | WorkOS AuthKit (RS256 JWT, `PyJWT` + `PyJWKClient` on backend) |
 | LLM | Anthropic Claude (via `llm_client.py`) |
 | Embedding | OpenAI `text-embedding-3-small` (768d) |
 | Reranker | `cross-encoder/ms-marco-MiniLM-L-6-v2` (CrossEncoder, ~1.5GB on worker) |
@@ -289,20 +289,23 @@ Orchestrated by `start_fill_run_chain`.
 - **Progress UI**: Inline progress with shadcn `Progress` component + status message
 - **Icons**: lucide-react
 - **Dark mode**: class-based (`darkMode: "class"` in tailwind config)
+- **Whitespace**: Keep padding and margins minimal and compact. Avoid excessive vertical padding (e.g., `py-8`, `py-6` in small sections). Prefer `p-3`, `p-4`, `py-2`, `py-3` for compact UIs. Use `gap-2`, `gap-3` instead of `gap-4`, `gap-6` unless explicitly spacious design is requested.
 
 ---
 
 ## Database Migrations
 Alembic migrations in `backend/migrations/versions/`.
 
-Current head: `d1e2f3a4b5c6`
+Current head: `f3a4b5c6d7e8`
 ```
-...→ a7fd572ad161 → b1c2d3e4f5a6 → c4d5e6f7a8b9 → d1e2f3a4b5c6 (HEAD)
+...→ a7fd572ad161 → b1c2d3e4f5a6 → c4d5e6f7a8b9 → d1e2f3a4b5c6 → e2f3a4b5c6d7 → f3a4b5c6d7e8 (HEAD)
 ```
 - `a7fd572ad161`: Add beta limits & shadow credit lifecycle columns
 - `b1c2d3e4f5a6`: Upgrade vector column 384d → 768d (Feb 2026)
 - `c4d5e6f7a8b9`: Add PG tsvector trigger for hybrid FTS search; backfill (Feb 2026)
 - `d1e2f3a4b5c6`: Fix job_states check constraint to include template_fill_run_id (Feb 2026)
+- `e2f3a4b5c6d7`: Fix tsvector trigger function search_path (Supabase security lint)
+- `f3a4b5c6d7e8`: Drop 9 duplicate ix_ indexes shadowing idx_ counterparts (Supabase perf lint)
 
 > Switching embedding models requires: new migration (alter vector column) + `reembed_all_chunks.py`
 

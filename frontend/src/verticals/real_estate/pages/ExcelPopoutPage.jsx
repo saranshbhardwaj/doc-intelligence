@@ -8,7 +8,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { useParams } from 'react-router-dom';
-import { useAuth } from '@clerk/clerk-react';
+import { useAppAuth } from "@/hooks/useAppAuth";
 import ExcelGridView from '../components/ExcelGridView';
 import { useTemplateFill, useTemplateFillActions } from '../../../store';
 import { Loader2, AlertCircle, Table } from 'lucide-react';
@@ -16,7 +16,7 @@ import { Badge } from '../../../components/ui/badge';
 
 export default function ExcelPopoutPage() {
   const { fillRunId } = useParams();
-  const { getToken } = useAuth();
+  const { getToken } = useAppAuth();
   const pdfPopoutRef = useRef(null);
 
   const { fillRun, isLoading, error } = useTemplateFill();
@@ -28,7 +28,12 @@ export default function ExcelPopoutPage() {
   }, [fillRunId]);
 
   // Handle citation clicks - navigate PDF pop-out
-  function handleCitationClick(pageNumber) {
+  function handleCitationClick(pageNumberOrBbox) {
+    const pageNumber =
+      typeof pageNumberOrBbox === 'number'
+        ? pageNumberOrBbox
+        : Number(pageNumberOrBbox?.page);
+    if (!Number.isFinite(pageNumber) || pageNumber < 1) return;
 
     // Try to find PDF pop-out window
     // Check if we have a reference to it
@@ -103,7 +108,7 @@ export default function ExcelPopoutPage() {
   }
 
   return (
-    <div className="flex flex-col h-screen bg-background">
+    <div className="flex flex-col h-screen min-h-0 bg-background overflow-hidden">
       {/* Header */}
       <div className="border-b bg-card px-4 py-2.5 flex-shrink-0">
         <div className="flex items-center justify-between">
@@ -118,7 +123,7 @@ export default function ExcelPopoutPage() {
       </div>
 
       {/* Excel Grid with Drawer */}
-      <div className="flex-1 overflow-hidden">
+      <div className="flex-1 min-h-0 overflow-hidden">
         <ExcelGridView
           fillRunId={fillRunId}
           extractedData={fillRun.extracted_data}

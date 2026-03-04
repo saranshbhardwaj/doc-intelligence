@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useMemo } from 'react';
-import { useAuth } from '@clerk/clerk-react';
+import { useAppAuth } from "@/hooks/useAppAuth";
 import { useTemplateFillActions } from '../../../store';
 import { Copy, Check, AlertCircle, Loader2, Search, ChevronLeft, ChevronRight, Filter } from 'lucide-react';
 import { Button } from '../../../components/ui/button';
@@ -21,7 +21,7 @@ export default function FieldsList({
   selectedText,
   onCitationClick,
 }) {
-  const { getToken } = useAuth();
+  const { getToken } = useAppAuth();
   const { updateFieldData } = useTemplateFillActions();
   const [editingField, setEditingField] = useState(null);
   const [savingField, setSavingField] = useState(null);
@@ -38,7 +38,7 @@ export default function FieldsList({
   const pdfFields = fieldMapping?.pdf_fields || [];
   const allFields = pdfFields.length > 0
     ? pdfFields.map(f => [f.id, {
-        value: extractedData[f.id]?.value || f.sample_value,
+        value: extractedData[f.id]?.value || f.extracted_value,
         confidence: extractedData[f.id]?.confidence || f.confidence,
         source_page: extractedData[f.id]?.source_page,
         user_edited: extractedData[f.id]?.user_edited || false,

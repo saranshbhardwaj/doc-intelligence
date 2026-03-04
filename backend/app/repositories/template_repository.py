@@ -390,6 +390,13 @@ class TemplateRepository:
 
         return query.all()
 
+    def count_user_fill_runs(self, user_id: str, org_id: str) -> int:
+        """Return total number of fill runs for a user (cheap COUNT query)."""
+        return self.db.query(TemplateFillRun).filter(
+            TemplateFillRun.user_id == user_id,
+            TemplateFillRun.org_id == org_id,
+        ).count()
+
     def delete_fill_run(self, fill_run_id: str) -> bool:
         """Delete fill run and remove filled file from storage."""
         fill_run = self.get_fill_run(fill_run_id)

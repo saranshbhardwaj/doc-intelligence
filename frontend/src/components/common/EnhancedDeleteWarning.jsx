@@ -118,6 +118,10 @@ export default function EnhancedDeleteWarning({
             <>
               {isInUse ? (
                 <AlertDialogDescription className="space-y-4">
+                  <p className="text-sm text-muted-foreground">
+                    In Library, delete removes the document from this collection first.
+                    It is permanently deleted only when no other collection links remain.
+                  </p>
                   <p className="text-base">
                     <strong className="text-foreground">{documentName}</strong>{" "}
                     is currently being used in{" "}
@@ -204,6 +208,9 @@ export default function EnhancedDeleteWarning({
                     <p className="text-sm text-foreground font-medium mb-2">
                       ⚠️ Impact of Deletion:
                     </p>
+                    <p className="text-sm text-muted-foreground mb-2">
+                      If this is the last linked collection and the document is permanently deleted:
+                    </p>
                     <ul className="space-y-1 text-sm text-muted-foreground">
                       <li>• Document will be removed from all chat sessions</li>
                       <li>
@@ -233,13 +240,18 @@ export default function EnhancedDeleteWarning({
                 </AlertDialogDescription>
               ) : (
                 <AlertDialogDescription>
+                  <p className="mb-3 text-sm text-muted-foreground">
+                    In Library, delete removes the document from this collection first.
+                    It is permanently deleted only when no other collection links remain.
+                  </p>
                   <p className="mb-3">
-                    This will permanently delete{" "}
+                    This will remove{" "}
                     <strong className="text-foreground">{documentName}</strong>.
                   </p>
                   <p className="text-sm text-muted-foreground">
                     The document is not currently used in any chat sessions,
-                    extractions, or workflows. This action cannot be undone.
+                    extractions, or workflows. If this is the last collection link,
+                    the document will be permanently deleted and that action cannot be undone.
                   </p>
                 </AlertDialogDescription>
               )}

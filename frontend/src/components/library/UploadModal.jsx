@@ -216,13 +216,13 @@ export default function UploadModal({
 
             <div className="flex flex-col items-center justify-center py-12 px-4">
               <div
-                className={`w-16 h-16 rounded-full flex items-center justify-center mb-4 transition-colors ${
-                  dragActive ? "bg-primary/20" : "bg-muted"
+                className={`w-16 h-16 rounded-2xl flex items-center justify-center mb-4 transition-colors ${
+                  dragActive ? "bg-primary/20" : "bg-primary/10"
                 }`}
               >
                 <Upload
                   className={`w-8 h-8 transition-colors ${
-                    dragActive ? "text-primary" : "text-muted-foreground"
+                    dragActive ? "text-primary" : "text-primary/60"
                   }`}
                 />
               </div>
@@ -363,12 +363,14 @@ export default function UploadModal({
               variant="outline"
               onClick={() => onOpenChange?.(false)}
               disabled={uploading}
+              className="rounded-full"
             >
               Cancel
             </Button>
             <Button
               onClick={handleUpload}
               disabled={!selectedCollectionId || validFilesCount === 0 || uploading}
+              className="rounded-full"
             >
               {uploading ? (
                 <>

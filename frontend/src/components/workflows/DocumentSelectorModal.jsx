@@ -6,7 +6,7 @@
  */
 
 import { useState, useEffect, useRef } from "react";
-import { useAuth } from "@clerk/clerk-react";
+import { useAppAuth } from "@/hooks/useAppAuth";
 import {
   Dialog,
   DialogContent,
@@ -48,7 +48,7 @@ import { useWorkflowDraft, useWorkflowDraftActions } from "../../store";
 const MAX_PAGES = 700;
 
 export default function DocumentSelectorModal({ open, onOpenChange }) {
-  const { getToken } = useAuth();
+  const { getToken } = useAppAuth();
   const fileInputRef = useRef(null);
 
   // Zustand store for workflow draft

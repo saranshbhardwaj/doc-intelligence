@@ -4,7 +4,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { useAuth } from '@clerk/clerk-react';
+import { useAppAuth } from "@/hooks/useAppAuth";
 import {
   Dialog,
   DialogContent,
@@ -22,13 +22,13 @@ import { cn } from '@/lib/utils';
 import { listCollections, getCollection } from '../../../api';
 
 export default function DocumentSelectorDialog({ open, onOpenChange, onSelect, templateName }) {
-  const { getToken } = useAuth();
+  const { getToken } = useAppAuth();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [collections, setCollections] = useState([]);
   const [documents, setDocuments] = useState([]);
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedDocId, setSelectedDocId] = useState(null);
+  const [selectedDocKey, setSelectedDocKey] = useState(null);
 
   useEffect(() => {
     if (open) {
@@ -55,6 +55,7 @@ export default function DocumentSelectorDialog({ open, onOpenChange, onSelect, t
             ...doc,
             collectionName: col.name,
             collectionId: col.id,
+            uiSelectionKey: `${col.id}:${doc.id}`,
           }));
           allDocs.push(...colDocs);
         } catch (err) {
@@ -72,11 +73,11 @@ export default function DocumentSelectorDialog({ open, onOpenChange, onSelect, t
   }
 
   function handleSelect() {
-    const selectedDoc = documents.find((d) => d.id === selectedDocId);
+    const selectedDoc = documents.find((d) => d.uiSelectionKey === selectedDocKey);
     if (selectedDoc) {
       onSelect(selectedDoc);
       onOpenChange(false);
-      setSelectedDocId(null);
+      setSelectedDocKey(null);
       setSearchQuery('');
     }
   }
@@ -140,10 +141,10 @@ export default function DocumentSelectorDialog({ open, onOpenChange, onSelect, t
             <div className="space-y-2">
               {readyDocuments.map((doc) => (
                 <DocumentCard
-                  key={doc.id}
+                  key={doc.uiSelectionKey}
                   document={doc}
-                  selected={doc.id === selectedDocId}
-                  onSelect={() => setSelectedDocId(doc.id)}
+                  selected={doc.uiSelectionKey === selectedDocKey}
+                  onSelect={() => setSelectedDocKey(doc.uiSelectionKey)}
                 />
               ))}
             </div>
@@ -154,7 +155,7 @@ export default function DocumentSelectorDialog({ open, onOpenChange, onSelect, t
           <Button variant="outline" onClick={() => onOpenChange(false)}>
             Cancel
           </Button>
-          <Button onClick={handleSelect} disabled={!selectedDocId}>
+          <Button onClick={handleSelect} disabled={!selectedDocKey}>
             Select Document
           </Button>
         </DialogFooter>

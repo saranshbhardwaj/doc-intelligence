@@ -6,26 +6,19 @@ from typing import AsyncGenerator, Optional
 
 from fastapi import APIRouter, HTTPException, Query, Depends
 from sse_starlette.sse import EventSourceResponse, ServerSentEvent
-import httpx
 
 from app.db_models_users import User
 from app.utils.logging import logger
-from app.auth import get_current_user
+from app.auth import get_current_user, _verify_token, _claim
 from app.repositories.job_repository import JobRepository
 from app.repositories.extraction_repository import ExtractionRepository
 from app.repositories.document_repository import DocumentRepository
-from clerk_backend_api import Clerk
-from clerk_backend_api.security.types import AuthenticateRequestOptions
-from app.config import settings
 
 # Import job progress tracker (separate module to avoid circular imports)
 from app.services.job_tracker import JobProgressTracker
 from app.services.pubsub import safe_subscribe
 
 router = APIRouter()
-
-# Initialize Clerk client for token verification
-clerk = Clerk(bearer_auth=settings.clerk_secret_key)
 
 
 @router.get("/api/jobs/{job_id}/stream")
@@ -42,43 +35,19 @@ async def stream_job_progress(job_id: str, token: Optional[str] = Query(None)):
     """
 
     # Verify authentication via token query parameter
+    # (EventSource doesn't support custom headers, so the token is passed as ?token=)
     if not token:
         raise HTTPException(status_code=401, detail="Missing authentication token")
 
     try:
-        # Convert token to httpx request for Clerk SDK authentication
-        # EventSource doesn't support custom headers, so we receive token as query param
-        # but Clerk expects it in the Authorization header
         logger.info(f"[SSE] Verifying token for job {job_id}...", extra={"job_id": job_id})
-
-        httpx_request = httpx.Request(
-            method="GET",
-            url=f"http://localhost/api/jobs/{job_id}/stream",  # URL doesn't matter for token verification
-            headers={"Authorization": f"Bearer {token}"}
-        )
-
-        # Authenticate the request with Clerk
-        # Empty options accepts session tokens by default (not OAuth tokens)
-        request_state = clerk.authenticate_request(
-            httpx_request,
-            AuthenticateRequestOptions()
-        )
-
-        if not request_state.is_signed_in:
-            logger.error(f"[SSE] User is not signed in for job {job_id}", extra={"job_id": job_id})
-            raise HTTPException(status_code=401, detail="Not signed in")
-
-        # Extract user_id from the token payload ('sub' field in JWT)
-        payload = request_state.payload or {}
-        user_id = payload.get('sub')
-        org_id = payload.get('org_id') or payload.get('orgId')
+        payload = _verify_token(token)
+        user_id = payload.get("sub")           # standard JWT claim — no namespace
+        org_id = payload.get(_claim("org_id"))
 
         if not user_id:
-            logger.error(f"[SSE] Could not extract user_id from token for job {job_id}", extra={"job_id": job_id})
             raise HTTPException(status_code=401, detail="Could not extract user_id from token")
-
         if not org_id:
-            logger.error(f"[SSE] Could not extract org_id from token for job {job_id}", extra={"job_id": job_id})
             raise HTTPException(status_code=401, detail="Could not extract org_id from token")
 
         logger.info(

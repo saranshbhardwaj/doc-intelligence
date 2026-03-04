@@ -5,7 +5,7 @@
  * without leaving the ExtractPage.
  */
 import { useEffect, useState, useCallback, useRef } from "react";
-import { useAuth } from "@clerk/clerk-react";
+import { useAppAuth } from "@/hooks/useAppAuth";
 import {
   Download,
   Trash2,
@@ -33,7 +33,7 @@ export default function ExtractionResultSheet({
   extractionId: propExtractionId,
   onDelete,
 }) {
-  const { getToken } = useAuth();
+  const { getToken } = useAppAuth();
   const extraction = useExtraction();
   const { retryExtraction, resetExtraction } = useExtractionActions();
 

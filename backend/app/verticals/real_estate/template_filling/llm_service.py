@@ -63,6 +63,21 @@ class ExtractedFieldValue(BaseModel):
     source_text: str = Field(description="Brief snippet of surrounding text for context")
 
 
+class SchemaFieldResult(BaseModel):
+    """Extraction result for a single YAML schema field (Stage 2 targeted extraction)."""
+    field_id: str = Field(description="Schema field ID (from YAML)")
+    value: Optional[str] = Field(None, description="Extracted value, null if not found in PDF")
+    confidence: float = Field(ge=0.0, le=1.0, description="Extraction confidence (0.0-1.0)")
+    citations: List[str] = Field(default_factory=list, description="Citation tokens like [D1:p5]")
+
+
+class SchemaFieldExtractionResult(BaseModel):
+    """Result of Stage 2 targeted schema field extraction."""
+    results: List[SchemaFieldResult] = Field(description="Results for each requested schema field")
+    total_found: int = Field(description="Number of fields with non-null values found")
+    total_not_found: int = Field(description="Number of fields not found in PDF")
+
+
 # ============================================================================
 # LLM Service
 # ============================================================================
@@ -132,14 +147,132 @@ class TemplateFillLLMService:
             logger.error(f"Error detecting PDF fields: {e}", exc_info=True)
             raise
 
+    async def extract_schema_field_values(
+        self,
+        unmapped_fields: List[Dict[str, Any]],
+        pdf_fields: List[Dict[str, Any]],
+    ) -> Dict[str, Any]:
+        """
+        Stage 2: Targeted extraction of specific YAML schema fields from Azure DI output.
+
+        Instead of asking the LLM "which cells in these sheets match these PDF fields"
+        (generic 6-batch approach), we ask "for each of these 63 named schema fields,
+        what value does the PDF contain?" — a much more focused and accurate prompt.
+
+        Args:
+            unmapped_fields: Schema field defs that weren't matched in Stage 1 (alias match).
+                             Each dict has: id, sheet, value_cell, label_cell, data_type, pdf_aliases.
+            pdf_fields: All Azure DI key-value fields extracted from the PDF.
+
+        Returns:
+            Dict of {field_id: {"value": str, "confidence": float, "citations": List[str]}}
+            Only fields actually found in the PDF are included (no null entries).
+        """
+        if not unmapped_fields or not pdf_fields:
+            return {}
+
+        logger.info(
+            f"🎯 Stage 2 targeted extraction: {len(unmapped_fields)} unmapped schema fields "
+            f"from {len(pdf_fields)} Azure DI fields"
+        )
+
+        # Strip to minimal fields for token efficiency (26% reduction)
+        stripped_pdf_fields = [self._strip_pdf_field(f) for f in pdf_fields]
+        pdf_fields_json = json.dumps(stripped_pdf_fields, separators=(",", ":"), ensure_ascii=False)
+
+        # System prompt: all Azure DI data (cached across any follow-up calls)
+        system_prompt = f"""You are extracting values from a real estate PDF for specific named schema fields.
+
+Below is the complete list of key-value pairs extracted by Azure Document Intelligence:
+
+```json
+{pdf_fields_json}
+```
+
+For each requested schema field, find its value from the Azure DI data above.
+Match by the field's aliases and semantic meaning. For example:
+- A field with aliases ["City", "Location City"] might appear as "City:", "Location:", "Property City", etc.
+- A field with aliases ["Asking Price", "Purchase Price"] might appear as "List Price", "Sale Price", etc.
+
+Return null for value if the data genuinely cannot be found in the PDF."""
+
+        # User message: list of fields to extract (minimal token footprint)
+        fields_for_request = [
+            {
+                "id": f["id"],
+                "aliases": f.get("pdf_aliases", []),
+                "data_type": f.get("data_type", "text"),
+            }
+            for f in unmapped_fields
+        ]
+        user_message = (
+            f"Find values for these {len(fields_for_request)} schema fields from the Azure DI data "
+            f"in the system prompt.\n\n"
+            f"Fields to extract:\n```json\n"
+            f"{json.dumps(fields_for_request, indent=2)}\n```\n\n"
+            f"For each field return: field_id, value (null if not found), confidence (0.0-1.0), "
+            f"and citations (citation tokens like [D1:p5])."
+        )
+
+        system_arg = [
+            {
+                "type": "text",
+                "text": system_prompt,
+                "cache_control": {"type": "ephemeral"},
+            }
+        ]
+
+        message = await asyncio.to_thread(
+            self.client.messages.parse,
+            model=self.model,
+            max_tokens=self.max_tokens,
+            temperature=0.0,
+            timeout=settings.synthesis_llm_timeout_seconds,
+            system=system_arg,
+            messages=[{"role": "user", "content": user_message}],
+            output_format=SchemaFieldExtractionResult,
+        )
+
+        # Log token usage
+        usage = getattr(message, "usage", None)
+        if usage is not None:
+            cache_creation = getattr(usage, "cache_creation_input_tokens", 0) or 0
+            cache_read = getattr(usage, "cache_read_input_tokens", 0) or 0
+            input_tokens = getattr(usage, "input_tokens", 0) or 0
+            output_tokens = getattr(usage, "output_tokens", 0) or 0
+            logger.info(
+                f"🎯 Stage 2 tokens: input={input_tokens:,}, output={output_tokens:,}, "
+                f"cache_creation={cache_creation:,}, cache_read={cache_read:,}"
+            )
+
+        # Build {field_id: {value, confidence, citations}} — only for found fields
+        parsed = message.parsed_output
+        result_by_field: Dict[str, Any] = {}
+        for item in parsed.results:
+            if item.value:
+                result_by_field[item.field_id] = {
+                    "value": item.value,
+                    "confidence": item.confidence,
+                    "citations": item.citations,
+                }
+
+        found_count = len(result_by_field)
+        not_found_count = len(unmapped_fields) - found_count
+        logger.info(
+            f"✅ Stage 2 complete: {found_count}/{len(unmapped_fields)} fields found "
+            f"({not_found_count} not present in this PDF)"
+        )
+
+        return result_by_field
+
     def _format_chunks_with_citations(self, chunks: List[Dict[str, Any]]) -> str:
         """Format chunks with citation tokens for LLM consumption."""
         formatted_parts = []
 
         for i, chunk in enumerate(chunks):
-            citation = chunk.get("citation", "[?]")
+            page_num = self._resolve_chunk_page(chunk)
+            citation = f"[D1:p{page_num}]" if page_num > 0 else chunk.get("citation", "[?]")
             text = chunk.get("text", "")
-            page_num = chunk.get("page_number", 0)
             section = chunk.get("section_heading", "")
             is_table = chunk.get("is_tabular", False)
 
@@ -153,6 +286,54 @@ class TemplateFillLLMService:
             formatted_parts.append(f"{header}\n{formatted_text}\n")
 
         return "\n".join(formatted_parts)
+
+    def _resolve_chunk_page(self, chunk: Dict[str, Any]) -> int:
+        """
+        Resolve the most accurate display page for a chunk.
+
+        Priority:
+        1) chunk_metadata.bbox.page
+        2) chunk_metadata.page_number
+        3) chunk_metadata.page_range[0]
+        4) chunk.page_number (DB column fallback; may be first page for multi-page chunks)
+        """
+        metadata = chunk.get("chunk_metadata") or chunk.get("metadata") or {}
+        if isinstance(metadata, str):
+            try:
+                metadata = json.loads(metadata)
+            except (json.JSONDecodeError, TypeError):
+                metadata = {}
+
+        if isinstance(metadata, dict):
+            bbox = metadata.get("bbox")
+            if isinstance(bbox, dict):
+                bbox_page = bbox.get("page")
+                if isinstance(bbox_page, int) and bbox_page > 0:
+                    return bbox_page
+                if isinstance(bbox_page, str) and bbox_page.isdigit():
+                    return int(bbox_page)
+
+            metadata_page = metadata.get("page_number")
+            if isinstance(metadata_page, int) and metadata_page > 0:
+                return metadata_page
+            if isinstance(metadata_page, str) and metadata_page.isdigit():
+                return int(metadata_page)
+
+            page_range = metadata.get("page_range")
+            if isinstance(page_range, list) and page_range:
+                first_page = page_range[0]
+                if isinstance(first_page, int) and first_page > 0:
+                    return first_page
+                if isinstance(first_page, str) and first_page.isdigit():
+                    return int(first_page)
+
+        fallback_page = chunk.get("page_number")
+        if isinstance(fallback_page, int) and fallback_page > 0:
+            return fallback_page
+        if isinstance(fallback_page, str) and fallback_page.isdigit():
+            return int(fallback_page)
+
+        return 0
 
     def _build_field_detection_prompt(self, pdf_context: str) -> str:
         """Build prompt for field detection."""
@@ -694,7 +875,8 @@ Terms in each row are EQUIVALENT. Match in EITHER direction. Case-insensitive.
 4. **CRITICAL Matching Rules:**
    - Only create mappings with confidence >= 0.10
    - ALWAYS preserve the "citations" array from the PDF field
-   - Do NOT map the same PDF field to multiple Excel cells (choose best match)
+   - You MAY map the same PDF field to multiple Excel cells when those cells represent
+     the same metric in different sections/summaries (e.g., dashboard rollups)
    - Do NOT map to cells that appear to be formula cells (calculated fields)
    - For currencies: Match currency fields to currency cells
    - For percentages: Match percentage fields to percentage cells

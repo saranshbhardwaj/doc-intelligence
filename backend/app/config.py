@@ -11,9 +11,9 @@ class Settings(BaseSettings):
     anthropic_admin_api_key: str = ""  # sk-ant-admin-... from Anthropic Console (for Usage & Cost API)
     admin_api_key: str = "change-this-in-production"  # For analytics endpoint access
 
-    # Authentication (Clerk)
-    clerk_secret_key: str = ""  # Get from https://dashboard.clerk.com
-    clerk_publishable_key: str = ""  # Used by frontend
+    # Authentication (WorkOS AuthKit)
+    workos_client_id: str = ""  # Get from https://dashboard.workos.com
+    workos_api_key: str = ""    # WorkOS API key (sk_...)
 
     # Database
     database_url: str = ""

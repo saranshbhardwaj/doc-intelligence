@@ -102,6 +102,11 @@
   * {
     @apply border-border;
   }
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
   body {
     @apply bg-background text-foreground;
     background-image:
@@ -212,6 +217,54 @@
 
 .animation-delay-4000 {
   animation-delay: 4s;
+}
+
+/* Floating animation for hero decorative icons */
+@keyframes float {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-12px); }
+}
+
+@keyframes float-slow {
+  0%, 100% { transform: translateY(0px); }
+  50% { transform: translateY(-8px); }
+}
+
+/* Dash animation for SVG connecting lines */
+@keyframes dash-flow {
+  to { stroke-dashoffset: -20; }
+}
+
+.animate-float {
+  animation: float 6s ease-in-out infinite;
+}
+
+.animate-float-delayed {
+  animation: float 5s ease-in-out infinite;
+  animation-delay: 1.5s;
+}
+
+.animate-float-slow {
+  animation: float-slow 8s ease-in-out infinite;
+  animation-delay: 3s;
+}
+
+.animate-dash-flow {
+  stroke-dasharray: 8 6;
+  animation: dash-flow 1.5s linear infinite;
+}
+
+/* Glass card utility */
+.glass-card {
+  background: hsl(var(--card) / 0.6);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid hsl(var(--border) / 0.5);
+}
+
+.dark .glass-card {
+  background: hsl(var(--card) / 0.4);
+  border: 1px solid hsl(var(--border) / 0.3);
 }
 
 /* Custom Scrollbars - ChatGPT Inspired */

@@ -38,10 +38,19 @@ import {
   Clock,
   XCircle,
   Search,
-  Filter,
   FileDown,
   Loader2,
+  Bot,
+  FileSpreadsheet,
+  File,
 } from "lucide-react";
+
+const getDocFileIcon = (filename) => {
+  const ext = filename?.toLowerCase().split('.').pop();
+  if (ext === 'pdf') return { Icon: FileText, bg: 'bg-red-50 dark:bg-red-900/20', color: 'text-red-500 dark:text-red-400' };
+  if (['xlsx', 'xls'].includes(ext)) return { Icon: FileSpreadsheet, bg: 'bg-green-50 dark:bg-green-900/20', color: 'text-green-600 dark:text-green-400' };
+  return { Icon: File, bg: 'bg-blue-50 dark:bg-blue-900/20', color: 'text-blue-500 dark:text-blue-400' };
+};
 import { Button } from "../ui/button";
 import { Card } from "../ui/card";
 import { Input } from "../ui/input";
@@ -59,6 +68,13 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "../ui/dropdown-menu";
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from "../ui/dialog";
 import { Combobox } from "../ui/combobox";
 import Spinner from "../common/Spinner";
 import { getCollection } from "../../api/chat";
@@ -109,6 +125,13 @@ export default function ActiveChat({
   const shouldAutoScrollRef = useRef(true);
   const messagesScrollTopRef = useRef(0);
   const titleInputRef = useRef(null);
+  const textareaRef = useRef(null);
+
+  const handleTextareaInput = (e) => {
+    const ta = e.target;
+    ta.style.height = 'auto';
+    ta.style.height = Math.min(ta.scrollHeight, 200) + 'px';
+  };
 
   // Search and filter state
   const [documentSearchQuery, setDocumentSearchQuery] = useState("");
@@ -398,7 +421,7 @@ export default function ActiveChat({
       >
         <div className="w-full flex flex-col h-full min-w-0 overflow-hidden">
           {/* Sticky Header with Editable Title and Document Chips */}
-          <div className="sticky top-0 z-10 bg-card/80 backdrop-blur border-b border-border px-3 md:px-6 py-3">
+          <div className="sticky top-0 z-10 bg-card/80 backdrop-blur border-b border-border shadow-sm px-3 md:px-6 py-3">
         <div className="flex items-start md:items-center justify-between gap-2 mb-3">
           {/* Editable Title */}
           <div className="flex items-center gap-2 flex-1 min-w-0">
@@ -475,64 +498,68 @@ export default function ActiveChat({
           </DropdownMenu>
         </div>
 
-        {/* Document Chips */}
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-xs text-muted-foreground font-medium">
-            Documents ({sessionDocIds.length}):
-          </span>
-
-          {sessionDocIds.length === 0 ? (
-            <span className="text-xs text-muted-foreground italic">
-              No documents selected
-            </span>
-          ) : (
-            <>
-              {currentSession?.documents?.map((doc, index) => {
-                const isActive = pdfViewer.activeDocumentId === doc.id;
-                return (
-                  <div
-                    key={doc.id}
-                    onClick={() => handleDocumentChipClick(doc.id)}
-                    className={`group flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium transition-all cursor-pointer animate-chip-fade-in ${
-                      isActive
-                        ? 'bg-primary text-primary-foreground ring-2 ring-primary/50'
-                        : 'bg-primary/10 text-primary hover:bg-primary/20'
-                    }`}
-                    style={{ animationDelay: `${index * 30}ms` }}
-                    title="Click to view PDF"
-                  >
-                    <FileText className="w-3 h-3" />
-                    <span className="max-w-[90px] md:max-w-[120px] truncate">{doc.name}</span>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        onRemoveDocument?.(doc.id);
-                      }}
-                      className="opacity-0 group-hover:opacity-100 transition-opacity hover:text-destructive ml-0.5"
-                      title="Remove document"
-                    >
-                      <X className="w-3 h-3" />
-                    </button>
+        {/* Document Chips — horizontal scrollable strip */}
+        <div className="flex items-center gap-3 overflow-x-auto scrollbar-thin pb-1 pt-2">
+          {currentSession?.documents?.map((doc, index) => {
+            const { Icon: DocIcon, bg: docBg, color: docColor } = getDocFileIcon(doc.name || doc.filename);
+            const isActive = pdfViewer.activeDocumentId === doc.id;
+            return (
+              <div
+                key={doc.id}
+                onClick={() => handleDocumentChipClick(doc.id)}
+                className={`group flex items-center gap-3 px-4 py-2 rounded-xl border transition-all cursor-pointer shrink-0 min-w-[160px] animate-chip-fade-in ${
+                  isActive
+                    ? 'bg-primary/10 border-primary/30'
+                    : 'bg-muted/50 border-border hover:bg-card hover:shadow-sm'
+                }`}
+                style={{ animationDelay: `${index * 30}ms` }}
+                title="Click to view PDF"
+              >
+                <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${docBg}`}>
+                  <DocIcon className={`w-4 h-4 ${docColor}`} />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-xs font-semibold text-foreground truncate">{doc.name || doc.filename}</p>
+                  <div className="flex items-center gap-1.5 mt-0.5">
+                    <span className="w-2 h-2 rounded-full bg-primary shrink-0" />
+                    <span className="text-[10px] font-medium text-muted-foreground">Indexed</span>
                   </div>
-                );
-              })}
-            </>
-          )}
+                </div>
+                <button
+                  onClick={(e) => { e.stopPropagation(); onRemoveDocument?.(doc.id); }}
+                  className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-destructive p-0.5 shrink-0"
+                  title="Remove document"
+                >
+                  <X className="w-3.5 h-3.5" />
+                </button>
+              </div>
+            );
+          })}
 
-          {/* Add Documents Button */}
+          {/* Dashed "+ Add" button */}
           <button
             onClick={() => setShowDocumentManager(!showDocumentManager)}
-            className="flex items-center gap-1 px-2.5 py-1 bg-muted hover:bg-muted/80 text-foreground rounded-full text-xs font-medium transition-all"
+            className="w-10 h-10 rounded-xl border-2 border-dashed border-border text-muted-foreground hover:border-primary hover:text-primary hover:bg-primary/5 flex items-center justify-center transition-all shrink-0"
+            title="Add Document"
           >
-            <Plus className="w-3 h-3" />
-            Add
+            <Plus className="w-5 h-5" />
           </button>
         </div>
 
-        {/* Document Manager (Expandable) */}
-        {showDocumentManager && (
-          <div className="mt-3 p-3 bg-muted/50 rounded-lg border border-border animate-fade-in">
-            <div className="space-y-3">
+        {/* Document Manager Dialog */}
+        <Dialog open={showDocumentManager} onOpenChange={(open) => {
+          setShowDocumentManager(open);
+          if (!open) setDocsToAdd([]);
+        }}>
+          <DialogContent className="sm:max-w-lg max-h-[85vh] flex flex-col">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Plus className="w-4 h-4" />
+                Add Documents
+              </DialogTitle>
+            </DialogHeader>
+
+            <div className="flex-1 overflow-y-auto space-y-4 pr-3">
               {/* Collection Selector */}
               <div>
                 <label className="text-xs font-medium text-foreground mb-1.5 flex items-center gap-2">
@@ -564,47 +591,26 @@ export default function ActiveChat({
               {selectedCollectionId && (
                 <div>
                   <label className="text-xs font-medium text-foreground mb-1.5 block">
-                    Select Documents to Add ({docsToAdd.length} selected)
+                    Select Documents ({docsToAdd.length} selected)
                   </label>
 
-                  {/* Document Search and Filter */}
-                  <div className="space-y-2 mb-3">
-                    <div className="relative">
-                      <Search className="absolute left-2.5 top-2 h-3.5 w-3.5 text-muted-foreground" />
-                      <Input
-                        placeholder="Search documents..."
-                        value={documentSearchQuery}
-                        onChange={(e) => setDocumentSearchQuery(e.target.value)}
-                        className="pl-8 h-8 text-xs"
-                      />
-                    </div>
-
-                    <div className="flex items-center gap-2">
-                      <Filter className="w-3.5 h-3.5 text-muted-foreground" />
-                      <Select
-                        value={statusFilter}
-                        onValueChange={setStatusFilter}
-                      >
-                        <SelectTrigger className="h-8 text-xs bg-background">
-                          <SelectValue placeholder="Filter status..." />
-                        </SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="all">All Status</SelectItem>
-                          <SelectItem value="completed">Completed</SelectItem>
-                          <SelectItem value="processing">Processing</SelectItem>
-                          <SelectItem value="failed">Failed</SelectItem>
-                        </SelectContent>
-                      </Select>
-                    </div>
-
-                    {/* Results count */}
-                    {(documentSearchQuery || statusFilter !== "all") && (
-                      <p className="text-xs text-muted-foreground">
-                        {filteredDocuments.length} of{" "}
-                        {collectionDocuments.length} documents
-                      </p>
-                    )}
+                  {/* Document Search */}
+                  <div className="relative mb-3">
+                    <Search className="absolute left-2.5 top-2 h-3.5 w-3.5 text-muted-foreground" />
+                    <Input
+                      placeholder="Search documents..."
+                      value={documentSearchQuery}
+                      onChange={(e) => setDocumentSearchQuery(e.target.value)}
+                      className="pl-8 h-8 text-xs"
+                    />
                   </div>
+
+                  {/* Results count */}
+                  {documentSearchQuery && (
+                    <p className="text-xs text-muted-foreground mb-2">
+                      {filteredDocuments.length} of {collectionDocuments.length} documents
+                    </p>
+                  )}
 
                   {loadingDocuments ? (
                     <div className="flex items-center justify-center py-8">
@@ -622,7 +628,7 @@ export default function ActiveChat({
                       </p>
                     </div>
                   ) : (
-                    <div className="space-y-1.5 max-h-48 overflow-y-auto scrollbar-thin">
+                    <div className="space-y-1.5 max-h-[340px] overflow-y-auto scrollbar-thin">
                       {filteredDocuments.map((doc) => {
                         const isInSession = sessionDocIds.includes(doc.id);
                         const isSelected = docsToAdd.includes(doc.id);
@@ -699,32 +705,28 @@ export default function ActiveChat({
                   )}
                 </div>
               )}
-
-              {/* Actions */}
-              <div className="flex gap-2 pt-2">
-                <Button
-                  size="sm"
-                  onClick={handleAddDocuments}
-                  disabled={docsToAdd.length === 0}
-                  className="flex-1"
-                >
-                  Add {docsToAdd.length} Document
-                  {docsToAdd.length !== 1 ? "s" : ""}
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => {
-                    setShowDocumentManager(false);
-                    setDocsToAdd([]);
-                  }}
-                >
-                  Cancel
-                </Button>
-              </div>
             </div>
-          </div>
-        )}
+
+            <DialogFooter className="pt-2 border-t mt-4">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setShowDocumentManager(false);
+                  setDocsToAdd([]);
+                }}
+              >
+                Cancel
+              </Button>
+              <Button
+                onClick={handleAddDocuments}
+                disabled={docsToAdd.length === 0}
+              >
+                Add {docsToAdd.length} Document
+                {docsToAdd.length !== 1 ? "s" : ""}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
       {/* End: Sticky Header */}
 
@@ -754,7 +756,7 @@ export default function ActiveChat({
             </div>
           </div>
         ) : (
-          <div className="max-w-4xl mx-auto py-4 md:py-6 px-3 md:px-4 space-y-4 md:space-y-6">
+          <div className="max-w-4xl mx-auto py-4 md:py-6 px-3 md:px-4 space-y-8">
             {messages.map((msg, index) => {
               const isLastMessage = index === messages.length - 1;
               const isComparisonResponse =
@@ -766,9 +768,12 @@ export default function ActiveChat({
                 return (
                   <div
                     key={index}
-                    className="group flex justify-start animate-message-slide-left w-full"
+                    className="flex items-start gap-4 animate-message-slide-left w-full"
                   >
-                    <div className="w-full">
+                    <div className="h-9 w-9 rounded-full bg-gradient-to-br from-primary to-accent flex items-center justify-center shrink-0 mt-1 shadow-md">
+                      <Bot className="w-4 h-4 text-primary-foreground" />
+                    </div>
+                    <div className="flex-1 min-w-0">
                       <ComparisonMessage
                         message={msg}
                         onOpenComparisonPanel={handleOpenComparisonPanel}
@@ -784,21 +789,25 @@ export default function ActiveChat({
                 );
               }
 
+              if (msg.role === "user") {
+                return (
+                  <div key={index} className="flex flex-row-reverse items-end gap-3 animate-message-slide-left">
+                    <div className="flex flex-col items-end gap-1 max-w-[80%] md:max-w-[75%]">
+                      <div className="px-6 py-4 bg-primary/10 border border-primary/10 rounded-3xl rounded-br-sm text-foreground text-sm leading-relaxed">
+                        <div className="whitespace-pre-wrap">{msg.content}</div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              }
+
               return (
-                <div
-                  key={index}
-                  className={`flex ${
-                    msg.role === "user" ? "justify-end" : "justify-start"
-                  } animate-message-slide-left`}
-                >
-                  <div
-                    className={`group rounded-2xl px-5 py-3 ${
-                      msg.role === "user"
-                        ? "max-w-[80%] bg-primary text-primary-foreground"
-                        : "max-w-[92%] bg-card border border-border"
-                    }`}
-                  >
-                    {msg.role === "assistant" ? (
+                <div key={index} className="flex items-start gap-4 animate-message-slide-left">
+                  <div className="h-9 w-9 rounded-full bg-gradient-to-br from-primary to-accent flex items-center justify-center shrink-0 mt-1 shadow-md">
+                    <Bot className="w-4 h-4 text-primary-foreground" />
+                  </div>
+                  <div className="flex flex-col items-start gap-2 max-w-[88%]">
+                    <div className="group px-7 py-6 bg-card rounded-3xl rounded-bl-sm border border-border shadow-sm">
                       <div className="prose prose-sm max-w-none dark:prose-invert
                         prose-table:border-collapse prose-table:w-full
                         prose-th:border prose-th:border-border prose-th:bg-muted/50 prose-th:p-2
@@ -840,13 +849,8 @@ export default function ActiveChat({
                           {msg.content}
                         </ReactMarkdown>
                       </div>
-                    ) : (
-                      <div className="text-sm leading-relaxed whitespace-pre-wrap">
-                        {msg.content}
-                      </div>
-                    )}
-                    {/* Feedback component for assistant messages */}
-                    {msg.role === "assistant" && msg.id && (
+                    </div>
+                    {msg.id && (
                       <ChatMessageFeedback
                         messageId={msg.id}
                         sessionId={currentSession?.id}
@@ -886,8 +890,11 @@ export default function ActiveChat({
 
             {/* Thinking indicator - shown during processing before streaming */}
             {isThinking && (
-              <div className="flex justify-start animate-fade-in">
-                <div className="max-w-[80%] rounded-2xl px-5 py-3 bg-card border border-border">
+              <div className="flex items-start gap-4 animate-fade-in">
+                <div className="h-9 w-9 rounded-full bg-gradient-to-br from-primary to-accent flex items-center justify-center shrink-0 mt-1 shadow-md">
+                  <Bot className="w-4 h-4 text-primary-foreground" />
+                </div>
+                <div className="px-7 py-5 bg-card rounded-3xl rounded-bl-sm border border-border shadow-sm">
                   <div className="flex items-center gap-2 text-muted-foreground">
                     <Loader2 className="h-4 w-4 animate-spin" />
                     <span className="text-sm">{thinkingMessage || "Thinking..."}</span>
@@ -897,8 +904,11 @@ export default function ActiveChat({
             )}
 
             {isStreaming && streamingMessage && (
-              <div className="flex justify-start animate-fade-in">
-                <div className="max-w-[80%] rounded-2xl px-5 py-3 bg-card border border-border">
+              <div className="flex items-start gap-4 animate-fade-in">
+                <div className="h-9 w-9 rounded-full bg-gradient-to-br from-primary to-accent flex items-center justify-center shrink-0 mt-1 shadow-md">
+                  <Bot className="w-4 h-4 text-primary-foreground" />
+                </div>
+                <div className="px-7 py-6 bg-card rounded-3xl rounded-bl-sm border border-border shadow-sm max-w-[88%]">
                   {comparison.isActive && comparison.context ? (
                     // Render streaming comparison message with markdown + styled citations
                     <div className="prose prose-sm max-w-none dark:prose-invert
@@ -986,54 +996,58 @@ export default function ActiveChat({
         )}
       </div>
 
-      {/* Composer - sticky at bottom of scroll pane */}
-      <div className="sticky bottom-0 bg-card/90 backdrop-blur border-t border-border p-3 md:p-4">
-        <div className="max-w-4xl mx-auto px-0 md:px-4">
+      {/* Composer - floating glass card */}
+      <div className="sticky bottom-0 bg-gradient-to-t from-background via-background/95 to-transparent pt-8 pb-6 px-3 md:px-8">
+        <div className="max-w-4xl mx-auto">
           {chatError && (
-            <div className="mb-3 p-3 bg-destructive/10 text-destructive rounded-lg text-sm border border-destructive/20">
+            <div className="mb-3 p-3 bg-destructive/10 text-destructive rounded-xl text-sm border border-destructive/20">
               ⚠️ {chatError}
             </div>
           )}
 
-          <form onSubmit={handleSendMessage} className="flex gap-2 md:gap-3">
-            <input
-              type="text"
+          <div className="bg-card border border-border rounded-2xl shadow-xl flex flex-col overflow-hidden transition-all focus-within:ring-2 focus-within:ring-primary/30 focus-within:border-primary/50">
+            <textarea
+              ref={textareaRef}
               value={message}
               onChange={(e) => setMessage(e.target.value)}
+              onInput={handleTextareaInput}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  handleSendMessage(e);
+                }
+              }}
               placeholder={
                 sessionDocIds.length === 0
                   ? "Add documents to start chatting..."
-                  : "Ask a question about your documents..."
+                  : "Ask frearaAI anything about your documents..."
               }
               disabled={isStreaming || sessionDocIds.length === 0}
-              className="flex-1 px-4 py-3 border border-input rounded-lg bg-background text-foreground placeholder:text-muted-foreground disabled:bg-muted disabled:cursor-not-allowed focus:outline-none focus:ring-2 focus:ring-ring transition-all"
+              rows={1}
+              className="w-full bg-transparent border-none text-foreground placeholder:text-muted-foreground focus:ring-0 resize-none py-5 px-6 min-h-[60px] max-h-[200px] text-sm disabled:cursor-not-allowed outline-none"
             />
-            <Button
-              type="submit"
-              disabled={
-                !message.trim() || isStreaming || sessionDocIds.length === 0
-              }
-              size="lg"
-              className="min-w-[72px] md:min-w-[100px] px-3 md:px-4"
-            >
-              {isStreaming ? (
-                <>
-                  Sending...
-                </>
-              ) : (
-                <>
-                  <Send className="w-4 h-4 md:mr-2" />
-                  <span className="hidden md:inline">Send</span>
-                </>
-              )}
-            </Button>
-          </form>
-
-          {sessionDocIds.length === 0 && (
-            <p className="text-xs text-muted-foreground mt-2 text-center">
-              💡 Click "+ Add" above to select documents from your collections
-            </p>
-          )}
+            <div className="flex justify-end items-center px-4 pb-4 gap-3">
+              <span className="text-[11px] text-muted-foreground font-medium hidden md:inline-block">
+                Shift+Enter for new line
+              </span>
+              <button
+                type="button"
+                onClick={handleSendMessage}
+                disabled={!message.trim() || isStreaming || sessionDocIds.length === 0}
+                className="bg-primary hover:bg-primary/90 text-primary-foreground h-11 w-11 rounded-xl flex items-center justify-center shadow-lg shadow-primary/20 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                title="Send message"
+              >
+                {isStreaming ? (
+                  <Loader2 className="w-5 h-5 animate-spin" />
+                ) : (
+                  <Send className="w-5 h-5" />
+                )}
+              </button>
+            </div>
+          </div>
+          <p className="text-center text-[10px] text-muted-foreground mt-3 tracking-wide opacity-70">
+            frearaAI can make mistakes. Verify important information.
+          </p>
         </div>
       </div>
       {/* End: Outer flex container from line 254 */}

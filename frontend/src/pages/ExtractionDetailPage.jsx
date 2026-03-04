@@ -4,7 +4,7 @@
  */
 import { useEffect, useState, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { useAuth } from "@clerk/clerk-react";
+import { useAppAuth } from "@/hooks/useAppAuth";
 import AppLayout from "../components/layout/AppLayout";
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
@@ -26,7 +26,7 @@ import {
 export default function ExtractionDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { getToken } = useAuth();
+  const { getToken } = useAppAuth();
   const { retryExtraction } = useExtractionActions();
 
   const [loading, setLoading] = useState(true);

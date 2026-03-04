@@ -20,20 +20,31 @@ export default function HighlightOverlay({
     return null;
   }
 
+  const x0 = Number(bbox.x0);
+  const y0 = Number(bbox.y0);
+  const x1 = Number(bbox.x1);
+  const y1 = Number(bbox.y1);
+  if (![x0, y0, x1, y1].every(Number.isFinite)) {
+    return null;
+  }
+
   // Convert inches to points (PDF standard: 72 points per inch)
   const POINTS_PER_INCH = 72;
 
-  // Convert bbox from inches to points
-  const x0Points = bbox.x0 * POINTS_PER_INCH;
-  const y0Points = bbox.y0 * POINTS_PER_INCH;
-  const x1Points = bbox.x1 * POINTS_PER_INCH;
-  const y1Points = bbox.y1 * POINTS_PER_INCH;
+  // Convert bbox from inches to points and normalize coordinate ordering.
+  const x0Points = Math.min(x0, x1) * POINTS_PER_INCH;
+  const y0Points = Math.min(y0, y1) * POINTS_PER_INCH;
+  const x1Points = Math.max(x0, x1) * POINTS_PER_INCH;
+  const y1Points = Math.max(y0, y1) * POINTS_PER_INCH;
 
-  // Calculate position and size as percentages (for responsive rendering)
-  const left = (x0Points / pageWidth) * 100;
-  const top = (y0Points / pageHeight) * 100;
-  const width = ((x1Points - x0Points) / pageWidth) * 100;
-  const height = ((y1Points - y0Points) / pageHeight) * 100;
+  // Calculate position and size as percentages (for responsive rendering), clamped to page bounds.
+  const left = Math.max(0, Math.min(100, (x0Points / pageWidth) * 100));
+  const top = Math.max(0, Math.min(100, (y0Points / pageHeight) * 100));
+  const width = Math.max(0, Math.min(100 - left, ((x1Points - x0Points) / pageWidth) * 100));
+  const height = Math.max(0, Math.min(100 - top, ((y1Points - y0Points) / pageHeight) * 100));
+  if (width <= 0 || height <= 0) {
+    return null;
+  }
 
   return (
     <div

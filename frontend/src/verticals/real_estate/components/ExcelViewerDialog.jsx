@@ -5,7 +5,7 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { useAuth } from '@clerk/clerk-react';
+import { useAppAuth } from "@/hooks/useAppAuth";
 import * as XLSX from 'xlsx';
 import {
   Dialog,
@@ -22,7 +22,7 @@ import { cn } from '@/lib/utils';
 import { downloadRETemplate } from '../../../api/re-templates';
 
 export default function ExcelViewerDialog({ open, onOpenChange, templateId, templateName }) {
-  const { getToken } = useAuth();
+  const { getToken } = useAppAuth();
 
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);

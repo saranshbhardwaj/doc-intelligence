@@ -361,6 +361,17 @@ async def list_fills(
         raise HTTPException(status_code=500, detail="Failed to list fill runs")
 
 
+@router.get("/fills/count")
+async def count_fills(
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Return total fill run count for the current user (cheap COUNT query for badge display)."""
+    repo = TemplateRepository(db)
+    count = repo.count_user_fill_runs(user_id=user.id, org_id=user.org_id)
+    return {"count": count}
+
+
 @router.get("/{template_id}", response_model=TemplateDetail)
 async def get_template(
     template_id: str,
@@ -476,7 +487,13 @@ async def download_template(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db),
 ):
-    """Stream Excel template file through backend to avoid CORS issues."""
+    """
+    Download the Excel template file.
+
+    When storage is R2, returns a presigned URL as JSON so the browser can fetch
+    directly without a redirect (redirects cause Origin: null which breaks CORS).
+    When storage is local, streams the file through the API (dev mode).
+    """
     logger.info(f"Downloading template: {template_id}", extra={"user_id": user.id})
 
     try:
@@ -488,25 +505,28 @@ async def download_template(
 
         storage = get_storage_backend()
 
-        # Download to temp file
-        temp_path = f"/tmp/{template_id}.xlsx"
+        # R2: return presigned URL as JSON — frontend fetches directly to avoid the
+        # Origin: null CORS issue that occurs when browsers follow cross-origin redirects.
+        if storage.get_storage_type() == "r2":
+            presigned_url = storage.generate_presigned_url(template.file_path, expiry_seconds=3600)
+            return {"url": presigned_url, "storage_backend": "r2", "expires_in": 3600}
+
+        # Local filesystem: stream through API (dev mode)
+        file_ext = template.file_extension or ".xlsx"
+        temp_path = f"/tmp/{template_id}{file_ext}"
         try:
             storage.download(template.file_path, temp_path)
-
-            # Read into memory
             with open(temp_path, "rb") as f:
                 file_bytes = f.read()
         finally:
-            # Clean up temp file
             if os.path.exists(temp_path):
                 os.remove(temp_path)
 
-        # Stream to frontend
         return StreamingResponse(
             BytesIO(file_bytes),
             media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
             headers={
-                "Content-Disposition": f'inline; filename="{template.name}.xlsx"',
+                "Content-Disposition": f'inline; filename="{template.name}{file_ext}"',
             }
         )
 
@@ -666,22 +686,25 @@ async def update_mappings(
             raise HTTPException(status_code=404, detail="Fill run not found")
 
         # Update mappings
-        # Enforce 1 mapping per pdf_field_id (keep the last one provided, since this is user-edited input)
-        deduped_by_field_id = {}
+        # Enforce 1 mapping per Excel cell (a PDF field can map to multiple cells).
+        # Keep the last mapping provided for duplicate cell keys.
+        deduped_by_cell = {}
         for m in request.mappings:
-            field_id = m.get("pdf_field_id")
-            if not field_id:
+            excel_sheet = m.get("excel_sheet")
+            excel_cell = m.get("excel_cell")
+            if not excel_sheet or not excel_cell:
                 continue
-            deduped_by_field_id[field_id] = m
+            cell_key = f"{excel_sheet}!{excel_cell}"
+            deduped_by_cell[cell_key] = m
 
-        deduped_mappings = list(deduped_by_field_id.values())
+        deduped_mappings = list(deduped_by_cell.values())
 
         field_mapping = fill_run.field_mapping or {}
         field_mapping["mappings"] = deduped_mappings
 
         # Count user edits (compare to auto_mapped_count)
         user_edited_count = len([
-            m for m in request.mappings
+            m for m in deduped_mappings
             if m.get("status") in ["user_edited", "manual"]
         ])
 
