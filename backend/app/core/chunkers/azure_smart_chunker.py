@@ -622,6 +622,17 @@ class AzureSmartChunker(DocumentChunker):
                 # Merge chunk_metadata fields directly
                 base_metadata.update(chunk_metadata)
 
+                # Add enriched table structure from parser for field detection
+                # These come from the Azure DI parser's table structure parsing
+                # Optimize table_data: only store first 2 rows for metadata (field detection only needs samples)
+                # Full table preserved in chunk.tables[0]
+                metadata_table_data = table_data.get("table_data", [])[:2]
+                base_metadata.update({
+                    "table_name": table_data.get("table_name", ""),
+                    "column_headers": table_data.get("column_headers", []),
+                    "table_data": metadata_table_data,
+                })
+
                 chunk = Chunk(
                     chunk_id=generate_chunk_id(f"page_{page_num}", table_counter, "table"),
                     text=table_text,

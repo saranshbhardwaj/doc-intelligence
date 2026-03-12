@@ -9,6 +9,7 @@ from app.utils.logging import logger
 from app.api.dependencies import cache
 from app.database import get_db, async_engine
 from app.verticals.private_equity.workflows.seeding import seed_workflows
+from app.verticals.private_equity.diligence.playbook_seeds import seed_system_playbooks
 from app.core.embeddings.factory import get_embedding_provider
 from app.services.service_locator import get_reranker
 
@@ -60,6 +61,15 @@ async def lifespan(app):
                 await asyncio.sleep(5)
             else:
                 logger.error("Workflow seeding failed after 3 attempts", extra={"error": str(e)})
+
+    # Seed PE diligence system playbooks (idempotent, slug-keyed)
+    try:
+        db = next(get_db())
+        created = seed_system_playbooks(db)
+        logger.info("PE diligence playbooks seeded", extra={"created": created})
+        db.close()
+    except Exception as e:
+        logger.error("PE diligence playbook seeding failed", extra={"error": str(e)})
 
     # Start background cleanup task (cache + uploaded file pruning)
     cleanup_task = asyncio.create_task(periodic_cleanup())

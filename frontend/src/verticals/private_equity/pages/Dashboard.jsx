@@ -45,15 +45,18 @@ export default function PEDashboard() {
 
   return (
     <AppLayout>
-      <div className="max-w-7xl mx-auto px-6 py-8">
+      <div className="pe-page max-w-6xl">
         {/* Header */}
-        <div className="mb-8">
-          <h1 className="text-3xl font-semibold text-foreground">
+        <div className="pe-header mb-8">
+          <div>
+            <h1 className="text-3xl font-semibold text-foreground font-display">
             {config?.name} Dashboard
-          </h1>
-          <p className="text-muted-foreground mt-2">
+            </h1>
+            <p className="text-muted-foreground mt-2">
             {config?.description}
-          </p>
+            </p>
+          </div>
+          <span className="pe-chip">Private Equity</span>
         </div>
 
         {loading ? (
@@ -64,7 +67,7 @@ export default function PEDashboard() {
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             {/* Workflow Templates */}
-            <div className="bg-card rounded-lg border border-border p-6">
+            <div className="pe-card p-6">
               <div className="flex items-center justify-between mb-5">
                 <h2 className="text-lg font-semibold text-foreground">
                   Available Workflows
@@ -118,7 +121,7 @@ export default function PEDashboard() {
             </div>
 
             {/* Recent Workflow Runs */}
-            <div className="bg-card rounded-lg border border-border p-6">
+            <div className="pe-card p-6">
               <div className="flex items-center justify-between mb-5">
                 <h2 className="text-lg font-semibold text-foreground">
                   Recent Workflow Runs
@@ -168,7 +171,7 @@ export default function PEDashboard() {
             </div>
 
             {/* Recent Extractions */}
-            <div className="bg-card rounded-lg border border-border p-6 lg:col-span-2">
+            <div className="pe-card p-6 lg:col-span-2">
               <div className="flex items-center justify-between mb-5">
                 <h2 className="text-lg font-semibold text-foreground">
                   Recent Extractions

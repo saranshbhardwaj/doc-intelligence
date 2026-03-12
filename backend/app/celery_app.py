@@ -61,6 +61,8 @@ celery_app.conf.task_routes = {
     # Critical: user-facing, revenue-impacting tasks get dedicated workers
     "app.verticals.private_equity.workflows.tasks.tasks.*": {"queue": "critical"},
     "app.verticals.private_equity.extraction.tasks.tasks.*": {"queue": "critical"},
+    "app.verticals.private_equity.diligence.tasks.*": {"queue": "critical"},
+    "app.verticals.private_equity.diligence.investigations.tasks.*": {"queue": "critical"},
     "app.verticals.real_estate.template_filling.tasks.*": {"queue": "critical"},
     # Default: document indexing runs in background, can wait
     "app.services.tasks.document_processor.*": {"queue": "default"},
@@ -88,6 +90,7 @@ try:
     import app.db_models_workflows  # noqa: F401 - Workflow, WorkflowRun
     import app.db_models_documents  # noqa: F401 - Document, DocumentChunk
     import app.db_models_templates  # noqa: F401 - ExcelTemplate, TemplateFillRun
+    import app.db_models_pe_diligence  # noqa: F401 - PE diligence domain models
 except Exception:
     # Non-fatal here; if imports fail the worker will likely fail later when using DB.
     pass
@@ -98,6 +101,8 @@ try:
         import app.services.tasks.stuck_task_monitor  # noqa: F401 - Background cleanup of stuck tasks
         import app.verticals.private_equity.extraction.tasks  # noqa: F401 - PE extraction pipeline tasks
         import app.verticals.private_equity.workflows.tasks.tasks  # noqa: F401 - PE workflow execution pipeline tasks (explicit import to ensure registration)
+        import app.verticals.private_equity.diligence.tasks  # noqa: F401 - PE diligence analysis tasks
+        import app.verticals.private_equity.diligence.investigations.tasks  # noqa: F401 - PE diligence investigation tasks
         import app.verticals.real_estate.template_filling.tasks  # noqa: F401 - RE template filling tasks
 except Exception as e:
     # Log task import failures so we can debug worker registration issues

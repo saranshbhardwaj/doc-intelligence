@@ -190,6 +190,7 @@ class HybridRetriever:
             DocumentChunk.section_heading,
             DocumentChunk.section_type,
             DocumentChunk.chunk_metadata,
+            DocumentChunk.tables,
             distance_expr
         )
 
@@ -280,6 +281,7 @@ class HybridRetriever:
                 "section_heading": r.section_heading,
                 "section_type": r.section_type,
                 "chunk_metadata": metadata,
+                "tables": r.tables,
                 # Extract bbox at top level for easy access
                 "bbox": metadata.get("bbox"),
                 "page_range": metadata.get("page_range"),
@@ -336,6 +338,7 @@ class HybridRetriever:
             DocumentChunk.section_heading,
             DocumentChunk.section_type,
             DocumentChunk.chunk_metadata,
+            DocumentChunk.tables,
             rank_expr
         )
 
@@ -395,6 +398,7 @@ class HybridRetriever:
                 "section_heading": r.section_heading,
                 "section_type": r.section_type,
                 "chunk_metadata": metadata,
+                "tables": r.tables,
                 # Extract bbox at top level for easy access
                 "bbox": metadata.get("bbox"),
                 "page_range": metadata.get("page_range"),

@@ -1,7 +1,9 @@
 // Private Equity Pages
 export { default as PEDashboard } from './Dashboard';
-
-// Placeholder exports for future pages
-// export { default as WorkflowsPage } from './Workflows';
-// export { default as ExtractionPage } from './Extraction';
-// export { default as ComparisonPage } from './Comparison';
+export { default as PELayout } from './PELayout';
+export { default as DealRoomsPage } from './DealRoomsPage';
+export { default as RoomDashboard } from './RoomDashboard';
+export { default as RoomDocuments } from './RoomDocuments';
+export { default as RoomAnalysis } from './RoomAnalysis';
+export { default as RoomInvestigations } from './RoomInvestigations';
+export { default as InvestigationDetail } from './InvestigationDetail';

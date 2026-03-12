@@ -11,6 +11,7 @@ import AppLayout from '../../../components/layout/AppLayout';
 import { Button } from '../../../components/ui/button';
 import { Badge } from '../../../components/ui/badge';
 import { Input } from '../../../components/ui/input';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '../../../components/ui/table';
 import { AlertDialog, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '../../../components/ui/alert-dialog';
 import UploadTemplateModal from '../components/UploadTemplateModal';
 import DocumentSelectorDialog from '../components/DocumentSelectorDialog';
@@ -27,6 +28,8 @@ import {
   Clock,
   Download,
   Eye,
+  ChevronLeft,
+  ChevronRight,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import {
@@ -55,10 +58,10 @@ export default function TemplatesPage() {
   const [error, setError] = useState(null);
   const [searchQuery, setSearchQuery] = useState('');
 
-  // Pagination for fill runs
-  const [fillRunsOffset, setFillRunsOffset] = useState(0);
-  const [hasMoreFillRuns, setHasMoreFillRuns] = useState(true);
-  const [loadingMore, setLoadingMore] = useState(false);
+  // Pagination for fill runs (page-based)
+  const FILL_PAGE_SIZE = 20;
+  const [fillPage, setFillPage] = useState(0);
+  const [fillTotal, setFillTotal] = useState(null);
 
   // Upload state
   const [showUploadModal, setShowUploadModal] = useState(false);
@@ -82,14 +85,12 @@ export default function TemplatesPage() {
   const [checkingUsage, setCheckingUsage] = useState(false);
 
   useEffect(() => {
-    // Reset pagination when switching tabs
-    setFillRunsOffset(0);
-    setHasMoreFillRuns(true);
+    setFillPage(0);
     setFillRuns([]);
-    loadData(true);
+    loadData(0);
   }, [activeTab]);
 
-  async function loadData(reset = false) {
+  async function loadData(page = fillPage) {
     try {
       setLoading(true);
       setError(null);
@@ -102,41 +103,25 @@ export default function TemplatesPage() {
         setTemplates(data || []);
         setFillRunCount(count);
       } else {
-        const offset = reset ? 0 : fillRunsOffset;
-        const data = await listFillRuns(getToken, 20, offset);
-
-        if (reset) {
-          setFillRuns(data || []);
-          setFillRunsOffset(20);
-        } else {
-          setFillRuns(prev => [...prev, ...(data || [])]);
-          setFillRunsOffset(prev => prev + 20);
-        }
-
-        // If we got less than 20 items, there's no more to load
-        setHasMoreFillRuns(data && data.length === 20);
+        const offset = page * FILL_PAGE_SIZE;
+        const [data, total] = await Promise.all([
+          listFillRuns(getToken, FILL_PAGE_SIZE, offset),
+          getFillRunCount(getToken),
+        ]);
+        setFillRuns(data || []);
+        setFillTotal(total);
       }
     } catch (err) {
       console.error('❌ Failed to load data:', err);
-      console.error('❌ Error details:', err.response?.data);
       setError(`Failed to load ${activeTab}`);
     } finally {
       setLoading(false);
     }
   }
 
-  async function loadMoreFillRuns() {
-    try {
-      setLoadingMore(true);
-      const data = await listFillRuns(getToken, 20, fillRunsOffset);
-      setFillRuns(prev => [...prev, ...(data || [])]);
-      setFillRunsOffset(prev => prev + 20);
-      setHasMoreFillRuns(data && data.length === 20);
-    } catch (err) {
-      console.error('Failed to load more fill runs:', err);
-    } finally {
-      setLoadingMore(false);
-    }
+  async function goToFillPage(newPage) {
+    setFillPage(newPage);
+    await loadData(newPage);
   }
 
   async function handleUpload(file, metadata) {
@@ -275,10 +260,9 @@ export default function TemplatesPage() {
     try {
       setIsDeleting(true);
       await deleteFillRun(getToken, fillRunToDelete.id);
-      // Remove from local state
-      setFillRuns(prev => prev.filter(fr => fr.id !== fillRunToDelete.id));
       setShowDeleteAlert(false);
       setFillRunToDelete(null);
+      await loadData(fillPage);
     } catch (err) {
       console.error('Delete failed:', err);
       toast.error('Failed to delete fill run', {
@@ -382,7 +366,7 @@ export default function TemplatesPage() {
             <div className="flex flex-col items-center justify-center h-full">
               <AlertCircle className="h-12 w-12 text-destructive mb-3" />
               <p className="text-destructive text-sm">{error}</p>
-              <Button onClick={loadData} variant="outline" size="sm" className="mt-4">
+              <Button onClick={() => loadData(0)} variant="outline" size="sm" className="mt-4">
                 Try Again
               </Button>
             </div>
@@ -402,9 +386,10 @@ export default function TemplatesPage() {
               onSearchChange={setSearchQuery}
               onViewFill={handleViewFill}
               onDeleteFill={handleDeleteFillRun}
-              onLoadMore={loadMoreFillRuns}
-              hasMore={hasMoreFillRuns}
-              loadingMore={loadingMore}
+              page={fillPage}
+              pageSize={FILL_PAGE_SIZE}
+              total={fillTotal}
+              onPageChange={goToFillPage}
             />
           )}
         </div>
@@ -637,10 +622,10 @@ function TemplateCard({ template, onView, onStartFill, onDelete }) {
       {/* Stats */}
       <div className="p-4 space-y-3">
         <div className="flex items-center justify-between text-sm">
-          <span className="text-muted-foreground">Fillable Fields</span>
-          {isAnalyzing
-            ? <span className="text-xs text-muted-foreground italic">detecting…</span>
-            : <Badge variant="secondary">{totalFields}</Badge>}
+          <span className="text-muted-foreground">Created</span>
+          {template.created_at
+            ? <Badge variant="secondary">{new Date(template.created_at).toLocaleDateString()}</Badge>
+            : <span className="text-xs text-muted-foreground italic">—</span>}
         </div>
         <div className="flex items-center justify-between text-sm">
           <span className="text-muted-foreground">Sheets</span>
@@ -701,160 +686,175 @@ function TemplateCard({ template, onView, onStartFill, onDelete }) {
   );
 }
 
-// Fill Runs List Component
-function FillRunsList({ fillRuns, searchQuery, onSearchChange, onViewFill, onDeleteFill, onLoadMore, hasMore, loadingMore }) {
+const FILL_STATUS_CONFIG = {
+  queued:           { icon: Clock,        label: 'Queued',          cls: 'text-muted-foreground bg-muted/50' },
+  detecting_fields: { icon: Loader2,      label: 'Detecting',       cls: 'text-primary bg-primary/10', spin: true },
+  fields_detected:  { icon: CheckCircle,  label: 'Fields Detected', cls: 'text-primary bg-primary/10' },
+  mapping:          { icon: Loader2,      label: 'Mapping',         cls: 'text-primary bg-primary/10', spin: true },
+  awaiting_review:  { icon: Eye,          label: 'Awaiting Review', cls: 'text-amber-600 bg-amber-50 dark:bg-amber-950/30' },
+  extracting:       { icon: Loader2,      label: 'Extracting',      cls: 'text-primary bg-primary/10', spin: true },
+  filling:          { icon: Loader2,      label: 'Filling',         cls: 'text-primary bg-primary/10', spin: true },
+  completed:        { icon: CheckCircle,  label: 'Completed',       cls: 'text-green-600 bg-green-50 dark:bg-green-950/30' },
+  failed:           { icon: AlertCircle,  label: 'Failed',          cls: 'text-destructive bg-destructive/10' },
+};
+
+// Fill Runs List Component — paginated table view
+function FillRunsList({ fillRuns, searchQuery, onSearchChange, onViewFill, onDeleteFill, page, pageSize, total, onPageChange }) {
+  const totalPages = total != null ? Math.ceil(total / pageSize) : null;
+  const from = total != null ? page * pageSize + 1 : null;
+  const to   = total != null ? Math.min((page + 1) * pageSize, total) : null;
+
   return (
-    <div className="max-w-7xl mx-auto">
-      {/* Search Bar */}
-      <div className="mb-4 sm:mb-6">
-        <div className="relative">
+    <div className="flex flex-col gap-3">
+      {/* Search + count row */}
+      <div className="flex items-center gap-3">
+        <div className="relative flex-1 max-w-sm">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
             type="text"
             placeholder="Search fill runs..."
             value={searchQuery}
             onChange={(e) => onSearchChange(e.target.value)}
-            className="pl-9"
+            className="pl-9 h-8 text-sm"
           />
         </div>
+        {total != null && (
+          <span className="text-xs text-muted-foreground shrink-0">{total} total</span>
+        )}
       </div>
 
-      {/* Fill Runs List */}
+      {/* Table */}
       {fillRuns.length === 0 ? (
-        <div className="flex flex-col items-center justify-center py-12 sm:py-16 text-muted-foreground">
-          <Clock className="h-16 w-16 mb-4 text-muted-foreground/50" />
+        <div className="flex flex-col items-center justify-center py-16 text-muted-foreground">
+          <Clock className="h-12 w-12 mb-3 text-muted-foreground/40" />
           <p className="text-sm">No fill runs found</p>
           <p className="text-xs mt-1">Start a fill run from a template</p>
         </div>
       ) : (
-        <>
-          <div className="space-y-3">
-            {fillRuns.map((fillRun) => (
-              <FillRunCard key={fillRun.id} fillRun={fillRun} onView={onViewFill} onDelete={onDeleteFill} />
-            ))}
-          </div>
+        <div className="rounded-lg border border-border overflow-hidden">
+          <Table>
+            <TableHeader>
+              <TableRow className="bg-muted/30 hover:bg-muted/30">
+                <TableHead className="text-xs font-medium py-2 pl-4">Template</TableHead>
+                <TableHead className="text-xs font-medium py-2">Status</TableHead>
+                <TableHead className="text-xs font-medium py-2">Document</TableHead>
+                <TableHead className="text-xs font-medium py-2">Date</TableHead>
+                <TableHead className="text-xs font-medium py-2">Stage</TableHead>
+                <TableHead className="text-xs font-medium py-2 pr-4 text-right">Actions</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {fillRuns.map((fillRun) => {
+                const cfg = FILL_STATUS_CONFIG[fillRun.status] || FILL_STATUS_CONFIG.queued;
+                const Icon = cfg.icon;
+                const templateDeleted = !fillRun.template_id;
+                const documentDeleted = !fillRun.document_id;
+                return (
+                  <TableRow
+                    key={fillRun.id}
+                    className="cursor-pointer hover:bg-muted/30 transition-colors group"
+                    onClick={() => onViewFill(fillRun.id)}
+                  >
+                    {/* Template name */}
+                    <TableCell className="py-2.5 pl-4 max-w-[220px]">
+                      <span className="font-medium text-sm truncate block">
+                        {fillRun.template_snapshot?.name || 'Unknown Template'}
+                      </span>
+                      {templateDeleted && (
+                        <span className="text-xs text-destructive">Template deleted</span>
+                      )}
+                    </TableCell>
 
-          {/* Load More Button */}
-          {hasMore && (
-            <div className="flex justify-center mt-6">
-              <Button
-                variant="outline"
-                onClick={onLoadMore}
-                disabled={loadingMore}
-              >
-                {loadingMore ? (
-                  <>
-                    <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-                    Loading...
-                  </>
-                ) : (
-                  'Load More'
-                )}
-              </Button>
-            </div>
-          )}
-        </>
+                    {/* Status badge */}
+                    <TableCell className="py-2.5">
+                      <span className={cn('inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs font-medium', cfg.cls)}>
+                        <Icon className={cn('h-3 w-3', cfg.spin && 'animate-spin')} />
+                        {cfg.label}
+                      </span>
+                    </TableCell>
+
+                    {/* Document filename */}
+                    <TableCell className="py-2.5 max-w-[200px]">
+                      <span className={cn('text-xs text-muted-foreground truncate block', documentDeleted && 'line-through opacity-50')}>
+                        {fillRun.document_metadata?.filename || '—'}
+                      </span>
+                      {fillRun.total_fields_detected > 0 && (
+                        <span className="text-xs text-muted-foreground/70">
+                          {fillRun.total_fields_mapped ?? 0} / {fillRun.total_fields_detected} fields
+                        </span>
+                      )}
+                    </TableCell>
+
+                    {/* Date */}
+                    <TableCell className="py-2.5 text-xs text-muted-foreground whitespace-nowrap">
+                      {new Date(fillRun.created_at).toLocaleDateString()}
+                    </TableCell>
+
+                    {/* Stage */}
+                    <TableCell className="py-2.5 text-xs text-muted-foreground">
+                      {fillRun.current_stage ? fillRun.current_stage.replace(/_/g, ' ') : '—'}
+                    </TableCell>
+
+                    {/* Actions */}
+                    <TableCell className="py-2.5 pr-4 text-right" onClick={(e) => e.stopPropagation()}>
+                      <div className="flex items-center justify-end gap-1">
+                        {fillRun.status === 'completed' && fillRun.artifact && (
+                          <Button size="sm" variant="ghost" className="h-7 px-2">
+                            <Download className="h-3.5 w-3.5" />
+                          </Button>
+                        )}
+                        <Button size="sm" variant="ghost" className="h-7 px-2" onClick={() => onViewFill(fillRun.id)}>
+                          <Eye className="h-3.5 w-3.5" />
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="ghost"
+                          className="h-7 px-2 text-muted-foreground hover:text-destructive"
+                          onClick={() => onDeleteFill(fillRun.id)}
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
+                    </TableCell>
+                  </TableRow>
+                );
+              })}
+            </TableBody>
+          </Table>
+        </div>
       )}
-    </div>
-  );
-}
 
-// Fill Run Card Component
-function FillRunCard({ fillRun, onView, onDelete }) {
-  const statusConfig = {
-    queued: { icon: Clock, variant: 'secondary', color: 'text-muted-foreground' },
-    detecting_fields: { icon: Loader2, variant: 'default', color: 'text-primary', spin: true },
-    fields_detected: { icon: CheckCircle, variant: 'default', color: 'text-primary' },
-    mapping: { icon: Loader2, variant: 'default', color: 'text-primary', spin: true },
-    awaiting_review: { icon: Eye, variant: 'default', color: 'text-primary' },
-    extracting: { icon: Loader2, variant: 'default', color: 'text-primary', spin: true },
-    filling: { icon: Loader2, variant: 'default', color: 'text-primary', spin: true },
-    completed: { icon: CheckCircle, variant: 'success', color: 'text-success' },
-    failed: { icon: AlertCircle, variant: 'destructive', color: 'text-destructive' },
-  };
-
-  const config = statusConfig[fillRun.status] || statusConfig.queued;
-  const StatusIcon = config.icon;
-
-  // Check if template or document was deleted
-  const templateDeleted = !fillRun.template_id;
-  const documentDeleted = !fillRun.document_id;
-
-  return (
-    <div className="bg-card rounded-lg border border-border hover:border-primary/50 transition-all p-3 sm:p-4">
-      <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between gap-3">
-        <div
-          className="flex-1 min-w-0 cursor-pointer"
-          onClick={() => onView(fillRun.id)}
-        >
-          <div className="flex items-center gap-2 mb-2 flex-wrap">
-            <h3 className="font-semibold text-foreground truncate">
-              {fillRun.template_snapshot?.name || 'Unknown Template'}
-            </h3>
-            <Badge variant={config.variant} className="text-xs">
-              <StatusIcon className={cn('h-3 w-3 mr-1', config.color, config.spin && 'animate-spin')} />
-              {fillRun.status}
-            </Badge>
-            {templateDeleted && (
-              <Badge variant="destructive" className="text-xs">
-                Template Deleted
-              </Badge>
-            )}
-            {documentDeleted && (
-              <Badge variant="destructive" className="text-xs">
-                Document Deleted
-              </Badge>
-            )}
-          </div>
-
-          <div className="flex items-center gap-3 sm:gap-4 flex-wrap text-xs text-muted-foreground">
-            <span className={cn(documentDeleted && "line-through opacity-50")}>
-              {fillRun.document_metadata?.filename || 'Unknown Document'}
-            </span>
-            {fillRun.total_fields_mapped > 0 && (
-              <span>
-                {fillRun.total_fields_mapped} / {fillRun.total_fields_detected} fields mapped
-              </span>
-            )}
-            <span>{new Date(fillRun.created_at).toLocaleDateString()}</span>
-          </div>
-
-          {fillRun.current_stage && (
-            <p className="text-xs text-muted-foreground mt-2">
-              Stage: {fillRun.current_stage}
-            </p>
-          )}
-        </div>
-
-        <div className="flex items-center gap-2 sm:ml-4 w-full sm:w-auto">
-          {fillRun.status === 'completed' && fillRun.artifact && (
-            <Button size="sm" variant="outline" className="flex-1 sm:flex-none">
-              <Download className="h-3 w-3 mr-1.5" />
-              Download
+      {/* Pagination controls */}
+      {totalPages != null && totalPages > 1 && (
+        <div className="flex items-center justify-between pt-1">
+          <span className="text-xs text-muted-foreground">
+            {from}–{to} of {total}
+          </span>
+          <div className="flex items-center gap-1">
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 px-2"
+              disabled={page === 0}
+              onClick={() => onPageChange(page - 1)}
+            >
+              <ChevronLeft className="h-3.5 w-3.5" />
             </Button>
-          )}
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={() => onView(fillRun.id)}
-            className="flex-1 sm:flex-none"
-          >
-            <Eye className="h-3 w-3 mr-1.5" />
-            View
-          </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            onClick={(e) => {
-              e.stopPropagation();
-              onDelete(fillRun.id);
-            }}
-            className="px-2 sm:px-3"
-          >
-            <Trash2 className="h-3 w-3" />
-          </Button>
+            <span className="text-xs px-2 text-muted-foreground">
+              Page {page + 1} / {totalPages}
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              className="h-7 px-2"
+              disabled={page >= totalPages - 1}
+              onClick={() => onPageChange(page + 1)}
+            >
+              <ChevronRight className="h-3.5 w-3.5" />
+            </Button>
+          </div>
         </div>
-      </div>
+      )}
     </div>
   );
 }

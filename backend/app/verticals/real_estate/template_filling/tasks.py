@@ -14,7 +14,7 @@ import json
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, List
 
 from celery import chain, shared_task
 from sqlalchemy.orm import Session
@@ -32,6 +32,7 @@ from app.utils.costs import compute_llm_cost
 from app.utils.logging import logger
 from app.utils.metrics_recorder import record_template_fill_completed, record_template_fill_failed
 from app.utils.metrics import TEMPLATE_FILL_LATENCY_SECONDS
+from app.core.rag.hybrid_retriever import HybridRetriever
 from app.verticals.real_estate.template_filling.excel_handler import ExcelHandler
 from app.verticals.real_estate.template_filling.llm_service import TemplateFillLLMService
 from app.verticals.real_estate.template_filling.excel.mapping_coordinator import coordinator as mapping_coordinator
@@ -51,6 +52,122 @@ def _reverse_template_fill_shadow(fill_run_id: str, reason: str, stage: str) -> 
     )
 
 
+def _extract_schema_table_row_labels(schema_obj: Any, workbook: Any) -> Dict[str, Any]:
+    """
+    Extract row labels for schema tables from the Excel template.
+
+    Returns:
+        Dict: {table_id: {"row_labels": [...], "start_row": int, "end_row": int}}
+    """
+    labels_by_table: Dict[str, Any] = {}
+    if not schema_obj or not workbook:
+        return labels_by_table
+
+    for table in getattr(schema_obj, "tables", []) or []:
+        table_id = table.get("id")
+        sheet_name = table.get("sheet")
+        row_id_col = table.get("row_identifier_column")
+        start_row = table.get("data_start_row")
+        end_row = table.get("data_end_row", start_row)
+
+        if not table_id or not sheet_name or not row_id_col or not start_row:
+            continue
+        if sheet_name not in workbook.sheetnames:
+            continue
+
+        sheet = workbook[sheet_name]
+        row_labels = []
+        for row in range(start_row, (end_row or start_row) + 1):
+            cell_value = sheet[f"{row_id_col}{row}"].value
+            row_labels.append(str(cell_value).strip() if cell_value is not None else "")
+
+        labels_by_table[table_id] = {
+            "row_labels": row_labels,
+            "start_row": start_row,
+            "end_row": end_row,
+        }
+
+    return labels_by_table
+
+
+def _build_table_query(table_def: Dict[str, Any], row_labels: List[str]) -> str:
+    parts = [table_def.get("sheet", "")]
+    for col in table_def.get("columns", []) or []:
+        if col.get("header"):
+            parts.append(col.get("header"))
+        parts.extend(col.get("pdf_aliases", []) or [])
+    parts.extend(row_labels[:10])
+    return " ".join([p for p in parts if p])
+
+
+def _retrieve_table_rag_chunks(
+    db: Session,
+    document_id: str,
+    query: str,
+    top_k: int = 5
+) -> List[Dict[str, Any]]:
+    if not document_id:
+        return []
+    retriever = HybridRetriever(db)
+    results = retriever.retrieve(
+        query=query,
+        document_ids=[document_id],
+        top_k=top_k,
+    )
+    table_chunks = [
+        r for r in results
+        if r.get("section_type") == "table" or r.get("is_tabular")
+    ]
+    if len(table_chunks) >= top_k:
+        return table_chunks[:top_k]
+
+    kv_chunks = [
+        r for r in results
+        if r.get("section_type") in ("key_value_pairs", "key_value")
+    ]
+    merged = table_chunks + kv_chunks
+    if merged:
+        return merged[:top_k]
+    return results[:top_k]
+
+
+def _get_table_batch_key(table_def: Dict[str, Any]) -> str:
+    sheet = table_def.get("sheet") or "unknown"
+    return sheet.lower()
+
+
+def _compute_schema_counts(schema_obj: Any) -> Dict[str, Any]:
+    fields = getattr(schema_obj, "fields", []) or []
+    tables = getattr(schema_obj, "tables", []) or []
+    total_table_cells = 0
+    total_table_rows = 0
+    total_table_columns = 0
+    unknown_row_tables = 0
+
+    for table in tables:
+        columns = [c for c in (table.get("columns") or []) if c.get("excel_column")]
+        col_count = len(columns)
+        total_table_columns += col_count
+
+        start_row = table.get("data_start_row")
+        end_row = table.get("data_end_row")
+        if start_row and end_row and end_row >= start_row:
+            row_count = end_row - start_row + 1
+            total_table_rows += row_count
+            total_table_cells += row_count * col_count
+        else:
+            unknown_row_tables += 1
+
+    return {
+        "schema_id": getattr(schema_obj, "schema_id", None),
+        "yaml_field_count": len(fields),
+        "yaml_table_count": len(tables),
+        "yaml_table_rows": total_table_rows,
+        "yaml_table_columns": total_table_columns,
+        "yaml_table_cells": total_table_cells,
+        "yaml_tables_with_unknown_rows": unknown_row_tables,
+        "total_yaml_fields": len(fields) + total_table_cells,
+    }
 
 
 @shared_task(bind=True)
@@ -191,6 +308,15 @@ def detect_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         if not document:
             raise ValueError(f"Document not found: {document_id}")
 
+        # Get template to count Excel schema cells (not PDF detected fields)
+        template = repo.get_template(fill_run.template_id)
+        schema_cell_count = 0
+        if template and template.schema_metadata:
+            # Count: KV fields + all table columns
+            fields = template.schema_metadata.get("fields", [])
+            tables = template.schema_metadata.get("tables", [])
+            schema_cell_count = len(fields) + sum(len(t.get("columns", [])) for t in tables)
+
         # Get KV and table chunks from document
         chunks = document_repo.get_chunks_for_document(document_id)
 
@@ -206,6 +332,7 @@ def detect_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         # ========================================================================
         kv_chunks = []
         table_chunks = []
+        narrative_chunks = []
 
         for chunk in chunks:
             # Parse metadata
@@ -223,8 +350,11 @@ def detect_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                 kv_chunks.append((chunk, metadata))
             elif section_type == "table":
                 table_chunks.append((chunk, metadata))
+            else:
+                narrative_chunks.append((chunk, metadata))
 
-        logger.info(f"Found {len(kv_chunks)} key-value chunks and {len(table_chunks)} table chunks")
+
+        logger.info(f"Found {len(kv_chunks)} key-value chunks, {len(table_chunks)} table chunks, and {len(narrative_chunks)} narrative chunks")
 
         # Process KV chunks
         for chunk, metadata in kv_chunks:
@@ -260,9 +390,6 @@ def detect_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                     "description": f"Key-value field from page {kv_page_number}",
                     "source": "key_value_pairs"
                 }
-
-                # FIXED: Extract bbox from the INDIVIDUAL KV pair (not chunk-level merged bbox)
-                kv_bbox = kv.get("bbox")
                 if kv_bbox:
                     field_data["bbox"] = kv_bbox
 
@@ -278,37 +405,71 @@ def detect_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         # Extract fields from TABLE chunks
         # ========================================================================
         for chunk, metadata in table_chunks:
-            table_name = metadata.get("table_name", "")
-            column_headers = metadata.get("column_headers", [])
-            # Extract bbox from chunk metadata for PDF highlighting
-            chunk_bbox = metadata.get("bbox", {})
-            # Use bbox page if available (physical PDF page from Azure DI bounding_regions)
-            page_range = metadata.get("page_range", [])
-            metadata_page = metadata.get("page_number")
-            range_page = page_range[0] if isinstance(page_range, list) and page_range else None
-            table_page = (
-                (chunk_bbox.get("page") if isinstance(chunk_bbox, dict) and chunk_bbox else None)
-                or metadata_page
-                or range_page
-                or chunk.page_number
-            )
+            # Extract complete table dict from chunk.tables (primary source - has ALL data from Azure DI)
+            # Handle both parsed (list) and stringified (JSON string) formats from DB
+            table_dict = None
+            if chunk.tables:
+                tables_data = chunk.tables
+                # If tables_data is a JSON string, parse it first
+                if isinstance(tables_data, str):
+                    try:
+                        tables_data = json.loads(tables_data)
+                    except (json.JSONDecodeError, TypeError):
+                        tables_data = None
+
+                # Extract first table dict from parsed list
+                if isinstance(tables_data, list) and len(tables_data) > 0:
+                    try:
+                        table_dict = tables_data[0]
+                    except (IndexError, TypeError):
+                        pass
+
+            # Fallback: build minimal table dict from metadata (limited to 2 rows)
+            if not table_dict:
+                table_dict = {
+                    "table_name": metadata.get("table_name", ""),
+                    "column_headers": metadata.get("column_headers", []),
+                    "table_data": metadata.get("table_data", []),
+                    "page_number": metadata.get("page_number"),
+                }
+
+            # Extract table metadata from table_dict (single source of truth)
+            table_name = table_dict.get("table_name", "")
+            column_headers = table_dict.get("column_headers", [])
+            chunk_bbox = metadata.get("bbox", {})  # Bbox is metadata-specific for PDF highlighting
+
+            # Determine table page for citations (prefer table_dict.page_number)
+            table_page = table_dict.get("page_number")
+            if not table_page:
+                # Fallback: derive from metadata or chunk
+                page_range = metadata.get("page_range", [])
+                metadata_page = metadata.get("page_number")
+                range_page = page_range[0] if isinstance(page_range, list) and page_range else None
+                table_page = (
+                    (chunk_bbox.get("page") if isinstance(chunk_bbox, dict) and chunk_bbox else None)
+                    or metadata_page
+                    or range_page
+                    or chunk.page_number
+                )
             if isinstance(table_page, str) and table_page.isdigit():
                 table_page = int(table_page)
             citation = f"[D1:p{table_page}]"
 
+            # Extract table data for per-column fields (schema matching - Stage 1)
+            table_data_rows = table_dict.get("table_data", [])
+
+            # Create per-column fields for schema alias matching (Stage 1)
             for col_header in column_headers:
                 if not col_header or col_header.lower() in ["", "none", "n/a"]:
                     continue
 
-                # Get sample value from first row if available
+                # Get sample value from first row
                 extracted_value = ""
-                table_data = metadata.get("table_data", [])
-                if table_data and len(table_data) > 0:
-                    # Find column index
+                if table_data_rows and len(table_data_rows) > 0:
                     try:
                         col_idx = column_headers.index(col_header)
-                        if col_idx < len(table_data[0]):
-                            extracted_value = table_data[0][col_idx]
+                        if col_idx < len(table_data_rows[0]):
+                            extracted_value = table_data_rows[0][col_idx]
                     except (ValueError, IndexError):
                         pass
 
@@ -317,17 +478,12 @@ def detect_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                     "name": col_header,
                     "type": "text",
                     "extracted_value": extracted_value,
-                    # NOTE: Hardcoded confidence for table columns.
-                    # Unlike key-value pairs (which get per-pair confidence from Azure DI),
-                    # Azure DI does NOT provide per-column/per-cell confidence for tables.
-                    # Future: Could calculate from table structure quality metrics.
-                    "confidence": 0.9,
+                    "confidence": 0.9,  # NOTE: Hardcoded for tables (Azure DI doesn't provide per-cell confidence)
                     "citations": [citation],
                     "description": f"Column from table '{table_name}' on page {table_page}",
                     "source": "table"
                 }
 
-                # Include bbox for PDF highlighting if available
                 if chunk_bbox:
                     field_data["bbox"] = chunk_bbox
 
@@ -338,6 +494,61 @@ def detect_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
 
                 detected_fields.append(field_data)
                 field_id_counter += 1
+
+            # Create one table_block field per table with full row data for LLM context (Stage 1.5)
+            # Pass the complete table_dict from chunk.tables directly (already well-structured)
+            if column_headers:
+                detected_fields.append({
+                    "id": f"tbl_block_{field_id_counter}",
+                    "name": table_dict.get("table_name", "Table"),
+                    "type": "table",
+                    "extracted_value": "",
+                    "confidence": 0.9,
+                    "citations": [citation],
+                    "source": "table_block",
+                    # Pass complete table structure from chunk.tables
+                    "table_name": table_dict.get("table_name", ""),
+                    "table_columns": table_dict.get("column_headers", []),
+                    "table_rows": table_dict.get("table_data", []),
+                    "page_number": table_dict.get("page_number"),
+                })
+                field_id_counter += 1
+
+        # ========================================================================
+        # Extract fields from NARRATIVE chunks (for LLM context)
+        # ========================================================================
+        for chunk, metadata in narrative_chunks:
+            narrative_text = chunk.text or ""
+            if not narrative_text.strip():
+                continue
+
+            # Extract section heading from metadata
+            metadata_dict = metadata if isinstance(metadata, dict) else {}
+            section_heading = ""
+            if isinstance(metadata_dict.get("heading_hierarchy"), list):
+                section_heading = metadata_dict["heading_hierarchy"][-1] if metadata_dict["heading_hierarchy"] else ""
+
+            # Get page number for citation
+            narrative_page = metadata_dict.get("page_number") or chunk.page_number
+            if isinstance(narrative_page, str) and narrative_page.isdigit():
+                narrative_page = int(narrative_page)
+            citation = f"[D1:p{narrative_page}]"
+
+            # Create one narrative_block field with full text for LLM context
+            # Narrative provides market/economic/demographic context for better field matching
+            detected_fields.append({
+                "id": f"narrative_block_{field_id_counter}",
+                "name": f"narrative: {section_heading}" if section_heading else "narrative",
+                "type": "narrative",
+                "extracted_value": narrative_text[:300],  # Summary (first 300 chars)
+                "confidence": 0.8,
+                "citations": [citation],
+                "source": "narrative_block",
+                # Full narrative text for LLM context
+                "full_text": narrative_text,
+                "section": section_heading,
+            })
+            field_id_counter += 1
 
         elapsed_ms = int((time.time() - start_time) * 1000)
 
@@ -361,10 +572,13 @@ def detect_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
             "mappings": []  # Empty initially, will be filled by auto-mapping
         }
 
+        # Use schema cell count as total_fields_detected (Excel cells to fill, not PDF extracted fields)
+        total_to_detect = schema_cell_count if schema_cell_count > 0 else len(detected_fields)
+
         repo.update_fill_run(
             fill_run_id,
             field_mapping=field_mapping,
-            total_fields_detected=len(detected_fields),
+            total_fields_detected=total_to_detect,
             field_detection_completed=True,
             status="fields_detected",
             current_stage="field_detection",
@@ -444,10 +658,14 @@ def auto_map_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
     template_id = payload["template_id"]
     detection_result = payload["detection_result"]
     job_id = payload["job_id"]
+    document_id = payload.get("document_id")
 
     # Config flags (read from settings if not in payload)
-    use_schema_only = payload.get("use_schema_only", settings.excel_schema_only)
-    skip_schema = payload.get("skip_schema", settings.excel_skip_schema)
+    # skip_generic_mapping controls Stage 2 (generic Excel mapping) - Default: True (skip generic, run only targeted)
+    skip_generic_mapping = payload.get("skip_generic_mapping", True)
+    # skip_schema controls Stage 1 (schema alias matching) - Default: False (run alias matching)
+    # Set to True to SKIP alias matching and send ALL YAML fields to targeted LLM extraction instead
+    skip_schema = payload.get("skip_schema", True)
 
     db = _get_db_session()
     repo = TemplateRepository(db)
@@ -477,27 +695,43 @@ def auto_map_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         schema_mappings = []
         generic_mappings = []
         schema_id = None  # Track for Stage 2
+        schema_table_row_labels: Dict[str, Any] = {}
+        schema_summary: Optional[Dict[str, Any]] = None
 
-        # === STEP 1: Try schema-based mapping (unless skipped) ===
-        if not skip_schema:
-            template_path = None
-            try:
-                from openpyxl import load_workbook
+        # === STEP 1: Identify template schema (always, regardless of skip_schema) ===
+        # Schema identification is separate from alias mapping creation.
+        # We identify the schema for Stage 1.5 targeted LLM, but only create mappings if skip_schema=False.
+        template_path = None
+        workbook = None
+        try:
+            from openpyxl import load_workbook
 
-                # Download template file from R2 to worker-local /tmp
-                storage = get_storage_backend()
-                template_path = storage.download_to_temp(template.file_path)
+            # Download template file from R2 to worker-local /tmp
+            storage = get_storage_backend()
+            template_path = storage.download_to_temp(template.file_path)
 
-                # Load workbook for fingerprint check
-                workbook = load_workbook(template_path, data_only=False)
+            # Load workbook for fingerprint check
+            workbook = load_workbook(template_path, data_only=False)
 
-                # Identify template
-                schema_id = mapping_coordinator.identify_template(workbook)
+            # Identify template (ALWAYS, regardless of skip_schema flag)
+            schema_id = mapping_coordinator.identify_template(workbook)
 
-                if schema_id:
-                    logger.info(f"✓ Template identified as: {schema_id}")
+            if schema_id:
+                logger.info(f"✓ Template identified as: {schema_id}")
+                # Extract row labels for schema tables (used in targeted table extraction)
+                schema_obj_for_rows = mapping_coordinator.schema_loader.load_schema(schema_id)
+                if schema_obj_for_rows:
+                    schema_table_row_labels = _extract_schema_table_row_labels(schema_obj_for_rows, workbook)
+                    schema_summary = _compute_schema_counts(schema_obj_for_rows)
+                    logger.info(
+                        "YAML schema summary: fields=%s table_cells=%s total=%s",
+                        schema_summary.get("yaml_field_count"),
+                        schema_summary.get("yaml_table_cells"),
+                        schema_summary.get("total_yaml_fields"),
+                    )
 
-                    # Create schema mappings (deterministic, instant)
+                # === STEP 1a: Create schema mappings (only if skip_schema=False) ===
+                if not skip_schema:
                     schema_mappings = mapping_coordinator.create_schema_mappings(schema_id, pdf_fields)
 
                     logger.info(f"Schema mapping: {len(schema_mappings)} fields mapped (confidence=0.98 baseline)")
@@ -526,21 +760,29 @@ def auto_map_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                         message=f"Schema matched {len(schema_mappings)} fields by alias"
                     )
                 else:
-                    logger.info("Template not recognized by schema system - will use generic analyzer")
+                    logger.info("Skipping alias mapping (skip_schema=True) — will use LLM only for schema fields")
+            else:
+                logger.info("Template not recognized by schema system - will use generic analyzer")
 
-            except Exception as e:
-                logger.warning(f"Schema mapping failed (will fall back to generic): {e}")
-                schema_mappings = []
-                schema_id = None
-            finally:
-                # Always clean up — even if load_workbook or identify_template throws
-                if template_path:
-                    Path(template_path).unlink(missing_ok=True)
+        except Exception as e:
+            logger.warning(f"Schema identification failed (will fall back to generic): {e}")
+            schema_mappings = []
+            schema_id = None
+        finally:
+            # Always clean up — even if load_workbook or identify_template throws
+            if workbook is not None:
+                try:
+                    workbook.close()
+                except Exception:
+                    pass
+            if template_path:
+                Path(template_path).unlink(missing_ok=True)
 
         # === STEP 1.5: Targeted LLM for unmapped YAML fields (Stage 2) ===
         # Ask LLM specifically: "find values for these 63 named fields in the Azure DI data"
         # Much cheaper and more accurate than the generic 6-batch sheet mapper for schema fields.
-        if schema_id and not use_schema_only:
+        # Always runs when schema is available (independent of skip_generic_mapping)
+        if schema_id:
             try:
                 from app.verticals.real_estate.template_filling.excel.schema_based import SchemaMapper
 
@@ -554,6 +796,11 @@ def auto_map_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                         if schema_obj.get_field(fid) is not None
                     ]
 
+                    schema_tables = schema_obj.tables or []
+
+                    if unmapped_fields or schema_tables:
+                        llm_service_targeted = TemplateFillLLMService()
+
                     if unmapped_fields:
                         logger.info(
                             f"🎯 Stage 2: {len(unmapped_fields)} unmapped YAML fields → targeted LLM"
@@ -565,7 +812,6 @@ def auto_map_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                             message=f"Finding values for {len(unmapped_fields)} schema fields..."
                         )
 
-                        llm_service_targeted = TemplateFillLLMService()
                         targeted_values = asyncio.run(
                             llm_service_targeted.extract_schema_field_values(
                                 unmapped_fields, pdf_fields
@@ -590,6 +836,7 @@ def auto_map_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                                     "extracted_value": result["value"],
                                     "confidence": result["confidence"],
                                     "citations": result.get("citations", []),
+                                    "reasoning": result.get("reasoning"),
                                     "source": "targeted_schema",
                                 })
 
@@ -612,7 +859,116 @@ def auto_map_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                                 f"({len(schema_mappings)} schema total)"
                             )
                         )
-                    else:
+
+                    if schema_tables:
+                        logger.info(
+                            f"🎯 Stage 2: {len(schema_tables)} schema tables → targeted LLM"
+                        )
+                        tracker.update_progress(
+                            status="mapping",
+                            current_stage="auto_mapping",
+                            progress_percent=70,
+                            message=f"Extracting values for {len(schema_tables)} schema tables..."
+                        )
+
+                        targeted_table_values = {}
+                        table_batches: Dict[str, List[Dict[str, Any]]] = {}
+                        for table_def in schema_tables:
+                            table_id = table_def.get("id")
+                            if not table_id:
+                                continue
+                            batch_key = _get_table_batch_key(table_def)
+                            table_batches.setdefault(batch_key, []).append(table_def)
+
+                        for batch_key, batch_tables in table_batches.items():
+                            batch_chunks: List[Dict[str, Any]] = []
+                            seen_chunk_ids = set()
+                            row_labels_by_table: Dict[str, List[str]] = {}
+
+                            for table_def in batch_tables:
+                                table_id = table_def.get("id")
+                                if not table_id:
+                                    continue
+                                row_labels = schema_table_row_labels.get(table_id, {}).get("row_labels", [])
+                                if row_labels and all(not str(lbl).strip() for lbl in row_labels):
+                                    logger.info(
+                                        f"Row labels empty for table {table_id}; using row_index order"
+                                    )
+                                    row_labels = []
+                                row_labels_by_table[table_id] = row_labels
+
+                                query = _build_table_query(table_def, row_labels)
+                                rag_chunks = _retrieve_table_rag_chunks(db, document_id, query)
+                                if not rag_chunks:
+                                    logger.info(f"No RAG chunks found for schema table {table_id}")
+                                    continue
+                                logger.info(
+                                    f"RAG table retrieval: table_id={table_id} chunks={len(rag_chunks)}"
+                                )
+
+                                for chunk in rag_chunks:
+                                    chunk_id = chunk.get("id")
+                                    if not chunk_id or chunk_id in seen_chunk_ids:
+                                        continue
+                                    seen_chunk_ids.add(chunk_id)
+                                    batch_chunks.append(chunk)
+
+                            if not batch_chunks:
+                                logger.info(f"No RAG chunks found for table batch {batch_key}")
+                                continue
+
+                            logger.info(
+                                f"RAG batch extraction: batch={batch_key} tables={len(batch_tables)} "
+                                f"chunks={len(batch_chunks)}"
+                            )
+
+                            logger.info(
+                                f"LLM table batch call: batch={batch_key} "
+                                f"table_ids={[t.get('id') for t in batch_tables if t.get('id')]}"
+                            )
+
+                            batch_result = asyncio.run(
+                                llm_service_targeted.extract_schema_table_values_rag_batch(
+                                    batch_tables,
+                                    batch_chunks,
+                                    row_labels_by_table=row_labels_by_table,
+                                )
+                            )
+                            if batch_result:
+                                targeted_table_values.update(batch_result)
+
+                        targeted_table_mappings = mapping_coordinator.create_targeted_schema_table_mappings(
+                            schema_tables, targeted_table_values, schema_table_row_labels
+                        )
+
+                        for mapping in targeted_table_mappings:
+                            extracted_value = mapping.get("extracted_value")
+                            if extracted_value is None:
+                                continue
+                            pdf_fields.append({
+                                "id": mapping.get("pdf_field_id"),
+                                "name": mapping.get("pdf_field_name"),
+                                "type": mapping.get("data_type", "text"),
+                                "extracted_value": extracted_value,
+                                "confidence": mapping.get("confidence", 0.7),
+                                "citations": mapping.get("citations", []),
+                                "reasoning": mapping.get("reasoning"),
+                                "source": "targeted_schema",
+                            })
+
+                        schema_mappings = schema_mappings + targeted_table_mappings
+
+                        tracker.update_progress(
+                            status="mapping",
+                            current_stage="auto_mapping",
+                            progress_percent=70,
+                            message=(
+                                f"Found {len(targeted_table_mappings)} table cells via targeted LLM "
+                                f"({len(schema_mappings)} schema total)"
+                            )
+                        )
+
+                    if not unmapped_fields and not schema_tables:
                         logger.info("All YAML schema fields matched in Stage 1 — skipping Stage 2")
                         tracker.update_progress(
                             status="mapping",
@@ -623,8 +979,8 @@ def auto_map_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
             except Exception as e:
                 logger.warning(f"Stage 2 targeted mapping failed (continuing to Stage 3): {e}")
 
-        # === STEP 2: Generic + LLM mapping for remaining cells (unless schema-only mode) ===
-        if not use_schema_only:
+        # === STEP 2: Generic + LLM mapping for remaining cells (unless skip_generic_mapping) ===
+        if not skip_generic_mapping:
             # Get cells already mapped by schema (Stage 1 + Stage 2)
             schema_mapped_cells = mapping_coordinator.get_schema_mapped_cells(schema_mappings)
 
@@ -772,8 +1128,10 @@ def auto_map_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         field_mapping = {
             # Use augmented pdf_fields (includes virtual entries for Stage 2 targeted values)
             "pdf_fields": pdf_fields,
-            "mappings": mappings
+            "mappings": mappings,
         }
+        if schema_summary:
+            field_mapping["schema_summary"] = schema_summary
 
         # Persist token data if LLM was used
         update_params = {
@@ -787,7 +1145,7 @@ def auto_map_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         }
 
         # Add token tracking data if generic mapping was used
-        if not use_schema_only and 'llm_cost' in locals():
+        if not skip_generic_mapping and 'llm_cost' in locals():
             update_params.update({
                 "input_tokens": llm_input_tokens,
                 "output_tokens": llm_output_tokens,

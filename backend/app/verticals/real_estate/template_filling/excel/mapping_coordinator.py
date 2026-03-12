@@ -7,6 +7,7 @@ from openpyxl import Workbook
 from app.utils.logging import logger
 
 from .schema_based import SchemaLoader, SchemaMapper, TemplateIdentifier
+from .schema_based.schema_loader import _normalize_field_name
 
 
 class MappingCoordinator:
@@ -149,12 +150,127 @@ class MappingCoordinator:
                 "excel_label": f"{field['sheet']}!{field.get('label_cell', '')}",
                 "confidence": result["confidence"],
                 "source": "targeted_schema",
-                "reasoning": f"Stage 2 targeted extraction for schema field '{field_id}'",
+                "reasoning": result.get("reasoning") or f"Stage 2 targeted extraction for schema field '{field_id}'",
                 "citations": result.get("citations", []),
             })
 
         logger.info(
             f"✓ Targeted schema mappings: {len(mappings)}/{len(unmapped_fields)} fields found by LLM"
+        )
+        return mappings
+
+    def create_targeted_schema_table_mappings(
+        self,
+        schema_tables: List[Dict[str, Any]],
+        targeted_table_values: Dict[str, Any],
+        table_row_labels: Optional[Dict[str, Any]] = None,
+    ) -> List[Dict[str, Any]]:
+        """
+        Convert Stage 2 LLM table results into mapping dicts using schema table cell positions.
+
+        Args:
+            schema_tables: Table defs from TemplateSchema.tables
+            targeted_table_values: {table_id: {"rows": [...]}}
+            table_row_labels: Optional map of table_id -> {row_labels: [...], start_row, end_row}
+
+        Returns:
+            List of mapping dicts with source="targeted_schema".
+        """
+        if not schema_tables or not targeted_table_values:
+            return []
+
+        table_row_labels = table_row_labels or {}
+        table_by_id = {t.get("id"): t for t in schema_tables if t.get("id")}
+        mappings: List[Dict[str, Any]] = []
+
+        for table_id, table_result in targeted_table_values.items():
+            table_def = table_by_id.get(table_id)
+            if not table_def:
+                continue
+
+            start_row = table_def.get("data_start_row")
+            end_row = table_def.get("data_end_row", start_row)
+            row_id_col = table_def.get("row_identifier_column")
+            row_labels = table_row_labels.get(table_id, {}).get("row_labels", [])
+            if row_labels:
+                seen_labels = {}
+                duplicates = set()
+                for idx, label in enumerate(row_labels):
+                    normalized_label = _normalize_field_name(str(label or ""))
+                    if not normalized_label:
+                        continue
+                    if normalized_label in seen_labels:
+                        duplicates.add(normalized_label)
+                    else:
+                        seen_labels[normalized_label] = idx
+                if duplicates:
+                    logger.warning(
+                        f"Duplicate row labels detected in schema table '{table_id}': "
+                        f"{', '.join(sorted(duplicates))}"
+                    )
+
+            columns = table_def.get("columns", [])
+            column_defs = {c.get("excel_column"): c for c in columns if c.get("excel_column")}
+
+            for row in table_result.get("rows", []):
+                row_index = row.get("row_index")
+                row_label = row.get("row_label")
+                values = row.get("values", {}) or {}
+                confidence = row.get("confidence", 0.7)
+                citations = row.get("citations", [])
+
+                excel_row = None
+                if row_labels and row_label:
+                    normalized_target = _normalize_field_name(str(row_label))
+                    for idx, label in enumerate(row_labels):
+                        normalized_label = _normalize_field_name(str(label or ""))
+                        if normalized_label and (
+                            normalized_label == normalized_target
+                            or normalized_target in normalized_label
+                            or normalized_label in normalized_target
+                        ):
+                            excel_row = (start_row or 0) + idx
+                            break
+
+                if excel_row is None:
+                    if start_row is None or row_index is None:
+                        continue
+                    excel_row = start_row + int(row_index)
+
+                if end_row is not None and excel_row > end_row:
+                    continue
+
+                for excel_col, value in values.items():
+                    if value is None or str(value).strip() == "":
+                        continue
+                    if row_id_col and row_label and excel_col == row_id_col:
+                        # Skip writing the row label column when labels are already present
+                        continue
+
+                    col_def = column_defs.get(excel_col, {})
+                    excel_cell = f"{excel_col}{excel_row}"
+                    data_type = col_def.get("data_type", "text")
+                    mappings.append({
+                        "pdf_field_id": f"targeted_table_{table_id}_{excel_cell}",
+                        "pdf_field_name": f"{table_id}:{excel_cell}",
+                        "excel_cell": excel_cell,
+                        "excel_sheet": table_def.get("sheet"),
+                        "excel_label": f"{table_id}:{col_def.get('header', excel_col)} ({row_label or excel_row})",
+                        "confidence": confidence,
+                        "source": "targeted_schema",
+                        "reasoning": row.get("reasoning") or f"Stage 2 targeted table extraction for '{table_id}'",
+                        "citations": citations,
+                        "extracted_value": value,
+                        "data_type": data_type,
+                        "schema_table_id": table_id,
+                        "schema_table_row_label": row_label,
+                        "schema_table_row_index": row_index,
+                        "schema_table_column": excel_col,
+                    })
+
+        logger.info(
+            f"✓ Targeted schema table mappings: {len(mappings)} cells mapped "
+            f"across {len(targeted_table_values)} tables"
         )
         return mappings
 

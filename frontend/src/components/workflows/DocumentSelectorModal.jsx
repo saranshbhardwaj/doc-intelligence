@@ -236,6 +236,38 @@ export default function DocumentSelectorModal({ open, onOpenChange }) {
       const jobId = res.job_id;
       const docId = res.document_id;
 
+      const isImmediateComplete = res?.status === "completed" || res?.reuse === true;
+      if (isImmediateComplete) {
+        const existingName = res?.existing_filename || res?.filename || upload.file.name;
+
+        setUploadingFiles((prev) =>
+          prev.map((u) =>
+            u.id === upload.id
+              ? { ...u, status: "completed", progress: 100, docId }
+              : u
+          )
+        );
+
+        // Refresh only the collection that was uploaded to
+        if (loadedCollections.has(selectedCollection)) {
+          setLoadedCollections((prev) => {
+            const newSet = new Set(prev);
+            newSet.delete(selectedCollection);
+            return newSet;
+          });
+          await fetchCollectionDocuments(selectedCollection);
+        }
+
+        const newSelected = new Set(tempSelectedIds);
+        newSelected.add(docId);
+        setTempSelectedIds(newSelected);
+
+        toast.info(
+          `The file ${upload.file.name} has the same content as ${existingName}.`
+        );
+        return;
+      }
+
       // Update status to processing
       setUploadingFiles((prev) =>
         prev.map((u) =>

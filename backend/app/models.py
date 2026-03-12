@@ -390,6 +390,7 @@ class SessionDocumentInfo(BaseModel):
     """Document information in a session"""
     id: str
     name: str
+    page_count: Optional[int] = None
     added_at: datetime
 
 

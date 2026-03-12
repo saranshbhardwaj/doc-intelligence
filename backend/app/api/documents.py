@@ -214,6 +214,7 @@ async def upload_document(
 
             return {
                 "document_id": existing_doc.id,
+                "existing_filename": existing_doc.filename,
                 "job_id": job.job_id if job else None,
                 "filename": safe_filename,
                 "status": "completed",

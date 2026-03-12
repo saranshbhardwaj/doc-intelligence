@@ -110,6 +110,7 @@ class FillRunStatus(BaseModel):
     total_fields_detected: Optional[int]
     total_fields_mapped: Optional[int]
     total_fields_filled: Optional[int]
+    total_template_fields: Optional[int]
     auto_mapped_count: Optional[int]
     user_edited_count: Optional[int]
     created_at: datetime
@@ -635,6 +636,35 @@ async def get_fill_status(
                     "file_size_bytes": document.file_size_bytes,
                 }
 
+        schema_summary = None
+        if isinstance(fill_run.field_mapping, dict):
+            schema_summary = fill_run.field_mapping.get("schema_summary")
+
+        total_template_fields = None
+        if isinstance(schema_summary, dict) and schema_summary.get("total_yaml_fields") is not None:
+            total_template_fields = schema_summary.get("total_yaml_fields")
+        else:
+            schema_metadata = None
+            if fill_run.template_snapshot and isinstance(fill_run.template_snapshot, dict):
+                schema_metadata = fill_run.template_snapshot.get("schema_metadata")
+            if not schema_metadata and fill_run.template_id:
+                try:
+                    template = repo.get_template(fill_run.template_id)
+                    if template:
+                        schema_metadata = template.schema_metadata
+                except Exception:
+                    schema_metadata = None
+
+            if schema_metadata:
+                total_template_fields = (
+                    schema_metadata.get("total_key_value_fields", 0) +
+                    sum(
+                        table.get("total_fillable_cells", 0)
+                        for sheet in schema_metadata.get("sheets", [])
+                        for table in sheet.get("tables", [])
+                    )
+                )
+
         return FillRunStatus(
             id=fill_run.id,
             template_id=fill_run.template_id,
@@ -647,6 +677,7 @@ async def get_fill_status(
             total_fields_detected=fill_run.total_fields_detected,
             total_fields_mapped=fill_run.total_fields_mapped,
             total_fields_filled=fill_run.total_fields_filled,
+            total_template_fields=total_template_fields,
             auto_mapped_count=fill_run.auto_mapped_count,
             user_edited_count=fill_run.user_edited_count,
             created_at=fill_run.created_at,
