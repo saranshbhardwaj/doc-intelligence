@@ -275,13 +275,23 @@ async def list_templates(
                 description=t.description,
                 category=t.category,
                 usage_count=t.usage_count,
-                # Calculate total fillable fields: key-value fields + all table cells
+                # Prefer YAML schema target fields when available, fallback to all detected fillables
                 total_fields=(
-                    t.schema_metadata.get("total_key_value_fields", 0) +
-                    sum(
-                        table.get("total_fillable_cells", 0)
-                        for sheet in t.schema_metadata.get("sheets", [])
-                        for table in sheet.get("tables", [])
+                    (
+                        (t.schema_metadata.get("schema_summary") or {}).get("total_yaml_fields")
+                        or t.schema_metadata.get("total_yaml_fields")
+                    )
+                    if t.schema_metadata and (
+                        (t.schema_metadata.get("schema_summary") or {}).get("total_yaml_fields") is not None
+                        or t.schema_metadata.get("total_yaml_fields") is not None
+                    )
+                    else (
+                        t.schema_metadata.get("total_key_value_fields", 0) +
+                        sum(
+                            table.get("total_fillable_cells", 0)
+                            for sheet in t.schema_metadata.get("sheets", [])
+                            for table in sheet.get("tables", [])
+                        )
                     )
                 ) if t.schema_metadata else 0,
                 total_sheets=len(t.schema_metadata.get("sheets", [])) if t.schema_metadata else 0,

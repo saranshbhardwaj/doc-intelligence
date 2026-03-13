@@ -147,13 +147,30 @@ export default function TemplatesPage() {
   // Background polling — runs after modal closes.
   async function pollTemplateAnalysis(templateId) {
     try {
-      const analyzed = await waitForTemplateAnalysis(getToken, templateId, 30_000);
-      setTemplates(prev =>
-        prev.map(t => (t.id === templateId ? { ...analyzed, _analyzing: false } : t))
-      );
-      toast.success('Template ready', {
-        description: `${analyzed.total_fields || 0} fillable field${analyzed.total_fields !== 1 ? 's' : ''} detected.`,
-      });
+      const maxPollAttempts = 6;
+
+      for (let attempt = 0; attempt < maxPollAttempts; attempt += 1) {
+        const analyzed = await waitForTemplateAnalysis(getToken, templateId, 30_000);
+        const hasSchemaMetadata =
+          analyzed?.schema_metadata && Object.keys(analyzed.schema_metadata).length > 0;
+
+        setTemplates(prev =>
+          prev.map(t => (
+            t.id === templateId
+              ? { ...analyzed, _analyzing: !hasSchemaMetadata, _analysisFailed: false }
+              : t
+          ))
+        );
+
+        if (hasSchemaMetadata) {
+          toast.success('Template ready', {
+            description: 'Template analysis completed successfully.',
+          });
+          return;
+        }
+      }
+
+      throw new Error('Template analysis did not complete in time');
     } catch (err) {
       console.error('Template analysis polling failed:', err);
       setTemplates(prev =>
@@ -192,7 +209,11 @@ export default function TemplatesPage() {
       setIsDeleting(true);
       const result = await deleteRETemplate(getToken, templateToDelete.id);
 
-      await loadData();
+      if (activeTab === 'templates') {
+        await loadData(0);
+      } else {
+        await loadData(fillPage);
+      }
       setShowDeleteAlert(false);
       setTemplateToDelete(null);
       setTemplateUsage(null);

@@ -14,7 +14,7 @@ import json
 import time
 from datetime import datetime
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from celery import chain, shared_task
 from sqlalchemy.orm import Session
@@ -170,6 +170,85 @@ def _compute_schema_counts(schema_obj: Any) -> Dict[str, Any]:
     }
 
 
+def _build_yaml_cell_status(
+    schema_obj: Any,
+    mappings: List[Dict[str, Any]]
+) -> Dict[str, Any]:
+    target_by_key: Dict[str, Dict[str, Any]] = {}
+    unknown_row_tables: List[Dict[str, Any]] = []
+
+    for field in getattr(schema_obj, "fields", []) or []:
+        sheet_name = field.get("sheet")
+        value_cell = field.get("value_cell")
+        if not sheet_name or not value_cell:
+            continue
+        key = f"{sheet_name}::{value_cell}"
+        target_by_key[key] = {
+            "excel_sheet": sheet_name,
+            "excel_cell": value_cell,
+            "target_type": "field",
+            "target_id": field.get("id"),
+        }
+
+    for table in getattr(schema_obj, "tables", []) or []:
+        table_id = table.get("id")
+        sheet_name = table.get("sheet")
+        start_row = table.get("data_start_row")
+        end_row = table.get("data_end_row")
+        row_identifier_col = table.get("row_identifier_column")
+
+        if not sheet_name:
+            continue
+
+        if not start_row or not end_row or end_row < start_row:
+            unknown_row_tables.append({
+                "table_id": table_id,
+                "sheet": sheet_name,
+            })
+            continue
+
+        table_columns = [
+            c.get("excel_column")
+            for c in (table.get("columns") or [])
+            if c.get("excel_column") and c.get("excel_column") != row_identifier_col
+        ]
+
+        for row_num in range(start_row, end_row + 1):
+            for excel_col in table_columns:
+                excel_cell = f"{excel_col}{row_num}"
+                key = f"{sheet_name}::{excel_cell}"
+                target_by_key[key] = {
+                    "excel_sheet": sheet_name,
+                    "excel_cell": excel_cell,
+                    "target_type": "table",
+                    "target_id": table_id,
+                }
+
+    mapped_keys = set()
+    for mapping in mappings or []:
+        sheet_name = mapping.get("excel_sheet")
+        excel_cell = mapping.get("excel_cell")
+        if not sheet_name or not excel_cell:
+            continue
+        key = f"{sheet_name}::{excel_cell}"
+        if key in target_by_key:
+            mapped_keys.add(key)
+
+    all_target_cells = list(target_by_key.values())
+    mapped_cells = [target_by_key[k] for k in target_by_key if k in mapped_keys]
+    unmapped_cells = [target_by_key[k] for k in target_by_key if k not in mapped_keys]
+
+    return {
+        "all_target_cells": all_target_cells,
+        "mapped_cells": mapped_cells,
+        "unmapped_cells": unmapped_cells,
+        "unknown_row_tables": unknown_row_tables,
+        "total_target_cells": len(all_target_cells),
+        "mapped_target_cells": len(mapped_cells),
+        "unmapped_target_cells": len(unmapped_cells),
+    }
+
+
 @shared_task(bind=True)
 def analyze_template_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
     """
@@ -220,6 +299,34 @@ def analyze_template_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
 
         # Analyze template
         schema_metadata = handler.analyze_template(file_path)
+
+        # If template matches a known YAML schema, persist schema-level totals
+        # so UI can report YAML target fields (not all detected Excel fillables).
+        schema_summary = None
+        workbook = None
+        try:
+            from openpyxl import load_workbook
+
+            workbook = load_workbook(file_path, data_only=False)
+            schema_id = mapping_coordinator.identify_template(workbook)
+            if schema_id:
+                schema_obj = mapping_coordinator.schema_loader.load_schema(schema_id)
+                if schema_obj:
+                    schema_summary = _compute_schema_counts(schema_obj)
+        except Exception as schema_err:
+            logger.warning(
+                f"Could not compute YAML schema summary during template analysis: {schema_err}"
+            )
+        finally:
+            if workbook is not None:
+                try:
+                    workbook.close()
+                except Exception:
+                    pass
+
+        if isinstance(schema_metadata, dict) and schema_summary:
+            schema_metadata["schema_summary"] = schema_summary
+            schema_metadata["total_yaml_fields"] = schema_summary.get("total_yaml_fields")
 
         # Update template with schema
         repo.update_template(
@@ -695,6 +802,7 @@ def auto_map_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         schema_mappings = []
         generic_mappings = []
         schema_id = None  # Track for Stage 2
+        schema_obj = None
         schema_table_row_labels: Dict[str, Any] = {}
         schema_summary: Optional[Dict[str, Any]] = None
 
@@ -721,6 +829,7 @@ def auto_map_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                 # Extract row labels for schema tables (used in targeted table extraction)
                 schema_obj_for_rows = mapping_coordinator.schema_loader.load_schema(schema_id)
                 if schema_obj_for_rows:
+                    schema_obj = schema_obj_for_rows
                     schema_table_row_labels = _extract_schema_table_row_labels(schema_obj_for_rows, workbook)
                     schema_summary = _compute_schema_counts(schema_obj_for_rows)
                     logger.info(
@@ -1130,6 +1239,8 @@ def auto_map_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
             "pdf_fields": pdf_fields,
             "mappings": mappings,
         }
+        if schema_obj:
+            field_mapping["yaml_cell_status"] = _build_yaml_cell_status(schema_obj, mappings)
         if schema_summary:
             field_mapping["schema_summary"] = schema_summary
 
