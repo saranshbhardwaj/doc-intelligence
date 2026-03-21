@@ -32,7 +32,10 @@ from app.core.metrics_setup import setup_prometheus_multiproc_dir
 setup_prometheus_multiproc_dir(clear_on_startup=True)  # Safe: only cleans our PID range
 
 from celery import Celery
+from celery.signals import worker_ready
 from app.config import settings
+from app.services.service_locator import get_reranker
+from app.utils.logging import logger
 
 celery_app = Celery(
     "doc_intelligence",
@@ -61,6 +64,8 @@ celery_app.conf.task_routes = {
     # Critical: user-facing, revenue-impacting tasks get dedicated workers
     "app.verticals.private_equity.workflows.tasks.tasks.*": {"queue": "critical"},
     "app.verticals.private_equity.extraction.tasks.tasks.*": {"queue": "critical"},
+    "app.verticals.private_equity.diligence.tasks.*": {"queue": "critical"},
+    "app.verticals.private_equity.diligence.investigations.tasks.*": {"queue": "critical"},
     "app.verticals.real_estate.template_filling.tasks.*": {"queue": "critical"},
     # Default: document indexing runs in background, can wait
     "app.services.tasks.document_processor.*": {"queue": "default"},
@@ -76,7 +81,35 @@ celery_app.conf.beat_schedule = {
         "schedule": crontab(minute="*/10"),  # Run every 10 minutes
         "options": {"queue": "default"},  # Low-priority maintenance task
     },
+    "cleanup-stale-analysis-runs": {
+        "task": "app.verticals.private_equity.diligence.tasks.cleanup_stale_analysis_runs",
+        "schedule": crontab(minute="*/10"),  # Run every 10 minutes
+        "options": {"queue": "default"},  # Low-priority maintenance task
+    },
 }
+
+
+def _extract_worker_queues(argv: list[str]) -> set[str]:
+    queues: set[str] = set()
+    for index, arg in enumerate(argv):
+        if arg == "-Q" and index + 1 < len(argv):
+            queues.update(part.strip() for part in argv[index + 1].split(",") if part.strip())
+        elif arg.startswith("--queues="):
+            queues.update(part.strip() for part in arg.split("=", 1)[1].split(",") if part.strip())
+    return queues
+
+
+def _should_preload_reranker(argv: list[str]) -> bool:
+    normalized = [str(arg).strip() for arg in argv if arg]
+    if "beat" in normalized:
+        return False
+    if "worker" not in normalized:
+        return False
+    if not settings.rag_use_reranker:
+        return False
+
+    queues = _extract_worker_queues(normalized)
+    return "critical" in queues
 
 # Explicitly import task modules so worker registers them.
 # Ensure all model modules are imported first so SQLAlchemy MetaData knows about
@@ -88,6 +121,7 @@ try:
     import app.db_models_workflows  # noqa: F401 - Workflow, WorkflowRun
     import app.db_models_documents  # noqa: F401 - Document, DocumentChunk
     import app.db_models_templates  # noqa: F401 - ExcelTemplate, TemplateFillRun
+    import app.db_models_pe_diligence  # noqa: F401 - PE diligence domain models
 except Exception:
     # Non-fatal here; if imports fail the worker will likely fail later when using DB.
     pass
@@ -98,6 +132,8 @@ try:
         import app.services.tasks.stuck_task_monitor  # noqa: F401 - Background cleanup of stuck tasks
         import app.verticals.private_equity.extraction.tasks  # noqa: F401 - PE extraction pipeline tasks
         import app.verticals.private_equity.workflows.tasks.tasks  # noqa: F401 - PE workflow execution pipeline tasks (explicit import to ensure registration)
+        import app.verticals.private_equity.diligence.tasks  # noqa: F401 - PE diligence analysis tasks
+        import app.verticals.private_equity.diligence.investigations.tasks  # noqa: F401 - PE diligence investigation tasks
         import app.verticals.real_estate.template_filling.tasks  # noqa: F401 - RE template filling tasks
 except Exception as e:
     # Log task import failures so we can debug worker registration issues
@@ -105,6 +141,36 @@ except Exception as e:
     print(f"WARNING: Failed to import task modules: {e}", file=sys.stderr)
     import traceback
     traceback.print_exc(file=sys.stderr)
+
+
+@worker_ready.connect
+def preload_reranker_for_critical_worker(**_kwargs):
+    if not _should_preload_reranker(sys.argv):
+        logger.info(
+            "Skipping reranker preload for this Celery process",
+            extra={"argv": sys.argv, "component": "celery_worker_startup"},
+        )
+        return
+
+    try:
+        logger.info(
+            "Preloading reranker for critical Celery worker",
+            extra={"argv": sys.argv, "component": "celery_worker_startup"},
+        )
+        get_reranker()
+        logger.info(
+            "Critical Celery worker reranker preload complete",
+            extra={"argv": sys.argv, "component": "celery_worker_startup"},
+        )
+    except Exception as exc:
+        logger.warning(
+            "Critical Celery worker reranker preload failed; worker will fall back to lazy init",
+            extra={
+                "argv": sys.argv,
+                "component": "celery_worker_startup",
+                "error": str(exc)[:300],
+            },
+        )
 
 # With pool=solo, each worker is a single process.
 # No forking complexity, no need for per-child Prometheus reinitialization.

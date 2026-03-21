@@ -7,7 +7,7 @@ from sqlalchemy.dialects.postgresql import TSVECTOR, JSONB
 from pgvector.sqlalchemy import Vector  # pgvector extension for embeddings
 from app.database import Base
 import uuid
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Tuple
 
 
 class Collection(Base):
@@ -113,7 +113,7 @@ class DocumentChunk(Base):
     embedding_model = Column(String(100), nullable=True)  # Track which model created this embedding
     embedding_version = Column(String(20), nullable=True)  # Model version for gradual migration
 
-    # Basic chunk metadata (backward compatible)
+    # Basic chunk metadata (legacy anchor page only; use chunk_metadata.page_range/bbox for multi-page chunks)
     page_number = Column(Integer, nullable=True)
     section_type = Column(String(50), nullable=True)  # "narrative", "table", etc.
     section_heading = Column(Text, nullable=True)
@@ -162,6 +162,79 @@ class DocumentChunk(Base):
     # Relationships
     document = relationship("Document", back_populates="chunks")
 
+
+    @staticmethod
+    def _coerce_page_int(value: Any) -> Optional[int]:
+        """Safely coerce metadata page values to int."""
+        try:
+            if value is None:
+                return None
+            return int(value)
+        except Exception:
+            return None
+
+    @classmethod
+    def resolve_page_info(
+        cls,
+        chunk_metadata: Optional[Dict[str, Any]],
+        fallback_page_number: Optional[int],
+    ) -> Tuple[Optional[int], List[int]]:
+        """Resolve an anchor page and page range from chunk metadata.
+
+        Priority for anchor page: bbox.page -> page_range[0] -> first region page -> fallback.
+        """
+        meta = chunk_metadata if isinstance(chunk_metadata, dict) else {}
+
+        range_pages: List[int] = []
+        raw_page_range = meta.get("page_range")
+        if isinstance(raw_page_range, list):
+            for page in raw_page_range:
+                parsed = cls._coerce_page_int(page)
+                if parsed is not None:
+                    range_pages.append(parsed)
+
+        region_pages: List[int] = []
+        for key in ("value_bounding_regions", "bounding_regions", "key_bounding_regions"):
+            regions = meta.get(key)
+            if not isinstance(regions, list):
+                continue
+            for region in regions:
+                if not isinstance(region, dict):
+                    continue
+                parsed = cls._coerce_page_int(region.get("page_number"))
+                if parsed is not None:
+                    region_pages.append(parsed)
+
+        bbox_page = None
+        bbox = meta.get("bbox")
+        if isinstance(bbox, dict):
+            bbox_page = cls._coerce_page_int(bbox.get("page"))
+
+        fallback_page = cls._coerce_page_int(fallback_page_number)
+
+        ordered_candidates = [bbox_page]
+        if range_pages:
+            ordered_candidates.append(range_pages[0])
+        if region_pages:
+            ordered_candidates.append(region_pages[0])
+        ordered_candidates.append(fallback_page)
+
+        anchor_page = next((p for p in ordered_candidates if p is not None), None)
+
+        all_pages: List[int] = []
+        for page in [*range_pages, *region_pages]:
+            if page not in all_pages:
+                all_pages.append(page)
+        if anchor_page is not None and anchor_page not in all_pages:
+            all_pages.insert(0, anchor_page)
+        if fallback_page is not None and fallback_page not in all_pages:
+            all_pages.append(fallback_page)
+
+        return anchor_page, all_pages
+
+    def get_page_info(self) -> Tuple[Optional[int], List[int]]:
+        """Instance helper wrapper around resolve_page_info."""
+        return self.resolve_page_info(self.chunk_metadata, self.page_number)
     # Helper methods for metadata access
     def get_section_id(self) -> Optional[str]:
         """Get section ID from metadata."""
@@ -324,3 +397,5 @@ class ChatMessage(Base):
 
     # Relationships
     session = relationship("ChatSession", back_populates="messages")
+
+

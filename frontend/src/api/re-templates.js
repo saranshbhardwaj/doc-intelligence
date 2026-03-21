@@ -43,6 +43,35 @@ export async function getRETemplate(getToken, templateId) {
   return response.data;
 }
 
+function enrichTemplateStats(template) {
+  if (!template) return template;
+
+  const schemaMetadata = template.schema_metadata || {};
+  const sheets = Array.isArray(schemaMetadata.sheets) ? schemaMetadata.sheets : [];
+  const yamlTotalRaw =
+    schemaMetadata?.schema_summary?.total_yaml_fields ??
+    schemaMetadata?.total_yaml_fields;
+  const isMissingYamlTotal =
+    yamlTotalRaw == null ||
+    (typeof yamlTotalRaw === "string" && yamlTotalRaw.trim() === "");
+  const yamlTotal = isMissingYamlTotal ? Number.NaN : Number(yamlTotalRaw);
+
+  const tableCells = sheets.reduce((sum, sheet) => {
+    const tables = Array.isArray(sheet?.tables) ? sheet.tables : [];
+    return sum + tables.reduce((tableSum, table) => tableSum + (table?.total_fillable_cells || 0), 0);
+  }, 0);
+
+  const fallbackTotalFields = (schemaMetadata.total_key_value_fields || 0) + tableCells;
+  const totalFields = Number.isFinite(yamlTotal) ? yamlTotal : fallbackTotalFields;
+  const totalSheets = sheets.length;
+
+  return {
+    ...template,
+    total_fields: totalFields,
+    total_sheets: totalSheets,
+  };
+}
+
 /**
  * Poll template until schema_metadata is populated (template analysis complete).
  *
@@ -61,7 +90,7 @@ export async function waitForTemplateAnalysis(getToken, templateId, maxWaitMs = 
     const template = await getRETemplate(getToken, templateId);
 
     if (template.schema_metadata && Object.keys(template.schema_metadata).length > 0) {
-      return template;
+      return enrichTemplateStats(template);
     }
 
     await new Promise(resolve => setTimeout(resolve, delay));
@@ -70,7 +99,8 @@ export async function waitForTemplateAnalysis(getToken, templateId, maxWaitMs = 
 
   // Timeout — return whatever state the template is in now
   console.warn('Template analysis timeout — returning current state');
-  return await getRETemplate(getToken, templateId);
+  const latest = await getRETemplate(getToken, templateId);
+  return enrichTemplateStats(latest);
 }
 
 /**

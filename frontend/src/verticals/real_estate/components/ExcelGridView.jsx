@@ -40,6 +40,18 @@ export default function ExcelGridView({
     return lookup;
   }, [mappings]);
 
+  const yamlUnmappedCellSet = useMemo(() => {
+    const lookup = new Set();
+    const unmappedCells = fieldMapping?.yaml_cell_status?.unmapped_cells || [];
+
+    for (const cell of unmappedCells) {
+      if (!cell?.excel_sheet || !cell?.excel_cell) continue;
+      lookup.add(`${cell.excel_sheet}::${cell.excel_cell}`);
+    }
+
+    return lookup;
+  }, [fieldMapping?.yaml_cell_status?.unmapped_cells]);
+
   const sheetMappingCounts = useMemo(() => {
     const counts = {};
     for (const mapping of mappings) {
@@ -69,6 +81,10 @@ export default function ExcelGridView({
   const getCellMapping = useCallback((sheetName, cellAddress) => {
     return mappingByCell.get(`${sheetName}::${cellAddress}`);
   }, [mappingByCell]);
+
+  const isYamlUnmappedCell = useCallback((sheetName, cellAddress) => {
+    return yamlUnmappedCellSet.has(`${sheetName}::${cellAddress}`);
+  }, [yamlUnmappedCellSet]);
 
   const getCellValue = useCallback((sheetName, cellAddress, mappingOverride = null) => {
     const mapping = mappingOverride || getCellMapping(sheetName, cellAddress);
@@ -215,6 +231,7 @@ export default function ExcelGridView({
               sheetName={activeSheet}
               getCellValue={getCellValue}
               getCellMapping={getCellMapping}
+              isYamlUnmappedCell={isYamlUnmappedCell}
               onCellClick={handleCellClick}
               selectedCell={selectedCell?.sheetName === activeSheet ? selectedCell : null}
             />

@@ -16,7 +16,7 @@ export const VERTICAL_CONFIGS = {
       'comparison', // Future
     ],
     navigationItems: [
-      { label: 'Dashboard', path: '/pe', icon: 'dashboard' },
+      { label: 'Deal Rooms', path: '/pe/rooms', icon: 'briefcase' },
       { label: 'Library', path: '/library', icon: 'book' },
       { label: 'Chat', path: '/chat', icon: 'message-circle' },
       { label: 'Workflows', path: '/workflows', icon: 'flow' },

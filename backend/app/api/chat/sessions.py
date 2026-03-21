@@ -82,6 +82,7 @@ async def create_session(
                     SessionDocumentInfo(
                         id=link.document.id,
                         name=link.document.filename,
+                        page_count=link.document.page_count,
                         added_at=link.added_at
                     )
                     for link in session_with_docs.document_links
@@ -186,6 +187,7 @@ async def get_session(
             SessionDocumentInfo(
                 id=link.document.id,
                 name=link.document.filename,
+                page_count=link.document.page_count,
                 added_at=link.added_at
             )
             for link in session.document_links
@@ -267,6 +269,7 @@ async def update_session(
             SessionDocumentInfo(
                 id=link.document.id,
                 name=link.document.filename,
+                page_count=link.document.page_count,
                 added_at=link.added_at
             )
             for link in session.document_links

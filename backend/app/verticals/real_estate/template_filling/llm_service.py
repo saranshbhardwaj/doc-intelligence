@@ -5,14 +5,111 @@ Uses Anthropic's Structured Outputs feature to GUARANTEE valid JSON responses.
 
 import asyncio
 import json
-from typing import Any, Dict, List, Optional
+import re
+import hashlib
+from difflib import SequenceMatcher
+from typing import Any, Dict, List, Optional, Tuple
+from urllib import response
 
 from anthropic import Anthropic
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, ValidationError, field_validator
 
 from app.config import settings
+from app.core.redis_client import get_redis_client_for_cache
 from app.utils.logging import logger
 
+TABLE_HEADER_CACHE_TTL_SECONDS = 60 * 60 * 24
+TABLE_HEADER_MIN_COVERAGE = 0.5
+TABLE_HEADER_STRONG_COVERAGE = 0.7
+TABLE_HEADER_MATCH_THRESHOLD = 0.82
+TABLE_HEADER_EQUIVALENTS = """Table header equivalences (case-insensitive):
+- Type, Unit Type, Unit, Floor Plan
+- # Units, Units, Unit Count, Count
+- Sqft, Sq Ft, Sq.Ft., Square Feet, SF
+- Sq.Ft./Unit, SF/Unit, Size, Area
+- Rent/Unit, Rent, Monthly Rent, Asking Rent
+- Rent/Sq Ft, Rent/Sq.Ft., Rent per Sq Ft, $/SF
+"""
+
+
+def _normalize_header(text: str) -> str:
+    if not text:
+        return ""
+    t = text.lower().strip()
+    t = t.replace("sq. ft.", "sqft").replace("sq.ft.", "sqft").replace("sq ft", "sqft")
+    t = t.replace("square feet", "sqft").replace("sq. ft", "sqft")
+    t = t.replace("per unit", "per_unit").replace("per sq ft", "per_sqft")
+    t = t.replace("rent/sq. ft.", "rent_per_sqft").replace("rent/sq ft", "rent_per_sqft")
+    t = t.replace("#", "number ")
+    t = re.sub(r"[^a-z0-9]+", " ", t)
+    t = re.sub(r"\s+", " ", t).strip()
+    return t
+
+
+def _tokenize_header(text: str) -> List[str]:
+    return [t for t in _normalize_header(text).split(" ") if t]
+
+
+def _similarity_score(a: str, b: str) -> float:
+    if not a or not b:
+        return 0.0
+    na = _normalize_header(a)
+    nb = _normalize_header(b)
+    if not na or not nb:
+        return 0.0
+    if na == nb:
+        return 1.0
+    ratio = SequenceMatcher(None, na, nb).ratio()
+    ta = set(_tokenize_header(na))
+    tb = set(_tokenize_header(nb))
+    if not ta or not tb:
+        return ratio
+    jaccard = len(ta & tb) / len(ta | tb)
+    return max(ratio, jaccard)
+
+
+def _build_table_signature(headers: List[str], row_count: int, col_count: int) -> str:
+    normalized_headers = [_normalize_header(h or "") for h in headers]
+    raw_sig = "|".join(normalized_headers) + f":{row_count}:{col_count}"
+    return hashlib.sha1(raw_sig.encode("utf-8")).hexdigest()[:16]
+
+
+def _resolve_column_map(
+    schema_columns: List[Dict[str, Any]],
+    pdf_headers: List[str],
+) -> Tuple[Dict[str, str], float]:
+    candidates: List[Tuple[str, str, float]] = []
+    for col in schema_columns:
+        excel_col = col.get("excel_column")
+        if not excel_col:
+            continue
+        aliases = [col.get("header") or ""] + list(col.get("pdf_aliases") or [])
+        best_header = None
+        best_score = 0.0
+        for header in pdf_headers:
+            score = 0.0
+            for alias in aliases:
+                if not alias:
+                    continue
+                score = max(score, _similarity_score(alias, header))
+            if score > best_score:
+                best_score = score
+                best_header = header
+        if best_header and best_score >= TABLE_HEADER_MATCH_THRESHOLD:
+            candidates.append((excel_col, best_header, best_score))
+
+    # Resolve duplicates by best score
+    column_map: Dict[str, str] = {}
+    used_headers: set[str] = set()
+    for excel_col, header, score in sorted(candidates, key=lambda x: x[2], reverse=True):
+        if header in used_headers:
+            continue
+        column_map[excel_col] = header
+        used_headers.add(header)
+
+    total_cols = len([c for c in schema_columns if c.get("excel_column")])
+    coverage = len(column_map) / max(total_cols, 1)
+    return column_map, coverage
 
 # ============================================================================
 # Pydantic Schemas for Structured Outputs
@@ -69,6 +166,7 @@ class SchemaFieldResult(BaseModel):
     value: Optional[str] = Field(None, description="Extracted value, null if not found in PDF")
     confidence: float = Field(ge=0.0, le=1.0, description="Extraction confidence (0.0-1.0)")
     citations: List[str] = Field(default_factory=list, description="Citation tokens like [D1:p5]")
+    reasoning: Optional[str] = Field(None, description="AI reasoning for this extraction (e.g., 'Found in KV pair', 'Extracted from Table X, column Y')")
 
 
 class SchemaFieldExtractionResult(BaseModel):
@@ -76,6 +174,43 @@ class SchemaFieldExtractionResult(BaseModel):
     results: List[SchemaFieldResult] = Field(description="Results for each requested schema field")
     total_found: int = Field(description="Number of fields with non-null values found")
     total_not_found: int = Field(description="Number of fields not found in PDF")
+
+
+class SchemaTableRowResult(BaseModel):
+    """Extraction result for a single table row in a YAML schema table."""
+    row_index: int = Field(description="0-based row index within the schema table data range")
+    row_label: Optional[str] = Field(None, description="Row label if provided (matches Excel row identifier column)")
+    values: Dict[str, Optional[str]] = Field(
+        description="Map of excel_column -> extracted value. "
+                    "MUST include all columns from the schema. "
+                    "Use null only if genuinely not found."
+    )
+    confidence: float = Field(ge=0.0, le=1.0, description="Extraction confidence for this row")
+    citations: List[str] = Field(default_factory=list, description="Citation tokens like [D1:p5]")
+    reasoning: Optional[str] = Field(None, description="AI reasoning for this row extraction (e.g., 'Matched row label', 'Extracted from Table X with column mapping')" )
+
+    @field_validator("values", mode="before")
+    @classmethod
+    def coerce_values_to_str(cls, v: Any) -> Dict[str, Optional[str]]:
+        if not isinstance(v, dict):
+            return v
+        return {
+            k: str(val) if val is not None else None
+            for k, val in v.items()
+        }
+
+
+class SchemaTableResult(BaseModel):
+    """Extraction result for a single YAML schema table."""
+    table_id: str = Field(description="Schema table ID")
+    rows: List[SchemaTableRowResult] = Field(description="Extracted rows for this table")
+
+
+class SchemaTableExtractionResult(BaseModel):
+    """Result of Stage 2 targeted schema table extraction."""
+    results: List[SchemaTableResult] = Field(description="Results for each requested schema table")
+    total_tables: int = Field(description="Number of tables processed")
+    total_rows: int = Field(description="Total rows returned across all tables")
 
 
 # ============================================================================
@@ -119,7 +254,7 @@ class TemplateFillLLMService:
         prompt = self._build_field_detection_prompt(context)
 
         try:
-            # Use Anthropic Structured Outputs (beta) - GUARANTEES valid JSON!
+            # Use Anthropic Structured Outputs - GUARANTEES valid JSON!
             message = await asyncio.to_thread(
                 self.client.messages.parse,
                 model=self.model,
@@ -176,15 +311,40 @@ class TemplateFillLLMService:
             f"from {len(pdf_fields)} Azure DI fields"
         )
 
-        # Strip to minimal fields for token efficiency (26% reduction)
-        stripped_pdf_fields = [self._strip_pdf_field(f) for f in pdf_fields]
+        # Split into KV, table_block, and narrative_block fields for LLM context.
+        # Per-column table fields (source="table") are excluded — they are redundant
+        # because table_block fields already contain the full table with all rows.
+        kv_fields = [f for f in pdf_fields if f.get("source") == "key_value_pairs"]
+        table_block_fields = [f for f in pdf_fields if f.get("source") == "table_block"]
+        narrative_block_fields = [f for f in pdf_fields if f.get("source") == "narrative_block"]
+        # Fall back to all fields if no table_block fields exist (backward compat)
+        fields_for_llm = kv_fields + table_block_fields + narrative_block_fields if table_block_fields else pdf_fields
+        stripped_pdf_fields = [self._strip_pdf_field(f) for f in fields_for_llm]
         pdf_fields_json = json.dumps(stripped_pdf_fields, separators=(",", ":"), ensure_ascii=False)
 
+        logger.info(
+            f"🎯 Stage 2 LLM context: {len(kv_fields)} KV fields + {len(table_block_fields)} table blocks + {len(narrative_block_fields)} narrative blocks"
+        )
+
         # System prompt: all Azure DI data (cached across any follow-up calls)
+#         system_prompt = f"""You are extracting values from a real estate PDF for specific named schema fields.
+
+# Below is the complete list of key-value pairs, full tables, and market context (narratives) extracted by Azure Document Intelligence:
+
+# ```json
+# {pdf_fields_json}
+# ```
+
+# For each requested schema field, find its value from the Azure DI data above.
+# Match by the field's aliases and semantic meaning. For example:
+# - A field with aliases ["City", "Location City"] might appear as "City:", "Location:", "Property City", etc.
+# - A field with aliases ["Asking Price", "Purchase Price"] might appear as "List Price", "Sale Price", etc.
+
+# Return null for value if the data genuinely cannot be found in the PDF."""
+        
         system_prompt = f"""You are extracting values from a real estate PDF for specific named schema fields.
 
-Below is the complete list of key-value pairs extracted by Azure Document Intelligence:
-
+Below is the complete list of key-value pairs, full tables, and market context (narratives) extracted by Azure Document Intelligence:
 ```json
 {pdf_fields_json}
 ```
@@ -194,7 +354,8 @@ Match by the field's aliases and semantic meaning. For example:
 - A field with aliases ["City", "Location City"] might appear as "City:", "Location:", "Property City", etc.
 - A field with aliases ["Asking Price", "Purchase Price"] might appear as "List Price", "Sale Price", etc.
 
-Return null for value if the data genuinely cannot be found in the PDF."""
+Be aggressive in matching — if a value is semantically equivalent to an alias, extract it.
+Return null only if the value genuinely cannot be found anywhere in the PDF data."""
 
         # User message: list of fields to extract (minimal token footprint)
         fields_for_request = [
@@ -210,8 +371,29 @@ Return null for value if the data genuinely cannot be found in the PDF."""
             f"in the system prompt.\n\n"
             f"Fields to extract:\n```json\n"
             f"{json.dumps(fields_for_request, indent=2)}\n```\n\n"
-            f"For each field return: field_id, value (null if not found), confidence (0.0-1.0), "
-            f"and citations (citation tokens like [D1:p5])."
+            f"IMPORTANT - Data Type Validation Rules:\n"
+            f"- currency: Must be numeric with $ sign (e.g., '$450,000'). Return null for non-numeric text.\n"
+            f"- number: Must be numeric (e.g., '100', '3.14'). Return null for non-numeric text.\n"
+            f"- percentage: Must include % (e.g., '65%', '8.11%'). Return null if not a percentage.\n"
+            f"- date: Must be a date (e.g., '2026-03-10', 'March 10, 2026'). Return null for non-dates.\n"
+            f"- text: Any text value is acceptable.\n\n"
+            f"CRITICAL: You MUST attempt to find a value for every single field. "
+            f"Do not skip fields. If a field has multiple possible aliases, try all of them. "
+            f"Only return null if the value is truly absent from the PDF data.\n\n"
+            f"Return ONLY a JSON object matching this exact structure, no markdown:\n"
+            "{\n"
+            '  "results": [\n'
+            "    {\n"
+            '      "field_id": "field_id_here",\n'
+            '      "value": "extracted value or null",\n'
+            '      "confidence": 0.95,\n'
+            '      "citations": ["[D1:p3]"],\n'
+            '      "reasoning": "Found as currency: $2,500,000 in KV pair Listing Price"\n'
+            "    }\n"
+            "  ],\n"
+            f'  "total_found": 10,\n'
+            f'  "total_not_found": 2\n'
+            "}\n"
         )
 
         system_arg = [
@@ -254,6 +436,7 @@ Return null for value if the data genuinely cannot be found in the PDF."""
                     "value": item.value,
                     "confidence": item.confidence,
                     "citations": item.citations,
+                    "reasoning": item.reasoning,
                 }
 
         found_count = len(result_by_field)
@@ -264,6 +447,696 @@ Return null for value if the data genuinely cannot be found in the PDF."""
         )
 
         return result_by_field
+
+    # async def extract_schema_field_values(
+    #     self,
+    #     unmapped_fields: List[Dict[str, Any]],
+    #     pdf_fields: List[Dict[str, Any]],
+    # ) -> Dict[str, Any]:
+    #     if not unmapped_fields or not pdf_fields:
+    #         return {}
+
+    #     logger.info(
+    #         f"🎯 Stage 2 targeted extraction: {len(unmapped_fields)} unmapped schema fields "
+    #         f"from {len(pdf_fields)} Azure DI fields"
+    #     )
+
+    #     kv_fields = [f for f in pdf_fields if f.get("source") == "key_value_pairs"]
+    #     table_block_fields = [f for f in pdf_fields if f.get("source") == "table_block"]
+    #     narrative_block_fields = [f for f in pdf_fields if f.get("source") == "narrative_block"]
+    #     fields_for_llm = kv_fields + table_block_fields + narrative_block_fields if table_block_fields else pdf_fields
+    #     stripped_pdf_fields = [self._strip_pdf_field(f) for f in fields_for_llm]
+    #     pdf_fields_json = json.dumps(stripped_pdf_fields, separators=(",", ":"), ensure_ascii=False)
+
+    #     logger.info(
+    #         f"🎯 Stage 2 LLM context: {len(kv_fields)} KV fields + "
+    #         f"{len(table_block_fields)} table blocks + {len(narrative_block_fields)} narrative blocks"
+    #     )
+
+    #     system_prompt = f"""You are extracting values from a real estate PDF for specific named schema fields.
+
+    # Below is the complete list of key-value pairs, full tables, and market context (narratives) extracted by Azure Document Intelligence:
+    # ```json
+    # {pdf_fields_json}
+    # ```
+
+    # For each requested schema field, find its value from the Azure DI data above.
+    # Match by the field's aliases and semantic meaning. For example:
+    # - A field with aliases ["City", "Location City"] might appear as "City:", "Location:", "Property City", etc.
+    # - A field with aliases ["Asking Price", "Purchase Price"] might appear as "List Price", "Sale Price", etc.
+
+    # Be aggressive in matching — if a value is semantically equivalent to an alias, extract it.
+    # Return null only if the value genuinely cannot be found anywhere in the PDF data."""
+
+    #     fields_for_request = [
+    #         {
+    #             "id": f["id"],
+    #             "aliases": f.get("pdf_aliases", []),
+    #             "data_type": f.get("data_type", "text"),
+    #         }
+    #         for f in unmapped_fields
+    #     ]
+
+    #     user_message = (
+    #         f"Find values for these {len(fields_for_request)} schema fields from the Azure DI data "
+    #         f"in the system prompt.\n\n"
+    #         f"Fields to extract:\n```json\n"
+    #         f"{json.dumps(fields_for_request, indent=2)}\n```\n\n"
+    #         f"IMPORTANT - Data Type Validation Rules:\n"
+    #         f"- currency: Must be numeric with $ sign (e.g., '$450,000'). Return null for non-numeric text.\n"
+    #         f"- number: Must be numeric (e.g., '100', '3.14'). Return null for non-numeric text.\n"
+    #         f"- percentage: Must include % (e.g., '65%', '8.11%'). Return null if not a percentage.\n"
+    #         f"- date: Must be a date (e.g., '2026-03-10', 'March 10, 2026'). Return null for non-dates.\n"
+    #         f"- text: Any text value is acceptable.\n\n"
+    #         f"CRITICAL: You MUST attempt to find a value for every single field. "
+    #         f"Do not skip fields. If a field has multiple possible aliases, try all of them. "
+    #         f"Only return null if the value is truly absent from the PDF data.\n\n"
+    #         f"Return ONLY a JSON object matching this exact structure, no markdown:\n"
+    #         "{\n"
+    #         '  "results": [\n'
+    #         "    {\n"
+    #         '      "field_id": "field_id_here",\n'
+    #         '      "value": "extracted value or null",\n'
+    #         '      "confidence": 0.95,\n'
+    #         '      "citations": ["[D1:p3]"],\n'
+    #         '      "reasoning": "Found as currency: $2,500,000 in KV pair Listing Price"\n'
+    #         "    }\n"
+    #         "  ],\n"
+    #         f'  "total_found": 10,\n'
+    #         f'  "total_not_found": 2\n'
+    #         "}\n"
+    #     )
+
+    #     system_arg = [
+    #         {
+    #             "type": "text",
+    #             "text": system_prompt,
+    #             "cache_control": {"type": "ephemeral"},
+    #         }
+    #     ]
+
+    #     response = await asyncio.to_thread(
+    #         self.client.messages.create,
+    #         model=self.model,
+    #         max_tokens=self.max_tokens,
+    #         temperature=0.0,
+    #         timeout=settings.synthesis_llm_timeout_seconds,
+    #         system=system_arg,
+    #         messages=[{"role": "user", "content": user_message}],
+    #     )
+
+    #     # Log token usage
+    #     usage = getattr(response, "usage", None)
+    #     if usage is not None:
+    #         cache_creation = getattr(usage, "cache_creation_input_tokens", 0) or 0
+    #         cache_read = getattr(usage, "cache_read_input_tokens", 0) or 0
+    #         input_tokens = getattr(usage, "input_tokens", 0) or 0
+    #         output_tokens = getattr(usage, "output_tokens", 0) or 0
+    #         logger.info(
+    #             f"🎯 Stage 2 tokens: input={input_tokens:,}, output={output_tokens:,}, "
+    #             f"cache_creation={cache_creation:,}, cache_read={cache_read:,}"
+    #         )
+
+    #     raw_text = response.content[0].text.strip()
+    #     if raw_text.startswith("```"):
+    #         raw_text = re.sub(r"^```(?:json)?\n?", "", raw_text)
+    #         raw_text = re.sub(r"\n?```$", "", raw_text)
+
+    #     try:
+    #         raw_result = json.loads(raw_text)
+    #         parsed = SchemaFieldExtractionResult(**raw_result)
+    #     except (json.JSONDecodeError, ValidationError) as e:
+    #         logger.error(f"Failed to parse field extraction response: {e}\nRaw: {raw_text[:500]}")
+    #         return {}
+
+    #     result_by_field: Dict[str, Any] = {}
+    #     for item in parsed.results:
+    #         if item.value:
+    #             result_by_field[item.field_id] = {
+    #                 "value": item.value,
+    #                 "confidence": item.confidence,
+    #                 "citations": item.citations,
+    #                 "reasoning": item.reasoning,
+    #             }
+
+    #     found_count = len(result_by_field)
+    #     not_found_count = len(unmapped_fields) - found_count
+    #     logger.info(
+    #         f"✅ Stage 2 complete: {found_count}/{len(unmapped_fields)} fields found "
+    #         f"({not_found_count} not present in this PDF)"
+    #     )
+
+    #     return result_by_field
+
+    async def extract_schema_table_values(
+        self,
+        schema_tables: List[Dict[str, Any]],
+        pdf_fields: List[Dict[str, Any]],
+        table_row_labels: Optional[Dict[str, Any]] = None,
+        document_id: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """
+        NOT GETTING USED IN CURRENT IMPLEMENTATION
+        Stage 2: Targeted extraction of YAML schema table values from Azure DI output.
+
+        Args:
+            schema_tables: List of schema table definitions from YAML.
+            pdf_fields: All Azure DI key-value fields extracted from the PDF.
+            table_row_labels: Optional mapping of table_id -> {row_labels: [...], start_row, end_row}
+
+        Returns:
+            Dict: {table_id: {"rows": [...]}}
+        """
+        if not schema_tables or not pdf_fields:
+            return {}
+
+        logger.info(
+            f"🎯 Stage 2 targeted table extraction: {len(schema_tables)} schema tables "
+            f"from {len(pdf_fields)} Azure DI fields"
+        )
+
+        kv_fields = [f for f in pdf_fields if f.get("source") == "key_value_pairs"]
+        table_block_fields = [f for f in pdf_fields if f.get("source") == "table_block"]
+        narrative_block_fields = [f for f in pdf_fields if f.get("source") == "narrative_block"]
+        fields_for_llm = kv_fields + table_block_fields + narrative_block_fields if table_block_fields else pdf_fields
+
+        if not table_block_fields:
+            logger.warning("Stage 2 table extraction skipped: no table_block fields found in pdf_fields")
+            return {}
+
+        stripped_pdf_fields = [self._strip_pdf_field(f) for f in fields_for_llm]
+        pdf_fields_json = json.dumps(stripped_pdf_fields, separators=(",", ":"), ensure_ascii=False)
+
+        table_candidates = []
+        for table_field in table_block_fields:
+            columns = table_field.get("table_columns") or []
+            if not columns:
+                continue
+            table_candidates.append({
+                "id": table_field.get("id"),
+                "name": table_field.get("table_name") or table_field.get("name") or "Table",
+                "columns": columns,
+                "rows": table_field.get("table_rows") or [],
+                "page_number": table_field.get("page_number"),
+            })
+
+        if not table_candidates:
+            logger.warning("Stage 2 table extraction skipped: no usable table candidates found")
+            return {}
+
+        table_requests = []
+        table_row_labels = table_row_labels or {}
+        redis_client = None
+        if document_id:
+            try:
+                redis_client = get_redis_client_for_cache()
+            except Exception as e:
+                logger.warning(f"Redis cache unavailable for table header mapping: {e}")
+
+        for table in schema_tables:
+            table_id = table.get("id")
+            if not table_id:
+                continue
+            start_row = table.get("data_start_row")
+            end_row = table.get("data_end_row", start_row)
+            row_labels = table_row_labels.get(table_id, {}).get("row_labels", [])
+            columns = [
+                {
+                    "excel_column": c.get("excel_column"),
+                    "header": c.get("header"),
+                    "data_type": c.get("data_type", "text"),
+                    "pdf_aliases": c.get("pdf_aliases", []),
+                }
+                for c in table.get("columns", [])
+            ]
+
+            best_candidate = None
+            best_column_map: Dict[str, str] = {}
+            best_coverage = 0.0
+            best_sig = None
+
+            for candidate in table_candidates:
+                headers = candidate.get("columns", [])
+                row_count = len(candidate.get("rows", []))
+                col_count = len(headers)
+                table_sig = _build_table_signature(headers, row_count, col_count)
+
+                cached_map = None
+                cached_coverage = 0.0
+                if redis_client is not None:
+                    cache_key = f"template_fill:table_header_map:{document_id}:{table_id}:{table_sig}"
+                    try:
+                        cached_raw = redis_client.get(cache_key)
+                        if cached_raw:
+                            cached_text = cached_raw.decode("utf-8") if isinstance(cached_raw, bytes) else cached_raw
+                            cached_payload = json.loads(cached_text)
+                            cached_map = cached_payload.get("column_map", {})
+                            cached_coverage = float(cached_payload.get("coverage") or 0.0)
+                    except Exception as e:
+                        logger.debug(f"Failed to read table header cache: {e}")
+
+                if cached_map:
+                    column_map = cached_map
+                    coverage = cached_coverage or (len(column_map) / max(len(columns), 1))
+                    logger.info(
+                        f"✓ Table header cache hit: table_id={table_id} coverage={coverage:.2f}"
+                    )
+                else:
+                    column_map, coverage = _resolve_column_map(columns, headers)
+                    logger.info(
+                        f"Table header match candidate: table_id={table_id} "
+                        f"candidate='{candidate.get('name')}' "
+                        f"coverage={coverage:.2f} "
+                        f"matched_cols={len(column_map)}/{max(len(columns), 1)}"
+                    )
+                    if redis_client is not None and coverage >= TABLE_HEADER_STRONG_COVERAGE:
+                        cache_key = f"template_fill:table_header_map:{document_id}:{table_id}:{table_sig}"
+                        cache_payload = {
+                            "column_map": column_map,
+                            "coverage": coverage,
+                            "headers": headers,
+                            "table_name": candidate.get("name"),
+                        }
+                        try:
+                            redis_client.setex(
+                                cache_key,
+                                TABLE_HEADER_CACHE_TTL_SECONDS,
+                                json.dumps(cache_payload),
+                            )
+                        except Exception as e:
+                            logger.debug(f"Failed to write table header cache: {e}")
+
+                if coverage > best_coverage:
+                    best_candidate = candidate
+                    best_column_map = column_map
+                    best_coverage = coverage
+                    best_sig = table_sig
+
+            if best_candidate is None:
+                logger.warning(f"No table candidate found for schema table {table_id}")
+                continue
+            if best_coverage < TABLE_HEADER_MIN_COVERAGE:
+                logger.info(
+                    f"Low header coverage for table {table_id}: {best_coverage:.2f} "
+                    f"(LLM will infer remaining columns)"
+                )
+            logger.info(
+                f"Selected table candidate for {table_id}: "
+                f"'{best_candidate.get('name')}' "
+                f"coverage={best_coverage:.2f} "
+                f"column_map={best_column_map}"
+            )
+
+            table_requests.append({
+                "table_id": table_id,
+                "sheet": table.get("sheet"),
+                "data_start_row": start_row,
+                "data_end_row": end_row,
+                "row_identifier_column": table.get("row_identifier_column"),
+                "row_labels": row_labels,
+                "columns": columns,
+                "column_map": best_column_map,
+                "column_map_coverage": round(best_coverage, 3),
+                "preferred_table": {
+                    "table_name": best_candidate.get("name"),
+                    "table_columns": best_candidate.get("columns", []),
+                    "page_number": best_candidate.get("page_number"),
+                    "table_signature": best_sig,
+                },
+            })
+
+        if not table_requests:
+            return {}
+
+        system_prompt = f"""You are extracting table values from a real estate PDF for specific YAML schema tables.
+
+Below is the complete list of key-value pairs, full tables, and narratives extracted by Azure Document Intelligence:
+
+```json
+{pdf_fields_json}
+```
+
+{TABLE_HEADER_EQUIVALENTS}
+
+For each requested schema table:
+- If `column_map` is provided, use it to map schema columns to PDF headers.
+- If `column_map_coverage` is low, you may infer additional columns using header similarity, but do NOT guess.
+- Use the row labels if provided (these match the Excel row identifier column).
+- If no row labels are provided, return rows in the order they appear in the PDF.
+- For each row, return a `values` map keyed by `excel_column` (e.g., "K", "M", "N").
+- Return null for any value that cannot be confidently found in the PDF.
+- Never fabricate values (e.g., do NOT invent # Units if the column is missing).
+"""
+
+        user_message = (
+            f"Extract values for these {len(table_requests)} schema tables.\n\n"
+            f"Tables to extract:\n```json\n{json.dumps(table_requests, indent=2)}\n```\n\n"
+            f"Rules:\n"
+            f"- `row_index` is 0-based within the table's data range.\n"
+            f"- `row_label` should match one of the provided row_labels if available.\n"
+            f"- Values must respect data_type: number, currency, percentage, date, text.\n"
+            f"- Use `column_map` when provided; leave missing columns as null.\n"
+            f"- Provide citations like [D1:p5] and a brief reasoning per row (reasoning is required).\n"
+        )
+
+        system_arg = [
+            {
+                "type": "text",
+                "text": system_prompt,
+                "cache_control": {"type": "ephemeral"},
+            }
+        ]
+
+        message = await asyncio.to_thread(
+            self.client.messages.parse,
+            model=self.model,
+            max_tokens=self.max_tokens,
+            temperature=0.1,
+            timeout=settings.synthesis_llm_timeout_seconds,
+            system=system_arg,
+            messages=[{"role": "user", "content": user_message}],
+            output_format=SchemaTableExtractionResult,
+        )
+
+        parsed_output = message.parsed_output
+        result = parsed_output.model_dump()
+
+        result_dict: Dict[str, Any] = {}
+        for table_result in result.get("results", []):
+            table_id = table_result.get("table_id")
+            if not table_id:
+                continue
+            result_dict[table_id] = {
+                "rows": table_result.get("rows", [])
+            }
+
+        logger.info(
+            f"🎯 Targeted table extraction complete: {len(result_dict)} tables, "
+            f"{sum(len(v.get('rows', [])) for v in result_dict.values())} rows"
+        )
+
+        return result_dict
+
+    async def extract_schema_table_values_rag(
+        self,
+        schema_table: Dict[str, Any],
+        context_chunks: List[Dict[str, Any]],
+        row_labels: Optional[List[str]] = None,
+    ) -> Dict[str, Any]:
+        """
+        RAG-based targeted extraction for a single schema table using retrieved chunks.
+        """
+        if not schema_table or not context_chunks:
+            return {}
+
+        table_id = schema_table.get("id")
+        if not table_id:
+            return {}
+
+        row_labels = row_labels or []
+        context_payload = self._build_table_rag_text_context(context_chunks)
+        context_json = json.dumps(context_payload, separators=(",", ":"), ensure_ascii=False)
+
+        columns = [
+            {
+                "excel_column": c.get("excel_column"),
+                "header": c.get("header"),
+                "data_type": c.get("data_type", "text"),
+                "pdf_aliases": c.get("pdf_aliases", []),
+            }
+            for c in schema_table.get("columns", [])
+        ]
+
+        table_request = {
+            "table_id": table_id,
+            "sheet": schema_table.get("sheet"),
+            "data_start_row": schema_table.get("data_start_row"),
+            "data_end_row": schema_table.get("data_end_row", schema_table.get("data_start_row")),
+            "row_identifier_column": schema_table.get("row_identifier_column"),
+            "row_labels": row_labels,
+            "columns": columns,
+        }
+
+        system_prompt = f"""You are extracting table values from a real estate PDF for a single YAML schema table.
+
+You are given a small, high-signal set of retrieved chunks (tables + key-value pairs).
+Use ONLY this context to extract values. Do not guess.
+
+Retrieved context:
+```json
+{context_json}
+```
+
+{TABLE_HEADER_EQUIVALENTS}
+"""
+
+        user_message = (
+            "Extract values for this schema table:\n\n"
+            f"```json\n{json.dumps(table_request, indent=2)}\n```\n\n"
+            "Rules:\n"
+            "- Use `excel_column` keys only in the `values` map.\n"
+            "- If a column is missing, return null for that column.\n"
+            "- Use row_labels when provided; if row_labels are empty or blank, ignore them and use row_index order.\n"
+            "- Provide citations like [D1:p5] and a brief reasoning per row (reasoning is required).\n"
+            "- Never fabricate values.\n"
+            "\nCRITICAL: For each row, the `values` dict MUST include ALL excel_column keys "
+            "listed in the table's `columns` array. "
+            "Example: if columns are G, H, I then values must be "
+            '{"G": "5 x 10", "H": "26", "I": "50"} — never return an empty {}.\n'
+            "\nReturn ONLY a JSON object matching this exact structure, no markdown:\n"
+            "{\n"
+            '  "results": [\n'
+            "    {\n"
+            '      "table_id": "...",\n'
+            '      "rows": [\n'
+            "        {\n"
+            '          "row_index": 0,\n'
+            '          "row_label": null,\n'
+            '          "values": {"G": "5 x 10", "H": "26", "I": "50"},\n'
+            '          "confidence": 0.95,\n'
+            '          "citations": ["[D1:p15]"],\n'
+            '          "reasoning": "Extracted from Table 7"\n'
+            "        }\n"
+            "      ]\n"
+            "    }\n"
+            "  ],\n"
+            '  "total_tables": 1,\n'
+            '  "total_rows": 12\n'
+            "}\n"
+        )
+
+        system_arg = [
+            {
+                "type": "text",
+                "text": system_prompt,
+                "cache_control": {"type": "ephemeral"},
+            }
+        ]
+
+        response = await asyncio.to_thread(
+            self.client.messages.create,
+            model=self.model,
+            max_tokens=self.max_tokens,
+            temperature=0.1,
+            timeout=settings.synthesis_llm_timeout_seconds,
+            system=system_arg,
+            messages=[{"role": "user", "content": user_message}],
+        )
+
+        raw_text = response.content[0].text.strip()
+        if raw_text.startswith("```"):
+            raw_text = re.sub(r"^```(?:json)?\n?", "", raw_text)
+            raw_text = re.sub(r"\n?```$", "", raw_text)
+
+        try:
+            raw_result = json.loads(raw_text)
+            # Validate through Pydantic (handles int->str coercion via field_validator)
+            parsed = SchemaTableExtractionResult(**raw_result)
+            raw_result = parsed.model_dump()
+        except (json.JSONDecodeError, ValidationError) as e:
+            logger.error(f"Failed to parse table extraction response: {e}\nRaw: {raw_text[:500]}")
+            return {}
+
+        result_dict: Dict[str, Any] = {}
+        results = raw_result.get("results") if isinstance(raw_result, dict) else None
+        if isinstance(results, list):
+            for table_result in results:
+                if table_result.get("table_id") == table_id:
+                    result_dict[table_id] = {
+                        "rows": table_result.get("rows", []),
+                    }
+                    break
+        elif isinstance(raw_result, dict) and raw_result.get("table_id") == table_id:
+            result_dict[table_id] = {"rows": raw_result.get("rows", [])}
+
+        return result_dict
+
+    async def extract_schema_table_values_rag_batch(
+        self,
+        schema_tables: List[Dict[str, Any]],
+        context_chunks: List[Dict[str, Any]],
+        row_labels_by_table: Optional[Dict[str, List[str]]] = None,
+    ) -> Dict[str, Any]:
+        """
+        RAG-based targeted extraction for a batch of schema tables using retrieved chunks.
+        """
+        if not schema_tables or not context_chunks:
+            return {}
+
+        row_labels_by_table = row_labels_by_table or {}
+        context_payload = self._build_table_rag_text_context(context_chunks)
+        context_json = json.dumps(context_payload, separators=(",", ":"), ensure_ascii=False)
+
+        table_requests = []
+        for schema_table in schema_tables:
+            table_id = schema_table.get("id")
+            if not table_id:
+                continue
+            row_labels = row_labels_by_table.get(table_id, [])
+            columns = [
+                {
+                    "excel_column": c.get("excel_column"),
+                    "header": c.get("header"),
+                    "data_type": c.get("data_type", "text"),
+                    "pdf_aliases": c.get("pdf_aliases", []),
+                }
+                for c in schema_table.get("columns", [])
+            ]
+            table_requests.append({
+                "table_id": table_id,
+                "sheet": schema_table.get("sheet"),
+                "data_start_row": schema_table.get("data_start_row"),
+                "data_end_row": schema_table.get("data_end_row", schema_table.get("data_start_row")),
+                "row_identifier_column": schema_table.get("row_identifier_column"),
+                "row_labels": row_labels,
+                "columns": columns,
+            })
+
+        if not table_requests:
+            return {}
+
+        system_prompt = f"""You are extracting table values from a real estate PDF for multiple YAML schema tables.
+
+You are given a small, high-signal set of retrieved chunks (tables + key-value pairs).
+Use ONLY this context to extract values. Do not guess.
+
+Retrieved context:
+```json
+{context_json}
+```
+
+{TABLE_HEADER_EQUIVALENTS}
+"""
+
+        # user_message = (
+        #     "Extract values for these schema tables:\n\n"
+        #     f"```json\n{json.dumps(table_requests, indent=2)}\n```\n\n"
+        #     "Rules:\n"
+        #     "- Return results per table_id.\n"
+        #     "- Use `excel_column` keys only in the `values` map.\n"
+        #     "- If a column is missing, return null for that column.\n"
+        #     "- Use row_labels when provided; if row_labels are empty or blank, ignore them and use row_index order.\n"
+        #     "- Provide citations like [D1:p5] and a brief reasoning per row (reasoning is required).\n"
+        #     "- Never fabricate values.\n"
+        #     "\nCRITICAL: For each row, the `values` dict MUST include ALL excel_column keys "
+        #     "listed in that table's `columns` array. "
+        #     "Example: if columns are G, H, I then values must be "
+        #     '{"G": "5 x 10", "H": "26", "I": "50"} — never return an empty {}.\n'
+        # )
+
+        user_message = (
+            "Extract values for these schema tables and return a JSON object.\n\n"
+            f"```json\n{json.dumps(table_requests, indent=2)}\n```\n\n"
+            "Rules:\n"
+            "- Return results per table_id.\n"
+            "- Use `excel_column` keys only in the `values` map.\n"
+            "- If a column is missing, return null for that column.\n"
+            "- Use row_labels when provided; if row_labels are empty or blank, use row_index order.\n"
+            "- Provide citations like [D1:p15] and reasoning per row.\n"
+            "- Never fabricate values.\n"
+            "- For each row, values MUST include ALL excel_column keys from that table's columns.\n\n"
+            "Return ONLY a JSON object matching this exact structure, no markdown:\n"
+            "{\n"
+            '  "results": [\n'
+            "    {\n"
+            '      "table_id": "...",\n'
+            '      "rows": [\n'
+            "        {\n"
+            '          "row_index": 0,\n'
+            '          "row_label": null,\n'
+            '          "values": {"G": "5 x 10", "H": "26", "I": "50"},\n'
+            '          "confidence": 0.95,\n'
+            '          "citations": ["[D1:p15]"],\n'
+            '          "reasoning": "Extracted from Table 7 NON-CLIMATE rows"\n'
+            "        }\n"
+            "      ]\n"
+            "    }\n"
+            "  ],\n"
+            '  "total_tables": 2,\n'
+            '  "total_rows": 12\n'
+            "}\n"
+        )
+
+        system_arg = [
+            {
+                "type": "text",
+                "text": system_prompt,
+                "cache_control": {"type": "ephemeral"},
+            }
+        ]
+
+        # USE messages.create instead of messages.parse
+        response = await asyncio.to_thread(
+            self.client.messages.create,
+            model=self.model,
+            max_tokens=self.max_tokens,
+            temperature=0.1,
+            timeout=settings.synthesis_llm_timeout_seconds,
+            system=system_arg,
+            messages=[{"role": "user", "content": user_message}],
+        )
+
+        # Parse the text response manually
+        raw_text = response.content[0].text.strip()
+
+        # Strip markdown fences if present
+        if raw_text.startswith("```"):
+            raw_text = re.sub(r"^```(?:json)?\n?", "", raw_text)
+            raw_text = re.sub(r"\n?```$", "", raw_text)
+
+        try:
+            raw_result = json.loads(raw_text)
+            # Validate through Pydantic
+            parsed = SchemaTableExtractionResult(**raw_result)
+            result = parsed.model_dump()
+        except (json.JSONDecodeError, ValidationError) as e:
+            logger.error(f"Failed to parse table extraction response: {e}\nRaw: {raw_text[:500]}")
+            return {}
+
+        # message = await asyncio.to_thread(
+        #     self.client.messages.parse,
+        #     model=self.model,
+        #     max_tokens=self.max_tokens,
+        #     temperature=0.0,
+        #     timeout=settings.synthesis_llm_timeout_seconds,
+        #     system=system_arg,
+        #     messages=[{"role": "user", "content": user_message}],
+        #     output_format=SchemaTableExtractionResult,
+        # )
+
+        # parsed_output = message.parsed_output
+        # result = parsed_output.model_dump()
+
+        result_dict: Dict[str, Any] = {}
+        for table_result in result.get("results", []):
+            table_id = table_result.get("table_id")
+            if not table_id:
+                continue
+            result_dict[table_id] = {
+                "rows": table_result.get("rows", []),
+            }
+
+        return result_dict
 
     def _format_chunks_with_citations(self, chunks: List[Dict[str, Any]]) -> str:
         """Format chunks with citation tokens for LLM consumption."""
@@ -715,8 +1588,10 @@ Each chunk has metadata in the header:
 
         Removes: description, source (not used by mapping logic)
         Keeps: id, name, type, extracted_value, confidence, citations (all required)
+        For table_block fields: also keeps table_name, table_columns, table_rows (full context)
+        For narrative_block fields: also keeps full_text and section (rich context for LLM)
         """
-        return {
+        stripped = {
             "id": field.get("id"),
             "name": field.get("name"),
             "type": field.get("type"),
@@ -724,6 +1599,49 @@ Each chunk has metadata in the header:
             "confidence": field.get("confidence"),
             "citations": field.get("citations", []),
         }
+        # Preserve full table structure for table_block fields
+        if field.get("type") == "table":
+            if field.get("table_name"):
+                stripped["table_name"] = field.get("table_name")
+            if field.get("table_columns"):
+                stripped["table_columns"] = field.get("table_columns")
+            if field.get("table_rows"):
+                stripped["table_rows"] = field.get("table_rows")
+        # Preserve full narrative text for narrative_block fields
+        elif field.get("type") == "narrative":
+            if field.get("full_text"):
+                stripped["full_text"] = field.get("full_text")
+            if field.get("section"):
+                stripped["section"] = field.get("section")
+        return stripped
+
+    def _build_table_rag_text_context(self, chunks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """
+        Build text-only RAG context from retrieved chunks for table extraction.
+        Uses DocumentChunk.text + page metadata only.
+        """
+        context: List[Dict[str, Any]] = []
+        for chunk in chunks:
+            metadata = chunk.get("chunk_metadata") or {}
+            if isinstance(metadata, str):
+                try:
+                    metadata = json.loads(metadata)
+                except Exception:
+                    metadata = {}
+
+            page_number = (
+                (metadata.get("bbox", {}) or {}).get("page")
+                or chunk.get("page_number")
+                or metadata.get("page_number")
+            )
+
+            context.append({
+                "text": chunk.get("text") or "",
+                "page_number": page_number,
+                "section_type": chunk.get("section_type") or metadata.get("chunk_type"),
+            })
+
+        return context
 
     def _estimate_tokens(self, text: str) -> int:
         """

@@ -25,7 +25,7 @@ import { Card } from "../ui/card";
 import { useComparison, useChatActions, usePdfViewer } from "../../store";
 import PairedChunksView from "../chat/comparison/PairedChunksView";
 import ComparisonTable from "./ComparisonTable";
-import PDFViewer from "../pdf/PDFViewer";
+import DocumentViewer from "../pdf/DocumentViewer";
 import Spinner from "../common/Spinner";
 import {
   ResizablePanelGroup as InnerResizablePanelGroup,
@@ -231,8 +231,9 @@ export default function ComparisonPanel({ isOpen, onClose }) {
                       </div>
                       <div className="flex-1 overflow-hidden">
                         {pdfUrls[documents[0]?.id] ? (
-                          <PDFViewer
-                            pdfUrl={pdfUrls[documents[0]?.id]}
+                          <DocumentViewer
+                            fileUrl={pdfUrls[documents[0]?.id]}
+                            filename={documents[0]?.filename || ''}
                             highlightBbox={
                               pdfViewer.highlightBbox?.docId === "A"
                                 ? pdfViewer.highlightBbox
@@ -270,8 +271,9 @@ export default function ComparisonPanel({ isOpen, onClose }) {
                         </div>
                         <div className="flex-1 overflow-hidden">
                           {pdfUrls[documents[1]?.id] ? (
-                            <PDFViewer
-                              pdfUrl={pdfUrls[documents[1]?.id]}
+                            <DocumentViewer
+                              fileUrl={pdfUrls[documents[1]?.id]}
+                              filename={documents[1]?.filename || ''}
                               highlightBbox={
                                 pdfViewer.highlightBbox?.docId === "B"
                                   ? pdfViewer.highlightBbox

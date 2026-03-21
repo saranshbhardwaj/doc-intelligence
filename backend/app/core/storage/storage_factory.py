@@ -13,6 +13,7 @@ from typing import Optional
 
 from app.config import settings
 from app.core.storage.cloudflare_r2 import CloudflareR2Storage, get_r2_storage
+from app.utils.document_uploads import get_content_type_for_extension
 from app.utils.logging import logger
 
 
@@ -208,15 +209,7 @@ class R2StorageBackend(StorageBackend):
     def _get_content_type(self, file_path: str) -> str:
         """Determine content type from file extension."""
         extension = Path(file_path).suffix.lower()
-        content_types = {
-            ".pdf": "application/pdf",
-            ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-            ".xlsm": "application/vnd.ms-excel.sheet.macroEnabled.12",
-            ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            ".json": "application/json",
-            ".txt": "text/plain",
-        }
-        return content_types.get(extension, "application/octet-stream")
+        return get_content_type_for_extension(extension)
 
 
 class LocalFilesystemBackend(StorageBackend):

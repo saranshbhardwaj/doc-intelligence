@@ -12,6 +12,7 @@ from app.db_models import JobState
 from app.repositories.job_repository import JobRepository
 from app.utils.logging import logger
 from app.services.pubsub import publish_event  # lightweight fire-and-forget
+from app.core.entity_types import build_entity_complete_event
 
 
 class JobProgressTracker:
@@ -28,6 +29,7 @@ class JobProgressTracker:
         self._last_commit_monotonic: float = 0.0
         self._throttle_seconds: float = 0.75  # minimum interval between lightweight progress commits
         self._min_progress_delta: int = 3     # commit only if progress advanced this much
+
 
     def get_job_state(self) -> JobState:
         """Get current job state from database using the tracker's session"""
@@ -197,7 +199,7 @@ class JobProgressTracker:
         job.status = "completed"
         job.progress_percent = 100
         job.current_stage = "completed"
-        job.message = "Extraction completed successfully"
+        job.message = job.message or "Job completed successfully"
         job.completed_at = datetime.now()
         job.updated_at = datetime.now()
         try:
@@ -218,10 +220,8 @@ class JobProgressTracker:
             "job_id": self.job_id
         })
         try:
-            publish_event(self.job_id, "complete", {
-                "message": job.message or "Extraction completed successfully",
-                "extraction_id": job.extraction_id
-            })
+            complete_data = build_entity_complete_event(job)
+            publish_event(self.job_id, "complete", complete_data)
             publish_event(self.job_id, "end", {"reason": "completed", "job_id": self.job_id})
         except Exception:
             logger.warning(

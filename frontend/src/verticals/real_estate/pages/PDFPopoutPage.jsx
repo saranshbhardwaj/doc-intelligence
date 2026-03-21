@@ -8,7 +8,7 @@
 import React, { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import { useAppAuth } from "@/hooks/useAppAuth";
-import PDFViewer from '../../../components/pdf/PDFViewer';
+import DocumentViewer from '../../../components/pdf/DocumentViewer';
 import { useTemplateFill, useTemplateFillActions } from '../../../store';
 import { Loader2, AlertCircle, FileText } from 'lucide-react';
 import { Badge } from '../../../components/ui/badge';
@@ -91,8 +91,9 @@ export default function PDFPopoutPage() {
       {/* PDF Viewer */}
       <div className="flex-1 overflow-hidden">
         {pdfUrl ? (
-          <PDFViewer
-            pdfUrl={pdfUrl}
+          <DocumentViewer
+            fileUrl={pdfUrl}
+            filename={fillRun?.document_metadata?.filename || ''}
             defaultPage={currentPage}
             onTextSelect={() => {}} // No text selection in pop-out
           />

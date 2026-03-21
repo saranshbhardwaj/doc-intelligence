@@ -30,6 +30,33 @@ from app.utils.metrics import (
 )
 
 
+def _parse_table_structure(table_text: str) -> tuple[list[str], list[list[str]], str]:
+    """Parse tab/newline separated table into headers, data rows, and name.
+
+    Expects format: HEADER1\tHEADER2\tHEADER3\n...
+
+    Returns: (column_headers, table_data_rows, table_name)
+    """
+    if not table_text.strip():
+        return [], [], ""
+
+    # Split by newlines first, then by tabs
+    rows = [r.split("\t") for r in table_text.split("\n") if r.strip()]
+    if not rows:
+        return [], [], ""
+
+    # First row contains headers
+    column_headers = rows[0]
+
+    # Remaining rows are data
+    table_data = rows[1:] if len(rows) > 1 else []
+
+    # Derive table name from first cell or use generic name
+    table_name = rows[0][0].strip() if rows[0][0].strip() else "Table Data"
+
+    return column_headers, table_data, table_name
+
+
 @dataclass
 class _PageData:
     page_number: int
@@ -139,7 +166,7 @@ class AzureDocumentIntelligenceParser(DocumentParser):
             # KEY_VALUE_PAIRS is only supported for PDF and images (JPEG, PNG, TIFF, BMP)
             # NOT supported for DOCX or XLSX
             features = []
-            if file_ext in ('pdf', 'jpg', 'jpeg', 'png', 'tiff', 'bmp', 'heif'):
+            if file_ext in ('pdf', 'jpg', 'jpeg', 'png', 'tiff', 'bmp', 'heif', 'heic'):
                 features.append(DocumentAnalysisFeature.KEY_VALUE_PAIRS)
                 logger.info(f"Requesting KEY_VALUE_PAIRS feature for {file_ext} file")
             else:
@@ -944,12 +971,19 @@ class AzureDocumentIntelligenceParser(DocumentParser):
                         "polygon": getattr(br, "polygon", [])
                     })
 
+            # Parse table structure for field detection
+            table_text = "\n".join(table_text_lines)
+            column_headers, table_rows, table_name = _parse_table_structure(table_text)
+
             table_data = {
                 "table_id": len(tables_by_page.get(page_num, [])),
-                "text": "\n".join(table_text_lines),
+                "text": table_text,
                 "row_count": table_row_count,
                 "column_count": table_col_count,
                 "bounding_regions": table_bounding_regions,
+                "column_headers": column_headers,
+                "table_data": table_rows,
+                "table_name": table_name,
             }
 
             # DEBUG: Log first table's bbox data

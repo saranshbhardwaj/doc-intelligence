@@ -27,6 +27,25 @@ export const createChatDocumentActions = (set, get) => ({
         }
       );
 
+      const isImmediateComplete =
+        data?.status === "completed" || data?.reuse === true;
+
+      if (isImmediateComplete) {
+        set((state) => ({
+          chat: {
+            ...state.chat,
+            uploadStatus: "completed",
+            uploadProgress: 100,
+            currentJobId: null,
+          },
+        }));
+
+        if (get().chat.currentCollection?.id === collectionId) {
+          get().selectCollection(getToken, collectionId);
+        }
+        return;
+      }
+
       set((state) => ({
         chat: {
           ...state.chat,

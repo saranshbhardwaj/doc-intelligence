@@ -53,9 +53,9 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next: Callable) -> Response:
         """Process request with rate limiting and security checks."""
-        # Exclude monitoring endpoints from rate limiting
-        # These should always be accessible for health checks and metrics scraping
-        if request.url.path in ('/metrics', '/api/health'):
+        # Exclude monitoring and streaming endpoints from rate limiting
+        path = request.url.path
+        if path in ('/metrics', '/api/health') or path.endswith('/stream'):
             return await call_next(request)
 
         client_ip = self._get_client_ip(request)
@@ -115,7 +115,6 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
                 extra={"client_ip": client_ip, "request_count": len(request_times)}
             )
             HTTP_REQUESTS_RATE_LIMITED.labels(
-                client_ip=client_ip,
                 path=request.url.path
             ).inc()
 

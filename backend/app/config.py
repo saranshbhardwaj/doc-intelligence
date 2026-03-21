@@ -39,7 +39,7 @@ class Settings(BaseSettings):
 
     # ===== EXCEL TEMPLATE MAPPING CONFIGURATION =====
     # Schema-based mapping system for known Excel templates
-    excel_schema_only: bool = False  # If True, only use schema (skip generic analyzer)
+    excel_schema_only: bool = True  # If True, only use schema (skip generic analyzer)
     excel_skip_schema: bool = False  # If True, skip schema (use generic analyzer only)
     # Default (both False) = Hybrid mode: schema first, generic fallback
 
@@ -73,6 +73,47 @@ class Settings(BaseSettings):
     synthesis_llm_model: str = "claude-haiku-4-5-20251001"  # Haiku 4.5 for cost-effective synthesis (testing)
     synthesis_llm_max_tokens: int = 50000  # Haiku 4.5 max output: 64K tokens (leave room for overhead)
     synthesis_llm_timeout_seconds: int = 600  # 10 minutes for large workflow outputs
+
+    # PE diligence classification fallback
+    pe_diligence_classifier_llm_fallback_enabled: bool = True
+    pe_diligence_classifier_llm_min_confidence: float = 0.60
+    pe_diligence_classifier_llm_input_chars: int = 4000
+
+    pe_diligence_llm_classification_enabled: bool = True  # opt-in until validated
+
+    # PE diligence investigation LLM claim augmentation
+    pe_diligence_investigation_llm_enabled: bool = True
+    pe_diligence_investigation_llm_max_chunks: int = 30  # max unmatched chunks to send to LLM
+
+    # PE diligence amendment linking (T11)
+    pe_diligence_amendment_linking_enabled: bool = True  # opt-in until validated
+    pe_diligence_amendment_linking_input_chars: int = 4000  # chars of amendment text sent to LLM
+    pe_diligence_amendment_linking_max_room_docs: int = 100  # system prompt size guard
+    pe_diligence_amendment_linking_concurrency: int = 10  # parallel LLM call cap
+
+    # PE diligence LLM clause extraction (stage 4b)
+    pe_diligence_llm_clause_extraction_enabled: bool = True  # opt-in until validated
+    pe_diligence_llm_clause_max_chunks_per_type: int = 10    # max candidate chunks per clause_type
+    pe_diligence_llm_clause_min_confidence: float = 0.50     # discard extracted clauses below this
+    pe_diligence_llm_clause_min_semantic_similarity: float = 0.20  # drop hybrid chunks below this cosine similarity before LLM
+
+    # PE diligence LLM numeric extraction (stage 5b)
+    pe_diligence_llm_numeric_extraction_enabled: bool = True  # opt-in until validated
+    pe_diligence_llm_numeric_max_chunks: int = 30              # max financial chunks sent to LLM
+    pe_diligence_llm_numeric_min_confidence: float = 0.50      # discard extracted metrics below this
+
+    # PE diligence per-document LLM analysis (runs for every classified doc)
+    pe_diligence_per_doc_analysis_top_k: int = 12            # chunks sent to LLM after reranking (was 8)
+    pe_diligence_per_doc_rerank_fetch_k: int = 20            # chunks fetched before reranking (headroom)
+    pe_diligence_per_doc_analysis_concurrency: int = 5       # parallel LLM calls cap
+
+    # PE diligence LLM findings synthesis (cross-doc, stage 7)
+    pe_diligence_llm_findings_synthesis_enabled: bool = True  # opt-in until validated
+    pe_diligence_llm_findings_max_input_chars: int = 30000     # max chars assembled for synthesis prompt
+
+    # PE diligence LLM summary generation (stage 9 upgrade)
+    pe_diligence_llm_summary_generation_enabled: bool = True  # opt-in until validated
+    pe_diligence_llm_summary_max_input_chars: int = 40000      # max chars assembled for summary prompt
 
     # ===== CHAT MEMORY SETTINGS =====
     # Number of most recent messages (user+assistant turns) to include verbatim

@@ -11,12 +11,11 @@ from app.db_models_users import User
 from app.utils.logging import logger
 from app.auth import get_current_user, _verify_token, _claim
 from app.repositories.job_repository import JobRepository
-from app.repositories.extraction_repository import ExtractionRepository
-from app.repositories.document_repository import DocumentRepository
 
 # Import job progress tracker (separate module to avoid circular imports)
 from app.services.job_tracker import JobProgressTracker
 from app.services.pubsub import safe_subscribe
+from app.core.entity_types import build_entity_complete_event, resolve_entity_owner
 
 router = APIRouter()
 
@@ -64,7 +63,6 @@ async def stream_job_progress(job_id: str, token: Optional[str] = Query(None)):
     # Note: We check job existence inside event_generator to send proper error events
     # This initial check is just for ownership verification
     job_repo = JobRepository()
-    extraction_repo = ExtractionRepository()
 
     job = job_repo.get_job(job_id)
 
@@ -93,68 +91,46 @@ async def stream_job_progress(job_id: str, token: Optional[str] = Query(None)):
             }
         )
 
-    # Generic ownership verification: check which entity type this job belongs to
-    # JobState supports: extraction_id, document_id, workflow_run_id (exactly one is set)
-    entity_owner_id = None
-    entity_org_id = None
-    entity_type = None
+    # For terminal-state jobs (failed/completed), skip ownership check and go straight to
+    # event_generator which will emit the appropriate SSE event and close cleanly.
+    # This prevents HTTP 404 when the associated entity (e.g. document) was cleaned up.
+    if job.status in ("failed", "completed"):
+        async def terminal_event_generator():
+            if job.status == "completed":
+                complete_data = build_entity_complete_event(job)
+                yield ServerSentEvent(data=json.dumps(complete_data), event="complete")
+            else:
+                yield ServerSentEvent(data=json.dumps({
+                    'stage': job.error_stage,
+                    'message': job.error_message,
+                    'type': job.error_type,
+                    'retryable': job.is_retryable
+                }), event="error")
+            yield ServerSentEvent(data=json.dumps({'reason': job.status, 'job_id': job_id}), event="end")
 
-    if job.extraction_id:
-        # Extract Mode: verify through extraction
-        extraction = extraction_repo.get_extraction(job.extraction_id)
-        if not extraction:
-            raise HTTPException(status_code=404, detail=f"Extraction not found for job {job_id}")
-        entity_owner_id = extraction.user_id
-        entity_org_id = getattr(extraction, "org_id", None)
-        entity_type = "extraction"
+        return EventSourceResponse(
+            terminal_event_generator(),
+            headers={
+                "X-Accel-Buffering": "no",
+                "Cache-Control": "no-cache",
+                "Content-Type": "text/event-stream; charset=utf-8"
+            }
+        )
 
-    elif job.workflow_run_id:
-        # Workflow Mode: verify through workflow run
-        from app.repositories.workflow_repository import WorkflowRepository
-        run = WorkflowRepository.get_run_by_id(job.workflow_run_id)
-        if not run:
-            raise HTTPException(status_code=404, detail=f"Workflow run not found for job {job_id}")
-        entity_owner_id = run.user_id
-        entity_org_id = getattr(run, "org_id", None)
-        entity_type = "workflow"
-
-    elif job.document_id:
-        # Chat Mode: verify through document
-        doc_repo = DocumentRepository()
-        doc = doc_repo.get_by_id(job.document_id, org_id)
-        if not doc:
-            raise HTTPException(status_code=404, detail=f"Document not found for job {job_id}")
-        entity_owner_id = doc.user_id
-        entity_org_id = getattr(doc, "org_id", None)
-        entity_type = "document"
-
-    elif job.template_fill_run_id:
-        # Template Fill Mode: verify through template fill run
-        from app.repositories.template_repository import TemplateRepository
-        fill_run = TemplateRepository.get_fill_run_by_id(job.template_fill_run_id)
-        if not fill_run:
-            raise HTTPException(status_code=404, detail=f"Template fill run not found for job {job_id}")
-        entity_owner_id = fill_run.user_id
-        entity_org_id = getattr(fill_run, "org_id", None)
-        entity_type = "template_fill"
-
-    else:
-        # No entity associated with job (should never happen due to DB constraints)
-        logger.error(f"[SSE] Job {job_id} has no associated entity (extraction_id, workflow_run_id, document_id, or template_fill_run_id)",
-                    extra={"job_id": job_id})
-        raise HTTPException(status_code=404, detail=f"Job {job_id} has no associated entity")
+    # Generic ownership verification
+    entity_owner_id, entity_org_id = resolve_entity_owner(job.entity_type, job.entity_id, org_id)
 
     # Verify ownership
     if entity_owner_id != user_id or (entity_org_id is not None and entity_org_id != org_id):
         logger.warning(
-            f"[SSE] User {user_id} attempted to access {entity_type} job {job_id} owned by {entity_owner_id}",
-            extra={"job_id": job_id, "user_id": user_id, "org_id": org_id, "owner_id": entity_owner_id, "entity_org_id": entity_org_id, "entity_type": entity_type}
+            f"[SSE] User {user_id} attempted to access {job.entity_type} job {job_id} owned by {entity_owner_id}",
+            extra={"job_id": job_id, "user_id": user_id, "org_id": org_id, "owner_id": entity_owner_id, "entity_org_id": entity_org_id, "entity_type": job.entity_type}
         )
         raise HTTPException(status_code=403, detail="You don't have permission to access this job")
 
     logger.info(
-        f"[SSE] User {user_id} authorized to stream {entity_type} job {job_id}",
-        extra={"job_id": job_id, "entity_type": entity_type}
+        f"[SSE] User {user_id} authorized to stream {job.entity_type} job {job_id}",
+        extra={"job_id": job_id, "entity_type": job.entity_type}
     )
 
     async def event_generator():
@@ -190,19 +166,7 @@ async def stream_job_progress(job_id: str, token: Optional[str] = Query(None)):
             return
 
         if job.status == "completed":
-            complete_data = {
-                'message': job.message or 'Job completed successfully',
-            }
-            # Include the relevant entity ID based on job type
-            if job.extraction_id:
-                complete_data['extraction_id'] = job.extraction_id
-            if job.workflow_run_id:
-                complete_data['run_id'] = job.workflow_run_id
-            if job.template_fill_run_id:
-                complete_data['fill_run_id'] = job.template_fill_run_id
-            if job.document_id:
-                complete_data['document_id'] = job.document_id
-
+            complete_data = build_entity_complete_event(job)
             yield ServerSentEvent(data=json.dumps(complete_data), event="complete")
             yield ServerSentEvent(data=json.dumps({'reason': 'completed', 'job_id': job_id}), event="end")
             return
@@ -210,15 +174,13 @@ async def stream_job_progress(job_id: str, token: Optional[str] = Query(None)):
         # Template fill specific: Handle awaiting_review status
         # This occurs after auto-mapping completes and user needs to review
         if job.status in ("mapped", "awaiting_review"):
-            # Check if this is a template fill job
-            if job.template_fill_run_id:
+            if job.entity_type == "template_fill_run":
                 from app.repositories.template_repository import TemplateRepository
-                fill_run = TemplateRepository.get_fill_run_by_id(job.template_fill_run_id)
+                fill_run = TemplateRepository.get_fill_run_by_id(job.entity_id)
                 if fill_run and fill_run.status == "awaiting_review":
-                    # Auto-mapping is complete, user needs to review
                     yield ServerSentEvent(data=json.dumps({
                         'message': job.message or 'Mapping complete - ready for review',
-                        'fill_run_id': job.template_fill_run_id,
+                        'fill_run_id': job.entity_id,
                         'status': 'awaiting_review'
                     }), event="complete")
                     yield ServerSentEvent(data=json.dumps({'reason': 'awaiting_review', 'job_id': job_id}), event="end")
@@ -326,62 +288,22 @@ async def stream_job_progress(job_id: str, token: Optional[str] = Query(None)):
 async def get_job_status(job_id: str, user: User = Depends(get_current_user)):
     """Get current job status (polling alternative to SSE) - REQUIRES AUTHENTICATION"""
     job_repo = JobRepository()
-    extraction_repo = ExtractionRepository()
     org_id = user.org_id
 
     job = job_repo.get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    # Generic ownership verification (same as SSE endpoint)
-    entity_owner_id = None
-    entity_org_id = None
-
-    if job.extraction_id:
-        extraction = extraction_repo.get_extraction(job.extraction_id)
-        if not extraction:
-            raise HTTPException(status_code=404, detail="Extraction not found")
-        entity_owner_id = extraction.user_id
-        entity_org_id = getattr(extraction, "org_id", None)
-
-    elif job.workflow_run_id:
-        from app.repositories.workflow_repository import WorkflowRepository
-        run = WorkflowRepository.get_run_by_id(job.workflow_run_id)
-        if not run:
-            raise HTTPException(status_code=404, detail="Workflow run not found")
-        entity_owner_id = run.user_id
-        entity_org_id = getattr(run, "org_id", None)
-
-    elif job.document_id:
-        doc_repo = DocumentRepository()
-        doc = doc_repo.get_by_id(job.document_id, org_id)
-        if not doc:
-            raise HTTPException(status_code=404, detail="Document not found")
-        entity_owner_id = doc.user_id
-        entity_org_id = getattr(doc, "org_id", None)
-
-    elif job.template_fill_run_id:
-        # Template Fill Mode: verify through template fill run
-        from app.repositories.template_repository import TemplateRepository
-        fill_run = TemplateRepository.get_fill_run_by_id(job.template_fill_run_id)
-        if not fill_run:
-            raise HTTPException(status_code=404, detail="Template fill run not found")
-        entity_owner_id = fill_run.user_id
-        entity_org_id = getattr(fill_run, "org_id", None)
-
-    else:
-        raise HTTPException(status_code=404, detail="Job has no associated entity")
+    entity_owner_id, entity_org_id = resolve_entity_owner(job.entity_type, job.entity_id, org_id)
 
     # Verify ownership
     if entity_owner_id != user.id or (entity_org_id is not None and entity_org_id != org_id):
         raise HTTPException(status_code=403, detail="You don't have permission to access this job")
 
     return {
-        "job_id": job.id,
-        "extraction_id": job.extraction_id,
-        "workflow_run_id": job.workflow_run_id,
-        "document_id": job.document_id,
-        "template_fill_run_id": job.template_fill_run_id,
+        "job_id": job.job_id,
+        "entity_type": job.entity_type,
+        "entity_id": job.entity_id,
         "status": job.status,
         "current_stage": job.current_stage,
         "progress_percent": job.progress_percent,
@@ -389,9 +311,10 @@ async def get_job_status(job_id: str, user: User = Depends(get_current_user)):
         "details": job.details,
         "parsing_completed": job.parsing_completed,
         "chunking_completed": job.chunking_completed,
-        "summarizing_completed": job.summarizing_completed,
-        "extracting_completed": job.extracting_completed,
-        # Template fill specific flags
+        "embedding_completed": job.embedding_completed,
+        "storing_completed": job.storing_completed,
+        "context_completed": job.context_completed,
+        "artifact_completed": job.artifact_completed,
         "field_detection_completed": job.field_detection_completed,
         "auto_mapping_completed": job.auto_mapping_completed,
         "data_extraction_completed": job.data_extraction_completed,
@@ -417,52 +340,13 @@ async def retry_job(job_id: str, user: User = Depends(get_current_user)):
     Other failures (parsing, chunking) require re-uploading the document.
     """
     job_repo = JobRepository()
-    extraction_repo = ExtractionRepository()
     org_id = user.org_id
 
     job = job_repo.get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    # Generic ownership verification (same as SSE endpoint)
-    entity_owner_id = None
-    entity_org_id = None
-    extraction = None
-
-    if job.extraction_id:
-        extraction = extraction_repo.get_extraction(job.extraction_id)
-        if not extraction:
-            raise HTTPException(status_code=404, detail="Extraction not found")
-        entity_owner_id = extraction.user_id
-        entity_org_id = getattr(extraction, "org_id", None)
-
-    elif job.workflow_run_id:
-        from app.repositories.workflow_repository import WorkflowRepository
-        run = WorkflowRepository.get_run_by_id(job.workflow_run_id)
-        if not run:
-            raise HTTPException(status_code=404, detail="Workflow run not found")
-        entity_owner_id = run.user_id
-        entity_org_id = getattr(run, "org_id", None)
-
-    elif job.document_id:
-        doc_repo = DocumentRepository()
-        doc = doc_repo.get_by_id(job.document_id, org_id)
-        if not doc:
-            raise HTTPException(status_code=404, detail="Document not found")
-        entity_owner_id = doc.user_id
-        entity_org_id = getattr(doc, "org_id", None)
-
-    elif job.template_fill_run_id:
-        # Template Fill Mode: verify through template fill run
-        from app.repositories.template_repository import TemplateRepository
-        fill_run = TemplateRepository.get_fill_run_by_id(job.template_fill_run_id)
-        if not fill_run:
-            raise HTTPException(status_code=404, detail="Template fill run not found")
-        entity_owner_id = fill_run.user_id
-        entity_org_id = getattr(fill_run, "org_id", None)
-
-    else:
-        raise HTTPException(status_code=404, detail="Job has no associated entity")
+    entity_owner_id, entity_org_id = resolve_entity_owner(job.entity_type, job.entity_id, org_id)
 
     # Verify ownership
     if entity_owner_id != user.id or (entity_org_id is not None and entity_org_id != org_id):
@@ -512,7 +396,8 @@ async def retry_job(job_id: str, user: User = Depends(get_current_user)):
     return {
         "success": True,
         "job_id": job_id,
-        "extraction_id": job.extraction_id,
+        "entity_type": job.entity_type,
+        "entity_id": job.entity_id,
         "resume_stage": resume_stage,
         "message": f"Job retry initiated from {resume_stage} stage"
     }

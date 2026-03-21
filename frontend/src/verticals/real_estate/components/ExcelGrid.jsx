@@ -15,6 +15,7 @@ export default function ExcelGrid({
   sheetName,
   getCellValue,
   getCellMapping,
+  isYamlUnmappedCell,
   onCellClick,
   selectedCell,
 }) {
@@ -189,6 +190,8 @@ export default function ExcelGrid({
 
                   // Determine if cell has a formula
                   const hasFormula = cell && cell.f;
+                  const isYamlUnmapped =
+                    !hasFormula && !mapping && isYamlUnmappedCell?.(sheetName, cellAddress);
 
                   // Get display value
                   let displayValue = '';
@@ -242,6 +245,11 @@ export default function ExcelGrid({
                     } else {
                       overlayColor = 'inset 0 0 0 2px hsl(var(--destructive))';
                     }
+                  } else if (isYamlUnmapped) {
+                    overlayColor = 'inset 0 0 0 2px hsl(var(--warning))';
+                    if (!excelStyle.backgroundColor) {
+                      inlineStyles.backgroundColor = 'hsl(var(--warning) / 0.10)';
+                    }
                   }
 
                   if (overlayColor) {
@@ -264,6 +272,8 @@ export default function ExcelGrid({
                           ? `Formula: ${displayValue}`
                           : mapping
                           ? `${mapping.excel_label || ''} (${Math.round((mapping.confidence || 0) * 100)}% confidence)`
+                          : isYamlUnmapped
+                          ? `Target cell not mapped yet (${cellAddress})`
                           : cellAddress
                       }
                     >
@@ -297,6 +307,12 @@ export default function ExcelGrid({
                                   <span className="text-xs text-muted-foreground">
                                     {Math.round((mapping.confidence || 0) * 100)}%
                                   </span>
+                                </div>
+                              )}
+                              {!mapping && isYamlUnmapped && (
+                                <div className="flex items-center gap-1">
+                                  <AlertTriangle className="h-3 w-3 text-warning" />
+                                  <span className="text-xs text-muted-foreground">Unmapped</span>
                                 </div>
                               )}
                               {needsExpansion && (
@@ -334,6 +350,10 @@ export default function ExcelGrid({
           <div className="flex items-center gap-1">
             <div className="w-2.5 h-2.5 rounded border-2 border-yellow-500" />
             <span>Medium</span>
+          </div>
+          <div className="flex items-center gap-1">
+            <div className="w-2.5 h-2.5 rounded border-2 border-yellow-500 bg-yellow-500/20" />
+            <span>Needs Mapping</span>
           </div>
           <div className="flex items-center gap-1">
             <div className="w-2.5 h-2.5 rounded border-2 border-red-500" />

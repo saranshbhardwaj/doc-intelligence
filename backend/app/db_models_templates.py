@@ -191,7 +191,6 @@ class TemplateFillRun(Base):
     # Relationships
     template = relationship("ExcelTemplate", back_populates="fill_runs")
     document = relationship("Document", foreign_keys=[document_id])
-    job_states = relationship("JobState", back_populates="template_fill_run", cascade="all, delete-orphan")
 
     def __repr__(self):
         return f"<TemplateFillRun(id={self.id}, template_id={self.template_id}, status={self.status})>"

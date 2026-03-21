@@ -32,7 +32,7 @@ import {
   DropdownMenuSeparator,
 } from "../components/ui/dropdown-menu";
 import Spinner from "../components/common/Spinner";
-import PDFViewer from "../components/pdf/PDFViewer";
+import DocumentViewer from "../components/pdf/DocumentViewer";
 import AppLayout from "../components/layout/AppLayout";
 import {
   ResizablePanelGroup,
@@ -550,8 +550,9 @@ export default function WorkflowResultPage() {
                       <Spinner size="lg" />
                     </div>
                   ) : activePdfUrl ? (
-                    <PDFViewer
-                      pdfUrl={activePdfUrl}
+                    <DocumentViewer
+                      fileUrl={activePdfUrl}
+                      filename={activeCitationDoc}
                       highlightBbox={pdfViewerState.highlightBbox}
                     />
                   ) : (
@@ -753,8 +754,9 @@ export default function WorkflowResultPage() {
                 <Spinner size="lg" />
               </div>
             ) : activePdfUrl ? (
-              <PDFViewer
-                pdfUrl={activePdfUrl}
+              <DocumentViewer
+                fileUrl={activePdfUrl}
+                filename={activeCitationDoc}
                 highlightBbox={pdfViewerState.highlightBbox}
               />
             ) : (

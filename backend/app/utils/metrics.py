@@ -46,6 +46,11 @@ External APIs (Azure Document Intelligence):
     - azure_di_latency_seconds
     - azure_di_pages_processed_total
     - azure_di_cost_usd_total
+PE Diligence Investigations:
+    - pe_investigation_runs_total (labels: investigation_type, status)
+    - pe_investigation_claims_total (labels: investigation_type, stance, verification_status)
+    - pe_investigation_claim_overrides_total (labels: investigation_type, new_status)
+    - pe_investigation_coverage_score (labels: investigation_type, coverage_status)
 """
 from prometheus_client import Counter, Histogram, Gauge
 
@@ -309,6 +314,37 @@ ANTHROPIC_USAGE_LAST_SYNC = Gauge(
     multiprocess_mode='max'
 )
 
+# --- PE Diligence Investigation metrics ---
+INVESTIGATION_RUNS_TOTAL = Counter(
+    "pe_investigation_runs_total",
+    "Total PE diligence investigation runs by type and outcome",
+    ["investigation_type", "status"],  # status: completed, failed, needs_review
+)
+
+INVESTIGATION_CLAIMS_TOTAL = Counter(
+    "pe_investigation_claims_total",
+    "Total claims produced by investigation runs",
+    ["investigation_type", "stance", "verification_status"],
+    # stance: supported, contradicted, unknown
+    # verification_status: needs_review, verified, dismissed
+)
+
+INVESTIGATION_CLAIM_OVERRIDES_TOTAL = Counter(
+    "pe_investigation_claim_overrides_total",
+    "Total claim verification overrides by reviewers",
+    ["investigation_type", "new_status"],
+    # new_status: verified, needs_review, dismissed
+)
+
+INVESTIGATION_COVERAGE_SCORE = Histogram(
+    "pe_investigation_coverage_score",
+    "Distribution of investigation coverage scores at run completion",
+    ["investigation_type", "coverage_status"],
+    # coverage_status: strong, moderate, weak
+    buckets=(0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0),
+)
+
+
 def init_labeled_metrics():
     """Pre-register labeled metrics so they appear in /metrics before first use.
 
@@ -339,6 +375,13 @@ def init_labeled_metrics():
     AZURE_DI_LATENCY_SECONDS.labels(model="prebuilt-layout")
     AZURE_DI_PAGES_PROCESSED.labels(model="prebuilt-layout")
     AZURE_DI_COST_USD.labels(model="prebuilt-layout")
+    # PE investigation metrics
+    INVESTIGATION_RUNS_TOTAL.labels(investigation_type="change_of_control", status="completed")
+    INVESTIGATION_RUNS_TOTAL.labels(investigation_type="change_of_control", status="failed")
+    INVESTIGATION_RUNS_TOTAL.labels(investigation_type="change_of_control", status="needs_review")
+    INVESTIGATION_CLAIMS_TOTAL.labels(investigation_type="change_of_control", stance="supported", verification_status="needs_review")
+    INVESTIGATION_CLAIM_OVERRIDES_TOTAL.labels(investigation_type="change_of_control", new_status="verified")
+    INVESTIGATION_COVERAGE_SCORE.labels(investigation_type="change_of_control", coverage_status="strong")
 
 
 __all__ = [
@@ -385,5 +428,9 @@ __all__ = [
     "ANTHROPIC_REPORTED_TOKENS",
     "ANTHROPIC_REPORTED_COST_USD",
     "ANTHROPIC_USAGE_LAST_SYNC",
+    "INVESTIGATION_RUNS_TOTAL",
+    "INVESTIGATION_CLAIMS_TOTAL",
+    "INVESTIGATION_CLAIM_OVERRIDES_TOTAL",
+    "INVESTIGATION_COVERAGE_SCORE",
     "init_labeled_metrics",
 ]

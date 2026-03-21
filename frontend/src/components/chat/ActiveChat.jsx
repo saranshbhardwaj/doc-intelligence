@@ -25,59 +25,24 @@
  *   - Editable session title
  */
 
-import { useState, useRef, useEffect, useMemo, useLayoutEffect } from "react";
+import { useState, useRef, useEffect, useLayoutEffect } from "react";
 import {
   Send,
   Download,
   FileText,
-  X,
-  Plus,
-  Check,
-  Pencil,
-  CheckCircle,
-  Clock,
-  XCircle,
-  Search,
   FileDown,
   Loader2,
   Bot,
-  FileSpreadsheet,
-  File,
+  X,
 } from "lucide-react";
-
-const getDocFileIcon = (filename) => {
-  const ext = filename?.toLowerCase().split('.').pop();
-  if (ext === 'pdf') return { Icon: FileText, bg: 'bg-red-50 dark:bg-red-900/20', color: 'text-red-500 dark:text-red-400' };
-  if (['xlsx', 'xls'].includes(ext)) return { Icon: FileSpreadsheet, bg: 'bg-green-50 dark:bg-green-900/20', color: 'text-green-600 dark:text-green-400' };
-  return { Icon: File, bg: 'bg-blue-50 dark:bg-blue-900/20', color: 'text-blue-500 dark:text-blue-400' };
-};
 import { Button } from "../ui/button";
-import { Card } from "../ui/card";
-import { Input } from "../ui/input";
-import { Checkbox } from "../ui/checkbox";
-import {
-  Select,
-  SelectTrigger,
-  SelectValue,
-  SelectContent,
-  SelectItem,
-} from "../ui/select";
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "../ui/dropdown-menu";
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from "../ui/dialog";
-import { Combobox } from "../ui/combobox";
 import Spinner from "../common/Spinner";
-import { getCollection } from "../../api/chat";
 import { ComparisonMessage, StreamingComparisonContent } from "./comparison";
 import ComparisonDocumentPicker from "./comparison/ComparisonDocumentPicker";
 import { useComparison, usePdfViewer, useChatActions, useStore } from "../../store";
@@ -91,7 +56,7 @@ import {
   ResizablePanel,
   ResizableHandle,
 } from "../ui/resizable";
-import PDFViewer from "../pdf/PDFViewer";
+import DocumentViewer from "../pdf/DocumentViewer";
 
 export default function ActiveChat({
   currentSession,
@@ -110,13 +75,6 @@ export default function ActiveChat({
   onExportSession,
 }) {
   const [message, setMessage] = useState("");
-  const [showDocumentManager, setShowDocumentManager] = useState(false);
-  const [selectedCollectionId, setSelectedCollectionId] = useState(null);
-  const [collectionDocuments, setCollectionDocuments] = useState([]);
-  const [loadingDocuments, setLoadingDocuments] = useState(false);
-  const [docsToAdd, setDocsToAdd] = useState([]);
-  const [isEditingTitle, setIsEditingTitle] = useState(false);
-  const [editedTitle, setEditedTitle] = useState(currentSession?.title || "");
   const [showComparisonPanel, setShowComparisonPanel] = useState(false);
   const [showPdfPanel, setShowPdfPanel] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
@@ -124,7 +82,6 @@ export default function ActiveChat({
   const messagesContainerRef = useRef(null);
   const shouldAutoScrollRef = useRef(true);
   const messagesScrollTopRef = useRef(0);
-  const titleInputRef = useRef(null);
   const textareaRef = useRef(null);
 
   const handleTextareaInput = (e) => {
@@ -132,10 +89,6 @@ export default function ActiveChat({
     ta.style.height = 'auto';
     ta.style.height = Math.min(ta.scrollHeight, 200) + 'px';
   };
-
-  // Search and filter state
-  const [documentSearchQuery, setDocumentSearchQuery] = useState("");
-  const [statusFilter, setStatusFilter] = useState("all");
 
   const isNearBottom = (element, threshold = 120) => {
     if (!element) return true;
@@ -184,46 +137,6 @@ export default function ActiveChat({
     container.scrollTop = messagesScrollTopRef.current;
   }, [showPdfPanel]);
 
-  // Auto-select first collection
-  useEffect(() => {
-    if (!selectedCollectionId && collections.length > 0) {
-      setSelectedCollectionId(collections[0].id);
-    }
-  }, [collections, selectedCollectionId]);
-
-  // Fetch collection documents when collection changes
-  useEffect(() => {
-    if (selectedCollectionId && showDocumentManager) {
-      fetchCollectionDocuments(selectedCollectionId);
-    }
-  }, [selectedCollectionId, showDocumentManager]);
-
-  // Focus title input when editing
-  useEffect(() => {
-    if (isEditingTitle && titleInputRef.current) {
-      titleInputRef.current.focus();
-      titleInputRef.current.select();
-    }
-  }, [isEditingTitle]);
-
-  // Sync title with current session
-  useEffect(() => {
-    setEditedTitle(currentSession?.title || "");
-  }, [currentSession?.title]);
-
-  const fetchCollectionDocuments = async (collectionId) => {
-    setLoadingDocuments(true);
-    try {
-      const collectionData = await getCollection(getToken, collectionId);
-      setCollectionDocuments(collectionData.documents || []);
-    } catch (error) {
-      console.error("Failed to fetch collection documents:", error);
-      setCollectionDocuments([]);
-    } finally {
-      setLoadingDocuments(false);
-    }
-  };
-
   const handleSendMessage = (e) => {
     e.preventDefault();
     if (!message.trim() || isStreaming) return;
@@ -232,74 +145,13 @@ export default function ActiveChat({
     setMessage("");
   };
 
-  const handleAddDocuments = () => {
-    if (docsToAdd.length > 0) {
-      onAddDocuments?.(docsToAdd);
-      setDocsToAdd([]);
-      setShowDocumentManager(false);
-    }
-  };
-
-  const handleToggleDoc = (docId) => {
-    setDocsToAdd((prev) =>
-      prev.includes(docId)
-        ? prev.filter((id) => id !== docId)
-        : [...prev, docId]
-    );
-  };
-
-  const handleSaveTitle = () => {
-    if (editedTitle.trim() && editedTitle !== currentSession?.title) {
-      onUpdateSessionTitle?.(editedTitle.trim());
-    }
-    setIsEditingTitle(false);
-  };
-
-  const handleCancelTitleEdit = () => {
-    setEditedTitle(currentSession?.title || "");
-    setIsEditingTitle(false);
-  };
-
-  const handleTitleKeyDown = (e) => {
-    if (e.key === "Enter") {
-      handleSaveTitle();
-    } else if (e.key === "Escape") {
-      handleCancelTitleEdit();
-    }
-  };
-
   const sessionDocIds = currentSession?.documents?.map((d) => d.id) || [];
-
-  // Filter and process documents
-  const filteredDocuments = useMemo(() => {
-    let filtered = [...collectionDocuments];
-
-    // Search filter
-    if (documentSearchQuery.trim()) {
-      const query = documentSearchQuery.toLowerCase();
-      filtered = filtered.filter((doc) =>
-        doc.filename.toLowerCase().includes(query)
-      );
-    }
-
-    // Status filter
-    if (statusFilter !== "all") {
-      filtered = filtered.filter((doc) => doc.status === statusFilter);
-    }
-
-    return filtered;
-  }, [collectionDocuments, documentSearchQuery, statusFilter]);
-
-  // Filter documents: exclude already-in-session AND only show completed
-  const availableDocuments = filteredDocuments.filter(
-    (doc) => !sessionDocIds.includes(doc.id) && doc.status === "completed"
-  );
 
   // Get comparison context for rendering
   const comparison = useComparison();
   const pdfViewer = usePdfViewer();
   const actions = useChatActions();
-  const { clearHighlight, setActivePdfDocument, clearPdfUrlCache } = actions;
+  const { clearHighlight, clearPdfUrlCache } = actions;
   const citationContext = useStore((state) => state.chat.citationContext);
 
   useEffect(() => {
@@ -365,15 +217,6 @@ export default function ActiveChat({
     setShowComparisonPanel(true);
   };
 
-  // Handler for clicking document chip (switch active PDF)
-  const handleDocumentChipClick = (docId) => {
-    if (messagesContainerRef.current) {
-      messagesScrollTopRef.current = messagesContainerRef.current.scrollTop;
-    }
-    setActivePdfDocument(docId, getToken);
-    setShowPdfPanel(true);
-  };
-
   // Clear PDF cache and reset panel state when session changes
   useEffect(() => {
     clearPdfUrlCache();
@@ -419,316 +262,37 @@ export default function ActiveChat({
         defaultSize={showPdfPanel ? 55 : 100}
         minSize={35}
       >
-        <div className="w-full flex flex-col h-full min-w-0 overflow-hidden">
-          {/* Sticky Header with Editable Title and Document Chips */}
-          <div className="sticky top-0 z-10 bg-card/80 backdrop-blur border-b border-border shadow-sm px-3 md:px-6 py-3">
-        <div className="flex items-start md:items-center justify-between gap-2 mb-3">
-          {/* Editable Title */}
-          <div className="flex items-center gap-2 flex-1 min-w-0">
-            {isEditingTitle ? (
-              <div className="flex items-center gap-2 flex-1 max-w-md">
-                <Input
-                  ref={titleInputRef}
-                  value={editedTitle}
-                  onChange={(e) => setEditedTitle(e.target.value)}
-                  onKeyDown={handleTitleKeyDown}
-                  onBlur={handleSaveTitle}
-                  className="h-8 text-base font-semibold"
-                  placeholder="Session title..."
-                />
-                <button
-                  onClick={handleSaveTitle}
-                  className="p-1.5 hover:bg-success/10 rounded transition-colors"
-                  title="Save"
-                >
-                  <Check className="w-4 h-4 text-success" />
-                </button>
-                <button
-                  onClick={handleCancelTitleEdit}
-                  className="p-1.5 hover:bg-destructive/10 rounded transition-colors"
-                  title="Cancel"
-                >
-                  <X className="w-4 h-4 text-destructive" />
-                </button>
-              </div>
-            ) : (
-              <div className="group flex items-center gap-2 flex-1 min-w-0">
-                <h2 className="text-lg font-semibold text-foreground truncate">
-                  {currentSession?.title || "Chat Session"}
-                </h2>
-                <button
-                  onClick={() => setIsEditingTitle(true)}
-                  className="opacity-50 hover:opacity-100 p-1.5 hover:bg-muted rounded transition-all"
-                  title="Edit title"
-                >
-                  <Pencil className="w-3.5 h-3.5 text-muted-foreground" />
-                </button>
-              </div>
-            )}
+        <div className="w-full flex flex-col h-full min-w-0 overflow-hidden relative">
+          <div className="absolute right-3 top-3 z-20">
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm" className="h-8 shrink-0 px-2 bg-card/90">
+                  <Download className="w-4 h-4 md:mr-2" />
+                  <span className="hidden md:inline">Export</span>
+                </Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end" className="w-48">
+                <DropdownMenuItem onClick={() => onExportSession?.("markdown")}>
+                  <FileText className="w-4 h-4 mr-2" />
+                  <div className="flex flex-col">
+                    <span className="font-medium">Markdown</span>
+                    <span className="text-xs text-muted-foreground">
+                      Simple .md file
+                    </span>
+                  </div>
+                </DropdownMenuItem>
+                <DropdownMenuItem onClick={() => onExportSession?.("word")}>
+                  <FileDown className="w-4 h-4 mr-2" />
+                  <div className="flex flex-col">
+                    <span className="font-medium">Word Document</span>
+                    <span className="text-xs text-muted-foreground">
+                      Professional .docx
+                    </span>
+                  </div>
+                </DropdownMenuItem>
+              </DropdownMenuContent>
+            </DropdownMenu>
           </div>
-
-          {/* Export Dropdown */}
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="sm" className="shrink-0">
-                <Download className="w-4 h-4 md:mr-2" />
-                <span className="hidden md:inline">Export</span>
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="w-48">
-              <DropdownMenuItem onClick={() => onExportSession?.("markdown")}>
-                <FileText className="w-4 h-4 mr-2" />
-                <div className="flex flex-col">
-                  <span className="font-medium">Markdown</span>
-                  <span className="text-xs text-muted-foreground">
-                    Simple .md file
-                  </span>
-                </div>
-              </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => onExportSession?.("word")}>
-                <FileDown className="w-4 h-4 mr-2" />
-                <div className="flex flex-col">
-                  <span className="font-medium">Word Document</span>
-                  <span className="text-xs text-muted-foreground">
-                    Professional .docx
-                  </span>
-                </div>
-              </DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
-        </div>
-
-        {/* Document Chips — horizontal scrollable strip */}
-        <div className="flex items-center gap-3 overflow-x-auto scrollbar-thin pb-1 pt-2">
-          {currentSession?.documents?.map((doc, index) => {
-            const { Icon: DocIcon, bg: docBg, color: docColor } = getDocFileIcon(doc.name || doc.filename);
-            const isActive = pdfViewer.activeDocumentId === doc.id;
-            return (
-              <div
-                key={doc.id}
-                onClick={() => handleDocumentChipClick(doc.id)}
-                className={`group flex items-center gap-3 px-4 py-2 rounded-xl border transition-all cursor-pointer shrink-0 min-w-[160px] animate-chip-fade-in ${
-                  isActive
-                    ? 'bg-primary/10 border-primary/30'
-                    : 'bg-muted/50 border-border hover:bg-card hover:shadow-sm'
-                }`}
-                style={{ animationDelay: `${index * 30}ms` }}
-                title="Click to view PDF"
-              >
-                <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${docBg}`}>
-                  <DocIcon className={`w-4 h-4 ${docColor}`} />
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs font-semibold text-foreground truncate">{doc.name || doc.filename}</p>
-                  <div className="flex items-center gap-1.5 mt-0.5">
-                    <span className="w-2 h-2 rounded-full bg-primary shrink-0" />
-                    <span className="text-[10px] font-medium text-muted-foreground">Indexed</span>
-                  </div>
-                </div>
-                <button
-                  onClick={(e) => { e.stopPropagation(); onRemoveDocument?.(doc.id); }}
-                  className="opacity-0 group-hover:opacity-100 transition-opacity text-muted-foreground hover:text-destructive p-0.5 shrink-0"
-                  title="Remove document"
-                >
-                  <X className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            );
-          })}
-
-          {/* Dashed "+ Add" button */}
-          <button
-            onClick={() => setShowDocumentManager(!showDocumentManager)}
-            className="w-10 h-10 rounded-xl border-2 border-dashed border-border text-muted-foreground hover:border-primary hover:text-primary hover:bg-primary/5 flex items-center justify-center transition-all shrink-0"
-            title="Add Document"
-          >
-            <Plus className="w-5 h-5" />
-          </button>
-        </div>
-
-        {/* Document Manager Dialog */}
-        <Dialog open={showDocumentManager} onOpenChange={(open) => {
-          setShowDocumentManager(open);
-          if (!open) setDocsToAdd([]);
-        }}>
-          <DialogContent className="sm:max-w-lg max-h-[85vh] flex flex-col">
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-2">
-                <Plus className="w-4 h-4" />
-                Add Documents
-              </DialogTitle>
-            </DialogHeader>
-
-            <div className="flex-1 overflow-y-auto space-y-4 pr-3">
-              {/* Collection Selector */}
-              <div>
-                <label className="text-xs font-medium text-foreground mb-1.5 flex items-center gap-2">
-                  <FileText className="w-3.5 h-3.5" />
-                  Select Collection
-                </label>
-                {collections.length === 0 ? (
-                  <p className="text-xs text-muted-foreground italic py-2">
-                    No collections available
-                  </p>
-                ) : (
-                  <Combobox
-                    items={collections.map((col) => ({
-                      value: col.id,
-                      label: col.name,
-                      subtitle: `${col.document_count} docs`,
-                    }))}
-                    value={selectedCollectionId}
-                    onValueChange={setSelectedCollectionId}
-                    placeholder="Choose collection..."
-                    searchPlaceholder="Search collections..."
-                    emptyMessage="No collections found."
-                    className="h-9 text-sm"
-                  />
-                )}
-              </div>
-
-              {/* Documents List */}
-              {selectedCollectionId && (
-                <div>
-                  <label className="text-xs font-medium text-foreground mb-1.5 block">
-                    Select Documents ({docsToAdd.length} selected)
-                  </label>
-
-                  {/* Document Search */}
-                  <div className="relative mb-3">
-                    <Search className="absolute left-2.5 top-2 h-3.5 w-3.5 text-muted-foreground" />
-                    <Input
-                      placeholder="Search documents..."
-                      value={documentSearchQuery}
-                      onChange={(e) => setDocumentSearchQuery(e.target.value)}
-                      className="pl-8 h-8 text-xs"
-                    />
-                  </div>
-
-                  {/* Results count */}
-                  {documentSearchQuery && (
-                    <p className="text-xs text-muted-foreground mb-2">
-                      {filteredDocuments.length} of {collectionDocuments.length} documents
-                    </p>
-                  )}
-
-                  {loadingDocuments ? (
-                    <div className="flex items-center justify-center py-8">
-                      <Spinner size="sm" />
-                    </div>
-                  ) : availableDocuments.length === 0 ? (
-                    <div className="text-center py-6 bg-muted/30 rounded-lg border border-dashed">
-                      <FileText className="w-8 h-8 text-muted-foreground mx-auto mb-2 opacity-40" />
-                      <p className="text-xs text-muted-foreground">
-                        {documentSearchQuery || statusFilter !== "all"
-                          ? "No documents match your filters"
-                          : collectionDocuments.length === 0
-                          ? "No documents in this collection"
-                          : "All documents are already added"}
-                      </p>
-                    </div>
-                  ) : (
-                    <div className="space-y-1.5 max-h-[340px] overflow-y-auto scrollbar-thin">
-                      {filteredDocuments.map((doc) => {
-                        const isInSession = sessionDocIds.includes(doc.id);
-                        const isSelected = docsToAdd.includes(doc.id);
-                        const isCompleted = doc.status === "completed";
-
-                        return (
-                          <div
-                            key={doc.id}
-                            className={`p-3 rounded-lg border transition-all ${
-                              isInSession
-                                ? "bg-success/5 border-success/30 cursor-not-allowed"
-                                : isSelected
-                                ? "bg-primary/5 border-primary"
-                                : isCompleted
-                                ? "border-border hover:border-muted-foreground/30 hover:bg-muted/30 cursor-pointer"
-                                : "border-border bg-muted/20 opacity-60 cursor-not-allowed"
-                            }`}
-                            onClick={() =>
-                              !isInSession &&
-                              isCompleted &&
-                              handleToggleDoc(doc.id)
-                            }
-                          >
-                            <div className="flex items-center gap-2">
-                              {isInSession ? (
-                                <div className="flex items-center justify-center w-4 h-4 bg-success rounded">
-                                  <Check className="w-3 h-3 text-success-foreground" />
-                                </div>
-                              ) : isCompleted ? (
-                                <Checkbox
-                                  id={`add-doc-${doc.id}`}
-                                  checked={isSelected}
-                                  onCheckedChange={() =>
-                                    handleToggleDoc(doc.id)
-                                  }
-                                  onClick={(e) => e.stopPropagation()}
-                                />
-                              ) : (
-                                <div className="w-4 h-4" />
-                              )}
-
-                              <div className="flex-1 min-w-0">
-                                <label
-                                  htmlFor={`add-doc-${doc.id}`}
-                                  className={`text-xs truncate block ${
-                                    isInSession
-                                      ? "text-success font-medium"
-                                      : isCompleted
-                                      ? "text-foreground cursor-pointer"
-                                      : "text-muted-foreground"
-                                  }`}
-                                >
-                                  {doc.filename}
-                                  {isInSession && " (Already added)"}
-                                </label>
-                                <div className="flex items-center gap-2 mt-0.5">
-                                  <span className="text-xs text-muted-foreground">
-                                    {doc.chunk_count || 0} chunks
-                                  </span>
-                                  {doc.status === "completed" ? (
-                                    <CheckCircle className="w-3 h-3 text-success" />
-                                  ) : doc.status === "processing" ? (
-                                    <Clock className="w-3 h-3 text-warning" />
-                                  ) : (
-                                    <XCircle className="w-3 h-3 text-destructive" />
-                                  )}
-                                </div>
-                              </div>
-                            </div>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-
-            <DialogFooter className="pt-2 border-t mt-4">
-              <Button
-                variant="outline"
-                onClick={() => {
-                  setShowDocumentManager(false);
-                  setDocsToAdd([]);
-                }}
-              >
-                Cancel
-              </Button>
-              <Button
-                onClick={handleAddDocuments}
-                disabled={docsToAdd.length === 0}
-              >
-                Add {docsToAdd.length} Document
-                {docsToAdd.length !== 1 ? "s" : ""}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-      </div>
-      {/* End: Sticky Header */}
 
       {/* Messages Area */}
       <div
@@ -756,7 +320,7 @@ export default function ActiveChat({
             </div>
           </div>
         ) : (
-          <div className="max-w-4xl mx-auto py-4 md:py-6 px-3 md:px-4 space-y-8">
+          <div className="max-w-4xl mx-auto w-full py-4 md:py-6 px-3 md:px-8 space-y-8">
             {messages.map((msg, index) => {
               const isLastMessage = index === messages.length - 1;
               const isComparisonResponse =
@@ -806,7 +370,7 @@ export default function ActiveChat({
                   <div className="h-9 w-9 rounded-full bg-gradient-to-br from-primary to-accent flex items-center justify-center shrink-0 mt-1 shadow-md">
                     <Bot className="w-4 h-4 text-primary-foreground" />
                   </div>
-                  <div className="flex flex-col items-start gap-2 max-w-[88%]">
+                  <div className="flex flex-col items-start gap-2 flex-1 min-w-0">
                     <div className="group px-7 py-6 bg-card rounded-3xl rounded-bl-sm border border-border shadow-sm">
                       <div className="prose prose-sm max-w-none dark:prose-invert
                         prose-table:border-collapse prose-table:w-full
@@ -908,7 +472,7 @@ export default function ActiveChat({
                 <div className="h-9 w-9 rounded-full bg-gradient-to-br from-primary to-accent flex items-center justify-center shrink-0 mt-1 shadow-md">
                   <Bot className="w-4 h-4 text-primary-foreground" />
                 </div>
-                <div className="px-7 py-6 bg-card rounded-3xl rounded-bl-sm border border-border shadow-sm max-w-[88%]">
+                <div className="px-7 py-6 bg-card rounded-3xl rounded-bl-sm border border-border shadow-sm flex-1 min-w-0">
                   {comparison.isActive && comparison.context ? (
                     // Render streaming comparison message with markdown + styled citations
                     <div className="prose prose-sm max-w-none dark:prose-invert
@@ -997,8 +561,8 @@ export default function ActiveChat({
       </div>
 
       {/* Composer - floating glass card */}
-      <div className="sticky bottom-0 bg-gradient-to-t from-background via-background/95 to-transparent pt-8 pb-6 px-3 md:px-8">
-        <div className="max-w-4xl mx-auto">
+      <div className="sticky bottom-0 bg-gradient-to-t from-background via-background/95 to-transparent pt-2 pb-2 px-0">
+        <div className="max-w-4xl mx-auto w-full px-3 md:px-8">
           {chatError && (
             <div className="mb-3 p-3 bg-destructive/10 text-destructive rounded-xl text-sm border border-destructive/20">
               ⚠️ {chatError}
@@ -1024,9 +588,9 @@ export default function ActiveChat({
               }
               disabled={isStreaming || sessionDocIds.length === 0}
               rows={1}
-              className="w-full bg-transparent border-none text-foreground placeholder:text-muted-foreground focus:ring-0 resize-none py-5 px-6 min-h-[60px] max-h-[200px] text-sm disabled:cursor-not-allowed outline-none"
+              className="w-full bg-transparent border-none text-foreground placeholder:text-muted-foreground focus:ring-0 resize-none py-2 px-4 min-h-[32px] max-h-[72px] text-sm disabled:cursor-not-allowed outline-none"
             />
-            <div className="flex justify-end items-center px-4 pb-4 gap-3">
+            <div className="flex justify-end items-center px-4 pb-1 gap-3">
               <span className="text-[11px] text-muted-foreground font-medium hidden md:inline-block">
                 Shift+Enter for new line
               </span>
@@ -1034,7 +598,7 @@ export default function ActiveChat({
                 type="button"
                 onClick={handleSendMessage}
                 disabled={!message.trim() || isStreaming || sessionDocIds.length === 0}
-                className="bg-primary hover:bg-primary/90 text-primary-foreground h-11 w-11 rounded-xl flex items-center justify-center shadow-lg shadow-primary/20 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
+                className="bg-primary hover:bg-primary/90 text-primary-foreground h-9 w-9 rounded-xl flex items-center justify-center shadow-lg shadow-primary/20 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
                 title="Send message"
               >
                 {isStreaming ? (
@@ -1083,7 +647,7 @@ export default function ActiveChat({
                   size="icon"
                   onClick={() => setShowPdfPanel(false)}
                   className="h-7 w-7"
-                  title="Close PDF viewer"
+                  title="Close document viewer"
                 >
                   <X className="h-4 w-4" />
                 </Button>
@@ -1093,18 +657,20 @@ export default function ActiveChat({
               {pdfViewer.isLoadingUrl ? (
                 <div className="flex flex-col items-center justify-center h-full gap-2">
                   <Spinner size="md" />
-                  <p className="text-sm text-muted-foreground">Loading PDF...</p>
+                  <p className="text-sm text-muted-foreground">Loading document...</p>
                 </div>
               ) : activePdfUrl ? (
-                <PDFViewer
-                  pdfUrl={activePdfUrl}
+                <DocumentViewer
+                  fileUrl={activePdfUrl}
+                  filename={currentSession?.documents?.find(d => d.id === pdfViewer.activeDocumentId)?.name || ''}
                   highlightBbox={pdfViewer.highlightBbox}
                   onHighlightClick={clearHighlight}
+                  suppressDefaultPageScroll
                 />
               ) : pdfViewer.activeDocumentId ? (
                 <div className="flex flex-col items-center justify-center h-full gap-2 text-muted-foreground">
                   <FileText className="w-12 h-12 opacity-20" />
-                  <p className="text-sm">Click a document chip to view PDF</p>
+                  <p className="text-sm">Click a document chip to view it</p>
                 </div>
               ) : (
                 <div className="flex flex-col items-center justify-center h-full gap-2 text-muted-foreground">
@@ -1145,13 +711,15 @@ export default function ActiveChat({
             {pdfViewer.isLoadingUrl ? (
               <div className="flex flex-col items-center justify-center h-full gap-2">
                 <Spinner size="md" />
-                <p className="text-sm text-muted-foreground">Loading PDF...</p>
+                  <p className="text-sm text-muted-foreground">Loading document...</p>
               </div>
             ) : activePdfUrl ? (
-              <PDFViewer
-                pdfUrl={activePdfUrl}
+              <DocumentViewer
+                fileUrl={activePdfUrl}
+                filename={currentSession?.documents?.find(d => d.id === pdfViewer.activeDocumentId)?.name || ''}
                 highlightBbox={pdfViewer.highlightBbox}
                 onHighlightClick={clearHighlight}
+                suppressDefaultPageScroll
               />
             ) : (
               <div className="flex flex-col items-center justify-center h-full gap-2 text-muted-foreground">

@@ -81,21 +81,21 @@ export default function AppLayout({ children, lockViewport = false }) {
     <div className={`${lockViewport ? "h-[100dvh] overflow-hidden" : "min-h-screen"} bg-background flex flex-col`}>
       {/* Header */}
       <header className="bg-card/80 backdrop-blur-md border-b border-border sticky top-0 z-40">
-        <div className="w-full px-4 md:px-6 py-2">
+        <div className="w-full px-4 md:px-6 py-1.5">
           <div className="flex items-center justify-between">
             {/* Logo / Home Link */}
             <Link
               to="/app/library"
-              className="flex items-center gap-3 hover:opacity-80 transition-opacity"
+              className="flex items-center gap-2.5 hover:opacity-80 transition-opacity"
             >
-              <span className="relative h-8 w-8 shrink-0 overflow-hidden rounded-md">
+              <span className="relative h-7 w-7 shrink-0 overflow-hidden rounded-md">
                 <img
                   src="/Freara%20ai%20logo.png"
                   alt="frearaAI"
                   className="absolute inset-0 h-full w-full scale-[1.78] object-cover"
                 />
               </span>
-              <span className="text-xl font-extrabold tracking-tight bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
+              <span className="text-lg font-extrabold tracking-tight bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
                 frearaAI
               </span>
             </Link>
@@ -125,7 +125,7 @@ export default function AppLayout({ children, lockViewport = false }) {
                         e.preventDefault();
                       }
                     }}
-                    className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all ${
+                    className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
                       isComingSoon
                         ? "text-muted-foreground/50 cursor-not-allowed"
                         : active

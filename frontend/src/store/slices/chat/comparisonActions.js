@@ -117,6 +117,8 @@ export const createChatComparisonActions = (set, get) => ({
         ...state.chat,
         messages: [...state.chat.messages, userMessage],
         isStreaming: true,
+        isThinking: true,
+        thinkingMessage: "Thinking...",
         streamingMessage: "",
         chatError: null,
         comparison: {
@@ -206,6 +208,8 @@ export const createChatComparisonActions = (set, get) => ({
             chat: {
               ...state.chat,
               isStreaming: false,
+              isThinking: false,
+              thinkingMessage: "",
               streamingMessage: "",
               chatError: getErrorMessage(error),
             },

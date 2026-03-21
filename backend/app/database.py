@@ -143,6 +143,7 @@ def init_db():
     import app.db_models_workflows  # noqa: F401 - Workflow, WorkflowRun
     import app.db_models_documents  # noqa: F401 - Document (canonical)
     import app.db_models_templates  # noqa: F401 - ExcelTemplate, TemplateFillRun
+    import app.db_models_pe_diligence  # noqa: F401 - PE diligence domain models
 
     # Create all tables
     Base.metadata.create_all(bind=engine)

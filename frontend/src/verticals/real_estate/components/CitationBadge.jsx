@@ -16,8 +16,23 @@ import { cn } from '@/lib/utils';
  */
 function parseCitationPage(citation) {
   if (!citation) return null;
-  const match = citation.match(/\[D\d+:p(\d+)\]/);
-  return match && match[1] ? parseInt(match[1], 10) : null;
+  const text = String(citation);
+
+  // Canonical format: [D1:p15]
+  let match = text.match(/\[D\d+:p(\d+)\]/i);
+
+  // Table format from extraction output: [Table 7:p15]
+  if (!match) {
+    match = text.match(/\[Table\s*\d+\s*:\s*p(\d+)\]/i);
+  }
+
+  // Fallback: any bracketed token with :pN, e.g. [Source:p15]
+  if (!match) {
+    match = text.match(/\[[^\]]*:\s*p(\d+)\]/i);
+  }
+
+  const page = match && match[1] ? parseInt(match[1], 10) : null;
+  return Number.isFinite(page) && page > 0 ? page : null;
 }
 
 /**

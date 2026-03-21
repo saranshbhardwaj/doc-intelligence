@@ -388,7 +388,8 @@ async def extract_document(
         job_id = str(uuid.uuid4())
         job_repo = JobRepository()
         job_state = job_repo.create_job(
-            extraction_id=request_id,
+            entity_type="extraction",
+            entity_id=request_id,
             status="queued",
             current_stage="queued",
             progress_percent=0,
@@ -655,7 +656,8 @@ async def extract_temp_document(
         job_repo = JobRepository()
         job = job_repo.create_job(
             job_id=job_id,
-            extraction_id=extraction_id,
+            entity_type="extraction",
+            entity_id=extraction_id,
             status="queued",
             current_stage="queued",
             progress_percent=0,
@@ -816,7 +818,8 @@ async def extract_from_document(
         job_repo = JobRepository()
         job = job_repo.create_job(
             job_id=job_id,
-            extraction_id=extraction_id,
+            entity_type="extraction",
+            entity_id=extraction_id,
             status="queued",
             current_stage="queued",
             progress_percent=0,

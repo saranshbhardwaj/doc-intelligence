@@ -19,7 +19,8 @@ export default function PDFViewer({
   onTextSelect,
   defaultPage = 1,
   highlightBbox = null,  // { page, x0, y0, x1, y1 } for highlighting
-  onHighlightClick       // Callback when highlight is clicked
+  onHighlightClick,      // Callback when highlight is clicked
+  suppressDefaultPageScroll = false
 }) {
   const INITIAL_RENDERED_PAGES = 1;
   const PAGE_LOAD_BATCH = 2;
@@ -33,10 +34,15 @@ export default function PDFViewer({
   const [loadedPages, setLoadedPages] = useState(INITIAL_RENDERED_PAGES);
   const [pdfReady, setPdfReady] = useState(false);  // True after PDF document loads
   const containerRef = useRef(null);
+  const prevHighlightRef = useRef(null);
 
   useEffect(() => {
     setPageNumber(defaultPage);
   }, [defaultPage]);
+
+  useEffect(() => {
+    prevHighlightRef.current = highlightBbox;
+  }, [highlightBbox]);
 
   // Scroll to page when highlight target changes (with retry until page is rendered).
   useEffect(() => {
@@ -77,7 +83,9 @@ export default function PDFViewer({
 
   // Scroll for page-only navigation (no bbox payload).
   useEffect(() => {
+    if (suppressDefaultPageScroll) return;
     if (!pdfReady || !defaultPage || (highlightBbox && highlightBbox.page)) return;
+    if (prevHighlightRef.current?.page && !highlightBbox) return;
 
     const targetPage = Number(defaultPage);
     if (!Number.isFinite(targetPage) || targetPage < 1) return;
@@ -107,7 +115,7 @@ export default function PDFViewer({
     }, 100);
 
     return () => clearInterval(timer);
-  }, [defaultPage, pdfReady, loadedPages, numPages, highlightBbox]);
+  }, [defaultPage, pdfReady, numPages, highlightBbox]);
 
   // Reset state when PDF URL changes
   useEffect(() => {
@@ -282,10 +290,10 @@ export default function PDFViewer({
   return (
     <div className="flex flex-col h-full">
       {/* Toolbar */}
-      <div className="flex items-center justify-between p-2 border-b bg-muted/30">
+      <div className="flex items-center justify-between px-2 py-1 border-b bg-muted/30">
         <div className="flex items-center gap-2">
-          <FileText className="h-4 w-4 text-muted-foreground" />
-          <span className="text-xs font-medium text-muted-foreground">
+          <FileText className="h-3.5 w-3.5 text-muted-foreground" />
+          <span className="text-[11px] font-medium text-muted-foreground">
             {numPages ? `Showing ${Math.min(loadedPages, numPages)} of ${numPages} pages` : 'Loading...'}
           </span>
         </div>
@@ -301,7 +309,7 @@ export default function PDFViewer({
             <ZoomOut className="h-4 w-4" />
           </Button>
 
-          <span className="text-xs font-medium text-muted-foreground px-2 min-w-[50px] text-center">
+          <span className="text-[11px] font-medium text-muted-foreground px-2 min-w-[46px] text-center">
             {Math.round(scale * 100)}%
           </span>
 

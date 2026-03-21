@@ -7,7 +7,7 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useAppAuth } from "@/hooks/useAppAuth";
-import PDFViewer from '../../../components/pdf/PDFViewer';
+import DocumentViewer from '../../../components/pdf/DocumentViewer';
 import FieldsList from '../components/FieldsList';
 import ExcelGridView from '../components/ExcelGridView';
 import { useTemplateFill, useTemplateFillActions } from '../../../store';
@@ -66,6 +66,7 @@ export default function TemplateFillPage() {
   const [jobMessage, setJobMessage] = useState('');
   const [jobStatus, setJobStatus] = useState('idle'); // idle, processing, completed, failed
   const [isRetrying, setIsRetrying] = useState(false);
+  const [jobIdOverride, setJobIdOverride] = useState(null);
 
   // Zustand store
   const {
@@ -90,6 +91,10 @@ export default function TemplateFillPage() {
   // Load fill run data on mount
   useEffect(() => {
     loadFillRun(fillRunId, getToken);
+    const storedJobId = window.localStorage.getItem(`template_fill_job:${fillRunId}`);
+    if (storedJobId) {
+      setJobIdOverride(storedJobId);
+    }
 
     // Cleanup on unmount
     return () => {
@@ -158,6 +163,10 @@ export default function TemplateFillPage() {
         setJobMessage('Finalizing download...');
         return;
       }
+      if (fillRun.status === 'completed' || fillRun.status === 'failed') {
+        window.localStorage.removeItem(`template_fill_job:${fillRunId}`);
+        setJobIdOverride(null);
+      }
       return;
     }
 
@@ -169,7 +178,8 @@ export default function TemplateFillPage() {
     setJobStatus('processing');
 
     let cleanup;
-    streamTemplateFillProgress(fillRunId, getToken, {
+    const sseJobId = jobIdOverride || fillRunId;
+    streamTemplateFillProgress(sseJobId, getToken, {
       onProgress: (data) => {
         setJobProgress(data.progress_percent || 0);
         setJobMessage(data.message || 'Processing...');
@@ -218,7 +228,7 @@ export default function TemplateFillPage() {
     return () => {
       if (cleanup) cleanup();
     };
-  }, [progressStateToken, fillRunId]);
+  }, [progressStateToken, fillRunId, jobIdOverride]);
 
   // Auto-show feedback modal on completion (with frequency rules)
   useEffect(() => {
@@ -307,6 +317,10 @@ export default function TemplateFillPage() {
         setJobMessage('Filling Excel template...');
 
         const result = await continueFillRun(getToken, fillRunId);
+        if (result?.job_id) {
+          window.localStorage.setItem(`template_fill_job:${fillRunId}`, result.job_id);
+          setJobIdOverride(result.job_id);
+        }
 
         // Wait a moment for backend to start processing, then reload
         // This allows the fill_run status to update from 'awaiting_review' to 'processing'
@@ -393,34 +407,32 @@ export default function TemplateFillPage() {
   return (
     <AppLayout lockViewport>
       <div className="flex-1 flex flex-col bg-background relative overflow-hidden min-h-0">
-        {/* Progress Overlay - Fixed to top */}
+        {/* Progress Banner (non-blocking) */}
         {jobStatus === 'processing' && (
-          <div className="absolute inset-0 bg-background/95 backdrop-blur-sm z-50 flex items-start justify-center pt-6">
-            <Card className="w-[480px] p-6 shadow-lg sticky top-6">
-              <div className="space-y-4">
-                <div className="flex items-center gap-3">
-                  <Loader2 className="h-5 w-5 animate-spin text-primary" />
-                  <h3 className="text-lg font-semibold">Template Fill in Progress</h3>
+          <div className="fixed right-4 top-20 z-50">
+            <Card className="w-[360px] p-4 shadow-lg">
+              <div className="space-y-3">
+                <div className="flex items-center gap-2">
+                  <Loader2 className="h-4 w-4 animate-spin text-primary" />
+                  <h3 className="text-sm font-semibold">Template Fill in Progress</h3>
                 </div>
 
-                {/* Progress bar */}
-                <div className="space-y-2">
+                <div className="space-y-1.5">
                   <Progress value={jobProgress} className="w-full h-2" />
-                  <div className="flex justify-between text-xs text-muted-foreground">
+                  <div className="flex justify-between text-[11px] text-muted-foreground">
                     <span>{jobProgress}%</span>
-                    <span>{jobMessage}</span>
+                    <span className="truncate max-w-[220px]">{jobMessage}</span>
                   </div>
                 </div>
 
-                {/* Details */}
-                <div className="text-xs text-muted-foreground space-y-1 bg-muted/50 p-3 rounded-md">
+                <div className="text-[11px] text-muted-foreground bg-muted/50 p-2.5 rounded-md space-y-1">
                   <div className="flex items-center gap-2">
                     <div className="w-1.5 h-1.5 bg-primary rounded-full animate-pulse" />
-                    <span>Processing large documents may take several minutes</span>
+                    <span>Processing runs in the background</span>
                   </div>
                   <div className="flex items-center gap-2">
                     <div className="w-1.5 h-1.5 bg-muted-foreground rounded-full" />
-                    <span>The page will auto-refresh when complete</span>
+                    <span>You can keep working while it completes</span>
                   </div>
                 </div>
               </div>
@@ -470,7 +482,7 @@ export default function TemplateFillPage() {
 
         {/* Header */}
         <div className="border-b bg-card">
-          <div className="px-6 py-2">
+          <div className="px-6 py-1">
             <div className="flex items-center justify-between">
               <div className="flex items-center gap-3">
                 <Button
@@ -485,8 +497,8 @@ export default function TemplateFillPage() {
                   <Table className="h-5 w-5 text-primary" />
                 </div>
                 <div>
-                  <h1 className="text-lg font-semibold text-foreground">Template Fill</h1>
-                  <p className="text-xs text-muted-foreground">
+                  <h1 className="text-base font-semibold text-foreground leading-tight">Template Fill</h1>
+                  <p className="text-[11px] text-muted-foreground leading-tight">
                     {fillRun.document_metadata?.filename || 'Document'} → Excel Template
                   </p>
                 </div>
@@ -561,15 +573,15 @@ export default function TemplateFillPage() {
           {/* Left Panel: PDF Viewer */}
           <ResizablePanel defaultSize={50} minSize={30} className="min-h-0 overflow-hidden">
             <div className="h-full min-h-0 flex flex-col bg-background overflow-hidden">
-              <div className="bg-card px-4 py-2 border-b flex-shrink-0">
+              <div className="bg-card px-4 py-1 border-b flex-shrink-0">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
-                    <FileText className="h-4 w-4 text-muted-foreground" />
-                    <h2 className="font-medium text-sm text-foreground">PDF Document</h2>
+                    <FileText className="h-3.5 w-3.5 text-muted-foreground" />
+                    <h2 className="font-medium text-xs text-foreground">PDF Document</h2>
                   </div>
                   <div className="flex items-center gap-2">
                     {fillRun.document_metadata && (
-                      <Badge variant="secondary">
+                      <Badge variant="secondary" className="text-[11px] px-2 py-0">
                         {fillRun.document_metadata.page_count} pages
                       </Badge>
                     )}
@@ -597,8 +609,9 @@ export default function TemplateFillPage() {
               </div>
               <div className="flex-1 min-h-0 overflow-auto">
                 {pdfUrl ? (
-                  <PDFViewer
-                    pdfUrl={pdfUrl}
+                  <DocumentViewer
+                    fileUrl={pdfUrl}
+                    filename={fillRun?.document_metadata?.filename || ''}
                     onTextSelect={handleTextSelect}
                     defaultPage={currentPage}
                     highlightBbox={highlightBbox}
@@ -642,7 +655,7 @@ export default function TemplateFillPage() {
                       <Table className="h-4 w-4" />
                       <span className="text-sm font-medium">Excel Preview</span>
                       <Badge variant="secondary">
-                        {fillRun.total_fields_mapped || 0} / {fillRun.total_fields_detected || 0}
+                        {fillRun.total_fields_mapped || 0} / {fillRun.total_template_fields || 0}
                       </Badge>
                     </TabsTrigger>
                     <TabsTrigger

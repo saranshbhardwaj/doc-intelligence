@@ -330,7 +330,8 @@ export default function MappingDetailsDialog({
                         {allPdfFields.map((field) => (
                           <CommandItem
                             key={field.id}
-                            value={field.name}
+                            value={`${field.id}::${field.name}`}
+                            keywords={[field.name, field.extracted_value || '']}
                             onSelect={() => {
                               setSelectedFieldId(field.id);
                               setOpen(false);
@@ -458,6 +459,11 @@ export default function MappingDetailsDialog({
           <h4 className="text-xs font-semibold text-foreground mb-1.5 flex items-center gap-1.5">
             <Info className="h-3.5 w-3.5 text-primary" />
             AI Reasoning
+            {mapping.confidence != null && (
+              <span className="ml-auto text-[11px] font-medium text-muted-foreground">
+                {Math.round(mapping.confidence * 100)}% confidence
+              </span>
+            )}
           </h4>
           <div className="bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800 rounded-lg p-2.5">
             <p className="text-xs text-foreground leading-relaxed">
@@ -525,7 +531,8 @@ export default function MappingDetailsDialog({
                         {allPdfFields.map((field) => (
                           <CommandItem
                             key={field.id}
-                            value={field.name}
+                            value={`${field.id}::${field.name}`}
+                            keywords={[field.name, field.extracted_value || '']}
                             onSelect={() => {
                               handleFieldChange(field.id);
                               setOpen(false);

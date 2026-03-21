@@ -19,6 +19,7 @@ import AppLayout from "../components/layout/AppLayout";
 import SessionSidebar from "../components/chat/SessionSidebar";
 import EmptyState from "../components/chat/EmptyState";
 import ActiveChat from "../components/chat/ActiveChat";
+import DocumentManagerDialog from "../components/chat/DocumentManagerDialog";
 import Spinner from "../components/common/Spinner";
 import { exportAsMarkdown, exportAsWord } from "../utils/exportChat";
 import { Sheet, SheetContent, SheetTitle, SheetDescription } from "../components/ui/sheet";
@@ -32,6 +33,7 @@ export default function ChatPage() {
   const [isInitializing, setIsInitializing] = useState(true);
   const [showNewChatDialog, setShowNewChatDialog] = useState(false);
   const [mobileSessionsOpen, setMobileSessionsOpen] = useState(false);
+  const [documentManagerOpen, setDocumentManagerOpen] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
     try {
       return localStorage.getItem("chatSidebarCollapsed") === "true";
@@ -136,6 +138,10 @@ export default function ChatPage() {
     // State is already updated in the slice action - no need to fetch
   };
 
+  const handleOpenDocument = (documentId) => {
+    actions.setActivePdfDocument(documentId, getToken);
+  };
+
   const handleUpdateSessionTitle = async (title) => {
     if (!chat.currentSession) return;
     await actions.updateSessionTitle(getToken, chat.currentSession.id, title);
@@ -219,6 +225,10 @@ export default function ChatPage() {
                 onNewChat={handleNewChat}
                 onSelectSession={handleSelectSession}
                 onDeleteSession={handleDeleteSession}
+                onUpdateSessionTitle={handleUpdateSessionTitle}
+                onOpenDocumentManager={() => setDocumentManagerOpen(true)}
+                onOpenDocument={handleOpenDocument}
+                onRemoveDocument={handleRemoveDocument}
                 isCollapsed={false}
                 onToggleCollapse={() => setMobileSessionsOpen(false)}
               />
@@ -239,6 +249,10 @@ export default function ChatPage() {
             onNewChat={handleNewChat}
             onSelectSession={handleSelectSession}
             onDeleteSession={handleDeleteSession}
+            onUpdateSessionTitle={handleUpdateSessionTitle}
+            onOpenDocumentManager={() => setDocumentManagerOpen(true)}
+            onOpenDocument={handleOpenDocument}
+            onRemoveDocument={handleRemoveDocument}
             isCollapsed={sidebarCollapsed}
             onToggleCollapse={toggleSidebar}
           />
@@ -314,6 +328,15 @@ export default function ChatPage() {
         onSelectDocuments={setSelectedDocuments}
         onStartChat={handleStartChat}
         getToken={getToken}
+      />
+
+      <DocumentManagerDialog
+        open={documentManagerOpen}
+        onOpenChange={setDocumentManagerOpen}
+        collections={chat.collections}
+        currentSessionDocuments={chat.currentSession?.documents || []}
+        getToken={getToken}
+        onAddDocuments={handleAddDocuments}
       />
     </AppLayout>
   );

@@ -245,6 +245,19 @@ export default function LibraryPage() {
           file
         );
 
+        const isImmediateComplete =
+          response?.status === "completed" || response?.reuse === true;
+
+        if (isImmediateComplete) {
+          const existingName = response?.existing_filename || response?.filename || file.name;
+          toast.info(
+            `The file ${file.name} has the same content as ${existingName}.`
+          );
+          await fetchDocuments(targetCollectionId);
+          await fetchCollections();
+          return;
+        }
+
         // Connect to SSE for progress tracking
         if (response.job_id) {
           // Add document with processing status immediately

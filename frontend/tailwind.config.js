@@ -9,6 +9,10 @@ export default {
         md: "calc(var(--radius) - 2px)",
         sm: "calc(var(--radius) - 4px)",
       },
+      fontFamily: {
+        sans: ["Instrument Sans", "ui-sans-serif", "system-ui", "-apple-system", "Segoe UI", "sans-serif"],
+        display: ["Space Grotesk", "Instrument Sans", "ui-sans-serif", "system-ui", "sans-serif"],
+      },
       colors: {
         background: "hsl(var(--background))",
         foreground: "hsl(var(--foreground))",
@@ -67,6 +71,22 @@ export default {
           high: "hsl(var(--similarity-high))",
           mid: "hsl(var(--similarity-mid))",
           low: "hsl(var(--similarity-low))",
+        },
+        // Document type badge tokens — bg-dt-X / text-dt-X-foreground
+        dt: {
+          spa:          { DEFAULT: "hsl(var(--dt-spa))",          foreground: "hsl(var(--dt-spa-fg))" },
+          merger:       { DEFAULT: "hsl(var(--dt-merger))",       foreground: "hsl(var(--dt-merger-fg))" },
+          customer:     { DEFAULT: "hsl(var(--dt-customer))",     foreground: "hsl(var(--dt-customer-fg))" },
+          employment:   { DEFAULT: "hsl(var(--dt-employment))",   foreground: "hsl(var(--dt-employment-fg))" },
+          "ip-license": { DEFAULT: "hsl(var(--dt-ip-license))",   foreground: "hsl(var(--dt-ip-license-fg))" },
+          vendor:       { DEFAULT: "hsl(var(--dt-vendor))",       foreground: "hsl(var(--dt-vendor-fg))" },
+          nda:          { DEFAULT: "hsl(var(--dt-nda))",          foreground: "hsl(var(--dt-nda-fg))" },
+          legal:        { DEFAULT: "hsl(var(--dt-legal))",        foreground: "hsl(var(--dt-legal-fg))" },
+          amendment:    { DEFAULT: "hsl(var(--dt-amendment))",    foreground: "hsl(var(--dt-amendment-fg))" },
+          financial:    { DEFAULT: "hsl(var(--dt-financial))",    foreground: "hsl(var(--dt-financial-fg))" },
+          qoe:          { DEFAULT: "hsl(var(--dt-qoe))",          foreground: "hsl(var(--dt-qoe-fg))" },
+          cim:          { DEFAULT: "hsl(var(--dt-cim))",          foreground: "hsl(var(--dt-cim-fg))" },
+          other:        { DEFAULT: "hsl(var(--dt-other))",        foreground: "hsl(var(--dt-other-fg))" },
         },
       },
       keyframes: {

@@ -7,7 +7,7 @@ This pipeline is ONLY for document uploads to the Library.
 It does NOT handle extraction logic (that's in tasks/extractions/).
 """
 from __future__ import annotations
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 import json
 import asyncio
 import os
@@ -26,6 +26,7 @@ from app.repositories.document_repository import DocumentRepository
 from app.repositories.user_repository import UserRepository
 from app.db_models_chat import DocumentChunk
 from app.services.beta_limits import enforce_page_limit, log_shadow_credits
+from app.utils.document_uploads import IMAGE_EXTENSIONS, POWERPOINT_EXTENSIONS, WORD_EXTENSIONS
 from app.utils.logging import logger
 from app.utils.pdf_utils import detect_pdf_type
 from app.utils.file_utils import save_raw_text, save_chunks
@@ -44,7 +45,7 @@ def _get_db_session():
 @shared_task(bind=True)
 def parse_document_for_indexing_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Parse PDF document for library indexing.
+    Parse uploaded document for library indexing.
 
     Input payload:
         - file_path: Path to uploaded PDF
@@ -93,12 +94,24 @@ def parse_document_for_indexing_task(self, payload: Dict[str, Any]) -> Dict[str,
         # Determine file type from extension
         file_ext = os.path.splitext(filename)[1].lower()
 
-        # Detect document type for metadata/logging (Azure DI handles both natively)
-        if file_ext == '.docx':
+        # Detect document type for metadata/logging (Azure DI handles these formats natively)
+        if file_ext in WORD_EXTENSIONS:
             pdf_type = "digital"
             tracker.update_progress(
                 progress_percent=8,
                 message="Detected DOCX document"
+            )
+        elif file_ext in POWERPOINT_EXTENSIONS:
+            pdf_type = "digital"
+            tracker.update_progress(
+                progress_percent=8,
+                message="Detected PowerPoint document"
+            )
+        elif file_ext in IMAGE_EXTENSIONS:
+            pdf_type = "scanned"
+            tracker.update_progress(
+                progress_percent=8,
+                message="Detected image document"
             )
         else:
             pdf_type = detect_pdf_type(file_path)
@@ -414,7 +427,7 @@ def store_vectors_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
     """
     job_id = payload["job_id"]
     document_id = payload["document_id"]
-    collection_id = payload["collection_id"]
+    collection_id = payload.get("collection_id")
     user_id = payload.get("user_id")
 
     db = _get_db_session()
@@ -570,22 +583,21 @@ def store_vectors_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                 extra={"document_id": document_id, "collection_id": collection_id}
             )
 
-        # Update Collection stats using database aggregate functions
-        # This recomputes document_count and total_chunks from the database,
-        # ensuring accuracy and preventing race conditions from concurrent operations
-        collection_repo = CollectionRepository()
-        stats_updated = collection_repo.recompute_collection_stats(
-            collection_id=collection_id,
-            embedding_model=payload.get("embedding_model"),
-            embedding_dimension=payload.get("embedding_dimension")
-        )
-
-        if not stats_updated:
-            # Collection might have been deleted during indexing (edge case)
-            logger.warning(
-                f"Failed to recompute collection stats - collection may have been deleted",
-                extra={"collection_id": collection_id, "document_id": document_id}
+        # Update Collection stats only when indexing runs in collection context.
+        if collection_id:
+            collection_repo = CollectionRepository()
+            stats_updated = collection_repo.recompute_collection_stats(
+                collection_id=collection_id,
+                embedding_model=payload.get("embedding_model"),
+                embedding_dimension=payload.get("embedding_dimension")
             )
+
+            if not stats_updated:
+                # Collection might have been deleted during indexing (edge case)
+                logger.warning(
+                    "Failed to recompute collection stats - collection may have been deleted",
+                    extra={"collection_id": collection_id, "document_id": document_id}
+                )
 
         tracker.update_progress(
             progress_percent=95,
@@ -657,7 +669,7 @@ def start_document_indexing_chain(
     filename: str,
     job_id: str,
     document_id: str,  # Canonical Document ID (from documents table)
-    collection_id: str,
+    collection_id: Optional[str],
     user_id: str,
     canonical_document_id: str | None = None,  # DEPRECATED: document_id is already canonical
     content_hash: str | None = None
@@ -672,7 +684,8 @@ def start_document_indexing_chain(
         filename: Original filename
         job_id: JobState ID for progress tracking
         document_id: Canonical Document ID (from documents table)
-        collection_id: Collection ID
+        collection_id: Optional collection ID (required for chat collection indexing,
+            optional for vertical-specific indexing like PE diligence rooms)
         user_id: User ID
         canonical_document_id: DEPRECATED - document_id is already the canonical ID
         content_hash: SHA256 hash of file content (for deduplication tracking)

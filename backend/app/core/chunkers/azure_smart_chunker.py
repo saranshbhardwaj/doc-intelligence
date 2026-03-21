@@ -19,10 +19,10 @@ from app.core.chunkers.base import (
 from app.core.parsers.base import ParserOutput
 from app.utils.chunk_metadata import (
     ChunkMetadataBuilder,
-    estimate_tokens,
     generate_chunk_id,
 )
 from app.utils.logging import logger
+from app.utils.token_utils import count_tokens, truncate_to_token_limit
 
 
 @dataclass
@@ -258,8 +258,11 @@ class AzureSmartChunker(DocumentChunker):
         Returns:
             List of chunks for this section
         """
-        # If section fits in token limit, create single chunk
-        if section.total_tokens <= self.max_tokens:
+        # Use accurate tiktoken count on actual built text — the rough char-based
+        # estimate (total_tokens) can undercount dense legal text 2-3x, producing
+        # single chunks that exceed OpenAI's 8192-token embedding limit.
+        actual_text = self._build_chunk_text(section, 1, 1)
+        if count_tokens(actual_text) <= self.max_tokens:
             return [self._create_section_chunk(section, sequence=1, total=1)]
 
         # Section too large, split into continuation chunks
@@ -324,7 +327,7 @@ class AzureSmartChunker(DocumentChunker):
             "section_type": "narrative",
             "is_tabular": False,
             "char_count": len(chunk_text),
-            "token_count": estimate_tokens(chunk_text),
+            "token_count": count_tokens(chunk_text),
             "chunk_type": "narrative",
             "has_tables": False,
             "source_parser": "azure_document_intelligence",
@@ -362,7 +365,16 @@ class AzureSmartChunker(DocumentChunker):
         current_tokens = 0
 
         for para in section.paragraphs:
-            para_tokens = estimate_tokens(para.get("content", ""))
+            para_tokens = count_tokens(para.get("content", ""))
+
+            # Hard clamp: a single paragraph larger than max_tokens would bypass
+            # the split logic (since current_paragraphs is empty). Truncate it.
+            if para_tokens > self.max_tokens:
+                logger.warning(
+                    f"[CHUNKER] Oversized paragraph ({para_tokens} tokens > {self.max_tokens}), truncating"
+                )
+                para = {**para, "content": truncate_to_token_limit(para["content"], self.max_tokens)}
+                para_tokens = self.max_tokens
 
             # Check if adding this paragraph exceeds limit
             if current_tokens + para_tokens > self.max_tokens and current_paragraphs:
@@ -386,7 +398,7 @@ class AzureSmartChunker(DocumentChunker):
 
                 # Start new chunk with overlap from previous chunk
                 overlap_paras = current_paragraphs[-self.overlap_paragraphs:] if self.overlap_paragraphs > 0 else []
-                overlap_tokens = sum(estimate_tokens(p.get("content", "")) for p in overlap_paras)
+                overlap_tokens = sum(count_tokens(p.get("content", "")) for p in overlap_paras)
                 current_paragraphs = overlap_paras + [para]
                 current_tokens = overlap_tokens + para_tokens
             else:
@@ -453,7 +465,7 @@ class AzureSmartChunker(DocumentChunker):
         current_tokens = 0
 
         for sentence in sentences:
-            sentence_tokens = estimate_tokens(sentence)
+            sentence_tokens = count_tokens(sentence)
 
             # If adding this sentence exceeds limit, create a chunk
             if current_tokens + sentence_tokens > self.max_tokens and current_sentences:
@@ -469,7 +481,7 @@ class AzureSmartChunker(DocumentChunker):
 
                 # Start new chunk with overlap from previous chunk
                 overlap_sents = current_sentences[-self.overlap_sentences:] if self.overlap_sentences > 0 else []
-                overlap_tokens = sum(estimate_tokens(s) for s in overlap_sents)
+                overlap_tokens = sum(count_tokens(s) for s in overlap_sents)
                 current_sentences = overlap_sents + [sentence]
                 current_tokens = overlap_tokens + sentence_tokens
             else:
@@ -530,7 +542,7 @@ class AzureSmartChunker(DocumentChunker):
             "section_type": "narrative",
             "is_tabular": False,
             "char_count": len(text),
-            "token_count": estimate_tokens(text),
+            "token_count": count_tokens(text),
             "chunk_type": "narrative",
             "has_tables": False,
             "source_parser": "azure_document_intelligence",
@@ -576,74 +588,139 @@ class AzureSmartChunker(DocumentChunker):
                     page_num, narrative_chunks
                 )
 
-                # Build table text
-                table_text = f"[Table {table_counter}]\n{table_data.get('text', '')}"
-
                 # Extract table context (preceding paragraph if available)
                 table_context = self._extract_table_context(page, table_data)
 
-                # Build metadata
-                builder = ChunkMetadataBuilder()
-                builder.set_section_id(f"table_{table_counter}")
-                builder.set_table_metadata(
-                    context=table_context,
-                    row_count=table_data.get("row_count"),
-                    column_count=table_data.get("column_count")
-                )
-
                 # Extract table bounding box for PDF highlighting
                 table_bbox = self._extract_table_bbox(table_data)
-                if table_bbox:
-                    builder.set_bbox(
-                        page=page_num,
-                        x0=table_bbox["x0"],
-                        y0=table_bbox["y0"],
-                        x1=table_bbox["x1"],
-                        y1=table_bbox["y1"]
+
+                # Split large tables into row-group sub-chunks; small tables stay as one chunk
+                row_groups = self._split_table_by_rows(table_data, self.max_tokens)
+                total_parts = len(row_groups)
+
+                first_chunk_id = None
+                created_chunks = []
+
+                for group_idx, group_text in enumerate(row_groups):
+                    if total_parts > 1:
+                        chunk_text = f"[Table {table_counter}, part {group_idx + 1}/{total_parts}]\n{group_text}"
+                    else:
+                        chunk_text = f"[Table {table_counter}]\n{group_text}"
+
+                    # Build metadata
+                    builder = ChunkMetadataBuilder()
+                    builder.set_section_id(f"table_{table_counter}")
+                    builder.set_table_metadata(
+                        context=table_context,
+                        row_count=table_data.get("row_count"),
+                        column_count=table_data.get("column_count")
                     )
 
-                if preceding_narrative:
-                    builder.link_to_narrative(preceding_narrative.chunk_id)
+                    if table_bbox:
+                        builder.set_bbox(
+                            page=page_num,
+                            x0=table_bbox["x0"],
+                            y0=table_bbox["y0"],
+                            x1=table_bbox["x1"],
+                            y1=table_bbox["y1"]
+                        )
 
-                chunk_metadata = builder.build()
+                    if preceding_narrative:
+                        builder.link_to_narrative(preceding_narrative.chunk_id)
 
-                # Create table chunk - merge chunk_metadata into base metadata
-                base_metadata = {
-                    "page_number": page_num,
-                    "section_type": "table",
-                    "is_tabular": True,
-                    "char_count": len(table_text),
-                    "token_count": estimate_tokens(table_text),
-                    "chunk_type": "table",
-                    "has_tables": True,
-                    "table_count": 1,
-                    "source_parser": "azure_document_intelligence",
-                }
-                # Merge chunk_metadata fields directly
-                base_metadata.update(chunk_metadata)
+                    chunk_metadata = builder.build()
 
-                chunk = Chunk(
-                    chunk_id=generate_chunk_id(f"page_{page_num}", table_counter, "table"),
-                    text=table_text,
-                    narrative_text="",  # No narrative in table chunks
-                    tables=[table_data],
-                    metadata=base_metadata
-                )
+                    metadata_table_data = table_data.get("table_data", [])[:2]
+                    base_metadata = {
+                        "page_number": page_num,
+                        "section_type": "table",
+                        "is_tabular": True,
+                        "char_count": len(chunk_text),
+                        "token_count": count_tokens(chunk_text),
+                        "chunk_type": "table",
+                        "has_tables": True,
+                        "table_count": 1,
+                        "source_parser": "azure_document_intelligence",
+                        "table_name": table_data.get("table_name", ""),
+                        "column_headers": table_data.get("column_headers", []),
+                        "table_data": metadata_table_data,
+                    }
+                    base_metadata.update(chunk_metadata)
 
-                # DEBUG: Log first table chunk's bbox
-                if table_counter == 1:
-                    logger.info(f"[CHUNKER] First table chunk on page {page_num}, "
-                              f"has bbox: {'bbox' in base_metadata}, bbox={base_metadata.get('bbox')}")
+                    # Continuation metadata for split tables (same pattern as narrative chunks)
+                    if total_parts > 1:
+                        base_metadata["is_continuation"] = group_idx > 0
+                        base_metadata["parent_chunk_id"] = first_chunk_id if group_idx > 0 else None
+                        base_metadata["chunk_sequence"] = group_idx + 1
+                        base_metadata["total_chunks_in_section"] = total_parts
 
-                table_chunks.append(chunk)
+                    chunk_id = generate_chunk_id(f"page_{page_num}", table_counter, f"table_{group_idx}")
+                    chunk = Chunk(
+                        chunk_id=chunk_id,
+                        text=chunk_text,
+                        narrative_text="",
+                        tables=[table_data] if group_idx == 0 else [],  # full data on first sub-chunk only
+                        metadata=base_metadata
+                    )
 
-                # Link narrative chunk to this table (bidirectional)
-                if preceding_narrative and self.link_tables_to_narrative:
+                    if group_idx == 0:
+                        first_chunk_id = chunk_id
+                        # DEBUG: Log first table chunk's bbox
+                        if table_counter == 1:
+                            logger.info(f"[CHUNKER] First table chunk on page {page_num}, "
+                                      f"has bbox: {'bbox' in base_metadata}, bbox={base_metadata.get('bbox')}, "
+                                      f"parts={total_parts}")
+
+                    created_chunks.append(chunk)
+
+                table_chunks.extend(created_chunks)
+
+                # Link narrative chunk to first table sub-chunk (bidirectional)
+                if preceding_narrative and self.link_tables_to_narrative and created_chunks:
                     linked_tables = preceding_narrative.metadata.get("linked_table_ids", [])
-                    linked_tables.append(chunk.chunk_id)
+                    linked_tables.append(created_chunks[0].chunk_id)
                     preceding_narrative.metadata["linked_table_ids"] = linked_tables
 
         return table_chunks
+
+    def _split_table_by_rows(self, table_data: dict, max_tokens: int) -> List[str]:
+        """Split table text into row-group segments of ~max_tokens each.
+
+        Each segment repeats the header row so it is self-contained for embedding.
+        Falls back to char-truncation when no structured row data is available.
+        """
+        rows = table_data.get("table_data", [])  # List[List[str]] from Azure DI parser
+        full_text = table_data.get("text", "")
+
+        if not rows or not full_text:
+            # No structured rows — truncate full text as a single group
+            if count_tokens(full_text) <= max_tokens:
+                return [full_text]
+            return [full_text[:max_tokens * 4]]
+
+        header = rows[0]
+        header_text = "\t".join(str(c) for c in header)
+        header_tokens = count_tokens(header_text)
+
+        groups: List[str] = []
+        current_lines: List[str] = [header_text]
+        current_tokens = header_tokens
+
+        for row in rows[1:]:
+            row_text = "\t".join(str(c) for c in row)
+            row_tokens = count_tokens(row_text)
+            if current_tokens + row_tokens > max_tokens and len(current_lines) > 1:
+                groups.append("\n".join(current_lines))
+                current_lines = [header_text, row_text]
+                current_tokens = header_tokens + row_tokens
+            else:
+                current_lines.append(row_text)
+                current_tokens += row_tokens
+
+        if current_lines:
+            groups.append("\n".join(current_lines))
+
+        return groups if groups else [full_text]
 
     def _create_key_value_chunks(
         self,
@@ -708,7 +785,7 @@ class AzureSmartChunker(DocumentChunker):
                 "section_type": "key_value_pairs",
                 "is_tabular": False,
                 "char_count": len(chunk_text),
-                "token_count": estimate_tokens(chunk_text),
+                "token_count": count_tokens(chunk_text),
                 "chunk_type": "key_value",
                 "page_range": page_range,
                 "key_value_pairs": enriched_kv_pairs,  # NOW includes individual bbox for each KV
@@ -831,7 +908,7 @@ class AzureSmartChunker(DocumentChunker):
     def _estimate_section_tokens(self, paragraphs: List[Dict]) -> int:
         """Estimate total tokens in a section."""
         total_chars = sum(len(p.get("content", "")) for p in paragraphs)
-        return estimate_tokens(" " * total_chars)  # Rough estimate
+        return count_tokens(" " * total_chars)  # Rough estimate
 
     def _polygon_to_bbox(self, polygon: List[float]) -> Dict:
         """
