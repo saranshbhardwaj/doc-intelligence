@@ -24,10 +24,7 @@ from app.core.llm.llm_client import LLMClient
 from app.core.llm.structured_runner import StructuredLLMRunner
 from app.core.rag.hybrid_retriever import HybridRetriever
 from app.utils.logging import logger
-
-# ─── Document types that carry financial data ───────────────────────────────
-
-FINANCIAL_DOC_TYPES = {"financial_statement", "qoe_report", "cim"}
+from app.verticals.private_equity.diligence.doc_types import NUMERIC_EXTRACTION_DOC_TYPES
 
 # ─── Hybrid search query for financial content ────────────────────────────────
 
@@ -150,7 +147,7 @@ class LLMNumericExtractor:
         # Scope to financial doc types if classified, else use all room documents
         financial_doc_ids = [
             doc_id for doc_id, cls in document_classifications.items()
-            if cls.get("document_type") in FINANCIAL_DOC_TYPES
+            if cls.get("document_type") in NUMERIC_EXTRACTION_DOC_TYPES
         ] or document_ids
 
         # Use hybrid retrieval to find financially relevant chunks

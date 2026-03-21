@@ -3,6 +3,9 @@
  *
  * Rooms mode  (/app/pe/rooms):            room list + new room
  * Room mode   (/app/pe/rooms/:roomId/*):  room-scoped nav (Dashboard/Docs/Analysis/Investigations)
+ *
+ * Also owns the single SSE connection for the active analysis job so the
+ * progress banner persists when the user navigates between sub-pages.
  */
 
 import { useState, useEffect, useRef } from "react";
@@ -16,7 +19,9 @@ import { Card } from "../../../components/ui/card";
 import { Input } from "../../../components/ui/input";
 import { Button } from "../../../components/ui/button";
 import { useAppAuth } from "@/hooks/useAppAuth";
-import { listRooms, createRoom, getRoom } from "../../../api/pe-diligence";
+import { listRooms, createRoom, getActiveAnalysisRun } from "../../../api/pe-diligence";
+import { useAnalysisRun, AnalysisBanner, WarningBanner } from "../hooks/useAnalysisRun";
+import { usePeDiligence, usePeDiligenceActions } from "../../../store";
 
 const STATUS_COLORS = {
   completed: "text-green-500",
@@ -39,7 +44,56 @@ const ROOM_NAV = [
 export default function PELayout({ children }) {
   const { roomId } = useParams();
   const location  = useLocation();
+  const { getToken } = useAppAuth();
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+
+  const peDiligence = usePeDiligence();
+  const actions = usePeDiligenceActions();
+
+  // Seed shared state when entering a room (or switching rooms)
+  useEffect(() => {
+    if (!roomId) return;
+
+    // Clear stale state when switching to a different room
+    if (peDiligence.roomId && peDiligence.roomId !== roomId) {
+      actions.peClearRoom();
+    }
+
+    actions.peLoadRoom(roomId, getToken);
+    actions.peLoadDocuments(roomId, getToken);
+    actions.peRefreshAnalysisStatus(roomId, getToken);
+
+    // Seed analysisJobId only if not already set for THIS room.
+    // When restoring from localStorage after a page refresh, the persisted
+    // roomId + analysisJobId let us skip the extra API call and reconnect directly.
+    const alreadySeeded = peDiligence.analysisJobId && peDiligence.roomId === roomId;
+    if (!alreadySeeded) {
+      getActiveAnalysisRun(getToken, roomId)
+        .then(activeRun => {
+          if (activeRun?.job_id) actions.peSetAnalysisJob(roomId, activeRun.job_id);
+        })
+        .catch(() => {});
+    }
+  }, [roomId]); // eslint-disable-line react-hooks/exhaustive-deps
+  // getToken is identity-stable from WorkOS AuthKit; actions is stable via useShallow.
+  // Only roomId change should restart seeding.
+
+  // Single SSE connection owned by PELayout — shared across all sub-pages
+  const { run: analysisRun } = useAnalysisRun(peDiligence.analysisJobId, {
+    getToken,
+    onComplete: (data) => {
+      const warnings = data?.metadata_json?.pipeline_warnings || [];
+      actions.peSetAnalysisWarnings(warnings);
+      actions.peRefreshDocuments(roomId, getToken);
+      actions.peRefreshAnalysisStatus(roomId, getToken);
+      actions.peMarkAnalysisCompleted(); // signals RoomAnalysis/RoomDashboard to reload
+      actions.peClearAnalysisJob();
+    },
+    onError: (error) => {
+      if (error?.isRetryable) return;
+      actions.peClearAnalysisJob();
+    },
+  });
 
   return (
     <AppLayout>
@@ -69,7 +123,12 @@ export default function PELayout({ children }) {
             <ChevronRight className="w-4 h-4" />
           </Button>
         )}
-        <main className="pe-main overflow-y-auto">{children}</main>
+        <main className="pe-main overflow-y-auto">
+          {/* Shared analysis progress banner — visible on all room sub-pages */}
+          {roomId && <AnalysisBanner run={analysisRun} />}
+          {roomId && <WarningBanner warnings={peDiligence.analysisWarnings} />}
+          {children}
+        </main>
       </div>
     </AppLayout>
   );
@@ -224,12 +283,8 @@ function RoomsSidebar({ location, onCollapse }) {
 /* ── Room-scoped sidebar ───────────────────────────────────────────────────── */
 
 function RoomSidebar({ roomId, location, onCollapse }) {
-  const { getToken } = useAppAuth();
-  const [room, setRoom] = useState(null);
-
-  useEffect(() => {
-    getRoom(getToken, roomId).then(setRoom).catch(console.error);
-  }, [roomId]);
+  // Room data comes from the shared store (loaded by PELayout on roomId change)
+  const { room } = usePeDiligence();
 
   return (
     <div className="flex flex-col h-full">

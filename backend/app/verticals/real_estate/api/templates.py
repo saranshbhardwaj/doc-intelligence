@@ -961,7 +961,8 @@ async def continue_fill(
         job_id = generate_id()
         job_repo = JobRepository()
         job = job_repo.create_job(
-            template_fill_run_id=fill_run_id,
+            entity_type="template_fill_run",
+            entity_id=fill_run_id,
             status="extracting",
             current_stage="data_extraction",
             progress_percent=70,

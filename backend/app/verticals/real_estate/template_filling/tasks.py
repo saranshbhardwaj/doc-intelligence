@@ -682,13 +682,13 @@ def detect_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         # Use schema cell count as total_fields_detected (Excel cells to fill, not PDF extracted fields)
         total_to_detect = schema_cell_count if schema_cell_count > 0 else len(detected_fields)
 
+        # Store metadata only (field_mapping, field_detection_completed)
+        # Progress updates via SSE (JobState)
         repo.update_fill_run(
             fill_run_id,
             field_mapping=field_mapping,
             total_fields_detected=total_to_detect,
             field_detection_completed=True,
-            status="fields_detected",
-            current_stage="field_detection",
         )
 
         db.close()
@@ -1244,20 +1244,19 @@ def auto_map_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         if schema_summary:
             field_mapping["schema_summary"] = schema_summary
 
-        # Persist token data if LLM was used
-        update_params = {
+        # Persist metadata (mapping, token data, completion flag)
+        # Progress updates via SSE (JobState)
+        metadata_params = {
             "field_mapping": field_mapping,
             "total_fields_mapped": total_mapped_fields,
             "auto_mapped_count": total_mapped_fields,
             "user_edited_count": 0,
             "auto_mapping_completed": True,
-            "status": "awaiting_review",
-            "current_stage": "auto_mapping",
         }
 
         # Add token tracking data if generic mapping was used
         if not skip_generic_mapping and 'llm_cost' in locals():
-            update_params.update({
+            metadata_params.update({
                 "input_tokens": llm_input_tokens,
                 "output_tokens": llm_output_tokens,
                 "cache_read_tokens": llm_cache_read_tokens,
@@ -1268,7 +1267,7 @@ def auto_map_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                 "cost_usd": llm_cost,
             })
 
-        repo.update_fill_run(fill_run_id, **update_params)
+        repo.update_fill_run(fill_run_id, **metadata_params)
 
         db.close()
 
@@ -1614,7 +1613,8 @@ def start_fill_run_chain(
         job_id = fill_run_id  # Use fill_run_id as job tracking ID
         job_repo = JobRepository()
         job_state = job_repo.create_job(
-            template_fill_run_id=fill_run_id,
+            entity_type="template_fill_run",
+            entity_id=fill_run_id,
             status="queued",
             current_stage="initialization",
             progress_percent=5,

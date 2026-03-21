@@ -4,7 +4,7 @@
  */
 
 import { useState, useEffect } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useLocation } from "react-router-dom";
 import { Plus, Search, AlertCircle, Circle, ChevronRight } from "lucide-react";
 import { useAppAuth } from "@/hooks/useAppAuth";
 import PELayout from "./PELayout";
@@ -184,6 +184,8 @@ export default function RoomInvestigations() {
   const { roomId } = useParams();
   const { getToken } = useAppAuth();
   const navigate = useNavigate();
+  const location = useLocation();
+  const suggestedInvestigation = location.state?.suggestedInvestigation || null;
 
   const [investigations, setInvestigations] = useState([]);
   const [loading, setLoading]       = useState(true);
@@ -228,6 +230,20 @@ export default function RoomInvestigations() {
           <div className="flex items-center gap-2 border border-destructive/30 bg-destructive/10 text-destructive rounded-lg p-3 text-sm mb-4">
             <AlertCircle className="w-4 h-4 shrink-0" />
             {error}
+          </div>
+        )}
+
+        {suggestedInvestigation && (
+          <div className="mb-4 rounded-xl border border-primary/20 bg-primary/5 p-4">
+            <p className="text-sm font-semibold text-foreground">
+              Suggested from baseline analysis: {suggestedInvestigation.title}
+            </p>
+            <p className="text-xs text-muted-foreground mt-1">
+              {suggestedInvestigation.rationale}
+            </p>
+            <p className="text-xs text-muted-foreground mt-2">
+              This is a planning handoff from analysis. It does not auto-run an investigation.
+            </p>
           </div>
         )}
 

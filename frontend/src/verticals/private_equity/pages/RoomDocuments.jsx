@@ -8,7 +8,7 @@ import { useState, useEffect, useMemo, useRef } from "react";
 import { useParams } from "react-router-dom";
 import {
   Upload, Play, AlertCircle, AlertTriangle, Link2, RefreshCw, Trash2,
-  FileText, Clock, MoreHorizontal, Folder, FolderOpen, FolderPlus, Files, Search, ArrowUpDown,
+  FileText, Clock, MoreHorizontal, Folder, FolderOpen, FolderPlus, Files, Search, ArrowUpDown, ChevronDown,
 } from "lucide-react";
 import { useAppAuth } from "@/hooks/useAppAuth";
 import PELayout from "./PELayout";
@@ -26,35 +26,16 @@ import {
   Dialog, DialogContent, DialogHeader, DialogTitle,
 } from "../../../components/ui/dialog";
 import {
-  listRoomDocuments,
   uploadRoomDocument,
   startAnalysis,
   removeRoomDocument,
   updateRoomDocumentFolder,
 } from "../../../api/pe-diligence";
-import { streamJobProgress } from "../../../api/sse-utils";
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-
-const DOC_TYPE_LABELS = {
-  offering_memorandum: "CIM / OM",
-  financial_statement: "Financials",
-  purchase_agreement: "SPA",
-  qoe_report: "QoE Report",
-  legal_contract: "Contract",
-  amendment: "Amendment",
-  other: "Other",
-};
-
-const DOC_TYPE_COLORS = {
-  offering_memorandum: "bg-purple-100 text-purple-700 dark:bg-purple-900/30 dark:text-purple-400",
-  financial_statement: "bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400",
-  purchase_agreement: "bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400",
-  qoe_report: "bg-cyan-100 text-cyan-700 dark:bg-cyan-900/30 dark:text-cyan-400",
-  legal_contract: "bg-orange-100 text-orange-700 dark:bg-orange-900/30 dark:text-orange-400",
-  amendment: "bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400",
-  other: "bg-gray-100 text-gray-600 dark:bg-gray-800 dark:text-gray-400",
-};
+import { createAuthenticatedApi } from "../../../api/client";
+import { streamJobProgress } from "@/api/sse-utils";
+import { AnalysisTriggerButton } from "../components/AnalysisTriggerButton";
+import { usePeDiligence, usePeDiligenceActions } from "../../../store";
+import { DOC_TYPE_LABELS, DOC_TYPE_COLORS } from "../constants";
 
 function getFileIcon(filename) {
   const ext = filename?.toLowerCase().split(".").pop();
@@ -63,6 +44,12 @@ function getFileIcon(filename) {
   }
   if (["docx", "doc"].includes(ext)) {
     return { bg: "bg-blue-50 dark:bg-blue-900/20", color: "text-blue-500 dark:text-blue-400" };
+  }
+  if (["pptx", "ppt"].includes(ext)) {
+    return { bg: "bg-orange-50 dark:bg-orange-900/20", color: "text-orange-500 dark:text-orange-400" };
+  }
+  if (["jpg", "jpeg", "png", "bmp", "tif", "tiff", "heif", "heic"].includes(ext)) {
+    return { bg: "bg-green-50 dark:bg-green-900/20", color: "text-green-600 dark:text-green-400" };
   }
   return { bg: "bg-gray-50 dark:bg-gray-800/40", color: "text-gray-500 dark:text-gray-400" };
 }
@@ -115,6 +102,8 @@ function StatusCell({ doc }) {
   );
 }
 
+// ─── Folder Item ──────────────────────────────────────────────────────────────
+
 function FolderItem({ label, count, active, onClick, icon, muted }) {
   return (
     <button
@@ -141,9 +130,23 @@ export default function RoomDocuments() {
   const { getToken } = useAppAuth();
   const fileInputRef = useRef(null);
 
+  // Shared store — docs, loading, analysis job, analysis status
+  const peDiligence = usePeDiligence();
+  const actions = usePeDiligenceActions();
+  const docs = peDiligence.documents;
+  const loading = peDiligence.documentsLoading;
+  const isRunning = peDiligence.analysisJobId != null;
+  const analysisStatus = {
+    ...peDiligence.analysisStatus,
+    loading: peDiligence.analysisStatusLoading,
+    refresh: () => actions.peRefreshAnalysisStatus(roomId, getToken),
+  };
+
+  // Local transient state for ingest-progress overrides and optimistic inserts
+  const [docProgressOverrides, setDocProgressOverrides] = useState({});
+  const [optimisticDocs, setOptimisticDocs] = useState([]);
+
   // Main state
-  const [docs, setDocs]                     = useState([]);
-  const [loading, setLoading]               = useState(true);
   const [error, setError]                   = useState(null);
   const [uploadStatus, setUploadStatus]     = useState(null);
   const [uploadProgress, setUploadProgress] = useState({ done: 0, total: 0 });
@@ -169,15 +172,38 @@ export default function RoomDocuments() {
   // Track active SSE cleanup functions keyed by document_id
   const sseCleanups = useRef({});
 
-  function loadDocs() {
-    setLoading(true);
-    listRoomDocuments(getToken, roomId)
-      .then(setDocs)
-      .catch((err) => setError(err.message || "Failed to load documents"))
-      .finally(() => setLoading(false));
-  }
+  // Effective docs = store docs with per-document ingest-progress overrides applied,
+  // plus any optimistic rows for newly uploaded docs not yet in the store.
+  const effectiveDocs = useMemo(() => {
+    const storeIds = new Set(docs.map(d => d.document_id));
+    const pending = optimisticDocs.filter(d => !storeIds.has(d.document_id));
+    return [
+      ...pending,
+      ...docs.map(d => {
+        const ov = docProgressOverrides[d.document_id];
+        return ov ? { ...d, ...ov } : d;
+      }),
+    ];
+  }, [docs, docProgressOverrides, optimisticDocs]);
 
-  useEffect(() => { loadDocs(); }, [roomId]);
+  useEffect(() => {
+    // Docs/room are loaded by PELayout on roomId change.
+    // Only restore local folder state and ensure analysis status is populated.
+    const stored = localStorage.getItem(`room_local_folders_${roomId}`);
+    if (stored) {
+      try {
+        setLocalFolders(JSON.parse(stored));
+      } catch {}
+    }
+    if (!peDiligence.analysisStatus) {
+      actions.peRefreshAnalysisStatus(roomId, getToken);
+    }
+  }, [roomId]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Persist local folders to localStorage
+  useEffect(() => {
+    localStorage.setItem(`room_local_folders_${roomId}`, JSON.stringify(localFolders));
+  }, [localFolders, roomId]);
 
   // Cleanup all SSE connections on unmount
   useEffect(() => {
@@ -186,16 +212,16 @@ export default function RoomDocuments() {
     };
   }, []);
 
-  // Folder derivation
-  const docFolders = [...new Set(docs.map((d) => d.folder).filter(Boolean))].sort();
+  // Folder derivation — all derived from effectiveDocs so optimistic rows count
+  const docFolders = [...new Set(effectiveDocs.map((d) => d.folder).filter(Boolean))].sort();
   const allFolders = [...new Set([...docFolders, ...localFolders])].sort();
-  const uncategorizedCount = docs.filter((d) => !d.folder).length;
+  const uncategorizedCount = effectiveDocs.filter((d) => !d.folder).length;
 
   const visibleDocs = selectedFolder === null
-    ? docs
+    ? effectiveDocs
     : selectedFolder === "__uncategorized__"
-      ? docs.filter((d) => !d.folder)
-      : docs.filter((d) => d.folder === selectedFolder);
+      ? effectiveDocs.filter((d) => !d.folder)
+      : effectiveDocs.filter((d) => d.folder === selectedFolder);
 
   useEffect(() => {
     setPage(0);
@@ -241,6 +267,12 @@ export default function RoomDocuments() {
   const pageEnd = Math.min(pageStart + pageSize, totalFiltered);
   const paginatedDocs = sortedDocs.slice(pageStart, pageEnd);
 
+  async function getJobStatus(jobId) {
+    const api = createAuthenticatedApi(getToken);
+    const response = await api.get(`/api/jobs/${jobId}/status`);
+    return response.data;
+  }
+
   const toggleSort = (field) => {
     if (sortBy === field) {
       setSortOrder((prev) => (prev === "asc" ? "desc" : "asc"));
@@ -251,33 +283,68 @@ export default function RoomDocuments() {
   };
 
   function connectSSE(jobId, documentId) {
+    if (!jobId || !documentId || sseCleanups.current[documentId]) {
+      return;
+    }
     streamJobProgress(jobId, getToken, {
+      fetchInitialState: true,
+      getJobStatus,
       onProgress: (data) => {
-        setDocs((prev) => prev.map((d) =>
-          d.document_id === documentId
-            ? {
-                ...d,
-                ingest_status: "processing",
-                status_detail: data.current_stage || data.message || "Processing",
-                progress_percent: data.progress_percent || 0,
-              }
-            : d
-        ));
+        setDocProgressOverrides(prev => ({
+          ...prev,
+          [documentId]: {
+            ingest_status: "processing",
+            status_detail: data.current_stage || data.message || "Processing",
+            progress_percent: data.progress_percent || 0,
+          },
+        }));
       },
       onComplete: () => {
+        setDocProgressOverrides(prev => { const n = { ...prev }; delete n[documentId]; return n; });
+        setOptimisticDocs(prev => prev.filter(d => d.document_id !== documentId));
         delete sseCleanups.current[documentId];
-        loadDocs();
+        actions.peRefreshDocuments(roomId, getToken);
+        actions.peRefreshAnalysisStatus(roomId, getToken);
       },
       onError: () => {
-        setDocs((prev) => prev.map((d) =>
-          d.document_id === documentId ? { ...d, ingest_status: "failed" } : d
-        ));
+        setDocProgressOverrides(prev => ({ ...prev, [documentId]: { ingest_status: "failed" } }));
         delete sseCleanups.current[documentId];
       },
     }).then((cleanup) => {
       if (cleanup) sseCleanups.current[documentId] = cleanup;
     });
   }
+
+  useEffect(() => {
+    const processingDocs = effectiveDocs.filter(
+      (doc) => doc.document_id && doc.job_id && doc.ingest_status === "processing"
+    );
+
+    processingDocs.forEach((doc) => {
+      setDocProgressOverrides((prev) => {
+        if (prev[doc.document_id]) return prev;
+        return {
+          ...prev,
+          [doc.document_id]: {
+            ingest_status: "processing",
+            status_detail: doc.status_detail || "Processing",
+            progress_percent: doc.progress_percent || 0,
+          },
+        };
+      });
+      connectSSE(doc.job_id, doc.document_id);
+    });
+
+    const activeIds = new Set(processingDocs.map((doc) => doc.document_id));
+    Object.entries(sseCleanups.current).forEach(([documentId, cleanup]) => {
+      if (!activeIds.has(documentId)) {
+        try {
+          cleanup();
+        } catch {}
+        delete sseCleanups.current[documentId];
+      }
+    });
+  }, [effectiveDocs]); // eslint-disable-line react-hooks/exhaustive-deps
 
   async function handleUpload(e) {
     const files = Array.from(e.target.files || []);
@@ -301,8 +368,26 @@ export default function RoomDocuments() {
         setUploadProgress({ done: completed, total: files.length });
 
         if (res.room_document_id) {
-          setDocs((prev) => {
-            const exists = prev.some((d) => d.id === res.room_document_id);
+          // If already fully indexed, refresh immediately
+          if (res.status === "completed") {
+            actions.peRefreshDocuments(roomId, getToken);
+            actions.peRefreshAnalysisStatus(roomId, getToken);
+            return;
+          }
+          // If reused but still processing, connect SSE to track progress
+          if (res.reuse && res.status === "processing" && res.job_id) {
+            connectSSE(res.job_id, res.document_id);
+            actions.peRefreshDocuments(roomId, getToken);
+            return;
+          }
+          if (res.reuse) {
+            actions.peRefreshDocuments(roomId, getToken);
+            return;
+          }
+
+          // Document is processing — add optimistic row and track per-document progress
+          setOptimisticDocs(prev => {
+            const exists = prev.some(d => d.document_id === res.document_id);
             if (exists) return prev;
             return [
               {
@@ -310,33 +395,59 @@ export default function RoomDocuments() {
                 document_id: res.document_id,
                 filename: res.filename,
                 folder: folderToUse,
-                ingest_status: res.status === "completed" ? "ready" : "processing",
-                status_detail: "Queued",
+                ingest_status: "processing",
+                status_detail: "Queued for indexing...",
                 progress_percent: 0,
                 created_at: new Date().toISOString(),
               },
               ...prev,
             ];
           });
-        }
 
-        if (res.job_id && res.status === "processing") {
-          connectSSE(res.job_id, res.document_id);
+          if (res.job_id) {
+            connectSSE(res.job_id, res.document_id);
+          }
         }
       })
     );
 
     fileInputRef.current.value = "";
-    const failed = results.filter((r) => r.status === "rejected").length;
-    setUploadStatus(failed > 0 ? `${failed} file(s) failed to upload` : "done");
+
+    // Collect and log detailed failure information
+    const failures = results
+      .map((r, i) => r.status === "rejected" ? { file: files[i].name, error: r.reason } : null)
+      .filter(Boolean);
+
+    if (failures.length > 0) {
+      console.error("Upload failures:", failures);
+
+      // Build user-friendly error message
+      let errorMsg = "";
+      const fileTypeErrors = failures.filter(f => f.error.message?.includes("not supported"));
+      const otherErrors = failures.filter(f => !f.error.message?.includes("not supported"));
+
+      if (fileTypeErrors.length > 0) {
+        const unsupportedFiles = fileTypeErrors.map(f => `"${f.file}"`).join(", ");
+        errorMsg = `${unsupportedFiles}: Supported formats are PDF, Word (.docx), PowerPoint (.pptx), and images (.jpg, .jpeg, .png, .bmp, .tif, .tiff, .heif, .heic).`;
+      }
+      if (otherErrors.length > 0) {
+        if (errorMsg) errorMsg += " ";
+        const otherDetails = otherErrors.map(f => `${f.file}: ${f.error.message || "Upload failed"}`).join("; ");
+        errorMsg += otherDetails;
+      }
+
+      setUploadStatus(`Upload failed: ${errorMsg}`);
+    } else {
+      setUploadStatus("done");
+    }
   }
 
-  async function handleAnalyze() {
+  async function handleAnalyze(incremental = false) {
     setError(null);
     setAnalyzeStatus(null);
     try {
-      await startAnalysis(getToken, roomId);
-      setAnalyzeStatus("started");
+      const result = await startAnalysis(getToken, roomId, !incremental, incremental);
+      actions.peSetAnalysisJob(roomId, result.job_id);
     } catch (err) {
       setAnalyzeStatus(err.response?.data?.detail || "Failed to start analysis");
     }
@@ -346,8 +457,9 @@ export default function RoomDocuments() {
     setDeleting(true);
     try {
       await removeRoomDocument(getToken, roomId, roomDocId);
-      setDocs((prev) => prev.filter((d) => d.id !== roomDocId));
       setConfirmDeleteId(null);
+      actions.peRefreshDocuments(roomId, getToken);
+      actions.peRefreshAnalysisStatus(roomId, getToken);
     } catch (err) {
       setError(err.response?.data?.detail || "Failed to remove document");
     } finally {
@@ -358,7 +470,7 @@ export default function RoomDocuments() {
   async function handleFolderUpdate(roomDocId, newFolder) {
     try {
       await updateRoomDocumentFolder(getToken, roomId, roomDocId, newFolder);
-      setDocs((prev) => prev.map((d) => d.id === roomDocId ? { ...d, folder: newFolder } : d));
+      actions.peRefreshDocuments(roomId, getToken);
     } catch (err) {
       setError(err.response?.data?.detail || "Failed to move document");
     }
@@ -373,15 +485,15 @@ export default function RoomDocuments() {
         <div className="px-6 py-4 border-b border-border flex items-center justify-between shrink-0 bg-card/60">
           <div>
             <h1 className="text-xl font-semibold font-display">Documents</h1>
-            <p className="text-xs text-muted-foreground">{docs.length} total</p>
+            <p className="text-xs text-muted-foreground">{effectiveDocs.length} total</p>
           </div>
-          <button
-            onClick={handleAnalyze}
-            className="pe-action-primary"
-          >
-            <Play className="w-4 h-4" />
-            Run Analysis
-          </button>
+          <AnalysisTriggerButton
+            roomId={roomId}
+            isRunning={isRunning}
+            onStart={handleAnalyze}
+            status={analysisStatus}
+            loading={analysisStatus?.loading}
+          />
         </div>
 
         {/* Status messages */}
@@ -391,17 +503,14 @@ export default function RoomDocuments() {
           </div>
         )}
         {uploadStatus && uploadStatus !== "uploading" && uploadStatus !== "done" && (
-          <div className="mx-6 mt-4 flex items-center gap-2 border border-destructive/30 bg-destructive/10 text-destructive rounded-lg p-3 text-sm">
-            <AlertCircle className="w-4 h-4 shrink-0" />
-            {uploadStatus}
+          <div className="mx-6 mt-4 flex items-start gap-2 border border-destructive/30 bg-destructive/10 text-destructive rounded-lg p-3 text-sm">
+            <AlertCircle className="w-4 h-4 shrink-0 mt-0.5" />
+            <div className="flex-1 break-words max-h-20 overflow-y-auto">
+              {uploadStatus}
+            </div>
           </div>
         )}
-        {analyzeStatus === "started" && (
-          <div className="mx-6 mt-4 flex items-center gap-2 text-sm text-blue-600 bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-3">
-            Analysis started — check the Analysis tab for progress.
-          </div>
-        )}
-        {analyzeStatus && analyzeStatus !== "started" && (
+        {analyzeStatus && analyzeStatus !== "started" && !isRunning && (
           <div className="mx-6 mt-4 flex items-center gap-2 border border-destructive/30 bg-destructive/10 text-destructive rounded-lg p-3 text-sm">
             <AlertCircle className="w-4 h-4 shrink-0" />
             {analyzeStatus}
@@ -416,17 +525,7 @@ export default function RoomDocuments() {
 
         {loading && <p className="px-6 py-4 text-sm text-muted-foreground">Loading documents…</p>}
 
-        {!loading && docs.length === 0 && (
-          <div className="pe-card-muted flex flex-col items-center justify-center py-16 m-6">
-            <div className="w-16 h-16 bg-primary/10 rounded-2xl flex items-center justify-center mb-4">
-              <Upload className="w-8 h-8 text-primary opacity-60" />
-            </div>
-            <p className="text-sm font-semibold">No documents yet</p>
-            <p className="text-xs text-muted-foreground mt-1">Upload PDF or DOCX files to get started.</p>
-          </div>
-        )}
-
-        {!loading && docs.length > 0 && (
+        {!loading && (
           <div className="flex flex-1 overflow-hidden">
             {/* Left sidebar — folders */}
             <aside className="w-56 shrink-0 border-r border-border flex flex-col overflow-hidden bg-muted/20">
@@ -477,7 +576,7 @@ export default function RoomDocuments() {
                 {/* All Documents */}
                 <FolderItem
                   label="All Documents"
-                  count={docs.length}
+                  count={effectiveDocs.length}
                   active={selectedFolder === null}
                   onClick={() => setSelectedFolder(null)}
                   icon={<Files className="w-4 h-4" />}
@@ -488,7 +587,7 @@ export default function RoomDocuments() {
                   <FolderItem
                     key={folder}
                     label={folder}
-                    count={docs.filter((d) => d.folder === folder).length}
+                    count={effectiveDocs.filter((d) => d.folder === folder).length}
                     active={selectedFolder === folder}
                     onClick={() => setSelectedFolder(folder)}
                     icon={<Folder className="w-4 h-4" />}
@@ -536,7 +635,7 @@ export default function RoomDocuments() {
                     />
                   </div>
                   <button
-                    onClick={loadDocs}
+                    onClick={() => { actions.peRefreshDocuments(roomId, getToken); actions.peRefreshAnalysisStatus(roomId, getToken); }}
                     className="p-1.5 rounded hover:bg-muted transition-colors"
                     title="Refresh"
                   >
@@ -546,7 +645,7 @@ export default function RoomDocuments() {
                     ref={fileInputRef}
                     type="file"
                     multiple
-                    accept=".pdf,.docx"
+                    accept=".pdf,.docx,.pptx,.jpg,.jpeg,.png,.bmp,.tif,.tiff,.heif,.heic"
                     className="hidden"
                     onChange={handleUpload}
                   />
@@ -554,6 +653,7 @@ export default function RoomDocuments() {
                     onClick={() => fileInputRef.current?.click()}
                     disabled={uploadStatus === "uploading"}
                     className="pe-action-ghost text-xs px-3 py-1.5 disabled:opacity-50"
+                    title="Supported formats: PDF, Word (.docx), PowerPoint (.pptx), and images (.jpg, .jpeg, .png, .bmp, .tif, .tiff, .heif, .heic)"
                   >
                     <Upload className="w-3.5 h-3.5" />
                     {uploadStatus === "uploading"
@@ -565,12 +665,29 @@ export default function RoomDocuments() {
                 </div>
               </div>
 
-              {/* Document table */}
+              {/* Document table or empty state */}
               {visibleDocs.length === 0 ? (
-                <div className="flex-1 flex items-center justify-center">
-                  <p className="text-sm text-muted-foreground">
-                    {selectedFolder === null ? "No documents yet" : "No documents in this folder"}
-                  </p>
+                <div className="flex-1 flex items-center justify-center p-6">
+                  {effectiveDocs.length === 0 ? (
+                    <div className="pe-card-muted flex flex-col items-center justify-center py-16 rounded-xl max-w-sm">
+                      <div className="w-16 h-16 bg-primary/10 rounded-2xl flex items-center justify-center mb-4">
+                        <Upload className="w-8 h-8 text-primary opacity-60" />
+                      </div>
+                      <p className="text-sm font-semibold">No documents yet</p>
+                      <p className="text-xs text-muted-foreground mt-1 text-center">Create folders to organize your documents, then upload PDF, Word, PowerPoint, or image files.</p>
+                      <button
+                        onClick={() => setNewFolderInputVisible(true)}
+                        className="mt-4 flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-lg bg-primary/10 text-primary hover:bg-primary/20 transition-colors"
+                      >
+                        <FolderPlus className="w-3.5 h-3.5" />
+                        Create First Folder
+                      </button>
+                    </div>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">
+                      {selectedFolder === null ? "No documents" : "No documents in this folder"}
+                    </p>
+                  )}
                 </div>
               ) : (
                 <div className="flex-1 overflow-x-auto">
@@ -604,6 +721,9 @@ export default function RoomDocuments() {
                             {sortBy === "status" && <ArrowUpDown className="w-3 h-3" />}
                           </div>
                         </TableHead>
+                        <TableHead className="text-xs uppercase tracking-wide font-bold text-muted-foreground w-16">
+                          Pages
+                        </TableHead>
                         <TableHead
                           className="text-xs uppercase tracking-wide font-bold text-muted-foreground cursor-pointer"
                           onClick={() => toggleSort("created_at")}
@@ -624,7 +744,7 @@ export default function RoomDocuments() {
                         const amendmentLink = doc.metadata?.amendment_link;
                         const amendmentParent = amendmentLink?.parent_document_id;
                         const parentDoc = amendmentParent
-                          ? docs.find((d) => d.document_id === amendmentParent)
+                          ? effectiveDocs.find((d) => d.document_id === amendmentParent)
                           : null;
                         const needsReview = classification?.needs_review;
                         const isConfirming = confirmDeleteId === doc.id;
@@ -687,7 +807,7 @@ export default function RoomDocuments() {
                             </TableCell>
 
                             {isConfirming ? (
-                              <TableCell colSpan={3}>
+                              <TableCell colSpan={4}>
                                 <div className="flex items-center gap-2">
                                   <span className="text-xs text-muted-foreground">Remove from room?</span>
                                   <button
@@ -707,6 +827,9 @@ export default function RoomDocuments() {
                               </TableCell>
                             ) : (
                               <>
+                                <TableCell className="text-sm text-muted-foreground">
+                                  {doc.page_count || "—"}
+                                </TableCell>
                                 <TableCell className="text-sm text-muted-foreground whitespace-nowrap">
                                   {formatDate(doc.created_at)}
                                 </TableCell>

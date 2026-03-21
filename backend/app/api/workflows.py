@@ -249,7 +249,7 @@ def create_workflow_run(payload: CreateWorkflowRunRequest, user: User = Depends(
     # Create JobState for progress streaming
     from app.repositories.job_repository import JobRepository
     job_repo = JobRepository()
-    job = job_repo.create_job(workflow_run_id=run.id, status="queued", current_stage="queued", message="Workflow queued")
+    job = job_repo.create_job(entity_type="workflow_run", entity_id=run.id, status="queued", current_stage="queued", message="Workflow queued")
     job_id = job.job_id if job else None  # FIXED: Use job.job_id instead of job.id
 
     reserve_shadow_credits(
@@ -781,7 +781,8 @@ def rerun_workflow(
     from app.repositories.job_repository import JobRepository
     job_repo = JobRepository()
     job = job_repo.create_job(
-        workflow_run_id=run.id,
+        entity_type="workflow_run",
+        entity_id=run.id,
         status="queued",
         current_stage="queued",
         progress_percent=0,

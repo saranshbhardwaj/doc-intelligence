@@ -14,6 +14,8 @@ from __future__ import annotations
 
 from typing import Dict
 
+from app.verticals.private_equity.diligence.doc_types import HIGH_VALUE_CONTRACT_DOC_TYPES
+
 
 INVESTIGATION_TEMPLATES: Dict[str, dict] = {
     "change_of_control_exposure": {
@@ -50,11 +52,7 @@ INVESTIGATION_TEMPLATES: Dict[str, dict] = {
             "acceleration upon default",
         ],
         # ── Document routing hints ────────────────────────────────
-        "document_type_hints": [
-            "purchase_agreement",
-            "legal_contract",
-            "other",
-        ],
+        "document_type_hints": [*sorted(HIGH_VALUE_CONTRACT_DOC_TYPES), "other"],
         "filename_hints": [
             "agreement",
             "contract",

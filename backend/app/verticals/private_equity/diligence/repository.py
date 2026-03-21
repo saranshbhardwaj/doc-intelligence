@@ -1,5 +1,5 @@
 """Repository for PE diligence domain entities."""
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Sequence, Tuple
 
 from sqlalchemy import func
@@ -179,6 +179,48 @@ class PEDiligenceRepository:
         self.db.commit()
         self.db.refresh(row)
         return row
+
+    def bulk_update_room_document_metadata(
+        self,
+        *,
+        room_id: str,
+        updates: Sequence[dict],
+    ) -> List[PEDiligenceRoomDocument]:
+        if not updates:
+            return []
+
+        document_ids = [u.get("document_id") for u in updates if u.get("document_id")]
+        if not document_ids:
+            return []
+
+        rows = self.db.query(PEDiligenceRoomDocument).filter(
+            PEDiligenceRoomDocument.room_id == room_id,
+            PEDiligenceRoomDocument.document_id.in_(document_ids),
+        ).all()
+        rows_by_document_id = {row.document_id: row for row in rows if row.document_id}
+
+        updated_rows: List[PEDiligenceRoomDocument] = []
+        for update in updates:
+            document_id = update.get("document_id")
+            row = rows_by_document_id.get(document_id)
+            if not row:
+                continue
+
+            if update.get("ingest_status") is not None:
+                row.ingest_status = update["ingest_status"]
+
+            metadata_patch = update.get("metadata_patch")
+            if metadata_patch:
+                existing = row.metadata_json or {}
+                row.metadata_json = {**existing, **metadata_patch}
+
+            updated_rows.append(row)
+
+        self.db.commit()
+        for row in updated_rows:
+            self.db.refresh(row)
+        return updated_rows
+
     def create_analysis_run(self, *, room_id: str, org_id: str, user_id: str, metadata: Optional[dict] = None) -> PEDiligenceAnalysisRun:
         run = PEDiligenceAnalysisRun(
             room_id=room_id,
@@ -192,6 +234,27 @@ class PEDiligenceRepository:
         self.db.commit()
         self.db.refresh(run)
         return run
+
+    @classmethod
+    def get_analysis_run_by_id(cls, run_id: str) -> Optional[PEDiligenceAnalysisRun]:
+        """Fetch an analysis run by ID using an internal session (for SSE auth checks)."""
+        from app.database import SessionLocal
+        db = SessionLocal()
+        try:
+            return db.query(PEDiligenceAnalysisRun).filter(PEDiligenceAnalysisRun.id == run_id).first()
+        finally:
+            db.close()
+
+    @classmethod
+    def get_investigation_run_by_id(cls, run_id: str):
+        """Fetch an investigation run by ID using an internal session (for SSE auth checks)."""
+        from app.database import SessionLocal
+        from app.db_models_pe_diligence import PEDiligenceInvestigationRun
+        db = SessionLocal()
+        try:
+            return db.query(PEDiligenceInvestigationRun).filter(PEDiligenceInvestigationRun.id == run_id).first()
+        finally:
+            db.close()
 
     def get_analysis_run(self, *, room_id: str, run_id: str, org_id: str, user_id: str) -> Optional[PEDiligenceAnalysisRun]:
         return self.db.query(PEDiligenceAnalysisRun).filter(
@@ -212,6 +275,7 @@ class PEDiligenceRepository:
         started_at: Optional[datetime] = None,
         completed_at: Optional[datetime] = None,
         metadata_patch: Optional[dict] = None,
+        job_id: Optional[str] = None,
     ) -> Optional[PEDiligenceAnalysisRun]:
         run = self.db.query(PEDiligenceAnalysisRun).filter(PEDiligenceAnalysisRun.id == run_id).first()
         if not run:
@@ -228,12 +292,46 @@ class PEDiligenceRepository:
             run.started_at = started_at
         if completed_at is not None:
             run.completed_at = completed_at
+        if job_id is not None:
+            run.job_id = job_id
         if metadata_patch:
             existing = run.metadata_json or {}
             run.metadata_json = {**existing, **metadata_patch}
         self.db.commit()
         self.db.refresh(run)
         return run
+
+    def get_latest_active_analysis_run(self, *, room_id: str) -> Optional[PEDiligenceAnalysisRun]:
+        """Get the most recent in-progress analysis run for a room, or None if none active."""
+        return (
+            self.db.query(PEDiligenceAnalysisRun)
+            .filter(
+                PEDiligenceAnalysisRun.room_id == room_id,
+                PEDiligenceAnalysisRun.status.in_(["pending", "running"]),
+            )
+            .order_by(PEDiligenceAnalysisRun.created_at.desc())
+            .first()
+        )
+
+    def get_latest_completed_run(self, *, room_id: str) -> Optional[PEDiligenceAnalysisRun]:
+        """Get the most recent completed analysis run for a room."""
+        return (
+            self.db.query(PEDiligenceAnalysisRun)
+            .filter(
+                PEDiligenceAnalysisRun.room_id == room_id,
+                PEDiligenceAnalysisRun.status == "completed",
+            )
+            .order_by(PEDiligenceAnalysisRun.created_at.desc())
+            .first()
+        )
+
+    def get_room_document_ids(self, *, room_id: str) -> List[str]:
+        """Return document IDs currently attached to a room."""
+        from app.db_models_pe_diligence import PEDiligenceRoomDocument
+        rows = self.db.query(PEDiligenceRoomDocument.document_id).filter(
+            PEDiligenceRoomDocument.room_id == room_id,
+        ).all()
+        return [r[0] for r in rows if r[0]]
 
     def get_run_verification_stats(self, *, room_id: str, run_id: str) -> Dict[str, int]:
         rows = self.db.query(PEDiligenceFinding.metadata_json).filter(
@@ -295,10 +393,12 @@ class PEDiligenceRepository:
             q = q.filter(PEDiligenceFinding.category == category)
         return q.order_by(PEDiligenceFinding.created_at.desc()).all()
 
-    def replace_findings(self, *, room_id: str, run_id: str, findings: Sequence[dict]) -> List[PEDiligenceFinding]:
-        self.db.query(PEDiligenceFinding).filter(
-            PEDiligenceFinding.room_id == room_id
-        ).delete()
+    def replace_findings(self, *, room_id: str, run_id: str, findings: Sequence[dict],
+                         document_ids: Optional[List[str]] = None) -> List[PEDiligenceFinding]:
+        q = self.db.query(PEDiligenceFinding).filter(PEDiligenceFinding.room_id == room_id)
+        if document_ids is not None:
+            q = q.filter(PEDiligenceFinding.source_document_id.in_(document_ids))
+        q.delete(synchronize_session="fetch")
         created: List[PEDiligenceFinding] = []
         for row in findings:
             finding = PEDiligenceFinding(room_id=room_id, analysis_run_id=run_id, **row)
@@ -440,6 +540,34 @@ class PEDiligenceRepository:
         self.db.refresh(event)
         return event
 
+    def add_audit_events(
+        self,
+        *,
+        room_id: str,
+        events: Sequence[dict],
+    ) -> List[PEDiligenceAuditEvent]:
+        if not events:
+            return []
+
+        created: List[PEDiligenceAuditEvent] = []
+        for item in events:
+            event = PEDiligenceAuditEvent(
+                room_id=room_id,
+                analysis_run_id=item.get("analysis_run_id"),
+                actor_user_id=item.get("actor_user_id"),
+                event_type=item.get("event_type"),
+                entity_type=item.get("entity_type"),
+                entity_id=item.get("entity_id"),
+                payload=item.get("payload") or {},
+            )
+            self.db.add(event)
+            created.append(event)
+
+        self.db.commit()
+        for event in created:
+            self.db.refresh(event)
+        return created
+
     def list_audit_events(self, *, room_id: str, limit: int, offset: int) -> List[PEDiligenceAuditEvent]:
         return self.db.query(PEDiligenceAuditEvent).filter(
             PEDiligenceAuditEvent.room_id == room_id
@@ -478,12 +606,18 @@ class PEDiligenceRepository:
 
     # ─── Clauses ──────────────────────────────────────────────────────────────
 
-    def save_clauses(self, *, room_id: str, run_id: str, clauses: List[dict]) -> List[PEDiligenceClause]:
-        """Replace clauses for this run and persist new ones."""
-        self.db.query(PEDiligenceClause).filter(
+    def save_clauses(self, *, room_id: str, run_id: str, clauses: List[dict],
+                     document_ids: Optional[List[str]] = None) -> List[PEDiligenceClause]:
+        """Replace clauses for this run and persist new ones.
+        If document_ids provided, only deletes clauses for those docs (incremental mode).
+        """
+        q = self.db.query(PEDiligenceClause).filter(
             PEDiligenceClause.room_id == room_id,
             PEDiligenceClause.analysis_run_id == run_id,
-        ).delete()
+        )
+        if document_ids is not None:
+            q = q.filter(PEDiligenceClause.source_document_id.in_(document_ids))
+        q.delete(synchronize_session="fetch")
 
         created: List[PEDiligenceClause] = []
         for c in clauses:
@@ -526,6 +660,39 @@ class PEDiligenceRepository:
             q = q.filter(PEDiligenceClause.clause_type == clause_type)
         return q.order_by(PEDiligenceClause.created_at.desc()).offset(offset).limit(limit).all()
 
+    def review_clause(
+        self,
+        *,
+        room_id: str,
+        clause_id: str,
+        review_status: str,
+        reviewed_by: str,
+        corrected_fields: Optional[dict] = None,
+    ) -> Optional[PEDiligenceClause]:
+        """Set review status on a clause (approve / flag / edit)."""
+        from datetime import datetime
+        clause = self.db.query(PEDiligenceClause).filter(
+            PEDiligenceClause.id == clause_id,
+            PEDiligenceClause.room_id == room_id,
+        ).first()
+        if not clause:
+            return None
+        if review_status == "pending":
+            # Reset to un-reviewed state
+            clause.review_status = None
+            clause.reviewed_by = None
+            clause.reviewed_at = None
+            clause.corrected_fields = None
+        else:
+            clause.review_status = review_status
+            clause.reviewed_by = reviewed_by
+            clause.reviewed_at = datetime.utcnow()
+            if corrected_fields is not None:
+                clause.corrected_fields = corrected_fields
+        self.db.commit()
+        self.db.refresh(clause)
+        return clause
+
     # ─── Contract Families ────────────────────────────────────────────────────
 
     def list_contract_families(self, *, room_id: str) -> List[PEDiligenceContractFamily]:
@@ -534,6 +701,18 @@ class PEDiligenceRepository:
         ).order_by(PEDiligenceContractFamily.created_at.asc()).all()
 
     # ─── Playbooks ────────────────────────────────────────────────────────────
+
+    def get_stale_running_analysis_runs(self, *, older_than_minutes: int = 30) -> List[PEDiligenceAnalysisRun]:
+        """Return analysis runs that are still 'running' but were created more than `older_than_minutes` ago."""
+        cutoff = datetime.utcnow() - timedelta(minutes=older_than_minutes)
+        return (
+            self.db.query(PEDiligenceAnalysisRun)
+            .filter(
+                PEDiligenceAnalysisRun.status == "running",
+                PEDiligenceAnalysisRun.created_at < cutoff,
+            )
+            .all()
+        )
 
     def list_playbooks(self, *, is_system: Optional[bool] = None) -> List[PEDiligencePlaybook]:
         q = self.db.query(PEDiligencePlaybook)

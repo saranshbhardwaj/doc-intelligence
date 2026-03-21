@@ -14,14 +14,17 @@ Input signals assembled into user content:
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
 from pydantic import BaseModel, Field
+
+from app.verticals.private_equity.diligence.formatting import fmt_checklist_summary, fmt_classifications
 
 from app.config import settings
 from app.core.llm.llm_client import LLMClient
 from app.core.llm.structured_runner import StructuredLLMRunner
 from app.utils.logging import logger
+from app.verticals.private_equity.diligence.normalization import normalize_findings
 
 # ─── Pydantic output models ─────────────────────────────────────────────────
 
@@ -167,27 +170,6 @@ def _fmt_llm_financials(llm_financials: Optional[dict]) -> str:
     return "\n".join(lines)
 
 
-def _fmt_checklist(checklist_entries: List[dict]) -> str:
-    gaps = [e["item"] for e in checklist_entries if e["item"].get("status") in {"missing", "partial"}]
-    if not gaps:
-        return ""
-    lines = ["## Checklist Gaps"]
-    for item in gaps:
-        lines.append(f"- [{item['status'].upper()}] {item['title']} (priority={item['priority']})")
-    return "\n".join(lines)
-
-
-def _fmt_classifications(document_classifications: Dict[str, dict]) -> str:
-    if not document_classifications:
-        return ""
-    counts: Dict[str, int] = {}
-    for cls in document_classifications.values():
-        dt = cls.get("document_type") or "other"
-        counts[dt] = counts.get(dt, 0) + 1
-    lines = ["## Document Types in Room"]
-    for dt, cnt in sorted(counts.items(), key=lambda x: -x[1]):
-        lines.append(f"- {dt}: {cnt} doc(s)")
-    return "\n".join(lines)
 
 
 def _assemble_user_content(
@@ -199,16 +181,96 @@ def _assemble_user_content(
     document_classifications: Dict[str, dict],
 ) -> str:
     sections = [
-        _fmt_classifications(document_classifications),
+        fmt_classifications(document_classifications, multiline=True),
         _fmt_clause_hits(clause_hits, structured_clauses_by_type),
         _fmt_numeric(numeric_signals),
         _fmt_llm_financials(llm_financials),
-        _fmt_checklist(checklist_entries),
+        fmt_checklist_summary(checklist_entries, detailed=True),
     ]
     content = "\n\n".join(s for s in sections if s)
     if len(content) > _MAX_INPUT_CHARS:
         content = content[:_MAX_INPUT_CHARS] + "\n\n[truncated]"
     return "Synthesize findings from the following diligence signals:\n\n" + content
+
+
+def _fmt_per_doc_findings(per_doc_findings: List[dict], max_findings: int = 60) -> str:
+    """Format per-doc findings for V2 synthesis prompt, grouped by document."""
+    if not per_doc_findings:
+        return ""
+    # Group by source_document_id
+    by_doc: Dict[str, List[dict]] = {}
+    for f in per_doc_findings[:max_findings]:
+        doc_id = f.get("source_document_id") or "unknown"
+        by_doc.setdefault(doc_id, []).append(f)
+    lines = ["## Per-Document Findings"]
+    for doc_id, findings in by_doc.items():
+        filename = (findings[0].get("metadata_json") or {}).get("filename", doc_id[:12])
+        doc_type = (findings[0].get("metadata_json") or {}).get("doc_type", "")
+        lines.append(f"\n### {filename} ({doc_type})")
+        for f in findings:
+            sev = f.get("severity", "medium").upper()
+            title = f.get("title", "")
+            desc = (f.get("description") or "")[:200]
+            meta = f.get("metadata_json") or {}
+            assessment = meta.get("assessment")
+            clause_type = meta.get("clause_type") or meta.get("playbook_slug")
+            page = f.get("source_page_number")
+            qualifiers = [part for part in [assessment, clause_type, f"page {page}" if page else None] if part]
+            qualifier_text = f" ({', '.join(qualifiers)})" if qualifiers else ""
+            lines.append(f"- [{sev}] {title}{qualifier_text}: {desc}")
+    return "\n".join(lines)
+
+
+def _candidate_evidence_from_findings(per_doc_findings: List[dict], supporting_evidence: List[str], category: Optional[str]) -> List[dict]:
+    tokens = {str(item).strip().lower() for item in supporting_evidence if str(item).strip()}
+    scored: List[tuple[int, float, dict]] = []
+    for finding in per_doc_findings:
+        metadata = finding.get("metadata_json") or {}
+        candidates = {
+            str(metadata.get("clause_type") or "").lower(),
+            str(metadata.get("playbook_slug") or "").lower(),
+            str(metadata.get("assessment") or "").lower(),
+            str(finding.get("category") or "").lower(),
+        }
+        title_words = {word for word in str(finding.get("title") or "").lower().replace("-", " ").split() if len(word) > 3}
+        score = len(tokens & candidates) + len(tokens & title_words)
+        if category and str(finding.get("category") or "").lower() == str(category).lower():
+            score += 1
+        if score <= 0 and tokens:
+            continue
+        for ev in finding.get("evidence_list") or []:
+            if isinstance(ev, dict) and ev.get("quote"):
+                scored.append((score, float(finding.get("confidence") or 0.0), ev))
+    scored.sort(key=lambda item: (-item[0], -item[1]))
+    out: List[dict] = []
+    seen = set()
+    for _, __, ev in scored:
+        key = (ev.get("source_document_id"), ev.get("source_page_number"), ev.get("quote"))
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(ev)
+        if len(out) >= 3:
+            break
+    return out
+
+
+def _assemble_user_content_v2(
+    per_doc_findings: List[dict],
+    numeric_signals: Dict[str, List[dict]],
+    llm_financials: Optional[dict],
+    document_classifications: Dict[str, dict],
+) -> str:
+    sections = [
+        fmt_classifications(document_classifications),
+        _fmt_per_doc_findings(per_doc_findings),
+        _fmt_numeric(numeric_signals),
+        _fmt_llm_financials(llm_financials),
+    ]
+    content = "\n\n".join(s for s in sections if s)
+    if len(content) > _MAX_INPUT_CHARS:
+        content = content[:_MAX_INPUT_CHARS] + "\n\n[truncated]"
+    return "Synthesize cross-document findings from the following per-document analysis:\n\n" + content
 
 
 # ─── Main synthesizer class ──────────────────────────────────────────────────
@@ -256,7 +318,7 @@ class LLMFindingsSynthesizer:
                 user_content=user_content,
                 system_prompt=_SYSTEM_PROMPT,
                 pydantic_model=SynthesizedFindings,
-                use_cache=False,
+                use_cache=True,
             )
         except Exception as exc:
             logger.warning(
@@ -275,15 +337,16 @@ class LLMFindingsSynthesizer:
         for raw in raw_findings:
             if not isinstance(raw, dict):
                 continue
-            # Try to find a primary source from clause hits matching supporting evidence
-            primary_ev: Optional[dict] = None
+            matched_evidence: List[dict] = []
             for evidence_key in (raw.get("supporting_evidence") or []):
                 for hit in clause_hits:
                     if hit.get("clause_type") == evidence_key:
-                        primary_ev = hit.get("evidence")
-                        break
-                if primary_ev:
+                        evidence = hit.get("evidence")
+                        if isinstance(evidence, dict) and evidence.get("quote"):
+                            matched_evidence.append(evidence)
+                if len(matched_evidence) >= 3:
                     break
+            primary_ev = matched_evidence[0] if matched_evidence else None
 
             out.append(
                 {
@@ -303,8 +366,87 @@ class LLMFindingsSynthesizer:
                         "supporting_evidence": raw.get("supporting_evidence") or [],
                         "synthesis_notes": data.get("synthesis_notes"),
                     },
-                    "evidence_list": [primary_ev] if primary_ev else [],
+                    "evidence_list": matched_evidence,
                 }
             )
 
-        return out[:15]  # cap at 15 per plan
+        return normalize_findings(out, source_kind="cross_document_synthesis", limit=15)
+
+    async def synthesize_v2(
+        self,
+        *,
+        per_doc_findings: List[dict],
+        numeric_signals: Dict[str, List[dict]],
+        llm_financials: Optional[dict],
+        document_classifications: Dict[str, dict],
+        room_id: str,
+        run_id: str,
+    ) -> Optional[List[dict]]:
+        """V2 synthesis: cross-document reasoning from per-doc findings (not clause_hits).
+
+        Receives the full per-doc findings as input and produces ≤15 room-level synthesis
+        findings that cross-reference patterns across documents.
+        """
+        user_content = _assemble_user_content_v2(
+            per_doc_findings=per_doc_findings,
+            numeric_signals=numeric_signals,
+            llm_financials=llm_financials,
+            document_classifications=document_classifications,
+        )
+
+        try:
+            result = await self.runner.run_structured(
+                user_content=user_content,
+                system_prompt=_SYSTEM_PROMPT,
+                pydantic_model=SynthesizedFindings,
+                use_cache=True,
+            )
+        except Exception as exc:
+            logger.warning(
+                "V2 LLM findings synthesizer failed",
+                extra={"room_id": room_id, "run_id": run_id, "error": str(exc)[:300]},
+            )
+            return None
+
+        data = result.get("data") or {}
+        raw_findings = data.get("findings") or []
+        if not raw_findings:
+            return None
+
+        out: List[dict] = []
+        for raw in raw_findings:
+            if not isinstance(raw, dict):
+                continue
+            matched_evidence = _candidate_evidence_from_findings(
+                per_doc_findings,
+                raw.get("supporting_evidence") or [],
+                raw.get("category"),
+            )
+            primary_ev = matched_evidence[0] if matched_evidence else None
+            out.append(
+                {
+                    "category": raw.get("category", "contract"),
+                    "severity": raw.get("severity", "medium"),
+                    "title": raw.get("title", "")[:200],
+                    "description": raw.get("description", "")[:1000],
+                    "recommendation": raw.get("recommendation", "")[:500],
+                    "status": "open",
+                    "source_document_id": primary_ev.get("source_document_id") if primary_ev else None,
+                    "source_chunk_id": primary_ev.get("source_chunk_id") if primary_ev else None,
+                    "source_page_number": primary_ev.get("source_page_number") if primary_ev else None,
+                    "evidence_quote": primary_ev.get("quote") if primary_ev else None,
+                    "confidence": raw.get("confidence"),
+                    "metadata_json": {
+                        "engine": "llm_synthesis_v2",
+                        "supporting_evidence": raw.get("supporting_evidence") or [],
+                        "synthesis_notes": data.get("synthesis_notes"),
+                    },
+                    "evidence_list": matched_evidence,
+                }
+            )
+
+        logger.info(
+            "V2 cross-doc synthesis complete",
+            extra={"room_id": room_id, "run_id": run_id, "count": len(out)},
+        )
+        return normalize_findings(out, source_kind="cross_document_synthesis", limit=15)

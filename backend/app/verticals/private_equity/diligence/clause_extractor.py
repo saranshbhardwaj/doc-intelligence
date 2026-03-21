@@ -27,7 +27,7 @@ from app.config import settings
 from app.core.llm.llm_client import LLMClient
 from app.core.llm.structured_runner import StructuredLLMRunner
 from app.core.rag.hybrid_retriever import HybridRetriever
-from app.core.rag.reranker import get_reranker
+from app.services.service_locator import get_reranker
 from app.utils.logging import logger
 
 
@@ -184,6 +184,32 @@ class LLMClauseExtractor:
                 top_k=self.max_chunks_per_type * 3,  # Fetch more, will rerank and cap later
             )
 
+            # Drop hybrid chunks whose semantic similarity is below the floor.
+            # We filter here (not inside the retriever) because the retriever's built-in
+            # floor has a fallback that returns unfiltered results when everything is below
+            # the threshold — which would send irrelevant chunks to the LLM anyway.
+            # Chunks that came only from BM25 (raw_similarity is None) are always kept
+            # because a keyword match means the clause terms are literally in the text.
+            min_sim = settings.pe_diligence_llm_clause_min_semantic_similarity
+            if min_sim and min_sim > 0:
+                before = len(hybrid_results)
+                hybrid_results = [
+                    c for c in hybrid_results
+                    if c.get("raw_similarity") is None or c.get("raw_similarity", 1.0) >= min_sim
+                ]
+                dropped = before - len(hybrid_results)
+                if dropped:
+                    logger.debug(
+                        "Dropped low-similarity hybrid chunks",
+                        extra={
+                            "playbook_slug": playbook.get("slug"),
+                            "room_id": room_id,
+                            "dropped": dropped,
+                            "kept": len(hybrid_results),
+                            "floor": min_sim,
+                        },
+                    )
+
             # Track which chunks we already have from regex
             seen_chunk_ids = {h.get("evidence", {}).get("source_chunk_id") for h in relevant_hits if h.get("evidence")}
 
@@ -229,7 +255,7 @@ class LLMClauseExtractor:
                         for h in relevant_hits
                     ]
                     if quotes:
-                        scores = reranker.predict(
+                        scores = reranker.model.predict(
                             [(playbook_query, quote) for quote in quotes]
                         )
                         # Sort by score descending
@@ -281,7 +307,7 @@ class LLMClauseExtractor:
                 user_content=user_content,
                 system_prompt=system_prompt,
                 pydantic_model=ExtractedClauseBatch,
-                use_cache=False,
+                use_cache=True,
             )
         except Exception as exc:
             logger.warning(
@@ -309,6 +335,12 @@ class LLMClauseExtractor:
             matching_hits = hits_by_type.get(clause_type, relevant_hits)
             primary_hit = matching_hits[0]["evidence"] if matching_hits else {}
 
+            # Pull bbox from primary hit's chunk_metadata for PDF citation linking
+            bbox = None
+            chunk_meta = primary_hit.get("chunk_metadata")
+            if isinstance(chunk_meta, dict):
+                bbox = chunk_meta.get("bbox")  # {page, x0, y0, x1, y1} in inches
+
             # Extract fields minus the top-level keys we promote
             extracted_fields = {
                 k: v for k, v in raw.items()
@@ -329,6 +361,7 @@ class LLMClauseExtractor:
                     "interpretation": raw.get("interpretation"),
                     "confidence": confidence,
                     "engine": "llm_v1",
+                    "metadata_json": {"bbox": bbox} if bbox else None,
                 }
             )
         return out
@@ -342,6 +375,7 @@ class LLMClauseExtractor:
         document_ids: List[str],
         room_id: str,
         run_id: str,
+        document_classifications: dict = None,
     ) -> List[dict]:
         """Run all applicable playbooks against clause hits + hybrid retrieval concurrently.
 
@@ -351,11 +385,50 @@ class LLMClauseExtractor:
             db: SQLAlchemy session for HybridRetriever
             document_ids: list of document IDs in the room (for scoping hybrid retrieval)
             room_id, run_id: for logging + output rows
+            document_classifications: optional dict mapping doc_id → {"document_type": str, ...}
+                Used for doc-type routing — playbooks with applicable_doc_types only run if
+                at least one document in the room matches. None = no filtering.
 
         Returns:
             Flat list of clause dicts ready for repo.save_clauses()
         """
         if not clause_hits or not playbooks:
+            return []
+
+        # Build the set of doc types present in this room
+        classified_types: set = set()
+        if document_classifications:
+            for cls in document_classifications.values():
+                doc_type = cls.get("document_type") if isinstance(cls, dict) else None
+                if doc_type:
+                    classified_types.add(doc_type)
+
+        # Filter playbooks by applicable_doc_types (None = run against all, backward compat)
+        active_playbooks = []
+        skipped = 0
+        for pb in playbooks:
+            applicable = pb.get("applicable_doc_types")
+            if not applicable:
+                # No restriction — always run
+                active_playbooks.append(pb)
+            elif classified_types & set(applicable):
+                # At least one matching doc type in the room
+                active_playbooks.append(pb)
+            else:
+                skipped += 1
+
+        if skipped:
+            logger.info(
+                "Doc-type routing skipped playbooks",
+                extra={
+                    "room_id": room_id,
+                    "skipped": skipped,
+                    "active": len(active_playbooks),
+                    "classified_types": list(classified_types),
+                },
+            )
+
+        if not active_playbooks:
             return []
 
         # Index hits by clause_type for fast lookup
@@ -364,10 +437,10 @@ class LLMClauseExtractor:
             ct = hit.get("clause_type", "")
             hits_by_type.setdefault(ct, []).append(hit)
 
-        # Run each playbook concurrently
+        # Run each active playbook concurrently
         tasks = [
             self._extract_for_playbook(pb, hits_by_type, db, document_ids, room_id, run_id)
-            for pb in playbooks
+            for pb in active_playbooks
         ]
         results = await asyncio.gather(*tasks, return_exceptions=True)
 
@@ -386,7 +459,7 @@ class LLMClauseExtractor:
             extra={
                 "room_id": room_id,
                 "run_id": run_id,
-                "playbooks_run": len(playbooks),
+                "playbooks_run": len(active_playbooks),
                 "clauses_extracted": len(all_clauses),
             },
         )

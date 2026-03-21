@@ -2,6 +2,8 @@
 from datetime import datetime
 from typing import Any, Dict, List, Optional
 
+from typing import Literal
+
 from pydantic import BaseModel, Field
 
 
@@ -37,6 +39,10 @@ class RoomDocumentOut(BaseModel):
     document_id: Optional[str]
     filename: Optional[str] = None
     ingest_status: str
+    job_id: Optional[str] = None
+    progress_percent: Optional[int] = None
+    status_detail: Optional[str] = None
+    page_count: Optional[int] = None
     folder: Optional[str] = None
     document_type: Optional[str] = None
     classification_confidence: Optional[float] = None
@@ -68,6 +74,7 @@ class UploadRoomDocumentOut(BaseModel):
 
 class StartAnalysisRequest(BaseModel):
     force_reanalyze: bool = False
+    incremental: bool = False
 
 
 class AnalysisRunOut(BaseModel):
@@ -77,6 +84,7 @@ class AnalysisRunOut(BaseModel):
     current_stage: Optional[str]
     progress_percent: int
     error_message: Optional[str]
+    job_id: Optional[str] = None
     created_at: datetime
     started_at: Optional[datetime]
     completed_at: Optional[datetime]
@@ -169,6 +177,21 @@ class SummaryOut(BaseModel):
     content_markdown: Optional[str]
     citations: Optional[List[Dict[str, Any]]] = None
     confidence: Optional[float]
+    overview: Optional[Dict[str, Any]] = None
+    triage: Optional[Dict[str, Any]] = None
+    coverage: Optional[Dict[str, Any]] = None
+    top_risks: List[Dict[str, Any]] = Field(default_factory=list)
+    contradictions: List[Dict[str, Any]] = Field(default_factory=list)
+    valuation_signals: List[Dict[str, Any]] = Field(default_factory=list)
+    deal_blockers: List[Dict[str, Any]] = Field(default_factory=list)
+    management_questions: List[Dict[str, Any]] = Field(default_factory=list)
+    follow_up_requests: List[Dict[str, Any]] = Field(default_factory=list)
+    missing_key_documents: List[Dict[str, Any]] = Field(default_factory=list)
+    document_gap_register: List[Dict[str, Any]] = Field(default_factory=list)
+    ic_memo_inputs: Optional[Dict[str, Any]] = None
+    ic_readiness: Optional[Dict[str, Any]] = None
+    suggested_investigations: List[Dict[str, Any]] = Field(default_factory=list)
+    data_quality_assessment: Optional[str] = None
     metadata: Optional[Dict[str, Any]] = None
     evidence_spans: List[EvidenceSpanOut] = Field(default_factory=list)
     created_at: datetime
@@ -203,10 +226,19 @@ class ClauseOut(BaseModel):
     confidence: Optional[float]
     engine: Optional[str]
     metadata: Optional[Dict[str, Any]] = None
+    review_status: Optional[str] = None
+    reviewed_by: Optional[str] = None
+    reviewed_at: Optional[datetime] = None
+    corrected_fields: Optional[Dict[str, Any]] = None
     created_at: datetime
 
     class Config:
         from_attributes = True
+
+
+class ClauseReviewIn(BaseModel):
+    status: Literal["approved", "flagged", "edited", "pending"]
+    corrected_fields: Optional[Dict[str, Any]] = None
 
 
 class ContractFamilyOut(BaseModel):

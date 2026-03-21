@@ -280,11 +280,19 @@ Orchestrated by `start_fill_run_chain`.
 
 ## UI Conventions
 - **Component library**: shadcn/ui (26 base components in `frontend/src/components/ui/`)
-- **Styling**: Tailwind CSS with tokenized colors — always use semantic tokens, never raw hex
+- **Styling**: Tailwind CSS with tokenized colors — always use semantic tokens, never raw hex or hardcoded color classes
   - Key tokens: `bg-background`, `bg-card`, `bg-muted`, `text-foreground`, `text-muted-foreground`
   - Error: `bg-destructive/10`, `border-destructive/30`, `text-destructive`
   - Success: `bg-green-500/10`, `text-green-600` (or `success` token)
   - Primary accent: `bg-primary/5`, `border-primary/20`, `text-primary`
+- **Adding new color tokens**: Always follow this 3-step pattern:
+  1. Define CSS variables in `frontend/src/index.css` under `:root {}` (light) and `.dark {}` using HSL components (no `hsl()` wrapper so opacity modifiers work)
+  2. Register in `frontend/tailwind.config.js` under `theme.extend.colors` as `"hsl(var(--my-token))"`
+  3. Use in components as `bg-my-token`, `text-my-token`, etc. — **never** put raw color values in JS files
+- **Doc type badge tokens**: `dt-*` namespace (`bg-dt-customer`, `text-dt-customer-foreground`, etc.)
+  - CSS vars: `--dt-X` (bg) and `--dt-X-fg` (text) in `index.css`
+  - Registered in `tailwind.config.js` under `colors.dt`
+  - Label/color mapping: `frontend/src/verticals/private_equity/constants.js` (`DOC_TYPE_LABELS`, `DOC_TYPE_COLORS`)
 - **Error UI**: Inline error cards (shadcn `Alert` or custom div with `AlertCircle` icon), NOT browser `alert()`
 - **Progress UI**: Inline progress with shadcn `Progress` component + status message
 - **Icons**: lucide-react

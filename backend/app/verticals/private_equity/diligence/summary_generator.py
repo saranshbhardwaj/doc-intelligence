@@ -15,6 +15,13 @@ from app.config import settings
 from app.core.llm.llm_client import LLMClient
 from app.core.llm.structured_runner import StructuredLLMRunner
 from app.utils.logging import logger
+from app.verticals.private_equity.diligence.formatting import fmt_checklist_summary, fmt_classifications
+from app.verticals.private_equity.diligence.normalization import (
+    normalize_management_questions,
+    normalize_priority_risks,
+    normalize_summary_payload,
+    normalize_text_note,
+)
 
 # ─── Pydantic output models ─────────────────────────────────────────────────
 
@@ -86,17 +93,6 @@ def _fmt_findings(finding_entries: List[dict]) -> str:
     return "\n".join(lines)
 
 
-def _fmt_checklist(checklist_entries: List[dict]) -> str:
-    items = [e["item"] for e in checklist_entries]
-    covered = sum(1 for it in items if it.get("status") in {"covered", "partial"})
-    total = len(items)
-    gaps = [it["title"] for it in items if it.get("status") == "missing"]
-    lines = [f"## Checklist: {covered}/{total} covered"]
-    if gaps:
-        lines.append(f"Missing: {', '.join(gaps)}")
-    return "\n".join(lines)
-
-
 def _fmt_financials(llm_financials: Optional[dict]) -> str:
     if not llm_financials:
         return ""
@@ -117,17 +113,6 @@ def _fmt_financials(llm_financials: Optional[dict]) -> str:
     if notes:
         lines.append(f"- Data quality: {notes}")
     return "\n".join(lines)
-
-
-def _fmt_classifications(document_classifications: Dict[str, dict]) -> str:
-    if not document_classifications:
-        return ""
-    counts: Dict[str, int] = {}
-    for cls in document_classifications.values():
-        dt = cls.get("document_type") or "other"
-        counts[dt] = counts.get(dt, 0) + 1
-    parts = [f"{dt}: {n}" for dt, n in sorted(counts.items(), key=lambda x: -x[1])]
-    return f"## Documents: {', '.join(parts)}"
 
 
 def _fmt_verification(verification_stats: Dict[str, int]) -> str:
@@ -171,10 +156,10 @@ class LLMSummaryGenerator:
         """Generate summary. Returns summary dict (same shape as _build_summary) or None."""
         sections = [
             f"# Diligence Summary — {room_name}",
-            _fmt_classifications(document_classifications),
+            fmt_classifications(document_classifications, multiline=False),
             _fmt_verification(verification_stats),
             _fmt_financials(llm_financials),
-            _fmt_checklist(checklist_entries),
+            fmt_checklist_summary(checklist_entries, detailed=False),
             _fmt_findings(finding_entries),
         ]
         content = "\n\n".join(s for s in sections if s)
@@ -188,7 +173,7 @@ class LLMSummaryGenerator:
                 user_content=user_content,
                 system_prompt=_SYSTEM_PROMPT,
                 pydantic_model=DiligenceSummary,
-                use_cache=False,
+                use_cache=True,
             )
         except Exception as exc:
             logger.warning(
@@ -198,9 +183,13 @@ class LLMSummaryGenerator:
             return None
 
         data = result.get("data") or {}
-        narrative = data.get("executive_narrative") or ""
+        narrative = (data.get("executive_narrative") or "").strip()
         if not narrative:
             return None
+
+        priority_risks = normalize_priority_risks(data.get("priority_risks"))
+        management_questions = normalize_management_questions(data.get("management_questions"))
+        data_quality_assessment = normalize_text_note(data.get("data_quality_assessment"), max_length=500)
 
         # Build markdown output (mirrors _build_summary structure)
         md_lines = [
@@ -210,20 +199,20 @@ class LLMSummaryGenerator:
             "",
             "## Priority Risks",
         ]
-        for i, risk in enumerate((data.get("priority_risks") or [])[:5], 1):
+        for i, risk in enumerate(priority_risks[:5], 1):
             sev_label = risk.get("severity", "medium").capitalize()
             md_lines.append(
                 f"{i}. **[{sev_label}] {risk.get('title', '')}** — {risk.get('reasoning', '')}"
             )
         md_lines += ["", "## Management Questions to Ask"]
-        for i, q in enumerate((data.get("management_questions") or [])[:7], 1):
+        for i, q in enumerate(management_questions[:7], 1):
             rationale = q.get("rationale", "")
             md_lines.append(
                 f"{i}. {q.get('question', '')}"
                 + (f" *(Rationale: {rationale})*" if rationale else "")
             )
-        if data.get("data_quality_assessment"):
-            md_lines += ["", f"**Data Quality Note:** {data['data_quality_assessment']}"]
+        if data_quality_assessment:
+            md_lines += ["", f"**Data Quality Note:** {data_quality_assessment}"]
 
         markdown = "\n".join(md_lines)
 
@@ -248,21 +237,24 @@ class LLMSummaryGenerator:
             extra={
                 "room_id": room_id,
                 "run_id": run_id,
-                "priority_risks": len(data.get("priority_risks") or []),
-                "management_questions": len(data.get("management_questions") or []),
+                "priority_risks": len(priority_risks),
+                "management_questions": len(management_questions),
             },
         )
 
-        return {
+        return normalize_summary_payload({
             "markdown": markdown,
             "citations": citations,
             "confidence": data.get("confidence") or 0.80,
             "evidence_list": evidence_list,
             "metadata": {
-                "priority_risks": data.get("priority_risks") or [],
-                "management_questions": data.get("management_questions") or [],
-                "data_quality_assessment": data.get("data_quality_assessment"),
+                "priority_risks": [
+                    {"title": risk.get("title"), "severity": risk.get("severity"), "summary": risk.get("reasoning")}
+                    for risk in priority_risks
+                ],
+                "management_questions": management_questions,
+                "data_quality_assessment": data_quality_assessment,
                 "document_classification": document_classifications,
                 "verification": verification_stats,
             },
-        }
+        })

@@ -7,7 +7,7 @@
 import React, { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useAppAuth } from "@/hooks/useAppAuth";
-import PDFViewer from '../../../components/pdf/PDFViewer';
+import DocumentViewer from '../../../components/pdf/DocumentViewer';
 import FieldsList from '../components/FieldsList';
 import ExcelGridView from '../components/ExcelGridView';
 import { useTemplateFill, useTemplateFillActions } from '../../../store';
@@ -609,8 +609,9 @@ export default function TemplateFillPage() {
               </div>
               <div className="flex-1 min-h-0 overflow-auto">
                 {pdfUrl ? (
-                  <PDFViewer
-                    pdfUrl={pdfUrl}
+                  <DocumentViewer
+                    fileUrl={pdfUrl}
+                    filename={fillRun?.document_metadata?.filename || ''}
                     onTextSelect={handleTextSelect}
                     defaultPage={currentPage}
                     highlightBbox={highlightBbox}

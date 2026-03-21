@@ -45,6 +45,21 @@
     --similarity-high: 152 66% 39%;
     --similarity-mid: 39 96% 52%;
     --similarity-low: 0 78% 56%;
+
+    /* Document type badge tokens (bg + foreground text) */
+    --dt-spa: 214 95% 93%;        --dt-spa-fg: 214 89% 35%;
+    --dt-merger: 214 95% 93%;     --dt-merger-fg: 214 89% 35%;
+    --dt-customer: 142 60% 89%;   --dt-customer-fg: 142 52% 27%;
+    --dt-employment: 350 80% 93%; --dt-employment-fg: 350 78% 40%;
+    --dt-ip-license: 262 75% 92%; --dt-ip-license-fg: 262 75% 42%;
+    --dt-vendor: 38 92% 90%;      --dt-vendor-fg: 38 80% 32%;
+    --dt-nda: 215 16% 91%;        --dt-nda-fg: 215 20% 35%;
+    --dt-legal: 24 92% 92%;       --dt-legal-fg: 24 90% 38%;
+    --dt-amendment: 240 67% 92%;  --dt-amendment-fg: 240 60% 42%;
+    --dt-financial: 160 60% 88%;  --dt-financial-fg: 160 55% 27%;
+    --dt-qoe: 185 75% 88%;        --dt-qoe-fg: 185 70% 27%;
+    --dt-cim: 270 55% 92%;        --dt-cim-fg: 270 55% 40%;
+    --dt-other: 220 12% 91%;      --dt-other-fg: 220 12% 40%;
   }
 
   /* Dark theme variables */
@@ -97,6 +112,21 @@
     --similarity-high: 152 58% 44%;
     --similarity-mid: 39 88% 56%;
     --similarity-low: 0 70% 44%;
+
+    /* Document type badge tokens — dark mode */
+    --dt-spa: 214 89% 22%;        --dt-spa-fg: 214 89% 68%;
+    --dt-merger: 214 89% 22%;     --dt-merger-fg: 214 89% 68%;
+    --dt-customer: 142 52% 20%;   --dt-customer-fg: 142 52% 62%;
+    --dt-employment: 350 78% 22%; --dt-employment-fg: 350 78% 70%;
+    --dt-ip-license: 262 75% 22%; --dt-ip-license-fg: 262 75% 72%;
+    --dt-vendor: 38 80% 20%;      --dt-vendor-fg: 38 80% 70%;
+    --dt-nda: 215 20% 22%;        --dt-nda-fg: 215 20% 68%;
+    --dt-legal: 24 90% 22%;       --dt-legal-fg: 24 90% 72%;
+    --dt-amendment: 240 60% 22%;  --dt-amendment-fg: 240 60% 70%;
+    --dt-financial: 160 55% 20%;  --dt-financial-fg: 160 55% 62%;
+    --dt-qoe: 185 70% 20%;        --dt-qoe-fg: 185 70% 62%;
+    --dt-cim: 270 55% 22%;        --dt-cim-fg: 270 55% 70%;
+    --dt-other: 220 12% 22%;      --dt-other-fg: 220 12% 62%;
   }
 }
 
@@ -264,6 +294,41 @@
 
   .pe-action-ghost {
     @apply pe-action border border-border/70 text-foreground hover:bg-muted/40;
+  }
+
+  /* ── KPI row (dashboard) ─────────────────────────────────── */
+  .pe-kpi-row {
+    @apply grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3 mb-5;
+  }
+  .pe-kpi-item {
+    @apply pe-card p-4 flex flex-col gap-1.5;
+  }
+
+  /* ── Filter / search bar ─────────────────────────────────── */
+  .pe-filter-bar {
+    @apply flex flex-wrap items-center gap-2 rounded-xl border border-border/60 bg-muted/30 px-3 py-2.5;
+  }
+
+  /* ── Investment Overview KPI stat card ─────────────────────────── */
+  .pe-deal-stat {
+    @apply pe-card p-4 flex flex-col gap-1;
+  }
+
+  /* ── Severity pills ──────────────────────────────────────── */
+  .pe-sev-high {
+    @apply inline-flex items-center text-xs px-2 py-0.5 rounded-full font-bold border
+      bg-red-100 text-red-700 border-red-200
+      dark:bg-red-900/30 dark:text-red-400 dark:border-red-800;
+  }
+  .pe-sev-medium {
+    @apply inline-flex items-center text-xs px-2 py-0.5 rounded-full font-bold border
+      bg-yellow-100 text-yellow-700 border-yellow-200
+      dark:bg-yellow-900/30 dark:text-yellow-400 dark:border-yellow-800;
+  }
+  .pe-sev-low {
+    @apply inline-flex items-center text-xs px-2 py-0.5 rounded-full font-bold border
+      bg-blue-100 text-blue-700 border-blue-200
+      dark:bg-blue-900/30 dark:text-blue-400 dark:border-blue-800;
   }
 }
 

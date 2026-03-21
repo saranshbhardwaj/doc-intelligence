@@ -14,12 +14,17 @@ from __future__ import annotations
 
 from typing import Dict, Optional, Sequence
 
+from app.verticals.private_equity.diligence.doc_types import (
+    DEFAULT_DOC_TYPE,
+    FINANCIAL_DOC_TYPES,
+    HIGH_VALUE_CONTRACT_DOC_TYPES,
+)
 
 # Document types considered "high-value" for investigation coverage.
-# These carry 3x weight in coverage scoring.
-_CONTRACT_TYPES = frozenset({"purchase_agreement", "legal_contract"})
-# Medium-value document types (1.5x weight).
-_FINANCIAL_TYPES = frozenset({"financial_statement", "qoe_report"})
+# These carry the strongest weighting in coverage scoring.
+_CONTRACT_TYPES = HIGH_VALUE_CONTRACT_DOC_TYPES
+# Medium-value document types.
+_FINANCIAL_TYPES = FINANCIAL_DOC_TYPES
 
 
 def compute_coverage_metrics(
@@ -55,7 +60,7 @@ def compute_coverage_metrics(
     if classifications:
         for doc_id, info in classifications.items():
             info = info if isinstance(info, dict) else {}
-            doc_type = info.get("document_type") or "other"
+            doc_type = info.get("document_type") or DEFAULT_DOC_TYPE
             if doc_type in _CONTRACT_TYPES:
                 contract_doc_ids.add(doc_id)
             elif doc_type in _FINANCIAL_TYPES:

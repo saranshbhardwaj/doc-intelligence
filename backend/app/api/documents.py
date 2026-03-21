@@ -16,6 +16,11 @@ from app.repositories.collection_repository import CollectionRepository
 from app.repositories.document_repository import DocumentRepository
 from app.repositories.job_repository import JobRepository
 from app.services.beta_limits import enforce_page_limit
+from app.utils.document_uploads import (
+    SUPPORTED_UPLOAD_EXTENSIONS,
+    get_content_type_for_filename,
+    validate_uploaded_file_signature,
+)
 from app.utils.logging import logger
 
 router = APIRouter()
@@ -34,7 +39,7 @@ async def upload_document(
     """
     Upload a document to a collection and start async indexing.
 
-    Supported formats: PDF (digital & scanned), DOCX
+    Supported formats: PDF, DOCX, PPTX, and supported image files
 
     New Schema Flow:
     1. Validate file (type, size, name)
@@ -48,7 +53,7 @@ async def upload_document(
 
     Args:
         collection_id: Collection ID (UUID format)
-        file: Document file (PDF or DOCX)
+        file: Document file (PDF, DOCX, PPTX, or supported image)
         user: Current user
 
     Returns:
@@ -76,24 +81,12 @@ async def upload_document(
             detail=f"Filename too long (max {MAX_FILENAME_LENGTH} characters)"
         )
 
-    # Validate file type - Azure Document Intelligence supported formats
-    # https://learn.microsoft.com/en-us/azure/ai-services/document-intelligence/
-    ALLOWED_EXTENSIONS = {
-        # Documents
-        '.pdf',   # PDF (digital and scanned/OCR)
-        '.docx',  # Microsoft Word
-        # Note: Excel, PowerPoint, and images not supported yet
-        # - Excel loses table structure (returned as paragraphs)
-        # - PowerPoint needs slide-based chunking strategy
-        # - Images need OCR-specific handling
-    }
-
     file_ext = os.path.splitext(file.filename.lower())[1]
-    if file_ext not in ALLOWED_EXTENSIONS:
+    if file_ext not in SUPPORTED_UPLOAD_EXTENSIONS:
         raise HTTPException(
             status_code=400,
             detail=f"File type '{file_ext}' not supported. "
-                   f"Allowed: {', '.join(sorted(ALLOWED_EXTENSIONS))}"
+                   f"Allowed: {', '.join(sorted(SUPPORTED_UPLOAD_EXTENSIONS))}"
         )
 
     # Read file and validate
@@ -113,20 +106,9 @@ async def upload_document(
             detail=f"File too large ({file_size_mb:.1f}MB). Maximum size is {MAX_FILE_SIZE_MB}MB"
         )
 
-    # Validate file magic number based on type
-    if file_ext == '.pdf':
-        if not file_bytes.startswith(b'%PDF-'):
-            raise HTTPException(
-                status_code=400,
-                detail="File does not appear to be a valid PDF"
-            )
-    elif file_ext == '.docx':
-        # DOCX files are ZIP archives; ZIP magic number is PK (0x50 0x4B)
-        if not file_bytes.startswith(b'PK'):
-            raise HTTPException(
-                status_code=400,
-                detail="File does not appear to be a valid DOCX file"
-            )
+    validation_error = validate_uploaded_file_signature(file_ext, file_bytes)
+    if validation_error:
+        raise HTTPException(status_code=400, detail=validation_error)
 
     # Calculate content hash for global deduplication
     content_hash = hashlib.sha256(file_bytes).hexdigest()
@@ -205,7 +187,8 @@ async def upload_document(
 
             # Create completed job for UI consistency
             job = job_repo.create_job(
-                document_id=existing_doc.id,  # Reference canonical document
+                entity_type="document",
+                entity_id=existing_doc.id,  # Reference canonical document
                 status="completed",
                 current_stage="reused",
                 progress_percent=100,
@@ -297,7 +280,8 @@ async def upload_document(
 
             # Create JobState (references canonical document, not collection_document)
             job = job_repo.create_job(
-                document_id=document.id,  # NEW: References canonical documents table
+                entity_type="document",
+                entity_id=document.id,  # NEW: References canonical documents table
                 status="queued",
                 current_stage="queued",
                 progress_percent=0,
@@ -441,13 +425,7 @@ async def download_document(
             if not os.path.exists(file_path):
                 raise HTTPException(status_code=404, detail="Document file not found on disk")
 
-            # Determine content type from filename extension
-            file_ext = os.path.splitext(document.filename)[1].lower()
-            content_types = {
-                '.pdf': 'application/pdf',
-                '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
-            }
-            media_type = content_types.get(file_ext, 'application/octet-stream')
+            media_type = get_content_type_for_filename(document.filename)
 
             return FileResponse(
                 path=file_path,

@@ -26,6 +26,7 @@ from app.repositories.document_repository import DocumentRepository
 from app.repositories.user_repository import UserRepository
 from app.db_models_chat import DocumentChunk
 from app.services.beta_limits import enforce_page_limit, log_shadow_credits
+from app.utils.document_uploads import IMAGE_EXTENSIONS, POWERPOINT_EXTENSIONS, WORD_EXTENSIONS
 from app.utils.logging import logger
 from app.utils.pdf_utils import detect_pdf_type
 from app.utils.file_utils import save_raw_text, save_chunks
@@ -44,7 +45,7 @@ def _get_db_session():
 @shared_task(bind=True)
 def parse_document_for_indexing_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Parse PDF document for library indexing.
+    Parse uploaded document for library indexing.
 
     Input payload:
         - file_path: Path to uploaded PDF
@@ -93,12 +94,24 @@ def parse_document_for_indexing_task(self, payload: Dict[str, Any]) -> Dict[str,
         # Determine file type from extension
         file_ext = os.path.splitext(filename)[1].lower()
 
-        # Detect document type for metadata/logging (Azure DI handles both natively)
-        if file_ext == '.docx':
+        # Detect document type for metadata/logging (Azure DI handles these formats natively)
+        if file_ext in WORD_EXTENSIONS:
             pdf_type = "digital"
             tracker.update_progress(
                 progress_percent=8,
                 message="Detected DOCX document"
+            )
+        elif file_ext in POWERPOINT_EXTENSIONS:
+            pdf_type = "digital"
+            tracker.update_progress(
+                progress_percent=8,
+                message="Detected PowerPoint document"
+            )
+        elif file_ext in IMAGE_EXTENSIONS:
+            pdf_type = "scanned"
+            tracker.update_progress(
+                progress_percent=8,
+                message="Detected image document"
             )
         else:
             pdf_type = detect_pdf_type(file_path)

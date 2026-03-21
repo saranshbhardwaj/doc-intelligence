@@ -3,7 +3,7 @@
  * Upload, view, and manage Excel templates for Real Estate vertical
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useAppAuth } from "@/hooks/useAppAuth";
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
@@ -84,6 +84,16 @@ export default function TemplatesPage() {
   const [isDeleting, setIsDeleting] = useState(false);
   const [checkingUsage, setCheckingUsage] = useState(false);
 
+  // Track if component is mounted to prevent state updates after unmount
+  const isMountedRef = useRef(true);
+
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
+
   useEffect(() => {
     setFillPage(0);
     setFillRuns([]);
@@ -100,6 +110,8 @@ export default function TemplatesPage() {
           listRETemplates(getToken),
           getFillRunCount(getToken),
         ]);
+        // Only update state if component is still mounted
+        if (!isMountedRef.current) return;
         setTemplates(data || []);
         setFillRunCount(count);
       } else {
@@ -108,14 +120,19 @@ export default function TemplatesPage() {
           listFillRuns(getToken, FILL_PAGE_SIZE, offset),
           getFillRunCount(getToken),
         ]);
+        // Only update state if component is still mounted
+        if (!isMountedRef.current) return;
         setFillRuns(data || []);
         setFillTotal(total);
       }
     } catch (err) {
-      console.error('❌ Failed to load data:', err);
+      if (!isMountedRef.current) return;
+      console.error('Failed to load data:', err);
       setError(`Failed to load ${activeTab}`);
     } finally {
-      setLoading(false);
+      if (isMountedRef.current) {
+        setLoading(false);
+      }
     }
   }
 
@@ -193,12 +210,16 @@ export default function TemplatesPage() {
     try {
       // Fetch usage stats from backend
       const usage = await getTemplateUsage(getToken, templateId);
+      if (!isMountedRef.current) return;
       setTemplateUsage(usage);
     } catch (err) {
+      if (!isMountedRef.current) return;
       console.error('Failed to check template usage:', err);
       setTemplateUsage(null);
     } finally {
-      setCheckingUsage(false);
+      if (isMountedRef.current) {
+        setCheckingUsage(false);
+      }
     }
   }
 
@@ -209,6 +230,7 @@ export default function TemplatesPage() {
       setIsDeleting(true);
       const result = await deleteRETemplate(getToken, templateToDelete.id);
 
+      if (!isMountedRef.current) return;
       if (activeTab === 'templates') {
         await loadData(0);
       } else {
@@ -226,12 +248,15 @@ export default function TemplatesPage() {
         toast.success(`Template deleted`);
       }
     } catch (err) {
+      if (!isMountedRef.current) return;
       console.error('Delete failed:', err);
       toast.error('Failed to delete template', {
         description: err.response?.data?.detail || err.message,
       });
     } finally {
-      setIsDeleting(false);
+      if (isMountedRef.current) {
+        setIsDeleting(false);
+      }
     }
   }
 
@@ -255,13 +280,17 @@ export default function TemplatesPage() {
 
       const result = await startTemplateFill(getToken, selectedTemplate.id, document.id);
 
+      if (!isMountedRef.current) return;
       // Navigate to fill run page
       navigate(`/app/re/fills/${result.fill_run_id}`);
     } catch (err) {
+      if (!isMountedRef.current) return;
       console.error('Failed to start fill run:', err);
       alert('Failed to start fill run: ' + (err.message || 'Unknown error'));
     } finally {
-      setStartingFill(false);
+      if (isMountedRef.current) {
+        setStartingFill(false);
+      }
     }
   }
 
@@ -281,16 +310,20 @@ export default function TemplatesPage() {
     try {
       setIsDeleting(true);
       await deleteFillRun(getToken, fillRunToDelete.id);
+      if (!isMountedRef.current) return;
       setShowDeleteAlert(false);
       setFillRunToDelete(null);
       await loadData(fillPage);
     } catch (err) {
+      if (!isMountedRef.current) return;
       console.error('Delete failed:', err);
       toast.error('Failed to delete fill run', {
         description: err.message,
       });
     } finally {
-      setIsDeleting(false);
+      if (isMountedRef.current) {
+        setIsDeleting(false);
+      }
     }
   }
 

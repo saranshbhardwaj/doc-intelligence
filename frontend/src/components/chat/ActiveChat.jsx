@@ -56,7 +56,7 @@ import {
   ResizablePanel,
   ResizableHandle,
 } from "../ui/resizable";
-import PDFViewer from "../pdf/PDFViewer";
+import DocumentViewer from "../pdf/DocumentViewer";
 
 export default function ActiveChat({
   currentSession,
@@ -647,7 +647,7 @@ export default function ActiveChat({
                   size="icon"
                   onClick={() => setShowPdfPanel(false)}
                   className="h-7 w-7"
-                  title="Close PDF viewer"
+                  title="Close document viewer"
                 >
                   <X className="h-4 w-4" />
                 </Button>
@@ -657,11 +657,12 @@ export default function ActiveChat({
               {pdfViewer.isLoadingUrl ? (
                 <div className="flex flex-col items-center justify-center h-full gap-2">
                   <Spinner size="md" />
-                  <p className="text-sm text-muted-foreground">Loading PDF...</p>
+                  <p className="text-sm text-muted-foreground">Loading document...</p>
                 </div>
               ) : activePdfUrl ? (
-                <PDFViewer
-                  pdfUrl={activePdfUrl}
+                <DocumentViewer
+                  fileUrl={activePdfUrl}
+                  filename={currentSession?.documents?.find(d => d.id === pdfViewer.activeDocumentId)?.name || ''}
                   highlightBbox={pdfViewer.highlightBbox}
                   onHighlightClick={clearHighlight}
                   suppressDefaultPageScroll
@@ -669,7 +670,7 @@ export default function ActiveChat({
               ) : pdfViewer.activeDocumentId ? (
                 <div className="flex flex-col items-center justify-center h-full gap-2 text-muted-foreground">
                   <FileText className="w-12 h-12 opacity-20" />
-                  <p className="text-sm">Click a document chip to view PDF</p>
+                  <p className="text-sm">Click a document chip to view it</p>
                 </div>
               ) : (
                 <div className="flex flex-col items-center justify-center h-full gap-2 text-muted-foreground">
@@ -710,11 +711,12 @@ export default function ActiveChat({
             {pdfViewer.isLoadingUrl ? (
               <div className="flex flex-col items-center justify-center h-full gap-2">
                 <Spinner size="md" />
-                <p className="text-sm text-muted-foreground">Loading PDF...</p>
+                  <p className="text-sm text-muted-foreground">Loading document...</p>
               </div>
             ) : activePdfUrl ? (
-              <PDFViewer
-                pdfUrl={activePdfUrl}
+              <DocumentViewer
+                fileUrl={activePdfUrl}
+                filename={currentSession?.documents?.find(d => d.id === pdfViewer.activeDocumentId)?.name || ''}
                 highlightBbox={pdfViewer.highlightBbox}
                 onHighlightClick={clearHighlight}
                 suppressDefaultPageScroll

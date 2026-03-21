@@ -76,8 +76,10 @@ class Settings(BaseSettings):
 
     # PE diligence classification fallback
     pe_diligence_classifier_llm_fallback_enabled: bool = True
-    pe_diligence_classifier_llm_min_confidence: float = 0.75
+    pe_diligence_classifier_llm_min_confidence: float = 0.60
     pe_diligence_classifier_llm_input_chars: int = 4000
+
+    pe_diligence_llm_classification_enabled: bool = True  # opt-in until validated
 
     # PE diligence investigation LLM claim augmentation
     pe_diligence_investigation_llm_enabled: bool = True
@@ -92,14 +94,20 @@ class Settings(BaseSettings):
     # PE diligence LLM clause extraction (stage 4b)
     pe_diligence_llm_clause_extraction_enabled: bool = True  # opt-in until validated
     pe_diligence_llm_clause_max_chunks_per_type: int = 10    # max candidate chunks per clause_type
-    pe_diligence_llm_clause_min_confidence: float = 0.60     # discard extracted clauses below this
+    pe_diligence_llm_clause_min_confidence: float = 0.50     # discard extracted clauses below this
+    pe_diligence_llm_clause_min_semantic_similarity: float = 0.20  # drop hybrid chunks below this cosine similarity before LLM
 
     # PE diligence LLM numeric extraction (stage 5b)
     pe_diligence_llm_numeric_extraction_enabled: bool = True  # opt-in until validated
     pe_diligence_llm_numeric_max_chunks: int = 30              # max financial chunks sent to LLM
-    pe_diligence_llm_numeric_min_confidence: float = 0.60      # discard extracted metrics below this
+    pe_diligence_llm_numeric_min_confidence: float = 0.50      # discard extracted metrics below this
 
-    # PE diligence LLM findings synthesis (stage 7 upgrade)
+    # PE diligence per-document LLM analysis (runs for every classified doc)
+    pe_diligence_per_doc_analysis_top_k: int = 12            # chunks sent to LLM after reranking (was 8)
+    pe_diligence_per_doc_rerank_fetch_k: int = 20            # chunks fetched before reranking (headroom)
+    pe_diligence_per_doc_analysis_concurrency: int = 5       # parallel LLM calls cap
+
+    # PE diligence LLM findings synthesis (cross-doc, stage 7)
     pe_diligence_llm_findings_synthesis_enabled: bool = True  # opt-in until validated
     pe_diligence_llm_findings_max_input_chars: int = 30000     # max chars assembled for synthesis prompt
 

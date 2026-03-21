@@ -49,6 +49,7 @@ export default function UploadModal({
   onCollectionChange,
   onUpload,
 }) {
+  const uploadAccept = ".pdf,.docx,.pptx,.jpg,.jpeg,.png,.bmp,.tif,.tiff,.heif,.heic";
   const [selectedFiles, setSelectedFiles] = useState([]);
   const [dragActive, setDragActive] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -70,13 +71,20 @@ export default function UploadModal({
     // Check file type (MIME type + extension fallback)
     const allowedTypes = new Set([
       "application/pdf",
-      "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      "image/jpeg",
+      "image/png",
+      "image/bmp",
+      "image/tiff",
+      "image/heif",
+      "image/heic",
     ]);
     const ext = file.name.toLowerCase().split('.').pop();
-    const allowedExts = ["pdf", "docx"];
+    const allowedExts = ["pdf", "docx", "pptx", "jpg", "jpeg", "png", "bmp", "tif", "tiff", "heif", "heic"];
 
     if (!allowedTypes.has(file.type) && !allowedExts.includes(ext)) {
-      errors.push("Only PDF and DOCX files are allowed");
+      errors.push("Only PDF, DOCX, PPTX, JPEG, PNG, BMP, TIFF, HEIF, and HEIC files are allowed");
     }
 
     if (file.size > 50 * 1024 * 1024) {
@@ -159,7 +167,7 @@ export default function UploadModal({
         <DialogHeader>
           <DialogTitle className="text-xl">Upload Documents</DialogTitle>
           <DialogDescription>
-            Upload documents to your collection. Supports PDF and DOCX. Files will be automatically
+            Upload documents to your collection. Supports PDF, Word, PowerPoint, and image files. Files will be automatically
             parsed, chunked, and embedded.
           </DialogDescription>
         </DialogHeader>
@@ -208,7 +216,7 @@ export default function UploadModal({
             <input
               ref={fileInputRef}
               type="file"
-              accept=".pdf,.docx"
+              accept={uploadAccept}
               multiple
               onChange={handleFileInput}
               className="hidden"
@@ -243,7 +251,7 @@ export default function UploadModal({
               </Button>
 
               <p className="text-xs text-muted-foreground mt-4">
-                Max file size: 50MB • PDF, DOCX
+                Max file size: 50MB • PDF, DOCX, PPTX, JPEG, PNG, BMP, TIFF, HEIF, HEIC
               </p>
             </div>
           </div>

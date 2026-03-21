@@ -166,7 +166,7 @@ class AzureDocumentIntelligenceParser(DocumentParser):
             # KEY_VALUE_PAIRS is only supported for PDF and images (JPEG, PNG, TIFF, BMP)
             # NOT supported for DOCX or XLSX
             features = []
-            if file_ext in ('pdf', 'jpg', 'jpeg', 'png', 'tiff', 'bmp', 'heif'):
+            if file_ext in ('pdf', 'jpg', 'jpeg', 'png', 'tiff', 'bmp', 'heif', 'heic'):
                 features.append(DocumentAnalysisFeature.KEY_VALUE_PAIRS)
                 logger.info(f"Requesting KEY_VALUE_PAIRS feature for {file_ext} file")
             else:

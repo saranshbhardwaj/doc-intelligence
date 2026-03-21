@@ -12,14 +12,15 @@ import {
 } from "lucide-react";
 import { useAppAuth } from "@/hooks/useAppAuth";
 import PELayout from "./PELayout";
-import PDFViewer from "@/components/pdf/PDFViewer";
+import DocumentViewer from "@/components/pdf/DocumentViewer";
 import {
   ResizablePanelGroup,
   ResizablePanel,
   ResizableHandle,
 } from "@/components/ui/resizable";
-import { getInvestigation, rerunInvestigation, overrideClaim } from "../../../api/pe-diligence";
+import { getInvestigation, rerunInvestigation, overrideClaim, listRoomDocuments } from "../../../api/pe-diligence";
 import { getDocumentDownloadUrl } from "../../../api/documents";
+import { mdToHtml } from "../constants";
 
 // ─── Style maps ───────────────────────────────────────────────────────────────
 
@@ -218,29 +219,29 @@ export default function InvestigationDetail() {
   const [error, setError]                 = useState(null);
   const [rerunning, setRerunning]         = useState(false);
 
-  // PDF panel state
-  const [showPdf, setShowPdf]             = useState(false);
-  const [activePdfUrl, setActivePdfUrl]   = useState(null);
+  // Document viewer state
+  const [showDocumentViewer, setShowDocumentViewer] = useState(false);
+  const [activeDocumentUrl, setActiveDocumentUrl]   = useState(null);
   const [highlightBbox, setHighlightBbox] = useState(null);
-  const [pdfLoading, setPdfLoading]       = useState(false);
-  const [activePdfLabel, setActivePdfLabel] = useState("");
+  const [documentLoading, setDocumentLoading] = useState(false);
+  const [activeDocumentLabel, setActiveDocumentLabel] = useState("");
+  const [activeFilename, setActiveFilename] = useState("");
   const urlCacheRef = useRef({});
 
-  // Build doc filename lookup from evidence spans
+  // Build doc filename lookup from room documents
   const [docFilenames, setDocFilenames]   = useState({});
 
   useEffect(() => {
-    getInvestigation(getToken, roomId, invId)
-      .then((data) => {
+    Promise.all([
+      getInvestigation(getToken, roomId, invId),
+      listRoomDocuments(getToken, roomId),
+    ])
+      .then(([data, docs]) => {
         setInvestigation(data);
-        const claimsData = data.claims || [];
-        setClaims(claimsData);
-        // Extract unique doc IDs from all evidence spans to build filenames map
-        // (filenames would need a separate call; use doc IDs as fallback for now)
-        const docIds = new Set();
-        claimsData.forEach((c) => c.evidence_spans?.forEach((s) => {
-          if (s.source_document_id) docIds.add(s.source_document_id);
-        }));
+        setClaims(data.claims || []);
+        const map = {};
+        (docs || []).forEach((d) => { map[d.document_id] = d.filename; });
+        setDocFilenames(map);
       })
       .catch((err) => setError(err.message || "Failed to load investigation"))
       .finally(() => setLoading(false));
@@ -249,8 +250,10 @@ export default function InvestigationDetail() {
   const handleViewInDoc = useCallback(async (span) => {
     if (!span.source_document_id) return;
     const docId = span.source_document_id;
-    setPdfLoading(true);
-    setActivePdfLabel(span.source_document_id);
+    setDocumentLoading(true);
+    const filename = docFilenames[docId] || '';
+    setActiveDocumentLabel(filename || docId);
+    setActiveFilename(filename);
 
     try {
       // Check URL cache
@@ -261,17 +264,17 @@ export default function InvestigationDetail() {
         url = result.url || result;
         urlCacheRef.current[docId] = { url, expiry: Date.now() + 10 * 60 * 1000 };
       }
-      setActivePdfUrl(url);
+      setActiveDocumentUrl(url);
       setHighlightBbox(
         span.source_page_number
           ? { page: span.source_page_number, x0: 0, y0: 0, x1: 0, y1: 0 }
           : null,
       );
-      setShowPdf(true);
+      setShowDocumentViewer(true);
     } catch (err) {
-      console.error("Failed to load PDF", err);
+      console.error("Failed to load document", err);
     } finally {
-      setPdfLoading(false);
+      setDocumentLoading(false);
     }
   }, [getToken]);
 
@@ -323,13 +326,13 @@ export default function InvestigationDetail() {
               )}
             </div>
             <div className="flex items-center gap-2">
-              {showPdf && (
+              {showDocumentViewer && (
                 <button
-                  onClick={() => setShowPdf(false)}
+                  onClick={() => setShowDocumentViewer(false)}
                   className="pe-action-ghost text-xs px-2.5 py-1.5"
                 >
                   <X className="w-3.5 h-3.5" />
-                  Close PDF
+                  Close viewer
                 </button>
               )}
               <button
@@ -376,7 +379,7 @@ export default function InvestigationDetail() {
           <div className="flex-1 min-h-0">
             <ResizablePanelGroup direction="horizontal" className="h-full">
               {/* Left: claims list */}
-              <ResizablePanel defaultSize={showPdf ? 55 : 100} minSize={30}>
+              <ResizablePanel defaultSize={showDocumentViewer ? 55 : 100} minSize={30}>
                 <div className="h-full overflow-y-auto px-6 py-4">
                   {isRunning && (
                     <div className="pe-muted-banner mb-4">
@@ -418,27 +421,28 @@ export default function InvestigationDetail() {
               </ResizablePanel>
 
               {/* PDF panel */}
-              {showPdf && (
+              {showDocumentViewer && (
                 <>
                   <ResizableHandle withHandle />
                   <ResizablePanel defaultSize={45} minSize={25}>
                     <div className="h-full flex flex-col border-l">
                       <div className="px-4 py-2.5 border-b bg-muted/30 flex items-center justify-between shrink-0">
                         <p className="text-xs font-medium text-muted-foreground truncate">
-                          {activePdfLabel || "Document"}
+                          {activeDocumentLabel || "Document"}
                         </p>
-                        <button onClick={() => setShowPdf(false)}>
+                        <button onClick={() => setShowDocumentViewer(false)}>
                           <X className="w-4 h-4 text-muted-foreground hover:text-foreground" />
                         </button>
                       </div>
                       <div className="flex-1 overflow-hidden">
-                        {pdfLoading ? (
+                        {documentLoading ? (
                           <div className="flex items-center justify-center h-full text-sm text-muted-foreground">
                             Loading document…
                           </div>
-                        ) : activePdfUrl ? (
-                          <PDFViewer
-                            pdfUrl={activePdfUrl}
+                        ) : activeDocumentUrl ? (
+                          <DocumentViewer
+                            fileUrl={activeDocumentUrl}
+                            filename={activeFilename}
                             highlightBbox={highlightBbox}
                           />
                         ) : null}
@@ -453,17 +457,4 @@ export default function InvestigationDetail() {
       </div>
     </PELayout>
   );
-}
-
-function mdToHtml(md) {
-  return md
-    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
-    .replace(/^### (.+)$/gm, "<h3 class='font-bold mt-3 mb-1'>$1</h3>")
-    .replace(/^## (.+)$/gm, "<h2 class='font-bold text-base mt-4 mb-1'>$1</h2>")
-    .replace(/^# (.+)$/gm, "<h1 class='font-bold text-lg mt-4 mb-2'>$1</h1>")
-    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
-    .replace(/\*(.+?)\*/g, "<em>$1</em>")
-    .replace(/^- (.+)$/gm, "<li class='ml-4 list-disc'>$1</li>")
-    .replace(/\n\n/g, "<br/><br/>")
-    .replace(/\n/g, "<br/>");
 }

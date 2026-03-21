@@ -50,9 +50,15 @@ export async function removeRoomDocument(getToken, roomId, roomDocumentId) {
 
 // --- Analysis ---
 
-export async function startAnalysis(getToken, roomId, forceReanalyze = false) {
+export async function startAnalysis(getToken, roomId, forceReanalyze = false, incremental = false) {
   const api = createAuthenticatedApi(getToken);
-  const res = await api.post(`${BASE}/rooms/${roomId}/analyze`, { force_reanalyze: forceReanalyze });
+  const res = await api.post(`${BASE}/rooms/${roomId}/analyze`, { force_reanalyze: forceReanalyze, incremental });
+  return res.data;
+}
+
+export async function getAnalysisStatus(getToken, roomId) {
+  const api = createAuthenticatedApi(getToken);
+  const res = await api.get(`${BASE}/rooms/${roomId}/analysis-status`);
   return res.data;
 }
 
@@ -60,6 +66,12 @@ export async function getAnalysisRun(getToken, roomId, runId) {
   const api = createAuthenticatedApi(getToken);
   const res = await api.get(`${BASE}/rooms/${roomId}/analysis-runs/${runId}`);
   return res.data;
+}
+
+export async function getActiveAnalysisRun(getToken, roomId) {
+  const api = createAuthenticatedApi(getToken);
+  const res = await api.get(`${BASE}/rooms/${roomId}/active-analysis-run`);
+  return res.data; // null or run object
 }
 
 export async function getRoomChecklist(getToken, roomId) {
@@ -158,6 +170,22 @@ export async function listContractFamilies(getToken, roomId) {
 export async function listPlaybooks(getToken) {
   const api = createAuthenticatedApi(getToken);
   const res = await api.get(`${BASE}/playbooks`);
+  return res.data;
+}
+
+// --- Clause Review ---
+
+export async function reviewClause(getToken, roomId, clauseId, payload) {
+  const api = createAuthenticatedApi(getToken);
+  const res = await api.patch(`${BASE}/rooms/${roomId}/clauses/${clauseId}/review`, payload);
+  return res.data;
+}
+
+// --- Room Financials ---
+
+export async function getRoomFinancials(getToken, roomId) {
+  const api = createAuthenticatedApi(getToken);
+  const res = await api.get(`${BASE}/rooms/${roomId}/financials`);
   return res.data;
 }
 

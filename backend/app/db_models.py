@@ -111,40 +111,30 @@ class JobState(Base):
     """
     Track real-time job progress through processing pipeline.
 
-    Supports Extract Mode, Chat Mode, Workflow Mode, and Template Fill Mode:
-    - Extract Mode: extraction_id is set
-    - Chat Mode: document_id is set (for chat indexing)
-    - Workflow Mode: workflow_run_id is set
-    - Template Fill Mode: template_fill_run_id is set
+    Uses a polymorphic entity_type + entity_id pattern — extensible to any new
+    entity type without schema migrations. Integrity enforced at application level.
 
-    A CHECK constraint ensures exactly one foreign key is set (XOR logic).
+    Supported entity_type values:
+    - "extraction"        — PE extraction run
+    - "document"          — Library document indexing
+    - "workflow_run"      — PE workflow run
+    - "template_fill_run" — RE template fill run
+    - "analysis_run"      — PE diligence analysis run
+    - "investigation_run" — PE diligence investigation run
     """
     __tablename__ = "job_states"
     __table_args__ = (
-        # Ensure exactly ONE of extraction_id, document_id, workflow_run_id, template_fill_run_id is set
-        CheckConstraint(
-            '((extraction_id IS NOT NULL AND document_id IS NULL AND workflow_run_id IS NULL AND template_fill_run_id IS NULL) OR '
-            '(extraction_id IS NULL AND document_id IS NOT NULL AND workflow_run_id IS NULL AND template_fill_run_id IS NULL) OR '
-            '(extraction_id IS NULL AND document_id IS NULL AND workflow_run_id IS NOT NULL AND template_fill_run_id IS NULL) OR '
-            '(extraction_id IS NULL AND document_id IS NULL AND workflow_run_id IS NULL AND template_fill_run_id IS NOT NULL))',
-            name='job_states_entity_exactly_one_fk_check'
-        ),
         Index("idx_job_states_job_id", "job_id"),
         Index("idx_job_states_status", "status"),
-        Index("idx_job_states_extraction_id", "extraction_id"),
-        Index("idx_job_states_document_id", "document_id"),
-        Index("idx_job_states_workflow_run_id", "workflow_run_id"),
-        Index("idx_job_states_template_fill_run_id", "template_fill_run_id"),
+        Index("idx_job_states_entity", "entity_type", "entity_id"),
     )
 
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     job_id = Column(String(36), unique=True, nullable=False)  # Job ID for tracking
 
-    # Entity being processed (exactly one must be set)
-    extraction_id = Column(String(36), ForeignKey("extractions.id", ondelete="CASCADE"), nullable=True)
-    document_id = Column(String(36), ForeignKey("documents.id", ondelete="CASCADE"), nullable=True)
-    workflow_run_id = Column(String(36), ForeignKey("workflow_runs.id", ondelete="CASCADE"), nullable=True)
-    template_fill_run_id = Column(String(36), ForeignKey("template_fill_runs.id", ondelete="CASCADE"), nullable=True)
+    # Polymorphic entity reference — no FK constraint, integrity enforced at app level
+    entity_type = Column(String(50), nullable=False)  # e.g. "extraction", "document", "workflow_run"
+    entity_id = Column(String(36), nullable=False)    # UUID of the referenced entity
 
     # Current status
     status = Column(String(20), default="queued")  # queued, parsing, chunking, embedding, storing, completed, failed
@@ -154,15 +144,12 @@ class JobState(Base):
     # Stage tracking flags (completed stages)
     parsing_completed = Column(Boolean, default=False)
     chunking_completed = Column(Boolean, default=False)
-    summarizing_completed = Column(Boolean, default=False)
-    extracting_completed = Column(Boolean, default=False)
     embedding_completed = Column(Boolean, default=False)
     storing_completed = Column(Boolean, default=False)
 
     # Workflow-specific stage flags
     context_completed = Column(Boolean, default=False)
     artifact_completed = Column(Boolean, default=False)
-    validation_completed = Column(Boolean, default=False)
 
     # Template fill-specific stage flags
     field_detection_completed = Column(Boolean, default=False)
@@ -189,9 +176,6 @@ class JobState(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     completed_at = Column(DateTime(timezone=True), nullable=True)
-
-    # Relationships
-    template_fill_run = relationship("TemplateFillRun", back_populates="job_states")
 
 
 class AnthropicUsageSnapshot(Base):

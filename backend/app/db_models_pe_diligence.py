@@ -82,6 +82,7 @@ class PEDiligenceAnalysisRun(Base):
     __table_args__ = (
         Index("idx_pe_diligence_analysis_runs_room_id", "room_id"),
         Index("idx_pe_diligence_analysis_runs_status", "status"),
+        Index("idx_pe_diligence_analysis_runs_job_id", "job_id"),
     )
 
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
@@ -94,6 +95,9 @@ class PEDiligenceAnalysisRun(Base):
     progress_percent = Column(Integer, nullable=False, default=0)
     error_message = Column(Text, nullable=True)
     metadata_json = Column("metadata", JSONB, nullable=True)
+
+    # Link to job tracking (for SSE real-time progress)
+    job_id = Column(String(36), nullable=True)
 
     started_at = Column(DateTime(timezone=True), nullable=True)
     completed_at = Column(DateTime(timezone=True), nullable=True)
@@ -408,6 +412,12 @@ class PEDiligenceClause(Base):
     metadata_json = Column("metadata", JSONB, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
+    # Human review fields
+    review_status = Column(String(20), nullable=True)  # null | "approved" | "flagged" | "edited"
+    reviewed_by = Column(String(255), nullable=True)
+    reviewed_at = Column(DateTime(timezone=True), nullable=True)
+    corrected_fields = Column(JSONB, nullable=True)  # overrides extracted_fields when set
+
     room = relationship("PEDiligenceRoom")
     source_document = relationship("Document")
     contract_family = relationship("PEDiligenceContractFamily")
@@ -428,5 +438,6 @@ class PEDiligencePlaybook(Base):
     prompt_template = Column(Text, nullable=True)
     output_schema = Column(JSONB, nullable=True)
     is_system = Column(Boolean, nullable=False, default=True)
+    applicable_doc_types = Column(JSONB, nullable=True)  # e.g. ["purchase_agreement", "legal_contract"]; None = all doc types
     metadata_json = Column("metadata", JSONB, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())

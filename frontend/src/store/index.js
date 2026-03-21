@@ -14,6 +14,7 @@ import { createChatSlice } from "./slices/chat/chatSlice";
 import { createWorkflowDraftSlice } from "./slices/workflowDraftSlice";
 import { createTemplateFillSlice } from "./slices/templateFillSlice";
 import { createFeedbackSlice } from "./slices/feedbackSlice";
+import { createPeDiligenceSlice } from "./slices/peDiligenceSlice";
 
 /**
  * Main store combining all slices
@@ -27,6 +28,7 @@ export const useStore = create(
       ...createWorkflowDraftSlice(...args),
       ...createTemplateFillSlice(...args),
       ...createFeedbackSlice(...args),
+      ...createPeDiligenceSlice(...args),
     }),
     {
       name: "sand-cloud-storage", // localStorage key
@@ -75,6 +77,11 @@ export const useStore = create(
           fillRunId: state.templateFill?.fillRunId ?? null,
           // Don't persist: fillRun, pdfUrl, pdfUrlExpiry, selectedText, isLoading, isSaving, error, pdfRefreshTimer
         },
+        // Persist PE analysis job ID + room for SSE reconnection after page refresh
+        peDiligence: {
+          roomId: state.peDiligence?.roomId ?? null,
+          analysisJobId: state.peDiligence?.analysisJobId ?? null,
+        },
       }),
       // Merge persisted slice keys into current state instead of overwriting
       // so that non-persisted defaults (e.g. progress structure) remain intact.
@@ -110,6 +117,11 @@ export const useStore = create(
           templateFill: {
             ...current.templateFill,
             ...persisted.templateFill,
+          },
+          peDiligence: {
+            ...current.peDiligence,
+            roomId: persisted.peDiligence?.roomId ?? null,
+            analysisJobId: persisted.peDiligence?.analysisJobId ?? null,
           },
         };
       },
@@ -289,6 +301,24 @@ export const useFeedbackActions = () =>
       hasFeedbackBeenSubmitted: state.hasFeedbackBeenSubmitted,
       setFeedbackSubmitting: state.setFeedbackSubmitting,
       isFeedbackSubmitting: state.isFeedbackSubmitting,
+    }))
+  );
+
+// PE Diligence selectors
+export const usePeDiligence = () => useStore((state) => state.peDiligence);
+
+export const usePeDiligenceActions = () =>
+  useStore(
+    useShallow((state) => ({
+      peLoadRoom: state.peLoadRoom,
+      peLoadDocuments: state.peLoadDocuments,
+      peRefreshDocuments: state.peRefreshDocuments,
+      peSetAnalysisJob: state.peSetAnalysisJob,
+      peClearAnalysisJob: state.peClearAnalysisJob,
+      peSetAnalysisWarnings: state.peSetAnalysisWarnings,
+      peMarkAnalysisCompleted: state.peMarkAnalysisCompleted,
+      peRefreshAnalysisStatus: state.peRefreshAnalysisStatus,
+      peClearRoom: state.peClearRoom,
     }))
   );
 

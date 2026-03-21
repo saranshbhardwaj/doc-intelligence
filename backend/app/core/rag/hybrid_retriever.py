@@ -60,7 +60,8 @@ class HybridRetriever:
         top_k: int = 20,
         document_ids: Optional[List[str]] = None,
         query_understanding=None,  # QueryUnderstanding object (optional, for HyDE)
-        min_semantic_similarity: Optional[float] = None
+        min_semantic_similarity: Optional[float] = None,
+        section_types: Optional[List[str]] = None,  # e.g. ["narrative"], ["table", "key_value_pairs"]
     ) -> List[Dict]:
         """
         Hybrid retrieval combining vector + keyword search
@@ -90,12 +91,14 @@ class HybridRetriever:
             top_k=top_k,
             document_ids=document_ids,
             query_understanding=query_understanding,  # Pass for HyDE
-            min_semantic_similarity=min_semantic_similarity
+            min_semantic_similarity=min_semantic_similarity,
+            section_types=section_types,
         )
 
         # 3. Keyword search (BM25/FTS)
         keyword_results = self._keyword_search(
-            query, collection_id, top_k=top_k, document_ids=document_ids
+            query, collection_id, top_k=top_k, document_ids=document_ids,
+            section_types=section_types,
         )
 
         # 4. Merge and normalize scores
@@ -147,7 +150,8 @@ class HybridRetriever:
         top_k: int,
         document_ids: Optional[List[str]],
         query_understanding=None,
-        min_semantic_similarity: Optional[float] = None
+        min_semantic_similarity: Optional[float] = None,
+        section_types: Optional[List[str]] = None,
     ) -> List[Dict]:
         """
         Semantic search using pgvector cosine similarity
@@ -207,6 +211,10 @@ class HybridRetriever:
             stmt = stmt.where(DocumentChunk.document_id.in_(document_ids))
         else:
             raise ValueError("Either collection_id or document_ids must be provided")
+
+        # Optional section_type filter (e.g. prefer narrative or table chunks)
+        if section_types:
+            stmt = stmt.where(DocumentChunk.section_type.in_(section_types))
 
         # Order by distance (ascending = most similar first)
         stmt = stmt.order_by(distance_expr).limit(top_k)
@@ -297,7 +305,8 @@ class HybridRetriever:
         query: str,
         collection_id: Optional[str],
         top_k: int,
-        document_ids: Optional[List[str]]
+        document_ids: Optional[List[str]],
+        section_types: Optional[List[str]] = None,
     ) -> List[Dict]:
         """
         Keyword search using PostgreSQL Full-Text Search (ts_rank_cd)
@@ -358,6 +367,10 @@ class HybridRetriever:
 
         # Match filter (full-text search)
         stmt = stmt.where(DocumentChunk.text_search_vector.op('@@')(tsquery))
+
+        # Optional section_type filter
+        if section_types:
+            stmt = stmt.where(DocumentChunk.section_type.in_(section_types))
 
         # Order by rank (descending = highest rank first)
         stmt = stmt.order_by(rank_expr.desc()).limit(top_k)
@@ -435,26 +448,22 @@ class HybridRetriever:
         # Get all unique chunk IDs
         all_chunk_ids = set(semantic_ranks.keys()) | set(keyword_ranks.keys())
 
+        # Build chunk data lookups for O(1) access (avoid O(N²) nested loops)
+        semantic_dict = {r["id"]: r for r in semantic_results}
+        keyword_dict = {r["id"]: r for r in keyword_results}
+
         # Build merged result dict
         merged_dict = {}
 
         for chunk_id in all_chunk_ids:
-            # Find original chunk data (prefer semantic for metadata completeness)
-            chunk_data = None
-            for r in semantic_results:
-                if r["id"] == chunk_id:
-                    chunk_data = r.copy()
-                    break
-
-            if not chunk_data:
-                for r in keyword_results:
-                    if r["id"] == chunk_id:
-                        chunk_data = r.copy()
-                        break
+            # Prefer semantic for metadata completeness, fall back to keyword
+            chunk_data = semantic_dict.get(chunk_id) or keyword_dict.get(chunk_id)
 
             if not chunk_data:
                 logger.warning(f"Chunk {chunk_id} not found in either result set (should not happen)")
                 continue
+
+            chunk_data = chunk_data.copy()
 
             # Calculate RRF score
             rrf_score = 0.0

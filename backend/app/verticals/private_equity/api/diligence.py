@@ -12,11 +12,13 @@ from sqlalchemy.orm import Session
 
 from app.auth import get_current_user
 from app.database import get_db
+from app.db_models import JobState
 from app.db_models_users import User
 from app.repositories.document_repository import DocumentRepository
 from app.repositories.job_repository import JobRepository
 from app.services.beta_limits import enforce_page_limit
 from app.services.tasks import start_document_indexing_chain
+from app.utils.document_uploads import SUPPORTED_UPLOAD_EXTENSIONS, validate_uploaded_file_signature
 from app.utils.logging import logger
 from app.verticals.private_equity.diligence.repository import PEDiligenceRepository
 from app.verticals.private_equity.diligence.schemas import (
@@ -25,6 +27,7 @@ from app.verticals.private_equity.diligence.schemas import (
     AuditEventOut,
     ChecklistItemOut,
     ClauseOut,
+    ClauseReviewIn,
     ContractFamilyOut,
     DiligenceRoomCreateRequest,
     DiligenceRoomOut,
@@ -47,7 +50,7 @@ router = APIRouter(prefix="/diligence", tags=["pe_diligence"])
 
 MAX_FILE_SIZE_MB = 50
 MAX_FILENAME_LENGTH = 255
-ALLOWED_EXTENSIONS = {".pdf", ".docx"}
+ALLOWED_EXTENSIONS = SUPPORTED_UPLOAD_EXTENSIONS
 
 
 def _build_evidence_map(spans) -> dict:
@@ -341,10 +344,9 @@ async def upload_room_document(
             detail=f"File too large ({file_size_mb:.1f}MB). Maximum size is {MAX_FILE_SIZE_MB}MB",
         )
 
-    if file_ext == ".pdf" and not file_bytes.startswith(b"%PDF-"):
-        raise HTTPException(status_code=400, detail="File does not appear to be a valid PDF")
-    if file_ext == ".docx" and not file_bytes.startswith(b"PK"):
-        raise HTTPException(status_code=400, detail="File does not appear to be a valid DOCX file")
+    validation_error = validate_uploaded_file_signature(file_ext, file_bytes)
+    if validation_error:
+        raise HTTPException(status_code=400, detail=validation_error)
 
     content_hash = hashlib.sha256(file_bytes).hexdigest()
     doc_repo = DocumentRepository()
@@ -490,7 +492,8 @@ async def upload_room_document(
         )
 
         job = job_repo.create_job(
-            document_id=document.id,
+            entity_type="document",
+            entity_id=document.id,
             status="queued",
             current_stage="queued",
             progress_percent=0,
@@ -563,20 +566,40 @@ def list_room_documents(
     # Batch-fetch filenames from the documents table
     doc_ids = [r.document_id for r in rows if r.document_id]
     filename_map: Dict[str, str] = {}
+    page_count_map: Dict[str, int] = {}
+    job_state_map: Dict[str, JobState] = {}
     if doc_ids:
-        docs = db.query(Document.id, Document.filename).filter(Document.id.in_(doc_ids)).all()
+        docs = db.query(Document.id, Document.filename, Document.page_count).filter(Document.id.in_(doc_ids)).all()
         filename_map = {d.id: d.filename for d in docs}
-    return [
-        RoomDocumentOut.model_validate(
-            {
-                **row.__dict__,
-                **_extract_document_classification_fields(row.metadata_json),
-                "metadata": row.metadata_json,
-                "filename": filename_map.get(row.document_id) if row.document_id else None,
-            }
+        page_count_map = {d.id: d.page_count for d in docs if d.page_count}
+        jobs = (
+            db.query(JobState)
+            .filter(
+                JobState.entity_type == "document",
+                JobState.entity_id.in_(doc_ids),
+            )
+            .all()
         )
-        for row in rows
-    ]
+        for job in jobs:
+            current = job_state_map.get(job.entity_id)
+            if current is None or (job.updated_at or job.created_at) > (current.updated_at or current.created_at):
+                job_state_map[job.entity_id] = job
+    result = []
+    for row in rows:
+        job = job_state_map.get(row.document_id) if row.document_id else None
+        is_active = job is not None and job.status not in ("completed", "failed")
+        result.append(RoomDocumentOut.model_validate({
+            **row.__dict__,
+            **_extract_document_classification_fields(row.metadata_json),
+            "metadata": row.metadata_json,
+            "filename": filename_map.get(row.document_id) if row.document_id else None,
+            "job_id": job.job_id if job else None,
+            "progress_percent": job.progress_percent if is_active else None,
+            "status_detail": (job.message or job.current_stage) if is_active else None,
+            "page_count": page_count_map.get(row.document_id) if row.document_id else None,
+            "ingest_status": "processing" if is_active else row.ingest_status,
+        }))
+    return result
 
 
 @router.delete("/rooms/{room_id}/documents/{room_document_id}", status_code=204)
@@ -682,6 +705,42 @@ def update_document_folder(
     return {"ok": True}
 
 
+@router.get("/rooms/{room_id}/analysis-status")
+def get_analysis_status(
+    room_id: str,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Get delta (added/removed docs) since last completed analysis run."""
+    repo = PEDiligenceRepository(db)
+    room = repo.get_room(room_id=room_id, org_id=user.org_id, user_id=user.id)
+    if not room:
+        raise HTTPException(status_code=404, detail="Diligence room not found")
+
+    last_run = repo.get_latest_completed_run(room_id=room_id)
+    if not last_run:
+        return {
+            "has_completed_run": False,
+            "last_run_completed_at": None,
+            "added_doc_count": 0,
+            "removed_doc_count": 0,
+            "has_delta": False,
+        }
+
+    prev_doc_ids = set((last_run.metadata_json or {}).get("document_classification", {}).keys())
+    current_doc_ids = set(repo.get_room_document_ids(room_id=room_id))
+    added = current_doc_ids - prev_doc_ids
+    removed = prev_doc_ids - current_doc_ids
+
+    return {
+        "has_completed_run": True,
+        "last_run_completed_at": last_run.completed_at,
+        "added_doc_count": len(added),
+        "removed_doc_count": len(removed),
+        "has_delta": bool(added or removed),
+    }
+
+
 @router.post("/rooms/{room_id}/analyze", response_model=AnalysisRunOut)
 def start_room_analysis(
     room_id: str,
@@ -700,6 +759,7 @@ def start_room_analysis(
         org_id=user.org_id,
         user_id=user.id,
         force_reanalyze=payload.force_reanalyze,
+        incremental=payload.incremental,
     )
     return _build_analysis_run_out(repo, run)
 
@@ -720,6 +780,23 @@ def get_room_analysis_run(
     )
     if not run:
         raise HTTPException(status_code=404, detail="Analysis run not found")
+    return _build_analysis_run_out(repo, run)
+
+
+@router.get("/rooms/{room_id}/active-analysis-run", response_model=Optional[AnalysisRunOut])
+def get_active_analysis_run(
+    room_id: str,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Get the most recent in-progress analysis run for a room, or null if none active."""
+    repo = PEDiligenceRepository(db)
+    room = repo.get_room(room_id=room_id, org_id=user.org_id, user_id=user.id)
+    if not room:
+        raise HTTPException(status_code=404, detail="Room not found")
+    run = repo.get_latest_active_analysis_run(room_id=room_id)
+    if not run:
+        return None
     return _build_analysis_run_out(repo, run)
 
 
@@ -849,10 +926,26 @@ def get_room_summary(
         entity_ids=[summary.id],
     )
     evidence_map = _build_evidence_map(spans)
+    metadata = summary.metadata_json or {}
     return SummaryOut.model_validate(
         {
             **summary.__dict__,
-            "metadata": summary.metadata_json,
+            "overview": metadata.get("overview"),
+            "triage": metadata.get("triage"),
+            "coverage": metadata.get("coverage"),
+            "top_risks": metadata.get("top_risks") or [],
+            "contradictions": metadata.get("contradictions") or [],
+            "valuation_signals": metadata.get("valuation_signals") or [],
+            "deal_blockers": metadata.get("deal_blockers") or [],
+            "management_questions": metadata.get("management_questions") or [],
+            "follow_up_requests": metadata.get("follow_up_requests") or [],
+            "missing_key_documents": metadata.get("missing_key_documents") or [],
+            "document_gap_register": metadata.get("document_gap_register") or [],
+            "ic_memo_inputs": metadata.get("ic_memo_inputs"),
+            "ic_readiness": metadata.get("ic_readiness"),
+            "suggested_investigations": metadata.get("suggested_investigations") or [],
+            "data_quality_assessment": metadata.get("data_quality_assessment"),
+            "metadata": metadata,
             "evidence_spans": evidence_map.get(summary.id, []),
         }
     )
@@ -919,6 +1012,41 @@ def list_room_clauses(
     ]
 
 
+@router.patch("/rooms/{room_id}/clauses/{clause_id}/review", response_model=ClauseOut)
+def review_clause(
+    room_id: str,
+    clause_id: str,
+    payload: ClauseReviewIn,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Set review status on a clause (approve / flag / edit)."""
+    repo = PEDiligenceRepository(db)
+    room = repo.get_room(room_id=room_id, org_id=user.org_id, user_id=user.id)
+    if not room:
+        raise HTTPException(status_code=404, detail="Diligence room not found")
+    clause = repo.review_clause(
+        room_id=room_id,
+        clause_id=clause_id,
+        review_status=payload.status,
+        reviewed_by=user.id,
+        corrected_fields=payload.corrected_fields,
+    )
+    if not clause:
+        raise HTTPException(status_code=404, detail="Clause not found")
+    # Serialize BEFORE audit event — add_audit_event calls db.commit() which expires ORM attributes
+    result = ClauseOut.model_validate({**clause.__dict__, "metadata": clause.metadata_json})
+    repo.add_audit_event(
+        room_id=room_id,
+        event_type=f"clause.reviewed.{payload.status}",
+        actor_user_id=user.id,
+        entity_type="clause",
+        entity_id=clause_id,
+        payload={"review_status": payload.status},
+    )
+    return result
+
+
 # ─── Contract Families ────────────────────────────────────────────────────────
 
 @router.get("/rooms/{room_id}/contract-families", response_model=List[ContractFamilyOut])
@@ -953,6 +1081,26 @@ def list_playbooks(
         PlaybookOut.model_validate({**row.__dict__, "clause_types": row.clause_types or []})
         for row in rows
     ]
+
+
+# ─── Room Financials ─────────────────────────────────────────────────────────
+
+@router.get("/rooms/{room_id}/financials")
+def get_room_financials(
+    room_id: str,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Return llm_financials and numeric_signals from the latest completed analysis run."""
+    repo = PEDiligenceRepository(db)
+    run = repo.get_latest_completed_run(room_id=room_id)
+    if not run:
+        return {"llm_financials": None, "numeric_signals": None}
+    meta = run.metadata_json or {}
+    return {
+        "llm_financials": meta.get("llm_financials"),
+        "numeric_signals": meta.get("numeric_signals"),
+    }
 
 
 # ─── IC Memo Generation ───────────────────────────────────────────────────────

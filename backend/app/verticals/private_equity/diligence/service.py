@@ -45,13 +45,63 @@ class PEDiligenceService:
         )
         return links
 
-    def start_analysis(self, *, room_id: str, org_id: str, user_id: str, force_reanalyze: bool) -> PEDiligenceAnalysisRun:
+    def start_analysis(
+        self,
+        *,
+        room_id: str,
+        org_id: str,
+        user_id: str,
+        force_reanalyze: bool,
+        incremental: bool = False,
+    ) -> PEDiligenceAnalysisRun:
+        import uuid
+        from app.repositories.job_repository import JobRepository
+
+        # Delta detection for incremental mode
+        incremental_payload = {}
+        if incremental and not force_reanalyze:
+            last_run = self.repo.get_latest_completed_run(room_id=room_id)
+            if last_run:
+                prev_doc_ids = set(
+                    (last_run.metadata_json or {}).get("document_classification", {}).keys()
+                )
+                current_doc_ids = set(self.repo.get_room_document_ids(room_id=room_id))
+                added = list(current_doc_ids - prev_doc_ids)
+                removed = list(prev_doc_ids - current_doc_ids)
+                if not added and not removed:
+                    # Nothing changed — return existing run
+                    return last_run
+                incremental_payload = {
+                    "incremental": True,
+                    "added_doc_ids": added,
+                    "removed_doc_ids": removed,
+                    "previous_run_id": last_run.id,
+                }
+
+        # Create analysis run
         run = self.repo.create_analysis_run(
             room_id=room_id,
             org_id=org_id,
             user_id=user_id,
-            metadata={"force_reanalyze": force_reanalyze},
+            metadata={"force_reanalyze": force_reanalyze, **incremental_payload},
         )
+
+        # Create JobState for SSE real-time progress
+        job_id = str(uuid.uuid4())
+        job_repo = JobRepository()
+        job = job_repo.create_job(
+            entity_type="analysis_run",
+            entity_id=run.id,
+            status="running",
+            current_stage="initialization",
+            message="Starting analysis...",
+            job_id=job_id,
+        )
+
+        # Store job_id on analysis run
+        if job:
+            self.repo.update_analysis_run(run_id=run.id, job_id=job_id)
+
         self.repo.mark_room_status(room_id=room_id, status="analyzing")
         self.repo.add_audit_event(
             room_id=room_id,
@@ -60,15 +110,17 @@ class PEDiligenceService:
             event_type="analysis.started",
             entity_type="analysis_run",
             entity_id=run.id,
-            payload={"force_reanalyze": force_reanalyze},
+            payload={"force_reanalyze": force_reanalyze, "job_id": job_id, **incremental_payload},
         )
 
         payload = {
             "room_id": room_id,
             "analysis_run_id": run.id,
+            "job_id": job_id,
             "org_id": org_id,
             "user_id": user_id,
             "force_reanalyze": force_reanalyze,
+            **incremental_payload,
         }
         run_diligence_analysis_task.apply_async(args=[payload], queue="critical")
         return run

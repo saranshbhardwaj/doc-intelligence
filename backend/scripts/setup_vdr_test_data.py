@@ -13,12 +13,14 @@ Usage:
     --output-dir "/path/to/output"
 """
 
+import csv
 import os
 import re
+import shutil
 import argparse
 from pathlib import Path
 from datetime import datetime, timedelta
-from typing import List, Dict
+from typing import List, Dict, Optional
 
 # Optional: Only use these if installed
 try:
@@ -364,10 +366,127 @@ def save_document(content: str, base_name: str, output_subdir: Path,
 
 
 # ============================================================================
+# CUAD Commercial Contracts
+# ============================================================================
+
+# Columns in master_clauses.csv that are most important for PE diligence.
+# A contract "has" a clause when the cell value is not empty and not '[]'.
+CUAD_PE_COLUMNS = [
+    "Change Of Control",
+    "Anti-Assignment",
+    "Termination For Convenience",
+    "Ip Ownership Assignment",
+    "Non-Compete",
+    "Exclusivity",
+    "Cap On Liability",
+    "Revenue/Profit Sharing",
+    "Governing Law",
+]
+
+# Skip contracts whose filenames contain these terms — they are M&A agreements
+# (already covered by MAUD) not commercial contracts of the target company.
+CUAD_MERGER_KEYWORDS = ["merger", "acquisition", "plan of merger", "reorganization plan"]
+
+NUM_CUAD_CONTRACTS = 8
+
+
+def _cuad_has_clause(cell_value: str) -> bool:
+    """Return True if the CUAD annotation cell indicates the clause is present."""
+    v = cell_value.strip()
+    return bool(v) and v != "[]"
+
+
+def _cuad_friendly_name(filename: str) -> str:
+    """Strip SEC filing codes and return a readable contract name."""
+    # Original pattern: CompanyName_Date_FilingCode_ExhibitCode_CIK_ExhibitCode_Description.pdf
+    # We want: CompanyName - Description
+    stem = Path(filename).stem
+    parts = stem.split("_")
+    if len(parts) >= 2:
+        company = parts[0]
+        # Description is usually the last meaningful part after the filing codes
+        description = parts[-1] if len(parts) > 1 else ""
+        if description:
+            return f"{company} - {description}"
+    return stem
+
+
+def add_cuad_commercial_contracts(cuad_dir: Path, output_dir: Path) -> int:
+    """
+    Select the best CUAD commercial contracts (by PE clause coverage) and copy
+    their PDFs into output_dir/4_commercial_contracts/.
+
+    Returns the number of contracts copied.
+    """
+    csv_path = cuad_dir / "master_clauses.csv"
+    pdf_dir = cuad_dir / "full_contract_pdf"
+
+    if not csv_path.exists():
+        print(f"[WARN] CUAD master_clauses.csv not found at {csv_path} — skipping")
+        return 0
+    if not pdf_dir.exists():
+        print(f"[WARN] CUAD full_contract_pdf/ not found at {pdf_dir} — skipping")
+        return 0
+
+    print(f"\n{'='*70}")
+    print("STEP 4: Selecting CUAD commercial contracts")
+    print("="*70)
+
+    # Score every contract
+    scored: List[Dict] = []
+    with open(csv_path, encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        for row in reader:
+            filename = row.get("Filename", "").strip()
+            if not filename:
+                continue
+
+            # Skip merger/acquisition agreements
+            lower = filename.lower()
+            if any(kw in lower for kw in CUAD_MERGER_KEYWORDS):
+                continue
+
+            score = sum(1 for col in CUAD_PE_COLUMNS if _cuad_has_clause(row.get(col, "")))
+            scored.append({"filename": filename, "score": score})
+
+    # Sort by score descending, then alphabetically for stable output
+    scored.sort(key=lambda x: (-x["score"], x["filename"]))
+    selected = scored[:NUM_CUAD_CONTRACTS]
+
+    print(f"[OK] Scored {len(scored)} commercial contracts, selecting top {len(selected)}\n")
+
+    commercial_dir = output_dir / "4_commercial_contracts"
+    commercial_dir.mkdir(exist_ok=True)
+
+    copied = 0
+    for rank, item in enumerate(selected, 1):
+        src_filename = item["filename"]
+        # The CSV stores the filename without path; PDFs may have same name
+        src_path = pdf_dir / src_filename
+        if not src_path.exists():
+            # Try case-insensitive search as a fallback
+            matches = list(pdf_dir.glob(src_filename))
+            src_path = matches[0] if matches else None
+
+        if not src_path or not src_path.exists():
+            print(f"  [{rank}] [MISSING] {src_filename}")
+            continue
+
+        friendly = _cuad_friendly_name(src_filename)
+        dest_path = commercial_dir / f"commercial_{rank:02d}_{friendly}.pdf"
+        shutil.copy2(str(src_path), str(dest_path))
+        copied += 1
+        print(f"  [{rank}] [OK] {dest_path.name}  (score={item['score']})")
+
+    print(f"\n[OK] Copied {copied} CUAD contracts to {commercial_dir}")
+    return copied
+
+
+# ============================================================================
 # Main Setup
 # ============================================================================
 
-def main(maud_dir: Path, output_dir: Path):
+def main(maud_dir: Path, output_dir: Path, cuad_dir: Optional[Path] = None):
     print("\n" + "="*70)
     print("[*] VDR TEST DATA SETUP")
     print("="*70)
@@ -410,12 +529,15 @@ def main(maud_dir: Path, output_dir: Path):
         selected_contracts[idx] = content
         base_name = txt_file.stem  # contract_0, contract_1, etc.
 
-        # Save in multiple formats
-        formats = ['txt']
-        if HAS_REPORTLAB and i % 3 != 0:  # PDF for ~2/3 of contracts
+        # Save in PDF/DOCX only (Azure DI doesn't support .txt)
+        formats = []
+        if HAS_REPORTLAB:
             formats.append('pdf')
-        if HAS_DOCX and i % 2 == 0:      # DOCX for ~1/2 of contracts
+        if HAS_DOCX:
             formats.append('docx')
+        # Fallback to TXT if neither library available
+        if not formats:
+            formats.append('txt')
 
         save_document(content, base_name, contracts_dir, formats=formats)
 
@@ -441,9 +563,15 @@ def main(maud_dir: Path, output_dir: Path):
             amendment_content = create_amendment(base_content, amendment_type)
             amendment_name = f"{contract_name}_{amendment_type}"
 
-            # Amendments in TXT + DOCX
-            save_document(amendment_content, amendment_name, amendments_dir,
-                        formats=['txt', 'docx'])
+            # Amendments in PDF + DOCX (Azure DI doesn't support .txt)
+            formats = []
+            if HAS_REPORTLAB:
+                formats.append('pdf')
+            if HAS_DOCX:
+                formats.append('docx')
+            if not formats:
+                formats.append('txt')
+            save_document(amendment_content, amendment_name, amendments_dir, formats=formats)
 
     print(f"\n[OK] Created {total_amendments} amendments")
 
@@ -458,14 +586,25 @@ def main(maud_dir: Path, output_dir: Path):
         base_name = doc_name.replace('.txt', '')
         print(f"\n[DOC] {doc_name}:")
 
-        # Mix formats for synthetics too
-        formats = ['txt']
-        if HAS_DOCX:
-            formats.append('docx')
+        # Mix formats for synthetics too (PDF/DOCX only for Azure DI compatibility)
+        formats = []
         if HAS_REPORTLAB:
             formats.append('pdf')
+        if HAS_DOCX:
+            formats.append('docx')
+        if not formats:
+            formats.append('txt')
 
         save_document(doc_content, base_name, synthetics_dir, formats=formats)
+
+    # ========================================================================
+    # STEP 4: Add CUAD commercial contracts (if cuad_dir provided)
+    # ========================================================================
+    cuad_count = 0
+    if cuad_dir:
+        cuad_count = add_cuad_commercial_contracts(cuad_dir, output_dir)
+    else:
+        print("\n[INFO] --cuad-dir not provided, skipping commercial contracts step")
 
     # ========================================================================
     # Summary
@@ -481,6 +620,7 @@ def main(maud_dir: Path, output_dir: Path):
    Base Contracts:     {len(list(contracts_dir.glob('*')))} files
    Amendments:         {len(list(amendments_dir.glob('*')))} files
    Test Documents:     {len(list(synthetics_dir.glob('*')))} files
+   Commercial (CUAD):  {cuad_count} files
    Total Files:        {total_files}
 
 [OUTPUT LOCATION]
@@ -490,16 +630,19 @@ def main(maud_dir: Path, output_dir: Path):
    1. Navigate to VDR dashboard
    2. Create new deal room: "MAUD Test Acquisition"
    3. Upload documents from each folder:
-      - 1_base_contracts/
-      - 2_amendments/
-      - 3_test_documents/
+      - 1_base_contracts/         (MAUD merger agreements)
+      - 2_amendments/             (synthetic CoC/assignment amendments)
+      - 3_test_documents/         (financial summary, service agreement, unclassified)
+      - 4_commercial_contracts/   (CUAD commercial contracts — customer, vendor, IP, NCA)
    4. Run analysis pipeline
    5. Run investigations
 
 [DOCUMENT TYPES]
-   - Base: Real merger agreements from MAUD
-   - Amendments: Synthetic modifications (CoC, assignments)
-   - Synthetics: Service agreements, financials, unclassified
+   - Base:        Real merger agreements from MAUD dataset
+   - Amendments:  Synthetic modifications (CoC, assignments)
+   - Synthetics:  Service agreements, financials, unclassified
+   - Commercial:  Real commercial contracts from CUAD dataset (Change of Control,
+                  Anti-Assignment, Termination for Convenience, IP Ownership, etc.)
 
 [TESTS]
    * Document classification
@@ -528,7 +671,7 @@ Examples:
     parser.add_argument(
         '--maud-dir',
         type=Path,
-        default=Path(r'C:\Users\sar13821\Downloads\PE\data\data\contracts'),
+        default=Path(r'C:\Users\sar13821\Downloads\PE\MAUD\data\contracts'),
         help='Path to MAUD contracts directory'
     )
 
@@ -539,12 +682,24 @@ Examples:
         help='Output directory for test data'
     )
 
+    parser.add_argument(
+        '--cuad-dir',
+        type=Path,
+        default=Path(r'C:\Users\sar13821\Downloads\PE\CUAD_v1'),
+        help='Path to CUAD_v1 directory (optional; adds commercial contracts)'
+    )
+
     args = parser.parse_args()
 
     # Verify input directory
     if not args.maud_dir.exists():
-        print(f"❌ MAUD directory not found: {args.maud_dir}")
+        print(f"[ERROR] MAUD directory not found: {args.maud_dir}")
         exit(1)
+
+    # Validate CUAD dir if provided
+    cuad_dir = args.cuad_dir if args.cuad_dir and args.cuad_dir.exists() else None
+    if args.cuad_dir and not cuad_dir:
+        print(f"[WARN] CUAD directory not found: {args.cuad_dir} — skipping commercial contracts")
 
     # Check dependencies
     if not HAS_REPORTLAB:
@@ -552,4 +707,4 @@ Examples:
     if not HAS_DOCX:
         print("[WARNING] python-docx not installed — install with: pip install python-docx")
 
-    main(args.maud_dir, args.output_dir)
+    main(args.maud_dir, args.output_dir, cuad_dir=cuad_dir)

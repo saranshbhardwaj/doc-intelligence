@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from typing import Dict, List, Literal, Optional
+from typing import Dict, List, Optional
 
 from pydantic import BaseModel, Field
 
@@ -9,31 +9,15 @@ from app.config import settings
 from app.core.llm.llm_client import LLMClient
 from app.core.llm.structured_runner import StructuredLLMRunner
 from app.utils.logging import logger
+from app.verticals.private_equity.diligence.doc_types import ALL_DOC_TYPE_VALUES, PEDocumentType
 
-
-ALLOWED_DOC_TYPES = [
-    "amendment",
-    "offering_memorandum",
-    "purchase_agreement",
-    "financial_statement",
-    "qoe_report",
-    "legal_contract",
-    "other",
-]
+ALLOWED_DOC_TYPES = list(ALL_DOC_TYPE_VALUES)
 
 
 class DocumentClassificationCandidate(BaseModel):
     document_id: str
     rule_anchor_id: str
-    document_type: Literal[
-        "amendment",
-        "offering_memorandum",
-        "purchase_agreement",
-        "financial_statement",
-        "qoe_report",
-        "legal_contract",
-        "other",
-    ]
+    document_type: PEDocumentType
     confidence: float = Field(ge=0.0, le=1.0)
     rationale: Optional[str] = None
     signals: List[str] = Field(default_factory=list)
@@ -64,14 +48,23 @@ class PEDiligenceClassificationAdapter:
             "You classify PE diligence documents into a fixed taxonomy. "
             "Return only the schema fields. "
             "Each classification must include the exact rule_anchor_id provided in input for that document. "
-            "Use conservative confidence: if uncertain, set document_type='other' and confidence <= 0.6. "
+            "Use conservative confidence: if uncertain, set document_type='other' and confidence <= 0.5. "
             "Allowed document_type values: "
             + ", ".join(ALLOWED_DOC_TYPES)
             + ". "
+            "Classify to the MOST SPECIFIC type available. "
+            "Use 'legal_contract' only as a generic fallback when the document is clearly a contract "
+            "but does not fit a more specific type like customer_contract, vendor_contract, ip_license, "
+            "employment_agreement, nda, purchase_agreement, merger_agreement, shareholder_agreement, or disclosure_schedule. "
             "Use 'amendment' for any document that modifies, supplements, or restates an existing agreement, "
             "including amendments, addenda, side letters, joinders, or amended-and-restated contracts. "
             "If a document is titled 'Amended and Restated [Agreement Name]', classify it as 'amendment' with "
-            "high confidence — it supersedes the original rather than merely modifying it."
+            "high confidence. "
+            "Use 'disclosure_schedule' for disclosure letters, schedules of exceptions, or seller/company disclosure schedules. "
+            "Use 'regulatory_filing' only for the filing itself, not an exhibit contract attached to a filing. "
+            "Use 'offering_memorandum' for CIM/offering memo style sale materials. "
+            "Use 'purchase_agreement' for SPA/stock purchase/asset purchase agreements and "
+            "'merger_agreement' for agreement-and-plan-of-merger style transaction documents."
         )
         user_content = json.dumps({"documents": doc_inputs}, ensure_ascii=False)
 
@@ -89,6 +82,8 @@ class PEDiligenceClassificationAdapter:
             rule_anchor_id = row.get("rule_anchor_id")
             doc_type = row.get("document_type")
             confidence = row.get("confidence")
+            if isinstance(doc_type, PEDocumentType):
+                doc_type = doc_type.value
             if not doc_id or not rule_anchor_id or doc_type not in ALLOWED_DOC_TYPES:
                 continue
             if confidence is None:

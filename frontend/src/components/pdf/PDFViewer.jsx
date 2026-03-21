@@ -115,7 +115,7 @@ export default function PDFViewer({
     }, 100);
 
     return () => clearInterval(timer);
-  }, [defaultPage, pdfReady, loadedPages, numPages, highlightBbox]);
+  }, [defaultPage, pdfReady, numPages, highlightBbox]);
 
   // Reset state when PDF URL changes
   useEffect(() => {

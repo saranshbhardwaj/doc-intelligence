@@ -31,7 +31,7 @@ import {
   DropdownMenuSeparator,
 } from "../ui/dropdown-menu";
 import Spinner from "../common/Spinner";
-import PDFViewer from "../pdf/PDFViewer";
+import DocumentViewer from "../pdf/DocumentViewer";
 import { getRun, getRunArtifact, exportRun, deleteRun } from "../../api";
 import { Sheet, SheetContent, SheetDescription, SheetHeader, SheetTitle } from "../ui/sheet";
 import {
@@ -442,8 +442,9 @@ export default function WorkflowResultSheet({ open, onOpenChange, runId }) {
                         <Spinner size="lg" />
                       </div>
                     ) : activePdfUrl ? (
-                      <PDFViewer
-                        pdfUrl={activePdfUrl}
+                      <DocumentViewer
+                        fileUrl={activePdfUrl}
+                        filename={activeCitationDoc}
                         highlightBbox={pdfViewerState.highlightBbox}
                       />
                     ) : (
@@ -626,8 +627,9 @@ export default function WorkflowResultSheet({ open, onOpenChange, runId }) {
                   <Spinner size="lg" />
                 </div>
               ) : activePdfUrl ? (
-                <PDFViewer
-                  pdfUrl={activePdfUrl}
+                <DocumentViewer
+                  fileUrl={activePdfUrl}
+                  filename={activeCitationDoc}
                   highlightBbox={pdfViewerState.highlightBbox}
                 />
               ) : (
