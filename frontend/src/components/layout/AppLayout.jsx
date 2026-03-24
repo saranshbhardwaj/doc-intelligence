@@ -9,7 +9,7 @@
  * - Breadcrumb support
  */
 
-import { Link, useLocation, useNavigate } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import { useAppAuth } from "@/hooks/useAppAuth";
 import { Library, MessageSquare, Play, Zap, FileSpreadsheet, LayoutDashboard, Menu, LogOut } from "lucide-react";
 import { useState } from "react";
@@ -31,9 +31,8 @@ const ICON_MAP = {
   'dashboard': LayoutDashboard,
 };
 
-export default function AppLayout({ children, lockViewport = false }) {
+export default function AppLayout({ children, lockViewport = false, headerLeft = null, headerRight = null, hideNav = false }) {
   const location = useLocation();
-  const navigate = useNavigate();
   const { isDark, toggle } = useDarkMode();
   const { user, signOut } = useAppAuth();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
@@ -80,7 +79,7 @@ export default function AppLayout({ children, lockViewport = false }) {
   return (
     <div className={`${lockViewport ? "h-[100dvh] overflow-hidden" : "min-h-screen"} bg-background flex flex-col`}>
       {/* Header */}
-      <header className="bg-card/80 backdrop-blur-md border-b border-border sticky top-0 z-40">
+      <header className="bg-card/80 backdrop-blur-md sticky top-0 z-40 after:absolute after:bottom-0 after:left-0 after:right-0 after:h-px after:bg-gradient-to-r after:from-transparent after:via-primary/25 after:to-transparent relative">
         <div className="w-full px-4 md:px-6 py-1.5">
           <div className="flex items-center justify-between">
             {/* Logo / Home Link */}
@@ -95,57 +94,67 @@ export default function AppLayout({ children, lockViewport = false }) {
                   className="absolute inset-0 h-full w-full scale-[1.78] object-cover"
                 />
               </span>
-              <span className="text-lg font-extrabold tracking-tight bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
+              <span className="text-xl font-extrabold tracking-tight bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent" style={{letterSpacing: '-0.02em'}}>
                 frearaAI
               </span>
             </Link>
 
+            {/* Page-level left slot (detail pages: back + title) */}
+            {headerLeft && (
+              <div className="hidden md:flex items-center gap-2 ml-2">
+                <div className="h-5 w-px bg-border" />
+                {headerLeft}
+              </div>
+            )}
+
             {/* Navigation */}
-            <nav className="hidden md:flex items-center gap-1">
-              {/* Vertical Dropdown - shown first */}
-              <VerticalDropdown currentVertical={currentVertical} />
+            {!hideNav && (
+              <nav className="hidden md:flex items-center gap-1">
+                {/* Vertical Dropdown - shown first */}
+                <VerticalDropdown currentVertical={currentVertical} />
 
-              {/* Separator if in vertical */}
-              {currentVertical && (
-                <div className="h-6 w-px bg-border mx-2" />
-              )}
+                {/* Separator if in vertical */}
+                {currentVertical && (
+                  <div className="h-6 w-px bg-border mx-2" />
+                )}
 
-              {/* Navigation Links */}
-              {navLinks.map((link) => {
-                const Icon = link.icon;
-                const active = isActive(link.path);
-                const isComingSoon = link.comingSoon;
+                {/* Navigation Links */}
+                {navLinks.map((link) => {
+                  const Icon = link.icon;
+                  const active = isActive(link.path);
+                  const isComingSoon = link.comingSoon;
 
-                return (
-                  <Link
-                    key={link.path}
-                    to={link.path}
-                    onClick={(e) => {
-                      if (isComingSoon) {
-                        e.preventDefault();
-                      }
-                    }}
-                    className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
-                      isComingSoon
-                        ? "text-muted-foreground/50 cursor-not-allowed"
-                        : active
-                        ? "bg-primary/10 text-primary"
-                        : "text-muted-foreground hover:bg-popover"
-                    }`}
-                    aria-current={active ? "page" : undefined}
-                    aria-disabled={isComingSoon}
-                  >
-                    <Icon className="w-4 h-4" />
-                    {link.label}
-                    {isComingSoon && (
-                      <span className="text-xs bg-muted px-1.5 py-0.5 rounded">
-                        Soon
-                      </span>
-                    )}
-                  </Link>
-                );
-              })}
-            </nav>
+                  return (
+                    <Link
+                      key={link.path}
+                      to={link.path}
+                      onClick={(e) => {
+                        if (isComingSoon) {
+                          e.preventDefault();
+                        }
+                      }}
+                      className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-all duration-200 ${
+                        isComingSoon
+                          ? "text-muted-foreground/50 cursor-not-allowed"
+                          : active
+                          ? "bg-primary/10 text-primary shadow-sm"
+                          : "text-muted-foreground hover:bg-primary/10 hover:text-foreground hover:-translate-y-px"
+                      }`}
+                      aria-current={active ? "page" : undefined}
+                      aria-disabled={isComingSoon}
+                    >
+                      <Icon className="w-4 h-4" />
+                      {link.label}
+                      {isComingSoon && (
+                        <span className="text-xs bg-muted px-1.5 py-0.5 rounded">
+                          Soon
+                        </span>
+                      )}
+                    </Link>
+                  );
+                })}
+              </nav>
+            )}
 
             {/* Right Actions */}
             <div className="flex items-center gap-4">
@@ -157,6 +166,11 @@ export default function AppLayout({ children, lockViewport = false }) {
               >
                 <Menu className="w-5 h-5" />
               </button>
+              {headerRight && (
+                <div className="hidden md:flex items-center gap-2">
+                  {headerRight}
+                </div>
+              )}
               <DarkModeToggle
                 isDark={isDark}
                 toggle={toggle}
@@ -167,7 +181,7 @@ export default function AppLayout({ children, lockViewport = false }) {
                 <button
                   type="button"
                   onClick={() => setUserMenuOpen((o) => !o)}
-                  className="w-9 h-9 rounded-full bg-primary/10 text-primary font-semibold text-sm flex items-center justify-center hover:bg-primary/20 transition-colors"
+                  className="w-9 h-9 rounded-full bg-primary/10 text-primary font-semibold text-sm flex items-center justify-center hover:bg-primary/20 hover:ring-2 hover:ring-primary/30 transition-all duration-200"
                   aria-label="User menu"
                 >
                   {user?.firstName?.[0] ?? user?.email?.[0]?.toUpperCase() ?? "U"}
@@ -295,7 +309,7 @@ export default function AppLayout({ children, lockViewport = false }) {
       <NetworkStatus />
 
       {/* Main Content */}
-      <main className={lockViewport ? "flex-1 min-h-0 flex flex-col overflow-hidden" : "flex-1 flex flex-col"}>
+      <main className={`${lockViewport ? "flex-1 min-h-0 flex flex-col overflow-hidden" : "flex-1 flex flex-col"} page-enter`}>
         {children}
       </main>
     </div>

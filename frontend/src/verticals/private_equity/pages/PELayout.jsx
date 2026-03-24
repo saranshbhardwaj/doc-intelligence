@@ -183,7 +183,7 @@ function RoomsSidebar({ location, onCollapse }) {
             Private Equity
           </p>
           <div className="flex items-center gap-1 mt-1">
-            <h2 className="text-sm font-semibold text-foreground">Deal Rooms</h2>
+            <h2 className="font-display text-sm font-semibold text-foreground">Deal Rooms</h2>
             <Button
               size="sm"
               variant="ghost"

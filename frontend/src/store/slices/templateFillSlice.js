@@ -13,6 +13,7 @@ import {
   updateExtractedData,
   updateFillMappings,
   continueFillRun,
+  renameFillRun as renameFillRunApi,
 } from '../../api/re-templates';
 import { getDocumentDownloadUrl } from '../../api/documents';
 
@@ -474,6 +475,26 @@ export const createTemplateFillSlice = (set, get) => ({
         { type: 'NAVIGATE_TO_PAGE', page: pageNumber },
         '*'
       );
+    }
+  },
+
+  /**
+   * Rename the current fill run
+   */
+  renameFillRun: async (fillRunId, name, getToken) => {
+    try {
+      await renameFillRunApi(getToken, fillRunId, name);
+      set((state) => ({
+        templateFill: {
+          ...state.templateFill,
+          fillRun: state.templateFill.fillRun
+            ? { ...state.templateFill.fillRun, name }
+            : state.templateFill.fillRun,
+        },
+      }));
+    } catch (err) {
+      console.error('❌ Failed to rename fill run:', err);
+      throw err;
     }
   },
 

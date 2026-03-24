@@ -18,7 +18,6 @@
 import { useState, useMemo, useEffect } from "react";
 import { Plus, MessageSquare, FileText, Trash2, Search, ChevronLeft, Pencil, Check, X } from "lucide-react";
 import { Button } from "../ui/button";
-import { Card } from "../ui/card";
 import { Input } from "../ui/input";
 import Spinner from "../common/Spinner";
 import {
@@ -82,7 +81,7 @@ export default function SessionSidebar({
   }
 
   return (
-    <Card className="p-3 h-full flex flex-col">
+    <div className="glass-sidebar p-3 h-full flex flex-col rounded-none">
       {/* Header with Collapse Button and New Chat Button */}
       <div className="mb-2 space-y-2">
         <div className="flex items-center justify-between">
@@ -104,7 +103,7 @@ export default function SessionSidebar({
       </div>
 
       {currentSession && (
-        <div className="mb-2 rounded-xl border border-border/60 bg-muted/30 px-2.5 py-2">
+        <div className="mb-2 rounded-xl border border-border/40 bg-muted/20 px-2.5 py-2">
           <div className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1">
             Active Session
           </div>
@@ -170,7 +169,7 @@ export default function SessionSidebar({
       )}
 
       {currentSession && (
-        <div className="mb-3 rounded-xl border border-border/60 bg-primary/5 px-2.5 py-2">
+        <div className="mb-3 rounded-xl border border-primary/15 bg-primary/5 px-2.5 py-2">
           <div className="flex items-center justify-between mb-2">
             <div className="flex items-center gap-2">
               <FileText className="w-3.5 h-3.5 text-muted-foreground" />
@@ -388,6 +387,6 @@ export default function SessionSidebar({
           {sessions.length} {sessions.length === 1 ? "session" : "sessions"}
         </div>
       </div>
-    </Card>
+    </div>
   );
 }

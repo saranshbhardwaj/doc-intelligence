@@ -132,7 +132,7 @@ export function FindingCard({ finding, roomId, docNameMap, onCitationClick, onUp
   const analystAction = verification.analyst_action || workflow.next_step_hint;
 
   return (
-    <div className={`bg-card border rounded-xl ${compact ? "p-3" : "p-4"} shadow-sm transition-opacity ${isDimmed ? "opacity-60" : ""}`}>
+    <div className={`glass-card rounded-xl ${compact ? "p-3" : "p-4"} transition-opacity ${isDimmed ? "opacity-50" : ""}`}>
       <div className="flex items-start gap-3 mb-2">
         <span className={`text-xs px-2 py-0.5 rounded-full font-bold capitalize border shrink-0 mt-0.5 ${severityStyle}`}>
           {finding.severity}
@@ -270,10 +270,10 @@ export function TabButton({ active, children, onClick }) {
   return (
     <button
       onClick={onClick}
-      className={`px-4 py-2 text-sm font-medium rounded-lg transition-colors ${
+      className={`px-4 py-2 text-sm font-medium rounded-lg transition-all duration-200 ${
         active
           ? "bg-primary text-primary-foreground shadow-sm"
-          : "text-muted-foreground hover:bg-muted hover:text-foreground"
+          : "text-muted-foreground hover:bg-muted/70 hover:text-foreground"
       }`}
     >
       {children}

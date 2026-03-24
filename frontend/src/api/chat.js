@@ -32,11 +32,11 @@ export async function createCollection(getToken, { name, description }) {
 
 export async function listCollections(
   getToken,
-  { limit = 50, offset = 0 } = {}
+  { limit = 50, offset = 0, includeDocuments = false } = {}
 ) {
   const api = createAuthenticatedApi(getToken);
   const response = await api.get("/api/chat/collections", {
-    params: { limit, offset },
+    params: { limit, offset, include_documents: includeDocuments || undefined },
   });
   return response.data;
 }

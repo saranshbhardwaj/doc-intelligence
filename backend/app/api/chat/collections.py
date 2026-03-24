@@ -3,6 +3,7 @@
 
 from typing import Optional
 from fastapi import APIRouter, Form, HTTPException, Depends, Query, Request
+from app.db_models_documents import Document
 
 from app.auth import get_current_user, get_current_org_role, is_admin_role
 from app.db_models_users import User
@@ -72,24 +73,62 @@ async def create_collection(
     }
 
 
+def _serialize_document(d: Document) -> dict:
+    return {
+        "id": d.id,
+        "filename": d.filename,
+        "page_count": d.page_count,
+        "chunk_count": d.chunk_count,
+        "has_embeddings": d.chunk_count > 0 and d.status == "completed",
+        "status": d.status,
+        "error_message": d.error_message,
+        "created_at": d.created_at.isoformat() if d.created_at else None,
+        "completed_at": d.completed_at.isoformat() if d.completed_at else None,
+    }
+
+
 @router.get("/collections")
 async def list_collections(
     user: User = Depends(get_current_user),
     limit: int = Query(50, ge=1, le=100),
-    offset: int = Query(0, ge=0)
+    offset: int = Query(0, ge=0),
+    include_documents: bool = Query(False),
 ):
     """
     List all collections for the current user.
 
-    Args:
-        user: Current user
-        limit: Max results (1-100, default: 50)
-        offset: Pagination offset (>=0, default: 0)
-
-    Returns:
-        List of collections with pagination metadata
+    When include_documents=true, returns each collection with its documents
+    embedded, resolving the N+1 pattern in one round-trip.
     """
     collection_repo = CollectionRepository()
+
+    if include_documents:
+        rows, total = collection_repo.list_collections_with_documents(
+            user_id=user.id,
+            org_id=user.org_id,
+            limit=limit,
+            offset=offset,
+        )
+        return {
+            "collections": [
+                {
+                    "id": row["collection"].id,
+                    "name": row["collection"].name,
+                    "description": row["collection"].description,
+                    "document_count": row["collection"].document_count,
+                    "total_chunks": row["collection"].total_chunks,
+                    "embedding_model": row["collection"].embedding_model,
+                    "created_at": row["collection"].created_at.isoformat() if row["collection"].created_at else None,
+                    "updated_at": row["collection"].updated_at.isoformat() if row["collection"].updated_at else None,
+                    "documents": [_serialize_document(d) for d in row["documents"]],
+                }
+                for row in rows
+            ],
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+        }
+
     collections, total = collection_repo.list_collections(
         user_id=user.id,
         org_id=user.org_id,

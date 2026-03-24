@@ -11,7 +11,7 @@ import DocumentViewer from '../../../components/pdf/DocumentViewer';
 import FieldsList from '../components/FieldsList';
 import ExcelGridView from '../components/ExcelGridView';
 import { useTemplateFill, useTemplateFillActions } from '../../../store';
-import { Loader2, AlertCircle, FileText, Table, List, Download, ArrowLeft, CheckCircle2, ExternalLink } from 'lucide-react';
+import { Loader2, AlertCircle, FileText, Table, List, Download, ArrowLeft, CheckCircle2, ExternalLink, Pencil, Check, X, Sparkles, Search, GitMerge, FileSpreadsheet, PartyPopper } from 'lucide-react';
 import { Badge } from '../../../components/ui/badge';
 import { Button } from '../../../components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../../../components/ui/tabs';
@@ -52,6 +52,88 @@ function formatStage(stage) {
   return stageMap[stage] || stage;
 }
 
+// Pipeline stage definitions for AI processing visualization
+const PIPELINE_STAGES = [
+  { key: 'detect', icon: Search, label: 'Scanning PDF', sub: 'Reading document structure and extracting fields', progress: [0, 35] },
+  { key: 'map', icon: GitMerge, label: 'AI Field Mapping', sub: 'Matching extracted fields to Excel template cells', progress: [35, 75] },
+  { key: 'fill', icon: FileSpreadsheet, label: 'Filling Template', sub: 'Writing values into Excel cells', progress: [75, 100] },
+];
+
+function AIPipelineView({ progress, message, fillRun }) {
+  const currentStageIndex = PIPELINE_STAGES.findIndex(
+    (s, i) => progress < PIPELINE_STAGES[i + 1]?.progress[0] ?? 100
+  );
+  const activeIndex = PIPELINE_STAGES.findIndex((s, i) => {
+    const next = PIPELINE_STAGES[i + 1];
+    return progress >= s.progress[0] && progress < (next?.progress[0] ?? 101);
+  });
+
+  return (
+    <div className="h-full flex flex-col items-center justify-center p-8 gap-8">
+      {/* Central AI animation */}
+      <div className="relative">
+        <div className="w-20 h-20 rounded-2xl glass-card flex items-center justify-center">
+          <Sparkles className="h-9 w-9 text-primary" />
+        </div>
+        <div className="absolute inset-0 rounded-2xl bg-primary/10 animate-ping opacity-30" />
+      </div>
+
+      <div className="text-center space-y-1 max-w-xs">
+        <h3 className="font-display text-lg font-semibold text-foreground">AI Processing</h3>
+        <p className="text-sm text-muted-foreground">{message || 'Analyzing document...'}</p>
+      </div>
+
+      {/* Overall progress bar */}
+      <div className="w-full max-w-xs space-y-2">
+        <Progress value={progress} className="h-1.5" />
+        <p className="text-xs text-muted-foreground text-center">{progress}% complete</p>
+      </div>
+
+      {/* Pipeline stages */}
+      <div className="w-full max-w-sm space-y-3">
+        {PIPELINE_STAGES.map((stage, i) => {
+          const isDone = progress >= (PIPELINE_STAGES[i + 1]?.progress[0] ?? 101);
+          const isActive = i === activeIndex;
+          const Icon = stage.icon;
+          return (
+            <div
+              key={stage.key}
+              className={`flex items-start gap-3 p-3 rounded-xl transition-all duration-300 ${
+                isActive ? 'glass-card border border-primary/20' : isDone ? 'opacity-60' : 'opacity-30'
+              }`}
+            >
+              <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
+                isDone ? 'bg-primary/15' : isActive ? 'bg-primary/10' : 'bg-muted'
+              }`}>
+                {isDone ? (
+                  <CheckCircle2 className="h-4 w-4 text-primary" />
+                ) : isActive ? (
+                  <Loader2 className="h-4 w-4 text-primary animate-spin" />
+                ) : (
+                  <Icon className="h-4 w-4 text-muted-foreground" />
+                )}
+              </div>
+              <div className="min-w-0">
+                <p className={`text-sm font-medium ${isDone || isActive ? 'text-foreground' : 'text-muted-foreground'}`}>
+                  {stage.label}
+                  {isDone && <span className="ml-2 text-xs text-primary font-normal">Done</span>}
+                </p>
+                {isActive && (
+                  <p className="text-xs text-muted-foreground mt-0.5">{stage.sub}</p>
+                )}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      <p className="text-xs text-muted-foreground/60 text-center max-w-xs">
+        Processing in the background · You can review the PDF while this runs
+      </p>
+    </div>
+  );
+}
+
 export default function TemplateFillPage() {
   const { fillRunId } = useParams();
   const navigate = useNavigate();
@@ -61,12 +143,18 @@ export default function TemplateFillPage() {
   const [highlightBbox, setHighlightBbox] = useState(null); // For PDF highlighting
   const [showFeedbackModal, setShowFeedbackModal] = useState(false);
 
+  // Rename state
+  const [isRenamingFillRun, setIsRenamingFillRun] = useState(false);
+  const [renameValue, setRenameValue] = useState('');
+  const [isSavingName, setIsSavingName] = useState(false);
+
   // Progress tracking state
   const [jobProgress, setJobProgress] = useState(0);
   const [jobMessage, setJobMessage] = useState('');
   const [jobStatus, setJobStatus] = useState('idle'); // idle, processing, completed, failed
   const [isRetrying, setIsRetrying] = useState(false);
   const [jobIdOverride, setJobIdOverride] = useState(null);
+  const [showCompletionBanner, setShowCompletionBanner] = useState(false);
 
   // Zustand store
   const {
@@ -85,6 +173,7 @@ export default function TemplateFillPage() {
     registerExcelPopout,
     navigatePdfToPage,
     cleanupPopouts,
+    renameFillRun,
   } = useTemplateFillActions();
   const progressStateToken = `${fillRun?.status || ''}|${fillRun?.artifact?.key || ''}|${fillRun?.artifact?.filename || ''}`;
 
@@ -147,6 +236,8 @@ export default function TemplateFillPage() {
         setJobStatus('completed');
         setJobProgress(100);
         setJobMessage('Template fill completed');
+        setShowCompletionBanner(true);
+        setTimeout(() => setShowCompletionBanner(false), 8000);
       } else if (fillRun.status === 'failed') {
         setJobStatus('failed');
         setJobMessage(fillRun.error_message || 'Template fill failed');
@@ -155,6 +246,8 @@ export default function TemplateFillPage() {
         setJobStatus('idle'); // Clear progress overlay
         setJobProgress(100);
         setJobMessage('Ready for review');
+        setShowCompletionBanner(true);
+        setTimeout(() => setShowCompletionBanner(false), 6000);
       }
       // If status is 'completed' but no artifact yet, keep processing overlay visible
       if (fillRun.status === 'completed' && !fillRun.artifact) {
@@ -404,39 +497,111 @@ export default function TemplateFillPage() {
     );
   }
 
+  const saveRename = async () => {
+    const trimmed = renameValue.trim();
+    if (!trimmed) return;
+    setIsSavingName(true);
+    try { await renameFillRun(fillRunId, trimmed, getToken); } finally { setIsSavingName(false); setIsRenamingFillRun(false); }
+  };
+
+  const fillHeaderLeft = (
+    <div className="flex items-center gap-2">
+      <Button variant="ghost" size="sm" onClick={() => navigate('/app/re/templates')} className="h-7 w-7 p-0">
+        <ArrowLeft className="h-4 w-4" />
+      </Button>
+      <div className="min-w-0">
+        {isRenamingFillRun ? (
+          <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+            <input
+              autoFocus
+              className="text-sm font-semibold bg-transparent border-b border-primary outline-none leading-tight text-foreground w-40"
+              value={renameValue}
+              onChange={(e) => setRenameValue(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') saveRename();
+                else if (e.key === 'Escape') setIsRenamingFillRun(false);
+              }}
+            />
+            <button className="p-0.5 text-primary disabled:opacity-50" disabled={isSavingName || !renameValue.trim()} onClick={saveRename}>
+              {isSavingName ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
+            </button>
+            <button className="p-0.5 text-muted-foreground hover:text-foreground" onClick={() => setIsRenamingFillRun(false)}>
+              <X className="h-3 w-3" />
+            </button>
+          </div>
+        ) : (
+          <div className="flex items-center gap-1 group cursor-pointer" onClick={() => { setRenameValue(fillRun.name || ''); setIsRenamingFillRun(true); }}>
+            <span className="text-sm font-semibold text-foreground leading-tight truncate max-w-[200px]">
+              {fillRun.name || 'Template Fill'}
+            </span>
+            <Pencil className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
+          </div>
+        )}
+        <p className="text-[10px] text-muted-foreground leading-tight truncate max-w-[260px]">
+          {fillRun.document_metadata?.filename || 'Document'} → Excel
+        </p>
+      </div>
+    </div>
+  );
+
+  const fillHeaderRight = (
+    <div className="flex items-center gap-2">
+      {(() => {
+        const statusInfo = formatStatus(fillRun.status);
+        return (
+          <Badge variant={statusInfo.variant} className={statusInfo.variant === 'success' ? 'bg-green-500 hover:bg-green-600 text-white text-xs' : 'text-xs'}>
+            {statusInfo.label}
+          </Badge>
+        );
+      })()}
+      {fillRun.current_stage && <Badge variant="outline" className="text-xs">{formatStage(fillRun.current_stage)}</Badge>}
+      {!fillRun.template_id && <Badge variant="destructive" className="text-xs">Template Deleted</Badge>}
+      {!fillRun.document_id && <Badge variant="destructive" className="text-xs">Doc Deleted</Badge>}
+      {fillRun.status === 'completed' && fillRun.artifact ? (
+        <>
+          <Button size="sm" onClick={handleContinue} className="bg-green-600 hover:bg-green-700 text-white h-7 text-xs">
+            <Download className="h-3.5 w-3.5 mr-1.5" />
+            Download
+          </Button>
+          <FeedbackButton operationType="template_fill" entityId={fillRunId} entitySummary={fillRun.template_snapshot?.name || 'Template Fill'} />
+        </>
+      ) : fillRun.status === 'awaiting_review' ? (
+        <Button size="sm" onClick={handleContinue} className="bg-blue-600 hover:bg-blue-700 text-white h-7 text-xs">
+          <CheckCircle2 className="h-3.5 w-3.5 mr-1.5" />
+          Approve &amp; Fill
+        </Button>
+      ) : fillRun.status === 'filling' ? (
+        <Button size="sm" disabled className="bg-muted h-7 text-xs">
+          <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+          Filling...
+        </Button>
+      ) : null}
+    </div>
+  );
+
   return (
-    <AppLayout lockViewport>
+    <AppLayout lockViewport hideNav headerLeft={fillHeaderLeft} headerRight={fillHeaderRight}>
       <div className="flex-1 flex flex-col bg-background relative overflow-hidden min-h-0">
-        {/* Progress Banner (non-blocking) */}
-        {jobStatus === 'processing' && (
-          <div className="fixed right-4 top-20 z-50">
-            <Card className="w-[360px] p-4 shadow-lg">
-              <div className="space-y-3">
-                <div className="flex items-center gap-2">
-                  <Loader2 className="h-4 w-4 animate-spin text-primary" />
-                  <h3 className="text-sm font-semibold">Template Fill in Progress</h3>
-                </div>
-
-                <div className="space-y-1.5">
-                  <Progress value={jobProgress} className="w-full h-2" />
-                  <div className="flex justify-between text-[11px] text-muted-foreground">
-                    <span>{jobProgress}%</span>
-                    <span className="truncate max-w-[220px]">{jobMessage}</span>
-                  </div>
-                </div>
-
-                <div className="text-[11px] text-muted-foreground bg-muted/50 p-2.5 rounded-md space-y-1">
-                  <div className="flex items-center gap-2">
-                    <div className="w-1.5 h-1.5 bg-primary rounded-full animate-pulse" />
-                    <span>Processing runs in the background</span>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <div className="w-1.5 h-1.5 bg-muted-foreground rounded-full" />
-                    <span>You can keep working while it completes</span>
-                  </div>
-                </div>
+        {/* Completion Banner */}
+        {showCompletionBanner && (
+          <div className="absolute top-2 left-1/2 -translate-x-1/2 z-50 animate-fade-in">
+            <div className="glass-card rounded-full px-5 py-2.5 flex items-center gap-3 shadow-lg border border-primary/20">
+              <div className="w-6 h-6 rounded-full bg-primary/10 flex items-center justify-center">
+                {fillRun?.status === 'completed' ? (
+                  <PartyPopper className="h-3.5 w-3.5 text-primary" />
+                ) : (
+                  <CheckCircle2 className="h-3.5 w-3.5 text-primary" />
+                )}
               </div>
-            </Card>
+              <span className="text-sm font-semibold text-foreground">
+                {fillRun?.status === 'completed'
+                  ? `${fillRun.total_fields_mapped || 0} cells filled · Ready to download`
+                  : `AI mapping complete · ${fillRun?.total_fields_mapped || 0} fields mapped`}
+              </span>
+              <button onClick={() => setShowCompletionBanner(false)} className="text-muted-foreground hover:text-foreground transition-colors">
+                <X className="h-3.5 w-3.5" />
+              </button>
+            </div>
           </div>
         )}
 
@@ -480,92 +645,19 @@ export default function TemplateFillPage() {
           </div>
         )}
 
-        {/* Header */}
-        <div className="border-b bg-card">
-          <div className="px-6 py-1">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-3">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => navigate('/app/re/templates')}
-                  className="h-8 w-8 p-0"
-                >
-                  <ArrowLeft className="h-4 w-4" />
-                </Button>
-                <div className="p-2 bg-muted rounded-lg">
-                  <Table className="h-5 w-5 text-primary" />
-                </div>
-                <div>
-                  <h1 className="text-base font-semibold text-foreground leading-tight">Template Fill</h1>
-                  <p className="text-[11px] text-muted-foreground leading-tight">
-                    {fillRun.document_metadata?.filename || 'Document'} → Excel Template
-                  </p>
-                </div>
-              </div>
-              <div className="flex items-center gap-3">
-                <div className="flex items-center gap-2 flex-wrap">
-                  {(() => {
-                    const statusInfo = formatStatus(fillRun.status);
-                    return (
-                      <Badge
-                        variant={statusInfo.variant}
-                        className={statusInfo.variant === 'success' ? 'bg-green-500 hover:bg-green-600 text-white' : ''}
-                      >
-                        {statusInfo.label}
-                      </Badge>
-                    );
-                  })()}
-                  {fillRun.current_stage && (
-                    <Badge variant="outline" className="text-xs">
-                      {formatStage(fillRun.current_stage)}
-                    </Badge>
-                  )}
-                  {!fillRun.template_id && (
-                    <Badge variant="destructive" className="text-xs">
-                      Template Deleted
-                    </Badge>
-                  )}
-                  {!fillRun.document_id && (
-                    <Badge variant="destructive" className="text-xs">
-                      Document Deleted
-                    </Badge>
-                  )}
-                </div>
-                {fillRun.status === 'completed' && fillRun.artifact ? (
-                  <>
-                    <Button
-                      size="sm"
-                      onClick={handleContinue}
-                      className="bg-green-600 hover:bg-green-700 text-white shadow-sm"
-                    >
-                      <Download className="h-4 w-4 mr-2" />
-                      Download Excel
-                    </Button>
-                    <FeedbackButton
-                      operationType="template_fill"
-                      entityId={fillRunId}
-                      entitySummary={fillRun.template_snapshot?.name || 'Template Fill'}
-                    />
-                  </>
-                ) : fillRun.status === 'awaiting_review' ? (
-                  <Button
-                    size="sm"
-                    onClick={handleContinue}
-                    className="bg-gradient-to-r from-blue-600 to-blue-700 hover:from-blue-700 hover:to-blue-800 text-white shadow-md hover:shadow-lg transition-all"
-                  >
-                    <CheckCircle2 className="h-4 w-4 mr-2" />
-                    Approve & Fill Template
-                  </Button>
-                ) : fillRun.status === 'filling' ? (
-                  <Button size="sm" disabled className="bg-muted">
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    Filling Template...
-                  </Button>
-                ) : null}
-              </div>
-            </div>
+        {/* Mobile toolbar */}
+        <div className="md:hidden flex items-center justify-between px-3 py-1.5 border-b bg-card flex-shrink-0">
+          <div className="flex items-center gap-2 min-w-0">
+            <Button variant="ghost" size="sm" onClick={() => navigate('/app/re/templates')} className="h-7 w-7 p-0 shrink-0">
+              <ArrowLeft className="h-4 w-4" />
+            </Button>
+            <span className="text-sm font-semibold truncate">{fillRun.name || 'Template Fill'}</span>
           </div>
+          {fillRun.status === 'completed' && fillRun.artifact && (
+            <Button size="sm" onClick={handleContinue} className="bg-green-600 text-white h-7 text-xs shrink-0">
+              <Download className="h-3.5 w-3.5" />
+            </Button>
+          )}
         </div>
 
         {/* Horizontal Split Layout */}
@@ -646,6 +738,14 @@ export default function TemplateFillPage() {
           <ResizablePanel defaultSize={50} minSize={30} className="min-h-0 overflow-hidden">
             <Tabs value={activeTab} onValueChange={setActiveTab} className="h-full min-h-0 flex flex-col overflow-hidden">
               <div className="sticky top-0 z-10 bg-card border-b flex-shrink-0">
+                {jobStatus === 'processing' && (
+                  <div className="h-0.5 bg-muted overflow-hidden">
+                    <div
+                      className="h-full bg-primary transition-all duration-700"
+                      style={{ width: `${jobProgress}%` }}
+                    />
+                  </div>
+                )}
                 <div className="flex items-center justify-between px-4">
                   <TabsList className="bg-transparent rounded-none p-0 h-auto border-b-0">
                     <TabsTrigger
@@ -704,7 +804,9 @@ export default function TemplateFillPage() {
               </TabsContent>
 
               <TabsContent value="excel" className="flex-1 min-h-0 overflow-auto m-0">
-                {!fillRun.template_id ? (
+                {jobStatus === 'processing' ? (
+                  <AIPipelineView progress={jobProgress} message={jobMessage} fillRun={fillRun} />
+                ) : !fillRun.template_id ? (
                   <div className="flex items-center justify-center h-full">
                     <div className="text-center space-y-3 p-8 max-w-md">
                       <div className="flex justify-center">

@@ -30,6 +30,9 @@ import {
   Eye,
   ChevronLeft,
   ChevronRight,
+  Pencil,
+  Check,
+  X,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import {
@@ -42,6 +45,7 @@ import {
   getFillRunCount,
   deleteFillRun,
   waitForTemplateAnalysis,
+  renameRETemplate,
 } from '../../../api/re-templates';
 
 export default function TemplatesPage() {
@@ -335,68 +339,58 @@ export default function TemplatesPage() {
     f.template_snapshot?.name?.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  return (
-    <AppLayout>
-      <div className="h-full flex flex-col bg-background">
-        {/* Header - ChatGPT Inspired */}
-        <div className="border-b bg-card/50 backdrop-blur supports-[backdrop-filter]:bg-card/50">
-          <div className="px-4 sm:px-6 py-4">
-            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
-              <div className="flex items-center gap-3 min-w-0">
-                <div className="p-2 bg-primary/10 rounded-lg">
-                  <FileSpreadsheet className="h-5 w-5 text-primary" />
-                </div>
-                <div className="min-w-0">
-                  <h1 className="text-lg font-semibold text-foreground truncate">Excel Templates</h1>
-                  <p className="text-xs text-muted-foreground mt-0.5">
-                    Upload and manage templates for document filling
-                  </p>
-                </div>
-              </div>
-              <div className="flex items-center gap-2">
-                <Button onClick={() => setShowUploadModal(true)} className="w-full sm:w-auto">
-                  <Upload className="h-4 w-4 mr-2" />
-                  Upload Template
-                </Button>
-              </div>
-            </div>
-          </div>
+  const uploadButton = (
+    <Button onClick={() => setShowUploadModal(true)} size="sm" className="h-7 text-xs">
+      <Upload className="h-3.5 w-3.5 mr-1.5" />
+      Upload Template
+    </Button>
+  );
 
-          {/* Tabs */}
-          <div className="px-4 sm:px-6 flex gap-6 border-t overflow-x-auto">
-            <button
-              onClick={() => setSearchParams({ tab: 'templates' })}
-              className={cn(
-                'px-1 py-3 text-sm font-medium border-b-2 transition-colors',
-                activeTab === 'templates'
-                  ? 'border-primary text-foreground'
-                  : 'border-transparent text-muted-foreground hover:text-foreground'
-              )}
-            >
-              Templates
-              {templates.length > 0 && (
-                <Badge variant="secondary" className="ml-2 text-xs">
-                  {templates.length}
-                </Badge>
-              )}
-            </button>
-            <button
-              onClick={() => setSearchParams({ tab: 'fills' })}
-              className={cn(
-                'px-1 py-3 text-sm font-medium border-b-2 transition-colors',
-                activeTab === 'fills'
-                  ? 'border-primary text-foreground'
-                  : 'border-transparent text-muted-foreground hover:text-foreground'
-              )}
-            >
-              Fill Runs
-              {(fillRunCount ?? fillRuns.length) > 0 && (
-                <Badge variant="secondary" className="ml-2 text-xs">
-                  {fillRunCount ?? fillRuns.length}
-                </Badge>
-              )}
-            </button>
-          </div>
+  return (
+    <AppLayout headerRight={uploadButton}>
+      <div className="h-full flex flex-col bg-background">
+        {/* Tabs */}
+        <div className="px-4 sm:px-6 flex gap-6 border-b overflow-x-auto">
+          <button
+            onClick={() => setSearchParams({ tab: 'templates' })}
+            className={cn(
+              'px-1 py-2.5 text-sm font-medium border-b-2 -mb-px transition-all duration-200',
+              activeTab === 'templates'
+                ? 'border-primary text-foreground'
+                : 'border-transparent text-muted-foreground hover:text-foreground'
+            )}
+          >
+            Templates
+            {templates.length > 0 && (
+              <Badge variant="secondary" className="ml-2 text-xs">
+                {templates.length}
+              </Badge>
+            )}
+          </button>
+          <button
+            onClick={() => setSearchParams({ tab: 'fills' })}
+            className={cn(
+              'px-1 py-2.5 text-sm font-medium border-b-2 -mb-px transition-all duration-200',
+              activeTab === 'fills'
+                ? 'border-primary text-foreground'
+                : 'border-transparent text-muted-foreground hover:text-foreground'
+            )}
+          >
+            Fill Runs
+            {(fillRunCount ?? fillRuns.length) > 0 && (
+              <Badge variant="secondary" className="ml-2 text-xs">
+                {fillRunCount ?? fillRuns.length}
+              </Badge>
+            )}
+          </button>
+        </div>
+
+        {/* Mobile upload button */}
+        <div className="md:hidden px-4 pt-3">
+          <Button onClick={() => setShowUploadModal(true)} className="w-full" size="sm">
+            <Upload className="h-4 w-4 mr-2" />
+            Upload Template
+          </Button>
         </div>
 
         {/* Error Messages */}
@@ -432,6 +426,10 @@ export default function TemplatesPage() {
               onView={handleViewTemplate}
               onStartFill={handleStartFill}
               onDelete={handleDelete}
+              onRename={async (templateId, name) => {
+                await renameRETemplate(getToken, templateId, name);
+                setTemplates((prev) => prev.map((t) => t.id === templateId ? { ...t, name } : t));
+              }}
             />
           ) : (
             <FillRunsList
@@ -584,7 +582,7 @@ export default function TemplatesPage() {
 }
 
 // Templates Grid Component
-function TemplatesGrid({ templates, searchQuery, onSearchChange, onView, onStartFill, onDelete }) {
+function TemplatesGrid({ templates, searchQuery, onSearchChange, onView, onStartFill, onDelete, onRename }) {
   return (
     <div className="max-w-7xl mx-auto">
       {/* Search Bar */}
@@ -617,6 +615,7 @@ function TemplatesGrid({ templates, searchQuery, onSearchChange, onView, onStart
               onView={onView}
               onStartFill={onStartFill}
               onDelete={onDelete}
+              onRename={onRename}
             />
           ))}
         </div>
@@ -626,11 +625,21 @@ function TemplatesGrid({ templates, searchQuery, onSearchChange, onView, onStart
 }
 
 // Template Card Component
-function TemplateCard({ template, onView, onStartFill, onDelete }) {
+function TemplateCard({ template, onView, onStartFill, onDelete, onRename }) {
   const totalFields = template.total_fields || 0;
   const totalSheets = template.total_sheets || 0;
   const isAnalyzing = template._analyzing;
   const analysisFailed = template._analysisFailed;
+  const [isRenaming, setIsRenaming] = React.useState(false);
+  const [renameValue, setRenameValue] = React.useState('');
+  const [isSaving, setIsSaving] = React.useState(false);
+
+  async function saveRename() {
+    const trimmed = renameValue.trim();
+    if (!trimmed) return;
+    setIsSaving(true);
+    try { await onRename(template.id, trimmed); } finally { setIsSaving(false); setIsRenaming(false); }
+  }
 
   return (
     <div className={cn(
@@ -643,7 +652,34 @@ function TemplateCard({ template, onView, onStartFill, onDelete }) {
       <div className="p-4 border-b bg-muted/30">
         <div className="flex items-start justify-between gap-2">
           <div className="flex-1 min-w-0">
-            <h3 className="font-semibold text-foreground truncate">{template.name}</h3>
+            {isRenaming ? (
+              <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                <input
+                  autoFocus
+                  className="font-semibold bg-transparent border-b border-primary outline-none text-foreground flex-1 min-w-0 text-sm"
+                  value={renameValue}
+                  onChange={(e) => setRenameValue(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') saveRename();
+                    else if (e.key === 'Escape') setIsRenaming(false);
+                  }}
+                />
+                <button className="p-0.5 text-primary disabled:opacity-50 flex-shrink-0" disabled={isSaving || !renameValue.trim()} onClick={saveRename}>
+                  {isSaving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Check className="h-3.5 w-3.5" />}
+                </button>
+                <button className="p-0.5 text-muted-foreground hover:text-foreground flex-shrink-0" onClick={() => setIsRenaming(false)}>
+                  <X className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            ) : (
+              <div
+                className="flex items-center gap-1 group cursor-pointer"
+                onClick={() => { setRenameValue(template.name); setIsRenaming(true); }}
+              >
+                <h3 className="font-semibold text-foreground truncate">{template.name}</h3>
+                <Pencil className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0" />
+              </div>
+            )}
             {template.description && (
               <p className="text-xs text-muted-foreground mt-1 line-clamp-2">
                 {template.description}
@@ -806,12 +842,14 @@ function FillRunsList({ fillRuns, searchQuery, onSearchChange, onViewFill, onDel
                 return (
                   <TableRow
                     key={fillRun.id}
-                    className="cursor-pointer hover:bg-muted/30 transition-colors group"
-                    onClick={() => onViewFill(fillRun.id)}
+                    className="hover:bg-muted/30 transition-colors group"
                   >
-                    {/* Template name */}
+                    {/* Template name / fill run name */}
                     <TableCell className="py-2.5 pl-4 max-w-[220px]">
-                      <span className="font-medium text-sm truncate block">
+                      {fillRun.name && (
+                        <span className="font-medium text-sm truncate block">{fillRun.name}</span>
+                      )}
+                      <span className={cn('truncate block', fillRun.name ? 'text-xs text-muted-foreground' : 'font-medium text-sm')}>
                         {fillRun.template_snapshot?.name || 'Unknown Template'}
                       </span>
                       {templateDeleted && (
@@ -850,7 +888,7 @@ function FillRunsList({ fillRuns, searchQuery, onSearchChange, onViewFill, onDel
                     </TableCell>
 
                     {/* Actions */}
-                    <TableCell className="py-2.5 pr-4 text-right" onClick={(e) => e.stopPropagation()}>
+                    <TableCell className="py-2.5 pr-4 text-right">
                       <div className="flex items-center justify-end gap-1">
                         {fillRun.status === 'completed' && fillRun.artifact && (
                           <Button size="sm" variant="ghost" className="h-7 px-2">

@@ -140,6 +140,24 @@ export async function deleteRETemplate(getToken, templateId) {
 }
 
 /**
+ * Rename an Excel template
+ */
+export async function renameRETemplate(getToken, templateId, name) {
+  const api = createAuthenticatedApi(getToken);
+  const response = await api.patch(`/api/v1/re/templates/${templateId}`, { name });
+  return response.data;
+}
+
+/**
+ * Rename a template fill run
+ */
+export async function renameFillRun(getToken, fillRunId, name) {
+  const api = createAuthenticatedApi(getToken);
+  const response = await api.patch(`/api/v1/re/templates/fills/${fillRunId}`, { name });
+  return response.data;
+}
+
+/**
  * Download Excel template file. Returns ArrayBuffer for XLSX parsing.
  *
  * R2 storage: backend returns { url } JSON — we fetch directly from the presigned

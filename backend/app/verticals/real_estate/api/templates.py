@@ -100,6 +100,7 @@ class FillRunStatus(BaseModel):
     """Fill run status information."""
 
     id: str
+    name: Optional[str] = None
     template_id: Optional[str]  # Can be null if template deleted
     document_id: Optional[str]  # Can be null if document deleted
     status: str
@@ -122,6 +123,7 @@ class FillRunListItem(BaseModel):
     """Fill run list item (simplified)."""
 
     id: str
+    name: Optional[str] = None
     template_id: Optional[str]  # Can be null if template deleted
     template_snapshot: Optional[Dict[str, Any]]  # Template metadata snapshot
     document_id: Optional[str]  # Can be null if document deleted
@@ -148,6 +150,18 @@ class ContinueFillRequest(BaseModel):
     """Request to continue fill run after user review."""
 
     pass  # No additional data needed
+
+
+class UpdateTemplateRequest(BaseModel):
+    """Request to rename a template."""
+
+    name: str = Field(..., min_length=1, max_length=255)
+
+
+class UpdateFillRunRequest(BaseModel):
+    """Request to rename a fill run."""
+
+    name: str = Field(..., min_length=1, max_length=255)
 
 
 # ==================== Template Management Endpoints ====================
@@ -351,6 +365,7 @@ async def list_fills(
 
             result.append(FillRunListItem(
                 id=fill_run.id,
+                name=fill_run.name,
                 template_id=fill_run.template_id,
                 template_snapshot=template_snapshot,
                 document_id=fill_run.document_id,
@@ -417,6 +432,22 @@ async def get_template(
     except Exception as e:
         logger.error(f"Failed to get template: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to get template")
+
+
+@router.patch("/{template_id}")
+async def rename_template(
+    template_id: str,
+    request: UpdateTemplateRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Rename a template."""
+    repo = TemplateRepository(db)
+    template = repo.get_template(template_id, user.org_id)
+    if not template or template.user_id != user.id:
+        raise HTTPException(status_code=404, detail="Template not found")
+    updated = repo.update_template(template_id, name=request.name)
+    return {"id": updated.id, "name": updated.name}
 
 
 @router.get("/{template_id}/usage")
@@ -677,6 +708,7 @@ async def get_fill_status(
 
         return FillRunStatus(
             id=fill_run.id,
+            name=fill_run.name,
             template_id=fill_run.template_id,
             document_id=fill_run.document_id,
             status=fill_run.status,
@@ -700,6 +732,22 @@ async def get_fill_status(
     except Exception as e:
         logger.error(f"Failed to get fill status: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to get fill status")
+
+
+@router.patch("/fills/{fill_run_id}")
+async def rename_fill_run(
+    fill_run_id: str,
+    request: UpdateFillRunRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Rename a fill run."""
+    repo = TemplateRepository(db)
+    fill_run = repo.get_fill_run(fill_run_id, user.org_id)
+    if not fill_run or fill_run.user_id != user.id:
+        raise HTTPException(status_code=404, detail="Fill run not found")
+    updated = repo.update_fill_run(fill_run_id, name=request.name)
+    return {"id": updated.id, "name": updated.name}
 
 
 @router.put("/fills/{fill_run_id}/mappings")

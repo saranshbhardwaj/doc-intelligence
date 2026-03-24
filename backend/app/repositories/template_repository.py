@@ -317,6 +317,7 @@ class TemplateRepository:
 
         # Update allowed fields
         allowed_fields = [
+            "name",
             "status",
             "current_stage",
             "field_mapping",

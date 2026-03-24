@@ -72,6 +72,11 @@ export default {
           mid: "hsl(var(--similarity-mid))",
           low: "hsl(var(--similarity-low))",
         },
+        tertiary: {
+          DEFAULT: "hsl(var(--tertiary))",
+          foreground: "hsl(var(--tertiary-foreground))",
+        },
+        surface: "hsl(var(--surface))",
         // Document type badge tokens — bg-dt-X / text-dt-X-foreground
         dt: {
           spa:          { DEFAULT: "hsl(var(--dt-spa))",          foreground: "hsl(var(--dt-spa-fg))" },
@@ -90,6 +95,10 @@ export default {
         },
       },
       keyframes: {
+        "page-enter": {
+          from: { opacity: "0", transform: "translateY(8px)" },
+          to: { opacity: "1", transform: "translateY(0)" },
+        },
         "accordion-down": {
           from: { height: "0" },
           to: { height: "var(--radix-accordion-content-height)" },
@@ -152,6 +161,7 @@ export default {
         },
       },
       animation: {
+        "page-enter": "page-enter 0.3s ease-out both",
         "accordion-down": "accordion-down 0.2s ease-out",
         "accordion-up": "accordion-up 0.2s ease-out",
         // Library animations

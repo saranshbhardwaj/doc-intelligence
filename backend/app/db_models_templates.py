@@ -98,6 +98,9 @@ class TemplateFillRun(Base):
     org_id = Column(String(64), nullable=False, index=True)  # Clerk org ID (tenant)
     user_id = Column(String(100), nullable=False, index=True)
 
+    # User-defined name (optional; falls back to template+document label in UI)
+    name = Column(String(255), nullable=True)
+
     # Template snapshot (preserve context if template is deleted)
     # Stores: {name, description, schema_metadata}
     template_snapshot = Column(JSONB)

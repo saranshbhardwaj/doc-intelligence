@@ -44,15 +44,24 @@ export function useExcelWorkbook(templateId) {
         return;
       }
 
-      // Download and parse Excel file
+      // Download Excel file
       const arrayBuffer = await downloadRETemplate(getToken, templateId);
 
-      // Parse with cellFormula and cellStyles to preserve Excel metadata
-      const wb = XLSX.read(arrayBuffer, { type: 'array', cellFormula: true, cellStyles: true });
-
-      // Cache the workbook for tab switches
-      cacheExcelWorkbook(wb, templateId);
-      setWorkbook(wb);
+      // Parse off the current call stack so the browser can paint the loading spinner
+      // before the synchronous XLSX.read blocks the main thread (can take 1-3s with cellStyles).
+      await new Promise((resolve, reject) => {
+        setTimeout(() => {
+          try {
+            // Parse with cellFormula and cellStyles to preserve Excel metadata
+            const wb = XLSX.read(arrayBuffer, { type: 'array', cellFormula: true, cellStyles: true });
+            cacheExcelWorkbook(wb, templateId);
+            setWorkbook(wb);
+            resolve();
+          } catch (err) {
+            reject(err);
+          }
+        }, 0);
+      });
     } catch (err) {
       console.error('❌ Failed to load Excel file:', err);
       setError('Failed to load Excel file');

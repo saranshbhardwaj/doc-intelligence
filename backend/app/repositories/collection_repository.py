@@ -392,6 +392,61 @@ class CollectionRepository:
                 db.rollback()
                 return False
 
+    def list_collections_with_documents(
+        self,
+        user_id: str,
+        org_id: str,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list, int]:
+        """List collections with their documents in a single query.
+
+        Returns each collection paired with all its documents, avoiding the
+        N+1 pattern of fetching each collection individually.
+
+        Returns:
+            Tuple of (list of dicts {collection, documents}, total collection count)
+        """
+        with self._get_session() as db:
+            try:
+                col_query = db.query(Collection).filter(
+                    Collection.user_id == user_id,
+                    Collection.org_id == org_id,
+                )
+                total = col_query.count()
+                collections = col_query.order_by(Collection.updated_at.desc()).limit(limit).offset(offset).all()
+
+                if not collections:
+                    return [], 0
+
+                collection_ids = [c.id for c in collections]
+
+                # Single join query for all documents across all collections
+                rows = (
+                    db.query(Document, CollectionDocument.collection_id)
+                    .join(CollectionDocument, Document.id == CollectionDocument.document_id)
+                    .filter(CollectionDocument.collection_id.in_(collection_ids))
+                    .all()
+                )
+
+                # Group documents by collection_id
+                docs_by_collection: dict[str, list] = {cid: [] for cid in collection_ids}
+                for doc, cid in rows:
+                    docs_by_collection[cid].append(doc)
+
+                result = [
+                    {"collection": c, "documents": docs_by_collection[c.id]}
+                    for c in collections
+                ]
+                return result, total
+
+            except SQLAlchemyError as e:
+                logger.error(
+                    "Failed to list collections with documents",
+                    extra={"user_id": user_id, "org_id": org_id, "error": str(e)}
+                )
+                return [], 0
+
     # ============================================================================
     # COLLECTION DOCUMENT OPERATIONS
     # ============================================================================

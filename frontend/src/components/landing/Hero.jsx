@@ -67,7 +67,7 @@ export default function Hero({ onGetStarted }) {
           </div>
 
           {/* Main heading */}
-          <h1 className="text-5xl sm:text-6xl lg:text-7xl font-extrabold text-foreground mb-6 leading-tight">
+          <h1 className="font-display text-5xl sm:text-6xl lg:text-7xl font-extrabold text-foreground mb-6 leading-tight">
             AI-Powered Intelligence for
             <br className="hidden sm:block" />
             <span className="bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">

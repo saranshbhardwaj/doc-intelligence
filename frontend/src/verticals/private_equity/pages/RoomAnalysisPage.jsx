@@ -60,7 +60,8 @@ export default function RoomAnalysisPage() {
 
   const clausesLoaded = useRef(false);
   const financialsLoaded = useRef(false);
-  const urlCache = useRef({});
+  // Cache pre-signed URLs with a 45-min TTL (R2/S3 URLs expire at 1h)
+  const urlCache = useRef({}); // { [documentId]: { url, expiresAt } }
 
   const [documentPanel, setDocumentPanel] = useState(null);
   const [documentLoading, setDocumentLoading] = useState(false);
@@ -82,6 +83,11 @@ export default function RoomAnalysisPage() {
   }, [getToken, roomId]);
 
   useEffect(() => {
+    // Reset lazy-load flags when room changes so new room data is fetched
+    clausesLoaded.current = false;
+    financialsLoaded.current = false;
+    setClauses([]);
+    setFinancials(null);
     loadData();
   }, [loadData]);
 
@@ -122,11 +128,13 @@ export default function RoomAnalysisPage() {
     setDocumentPanel({ documentId, page, filename, bbox: bbox ?? null, url: null });
 
     try {
-      let url = urlCache.current[documentId];
+      const cached = urlCache.current[documentId];
+      const now = Date.now();
+      let url = cached && cached.expiresAt > now ? cached.url : null;
       if (!url) {
         const data = await getDocumentDownloadUrl(getToken, documentId);
         url = data.url;
-        urlCache.current[documentId] = url;
+        urlCache.current[documentId] = { url, expiresAt: now + 45 * 60 * 1000 };
       }
       setDocumentPanel({ documentId, page, filename, bbox: bbox ?? null, url });
     } catch {
@@ -183,7 +191,7 @@ export default function RoomAnalysisPage() {
             )}
 
             {!loading && !hasData && (
-              <div className="pe-card-muted p-16 text-center">
+              <div className="glass-card p-16 text-center rounded-2xl">
                 <div className="w-16 h-16 bg-primary/10 rounded-2xl flex items-center justify-center mx-auto mb-4">
                   <Shield className="w-8 h-8 text-primary opacity-60" />
                 </div>
@@ -210,7 +218,7 @@ export default function RoomAnalysisPage() {
                   onAnalysisStart={handleRerun}
                 />
 
-                <div className="flex items-center gap-1 bg-muted/50 rounded-lg p-1 mb-6 w-fit">
+                <div className="glass-panel flex items-center gap-1 rounded-xl p-1 mb-6 w-fit border border-border/50">
                   <TabButton active={activeTab === "overview"} onClick={() => setActiveTab("overview")}>Room Overview</TabButton>
                   <TabButton active={activeTab === "by-document"} onClick={() => setActiveTab("by-document")}>By Document ({docs.length})</TabButton>
                   <TabButton active={activeTab === "deal-sourcing"} onClick={() => setActiveTab("deal-sourcing")}>Diligence Drivers</TabButton>
@@ -275,8 +283,8 @@ export default function RoomAnalysisPage() {
         </div>
 
         {showDocumentPanel && (
-          <div className="w-[40%] border-l border-border flex flex-col bg-background">
-            <div className="flex items-center justify-between px-4 py-3 border-b bg-muted/30 shrink-0">
+          <div className="w-[40%] border-l border-border/50 flex flex-col bg-background">
+            <div className="glass-sidebar flex items-center justify-between px-4 py-3 border-b border-border/50 shrink-0">
               <div className="flex items-center gap-2 min-w-0">
                 <FileText className="w-4 h-4 text-primary shrink-0" />
                 <span className="text-sm font-medium truncate">{documentPanel.filename || "Document"}</span>

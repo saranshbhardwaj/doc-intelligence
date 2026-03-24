@@ -282,11 +282,11 @@ export default function ChatPage() {
           ) : !chat.currentSession ? (
             /* No active session placeholder — dialog opens automatically */
             <div className="flex flex-col items-center justify-center h-full gap-4 text-center px-4">
-              <div className="w-16 h-16 bg-primary/10 rounded-2xl flex items-center justify-center">
+              <div className="w-16 h-16 glass-card rounded-2xl flex items-center justify-center">
                 <MessageSquare className="w-8 h-8 text-primary" />
               </div>
               <div>
-                <h3 className="text-lg font-semibold text-foreground">No active session</h3>
+                <h3 className="font-display text-lg font-semibold text-foreground">No active session</h3>
                 <p className="text-sm text-muted-foreground mt-1">
                   Select a session from the sidebar or start a new chat
                 </p>

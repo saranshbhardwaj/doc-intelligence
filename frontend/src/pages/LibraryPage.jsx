@@ -512,10 +512,10 @@ export default function LibraryPage() {
               <div className="h-full flex flex-col">
                 {/* Collection Header */}
                 <div className="mb-4">
-                  <h1 className="text-2xl font-semibold text-foreground mb-1">
+                  <h1 className="page-title text-2xl mb-1">
                     {selectedCollection.name}
                   </h1>
-                  <p className="text-sm text-muted-foreground">
+                  <p className="page-subtitle">
                     Manage documents in this collection
                   </p>
                 </div>
@@ -547,10 +547,10 @@ export default function LibraryPage() {
             ) : (
               <div className="h-full flex items-center justify-center">
                 <div className="text-center max-w-sm">
-                  <div className="w-20 h-20 mx-auto mb-6 bg-primary/10 rounded-3xl flex items-center justify-center shadow-lg border border-primary/10">
+                  <div className="w-20 h-20 mx-auto mb-6 glass-card rounded-3xl flex items-center justify-center shadow-lg">
                     <UploadCloud className="w-10 h-10 text-primary" />
                   </div>
-                  <h3 className="text-xl font-bold text-foreground mb-2">
+                  <h3 className="font-display text-xl font-bold text-foreground mb-2">
                     No Collection Selected
                   </h3>
                   <p className="text-sm text-muted-foreground mb-6">
