@@ -182,6 +182,10 @@ class TemplateFillRun(Base):
     llm_batches_count = Column(Integer, nullable=True)  # Number of LLM batches for field mapping
     cache_hit_rate = Column(Float, nullable=True)  # Percentage of cache hits (0.0-1.0)
 
+    # Prompt versioning & LLM I/O capture
+    prompt_version = Column(String(20), nullable=True)  # Which prompt set version produced this run
+    llm_io_log = Column(JSONB, nullable=True)  # Array of per-LLM-call records for debugging/evals
+
     # Error handling
     error_stage = Column(String(50))
     error_message = Column(Text)

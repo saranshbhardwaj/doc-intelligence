@@ -10,6 +10,67 @@ import { Button } from '../../../components/ui/button';
 import { AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, Info } from 'lucide-react';
 import { getExcelCellStyle } from '../utils/excelCellStyles';
 
+const DEFAULT_VISIBLE_ROW_END = 20;
+const DEFAULT_VISIBLE_COL_END = 10;
+const worksheetViewCache = new WeakMap();
+
+function getSheetWindowCacheKey(displayRowEnd, displayColEnd) {
+  return `${displayRowEnd}:${displayColEnd}`;
+}
+
+function computeInitialColumnWidths(worksheet) {
+  const widths = {};
+  const cols = worksheet['!cols'] || [];
+  const charToPixels = 7.5;
+
+  cols.forEach((colInfo, index) => {
+    if (colInfo && colInfo.wch) {
+      const pixels = Math.max(64, Math.min(400, colInfo.wch * charToPixels));
+      widths[index] = Math.round(pixels);
+    }
+  });
+
+  return widths;
+}
+
+function computeCellStyleCache(worksheet, displayRowEnd, displayColEnd) {
+  const cache = {};
+  const range = XLSX.utils.decode_range(worksheet['!ref'] || 'A1');
+
+  for (let R = range.s.r; R <= displayRowEnd; R++) {
+    for (let C = range.s.c; C <= displayColEnd; C++) {
+      const addr = XLSX.utils.encode_cell({ r: R, c: C });
+      cache[addr] = getExcelCellStyle(worksheet[addr]);
+    }
+  }
+
+  return cache;
+}
+
+export function warmExcelSheetView(worksheet) {
+  if (!worksheet) return null;
+
+  const existing = worksheetViewCache.get(worksheet);
+  if (existing?.initialColumnWidths && existing.windowCaches?.size) {
+    return existing;
+  }
+
+  const range = XLSX.utils.decode_range(worksheet['!ref'] || 'A1');
+  const displayRowEnd = Math.min(DEFAULT_VISIBLE_ROW_END, range.e.r);
+  const displayColEnd = Math.min(DEFAULT_VISIBLE_COL_END, range.e.c);
+  const windowKey = getSheetWindowCacheKey(displayRowEnd, displayColEnd);
+
+  const warmed = {
+    initialColumnWidths: computeInitialColumnWidths(worksheet),
+    windowCaches: new Map([
+      [windowKey, computeCellStyleCache(worksheet, displayRowEnd, displayColEnd)],
+    ]),
+  };
+
+  worksheetViewCache.set(worksheet, warmed);
+  return warmed;
+}
+
 export default function ExcelGrid({
   workbook,
   sheetName,
@@ -18,48 +79,42 @@ export default function ExcelGrid({
   isYamlUnmappedCell,
   onCellClick,
   selectedCell,
+  onReady,
 }) {
   const worksheet = workbook.Sheets[sheetName];
   const [expandedCells, setExpandedCells] = React.useState(new Set());
-  const [visibleRowEnd, setVisibleRowEnd] = React.useState(20); // Show first 20 rows initially
-  const [visibleColEnd, setVisibleColEnd] = React.useState(10); // Show first 10 columns initially
+  const [visibleRowEnd, setVisibleRowEnd] = React.useState(DEFAULT_VISIBLE_ROW_END); // Show first rows initially
+  const [visibleColEnd, setVisibleColEnd] = React.useState(DEFAULT_VISIBLE_COL_END); // Show first cols initially
+  const didSignalReadyRef = React.useRef(false);
 
   // Reset pagination when sheet changes
   React.useEffect(() => {
-    setVisibleRowEnd(20);
-    setVisibleColEnd(10);
+    setVisibleRowEnd(DEFAULT_VISIBLE_ROW_END);
+    setVisibleColEnd(DEFAULT_VISIBLE_COL_END);
   }, [sheetName]);
+
+  React.useEffect(() => {
+    didSignalReadyRef.current = false;
+  }, [sheetName, workbook]);
   const [resizing, setResizing] = React.useState(null); // { col: number, startX: number, startWidth: number }
 
   // Extract column widths from Excel file
-  const initialColumnWidths = React.useMemo(() => {
-    const widths = {};
-    const cols = worksheet['!cols'] || [];
-
-    // Convert Excel character width to pixels
-    // Excel character width (wch) is based on the default font
-    // Approximate conversion: 1 character ≈ 7.5 pixels (can vary by font)
-    const charToPixels = 7.5;
-
-    cols.forEach((colInfo, index) => {
-      if (colInfo && colInfo.wch) {
-        // Convert character width to pixels, with min/max bounds
-        const pixels = Math.max(64, Math.min(400, colInfo.wch * charToPixels));
-        widths[index] = Math.round(pixels);
-      }
-    });
-
-    return widths;
+  const sheetCache = React.useMemo(() => {
+    return warmExcelSheetView(worksheet);
   }, [worksheet]);
 
-  const [columnWidths, setColumnWidths] = React.useState(initialColumnWidths); // Track custom column widths
+  const [columnWidths, setColumnWidths] = React.useState(
+    sheetCache?.initialColumnWidths || {}
+  ); // Track custom column widths
 
   // Reset column widths when sheet changes
   React.useEffect(() => {
-    setColumnWidths(initialColumnWidths);
-  }, [sheetName, initialColumnWidths]);
+    setColumnWidths(sheetCache?.initialColumnWidths || {});
+  }, [sheetName, sheetCache]);
 
-  // Pre-compute cell addresses and styles for the full range once per sheet
+  // Pre-compute cell styles only for the currently visible range.
+  // Computing the entire worksheet upfront blocks the main thread and makes
+  // the sheet look "loaded" before it is actually interactive.
   const range = XLSX.utils.decode_range(worksheet['!ref'] || 'A1');
 
   // Determine which rows to display (with buffer)
@@ -81,17 +136,38 @@ export default function ExcelGrid({
   const rowBatchSize = 20;
   const colBatchSize = 5;
 
-  // Pre-compute cell address strings and styles to avoid recomputing per render
   const cellStyleCache = React.useMemo(() => {
-    const cache = {};
-    for (let R = range.s.r; R <= range.e.r; R++) {
-      for (let C = range.s.c; C <= range.e.c; C++) {
-        const addr = XLSX.utils.encode_cell({ r: R, c: C });
-        cache[addr] = getExcelCellStyle(worksheet[addr]);
-      }
+    const cacheKey = getSheetWindowCacheKey(displayRowEnd, displayColEnd);
+    const existingWindowCache = sheetCache?.windowCaches?.get(cacheKey);
+    if (existingWindowCache) {
+      return existingWindowCache;
     }
-    return cache;
-  }, [worksheet]);
+
+    const computed = computeCellStyleCache(worksheet, displayRowEnd, displayColEnd);
+    if (sheetCache?.windowCaches) {
+      sheetCache.windowCaches.set(cacheKey, computed);
+    }
+    return computed;
+  }, [worksheet, displayRowEnd, displayColEnd, sheetCache]);
+
+  React.useEffect(() => {
+    if (!onReady || didSignalReadyRef.current) return;
+
+    let frame1 = null;
+    let frame2 = null;
+
+    frame1 = requestAnimationFrame(() => {
+      frame2 = requestAnimationFrame(() => {
+        didSignalReadyRef.current = true;
+        onReady();
+      });
+    });
+
+    return () => {
+      if (frame1 !== null) cancelAnimationFrame(frame1);
+      if (frame2 !== null) cancelAnimationFrame(frame2);
+    };
+  }, [onReady, sheetName, rows.length, cols.length]);
 
   function handleLoadMoreRows() {
     setVisibleRowEnd(prev => Math.min(prev + rowBatchSize, range.e.r));
@@ -116,7 +192,7 @@ export default function ExcelGrid({
   // Get column width (custom, from Excel, or default)
   function getColumnWidth(col) {
     // Priority: 1) User-resized width, 2) Excel file width, 3) Default 128px
-    return columnWidths[col] || initialColumnWidths[col] || 128;
+    return columnWidths[col] || sheetCache?.initialColumnWidths?.[col] || 128;
   }
 
   // Column resize handlers

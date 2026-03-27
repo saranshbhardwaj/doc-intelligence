@@ -17,6 +17,14 @@ import { FileText, Search, AlertCircle, CheckCircle2, Folder, FolderOpen, Sparkl
 import { cn } from '@/lib/utils';
 import { listCollections } from '../../../api';
 
+function buildDefaultFillName(filename) {
+  const baseName = (filename || 'Document').replace(/\.[^/.]+$/, '');
+  const now = new Date();
+  const month = now.toLocaleString('en-US', { month: 'short' });
+  const day = String(now.getDate()).padStart(2, '0');
+  return `${baseName} - ${month} ${day}`;
+}
+
 export default function DocumentSelectorDialog({ open, onOpenChange, onSelect, templateName }) {
   const { getToken } = useAppAuth();
   const [loading, setLoading] = useState(true);
@@ -26,6 +34,8 @@ export default function DocumentSelectorDialog({ open, onOpenChange, onSelect, t
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedDocKey, setSelectedDocKey] = useState(null);
   const [selectedCollectionId, setSelectedCollectionId] = useState(null); // null = All
+  const [fillName, setFillName] = useState('');
+  const [hasEditedFillName, setHasEditedFillName] = useState(false);
 
   useEffect(() => {
     if (open) {
@@ -33,6 +43,8 @@ export default function DocumentSelectorDialog({ open, onOpenChange, onSelect, t
       setSelectedCollectionId(null);
       setSearchQuery('');
       setSelectedDocKey(null);
+      setFillName('');
+      setHasEditedFillName(false);
     }
   }, [open]);
 
@@ -65,7 +77,10 @@ export default function DocumentSelectorDialog({ open, onOpenChange, onSelect, t
   function handleSelect() {
     const selectedDoc = documents.find((d) => d.uiSelectionKey === selectedDocKey);
     if (selectedDoc) {
-      onSelect(selectedDoc);
+      onSelect({
+        document: selectedDoc,
+        fillName: fillName.trim(),
+      });
       onOpenChange(false);
     }
   }
@@ -105,6 +120,12 @@ export default function DocumentSelectorDialog({ open, onOpenChange, onSelect, t
   }, [readyDocuments]);
 
   const selectedCollection = collections.find((c) => c.id === selectedCollectionId);
+  const selectedDocument = documents.find((d) => d.uiSelectionKey === selectedDocKey);
+
+  useEffect(() => {
+    if (!selectedDocument || hasEditedFillName) return;
+    setFillName(buildDefaultFillName(selectedDocument.filename));
+  }, [selectedDocument, hasEditedFillName]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -126,6 +147,23 @@ export default function DocumentSelectorDialog({ open, onOpenChange, onSelect, t
                 Choose the PDF to analyze and fill <span className="font-medium text-foreground">{templateName}</span>
               </p>
             </div>
+          </div>
+          <div className="mt-4">
+            <label htmlFor="fill-run-name" className="block text-[11px] font-medium text-muted-foreground mb-1.5">
+              Name
+            </label>
+            <Input
+              id="fill-run-name"
+              type="text"
+              value={fillName}
+              onChange={(e) => {
+                setFillName(e.target.value);
+                setHasEditedFillName(true);
+              }}
+              placeholder="Optional run name"
+              className="h-9 text-sm"
+              maxLength={255}
+            />
           </div>
         </div>
 
@@ -246,7 +284,7 @@ export default function DocumentSelectorDialog({ open, onOpenChange, onSelect, t
           </Button>
           <Button size="sm" onClick={handleSelect} disabled={!selectedDocKey} className="gap-2">
             <Sparkles className="h-3.5 w-3.5" />
-            Start AI Fill
+            Start Fill
           </Button>
         </DialogFooter>
       </DialogContent>

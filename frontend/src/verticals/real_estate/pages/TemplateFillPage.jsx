@@ -11,7 +11,7 @@ import DocumentViewer from '../../../components/pdf/DocumentViewer';
 import FieldsList from '../components/FieldsList';
 import ExcelGridView from '../components/ExcelGridView';
 import { useTemplateFill, useTemplateFillActions } from '../../../store';
-import { Loader2, AlertCircle, FileText, Table, List, Download, ArrowLeft, CheckCircle2, ExternalLink, Pencil, Check, X, Sparkles, Search, GitMerge, FileSpreadsheet, PartyPopper } from 'lucide-react';
+import { Loader2, AlertCircle, FileText, Table, List, Download, ArrowLeft, CheckCircle2, ExternalLink, X, Sparkles, Search, GitMerge, FileSpreadsheet, PartyPopper } from 'lucide-react';
 import { Badge } from '../../../components/ui/badge';
 import { Button } from '../../../components/ui/button';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '../../../components/ui/tabs';
@@ -79,7 +79,7 @@ function AIPipelineView({ progress, message, fillRun }) {
       </div>
 
       <div className="text-center space-y-1 max-w-xs">
-        <h3 className="font-display text-lg font-semibold text-foreground">AI Processing</h3>
+        <h3 className="font-display text-lg font-semibold text-foreground">Processing</h3>
         <p className="text-sm text-muted-foreground">{message || 'Analyzing document...'}</p>
       </div>
 
@@ -143,11 +143,6 @@ export default function TemplateFillPage() {
   const [highlightBbox, setHighlightBbox] = useState(null); // For PDF highlighting
   const [showFeedbackModal, setShowFeedbackModal] = useState(false);
 
-  // Rename state
-  const [isRenamingFillRun, setIsRenamingFillRun] = useState(false);
-  const [renameValue, setRenameValue] = useState('');
-  const [isSavingName, setIsSavingName] = useState(false);
-
   // Progress tracking state
   const [jobProgress, setJobProgress] = useState(0);
   const [jobMessage, setJobMessage] = useState('');
@@ -155,6 +150,7 @@ export default function TemplateFillPage() {
   const [isRetrying, setIsRetrying] = useState(false);
   const [jobIdOverride, setJobIdOverride] = useState(null);
   const [showCompletionBanner, setShowCompletionBanner] = useState(false);
+  const [isDownloading, setIsDownloading] = useState(false);
 
   // Zustand store
   const {
@@ -173,7 +169,6 @@ export default function TemplateFillPage() {
     registerExcelPopout,
     navigatePdfToPage,
     cleanupPopouts,
-    renameFillRun,
   } = useTemplateFillActions();
   const progressStateToken = `${fillRun?.status || ''}|${fillRun?.artifact?.key || ''}|${fillRun?.artifact?.filename || ''}`;
 
@@ -370,6 +365,7 @@ export default function TemplateFillPage() {
     if (fillRun.status === 'completed') {
       // Download the filled Excel file
       try {
+        setIsDownloading(true);
         const blob = await downloadFilledExcel(getToken, fillRunId);
 
         // Verify blob is valid
@@ -401,6 +397,8 @@ export default function TemplateFillPage() {
         console.error('❌ Failed to download Excel file:', err);
         setJobStatus('failed');
         setJobMessage(`Failed to download Excel file: ${err.message}`);
+      } finally {
+        setIsDownloading(false);
       }
     } else if (fillRun.status === 'awaiting_review') {
       // Continue with filling the template
@@ -497,81 +495,73 @@ export default function TemplateFillPage() {
     );
   }
 
-  const saveRename = async () => {
-    const trimmed = renameValue.trim();
-    if (!trimmed) return;
-    setIsSavingName(true);
-    try { await renameFillRun(fillRunId, trimmed, getToken); } finally { setIsSavingName(false); setIsRenamingFillRun(false); }
-  };
+  const statusInfo = formatStatus(fillRun.status);
 
   const fillHeaderLeft = (
-    <div className="flex items-center gap-2">
-      <Button variant="ghost" size="sm" onClick={() => navigate('/app/re/templates')} className="h-7 w-7 p-0">
+    <div className="flex items-center gap-2.5 min-w-0">
+      <Button
+        variant="ghost"
+        size="sm"
+        onClick={() => navigate('/app/re/templates?tab=fills')}
+        className="h-8 w-8 rounded-full border border-border/70 bg-background/80 p-0 shrink-0 text-muted-foreground shadow-sm hover:bg-accent hover:text-foreground"
+      >
         <ArrowLeft className="h-4 w-4" />
       </Button>
       <div className="min-w-0">
-        {isRenamingFillRun ? (
-          <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
-            <input
-              autoFocus
-              className="text-sm font-semibold bg-transparent border-b border-primary outline-none leading-tight text-foreground w-40"
-              value={renameValue}
-              onChange={(e) => setRenameValue(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') saveRename();
-                else if (e.key === 'Escape') setIsRenamingFillRun(false);
-              }}
-            />
-            <button className="p-0.5 text-primary disabled:opacity-50" disabled={isSavingName || !renameValue.trim()} onClick={saveRename}>
-              {isSavingName ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
-            </button>
-            <button className="p-0.5 text-muted-foreground hover:text-foreground" onClick={() => setIsRenamingFillRun(false)}>
-              <X className="h-3 w-3" />
-            </button>
-          </div>
-        ) : (
-          <div className="flex items-center gap-1 group cursor-pointer" onClick={() => { setRenameValue(fillRun.name || ''); setIsRenamingFillRun(true); }}>
-            <span className="text-sm font-semibold text-foreground leading-tight truncate max-w-[200px]">
-              {fillRun.name || 'Template Fill'}
-            </span>
-            <Pencil className="h-3 w-3 text-muted-foreground opacity-0 group-hover:opacity-100 transition-opacity" />
-          </div>
-        )}
-        <p className="text-[10px] text-muted-foreground leading-tight truncate max-w-[260px]">
-          {fillRun.document_metadata?.filename || 'Document'} → Excel
-        </p>
+        <div className="flex items-center gap-2 min-w-0">
+          <span className="text-sm font-semibold text-foreground leading-tight truncate max-w-[220px]">
+            {fillRun.name || 'Template Fill'}
+          </span>
+          <Badge
+            variant={statusInfo.variant}
+            className={statusInfo.variant === 'success'
+              ? 'h-5 px-2 text-[10px] bg-green-500 hover:bg-green-600 text-white shrink-0'
+              : 'h-5 px-2 text-[10px] shrink-0'}
+          >
+            {statusInfo.label}
+          </Badge>
+          {!fillRun.template_id && <Badge variant="destructive" className="h-5 px-2 text-[10px] shrink-0">Template Deleted</Badge>}
+          {!fillRun.document_id && <Badge variant="destructive" className="h-5 px-2 text-[10px] shrink-0">Doc Deleted</Badge>}
+        </div>
       </div>
     </div>
   );
 
   const fillHeaderRight = (
-    <div className="flex items-center gap-2">
-      {(() => {
-        const statusInfo = formatStatus(fillRun.status);
-        return (
-          <Badge variant={statusInfo.variant} className={statusInfo.variant === 'success' ? 'bg-green-500 hover:bg-green-600 text-white text-xs' : 'text-xs'}>
-            {statusInfo.label}
-          </Badge>
-        );
-      })()}
-      {fillRun.current_stage && <Badge variant="outline" className="text-xs">{formatStage(fillRun.current_stage)}</Badge>}
-      {!fillRun.template_id && <Badge variant="destructive" className="text-xs">Template Deleted</Badge>}
-      {!fillRun.document_id && <Badge variant="destructive" className="text-xs">Doc Deleted</Badge>}
+    <div className="flex items-center gap-2 shrink-0">
       {fillRun.status === 'completed' && fillRun.artifact ? (
         <>
-          <Button size="sm" onClick={handleContinue} className="bg-green-600 hover:bg-green-700 text-white h-7 text-xs">
-            <Download className="h-3.5 w-3.5 mr-1.5" />
-            Download
+          <Button
+            size="sm"
+            variant="default"
+            onClick={handleContinue}
+            disabled={isDownloading}
+            className="h-8 rounded-full px-3 text-xs font-medium shadow-sm"
+          >
+            <span className="mr-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-primary-foreground/15 text-primary-foreground">
+              {isDownloading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
+            </span>
+            {isDownloading ? 'Downloading...' : 'Download'}
           </Button>
-          <FeedbackButton operationType="template_fill" entityId={fillRunId} entitySummary={fillRun.template_snapshot?.name || 'Template Fill'} />
+          <FeedbackButton
+            operationType="template_fill"
+            entityId={fillRunId}
+            entitySummary={fillRun.template_snapshot?.name || 'Template Fill'}
+            variant="ghost"
+            size="sm"
+            label="Give Feedback"
+            submittedLabel="Update Feedback"
+            iconOnly
+            className="h-8 w-8 rounded-full border border-border/60 bg-background/75 p-0 text-muted-foreground shadow-sm backdrop-blur-sm hover:bg-accent hover:text-foreground"
+          />
         </>
       ) : fillRun.status === 'awaiting_review' ? (
-        <Button size="sm" onClick={handleContinue} className="bg-blue-600 hover:bg-blue-700 text-white h-7 text-xs">
+        <Button size="sm" onClick={handleContinue} className="bg-blue-600 hover:bg-blue-700 text-white h-8 rounded-full px-3 text-xs">
           <CheckCircle2 className="h-3.5 w-3.5 mr-1.5" />
           Approve &amp; Fill
         </Button>
       ) : fillRun.status === 'filling' ? (
-        <Button size="sm" disabled className="bg-muted h-7 text-xs">
+        <Button size="sm" disabled className="bg-muted h-8 rounded-full px-3 text-xs">
           <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
           Filling...
         </Button>
@@ -580,7 +570,7 @@ export default function TemplateFillPage() {
   );
 
   return (
-    <AppLayout lockViewport hideNav headerLeft={fillHeaderLeft} headerRight={fillHeaderRight}>
+    <AppLayout lockViewport headerLeft={fillHeaderLeft} headerRight={fillHeaderRight}>
       <div className="flex-1 flex flex-col bg-background relative overflow-hidden min-h-0">
         {/* Completion Banner */}
         {showCompletionBanner && (
@@ -631,12 +621,12 @@ export default function TemplateFillPage() {
                       )}
                     </Button>
                   ) : (
-                    <Button
+                  <Button
                       variant="outline"
                       size="sm"
-                      onClick={() => navigate('/app/re/templates')}
+                      onClick={() => navigate('/app/re/templates?tab=fills')}
                     >
-                      Back to Templates
+                      Back to Fill Runs
                     </Button>
                   )}
                 </div>
@@ -648,14 +638,14 @@ export default function TemplateFillPage() {
         {/* Mobile toolbar */}
         <div className="md:hidden flex items-center justify-between px-3 py-1.5 border-b bg-card flex-shrink-0">
           <div className="flex items-center gap-2 min-w-0">
-            <Button variant="ghost" size="sm" onClick={() => navigate('/app/re/templates')} className="h-7 w-7 p-0 shrink-0">
+            <Button variant="ghost" size="sm" onClick={() => navigate('/app/re/templates?tab=fills')} className="h-7 w-7 p-0 shrink-0">
               <ArrowLeft className="h-4 w-4" />
             </Button>
             <span className="text-sm font-semibold truncate">{fillRun.name || 'Template Fill'}</span>
           </div>
           {fillRun.status === 'completed' && fillRun.artifact && (
-            <Button size="sm" onClick={handleContinue} className="bg-green-600 text-white h-7 text-xs shrink-0">
-              <Download className="h-3.5 w-3.5" />
+            <Button size="sm" onClick={handleContinue} disabled={isDownloading} className="bg-green-600 text-white h-7 text-xs shrink-0">
+              {isDownloading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
             </Button>
           )}
         </div>
@@ -848,3 +838,6 @@ export default function TemplateFillPage() {
     </AppLayout>
   );
 }
+
+
+

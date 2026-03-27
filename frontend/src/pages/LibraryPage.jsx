@@ -406,8 +406,18 @@ export default function LibraryPage() {
         });
       }
 
-      // Refresh collections (for counts) - don't refresh documents, already updated optimistically
-      await fetchCollections();
+      // Optimistically decrement document_count on the affected collection.
+      // Avoids a stale-read race where fetchCollections() returns the old cached
+      // count before the backend's recompute_collection_stats commit is visible.
+      if (selectedCollection?.id) {
+        setCollections((prev) =>
+          prev.map((c) =>
+            c.id === selectedCollection.id
+              ? { ...c, document_count: Math.max(0, (c.document_count || 0) - 1) }
+              : c
+          )
+        );
+      }
 
       // Purge document references only for hard delete.
       if (result?.action === "deleted") {
@@ -468,8 +478,7 @@ export default function LibraryPage() {
 
   return (
     <AppLayout breadcrumbs={[{ label: "Library" }]}>
-      <div className="h-full flex flex-col p-6">
-        {/* Stats Header */}
+      <div className="flex h-full min-h-0 flex-col px-6 pb-6 pt-4">
         <StatsHeader
           totalDocuments={stats.totalDocuments}
           totalCollections={stats.totalCollections}
@@ -477,29 +486,28 @@ export default function LibraryPage() {
           readyCount={stats.readyCount}
         />
 
-        {/* Main Content */}
-        <div className="flex-1 flex gap-4 md:gap-6 min-h-0">
-          {/* Collections Sidebar */}
-          <div className="hidden md:block w-64 flex-shrink-0">
-            <CollectionsSidebar
-              collections={collections}
-              selectedCollection={selectedCollection}
-              loading={loadingCollections}
-              onSelectCollection={handleSelectCollection}
-              onCreateCollection={handleCreateCollection}
-              onDeleteCollection={handleDeleteCollection}
-              requestCreate={createRequestCount}
-            />
+        <div className="split-row">
+          <div className="hidden w-72 flex-shrink-0 md:flex">
+            <aside className="library-shell panel-shell w-full">
+              <CollectionsSidebar
+                collections={collections}
+                selectedCollection={selectedCollection}
+                loading={loadingCollections}
+                onSelectCollection={handleSelectCollection}
+                onCreateCollection={handleCreateCollection}
+                onDeleteCollection={handleDeleteCollection}
+                requestCreate={createRequestCount}
+              />
+            </aside>
           </div>
 
-          {/* Documents Area */}
-          <div className="flex-1 min-w-0">
+          <div className="min-w-0 flex-1">
             <div className="md:hidden mb-3">
               <Button
                 variant="outline"
                 size="sm"
                 onClick={() => setMobileCollectionsOpen(true)}
-                className="w-full justify-start"
+                className="w-full justify-start rounded-full"
               >
                 <Menu className="w-4 h-4 mr-2" />
                 {selectedCollection
@@ -509,19 +517,26 @@ export default function LibraryPage() {
             </div>
 
             {selectedCollection ? (
-              <div className="h-full flex flex-col">
-                {/* Collection Header */}
-                <div className="mb-4">
-                  <h1 className="page-title text-2xl mb-1">
-                    {selectedCollection.name}
-                  </h1>
-                  <p className="page-subtitle">
-                    Manage documents in this collection
-                  </p>
+              <section className="library-shell-strong panel-shell h-full">
+                <div className="border-b border-border/70 px-5 py-4 sm:px-6">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+                    <div>
+                      <h2 className="mt-2 page-title text-[1.7rem]">
+                        {selectedCollection.name}
+                      </h2>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+                      <span className="rounded-full bg-muted px-3 py-1.5">
+                        {stats.readyCount} ready
+                      </span>
+                      <span className="rounded-full bg-muted px-3 py-1.5">
+                        {stats.processingCount} processing
+                      </span>
+                    </div>
+                  </div>
                 </div>
 
-                {/* Documents Table */}
-                <div className="flex-1 overflow-y-auto">
+                <div className="panel-scroll px-4 py-4 sm:px-5 sm:py-5">
                   <DocumentsTable
                     documents={documents}
                     loading={loadingDocs}
@@ -543,11 +558,11 @@ export default function LibraryPage() {
                     setStatusFilter={setStatusFilter}
                   />
                 </div>
-              </div>
+              </section>
             ) : (
-              <div className="h-full flex items-center justify-center">
+              <div className="library-shell-strong flex h-full items-center justify-center px-6">
                 <div className="text-center max-w-sm">
-                  <div className="w-20 h-20 mx-auto mb-6 glass-card rounded-3xl flex items-center justify-center shadow-lg">
+                  <div className="mx-auto mb-6 flex h-20 w-20 items-center justify-center rounded-3xl bg-primary/10">
                     <UploadCloud className="w-10 h-10 text-primary" />
                   </div>
                   <h3 className="font-display text-xl font-bold text-foreground mb-2">
@@ -594,7 +609,7 @@ export default function LibraryPage() {
       />
 
       <Sheet open={mobileCollectionsOpen} onOpenChange={setMobileCollectionsOpen}>
-        <SheetContent side="left" className="w-[90vw] max-w-sm p-4">
+        <SheetContent side="left" className="w-[90vw] max-w-sm p-0">
           <SheetTitle className="sr-only">Collections</SheetTitle>
           <SheetDescription className="sr-only">
             Select, create, or delete document collections.

@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional
 from openpyxl import Workbook
 
 from app.utils.logging import logger
+from app.services.citations import normalize_citations
 
 from .schema_based import SchemaLoader, SchemaMapper, TemplateIdentifier
 from .schema_based.schema_loader import _normalize_field_name
@@ -151,7 +152,7 @@ class MappingCoordinator:
                 "confidence": result["confidence"],
                 "source": "targeted_schema",
                 "reasoning": result.get("reasoning") or f"Stage 2 targeted extraction for schema field '{field_id}'",
-                "citations": result.get("citations", []),
+                "citations": normalize_citations(result.get("citations", [])),
             })
 
         logger.info(
@@ -259,7 +260,7 @@ class MappingCoordinator:
                         "confidence": confidence,
                         "source": "targeted_schema",
                         "reasoning": row.get("reasoning") or f"Stage 2 targeted table extraction for '{table_id}'",
-                        "citations": citations,
+                        "citations": normalize_citations(citations),
                         "extracted_value": value,
                         "data_type": data_type,
                         "schema_table_id": table_id,

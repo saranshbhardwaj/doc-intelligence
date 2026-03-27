@@ -2,11 +2,67 @@
 
 Resolves citation tokens like [D1:p15] to rich metadata with document names,
 page numbers, sections, and content snippets.
+
+Canonical citation format: [D{n}:p{N}]
+  - D{n}: document number (1-based), determined by context (session order, workflow array position, etc.)
+  - p{N}: physical PDF page number from Azure DI
+
+All LLM outputs should be normalized to this format via normalize_citation_token()
+before being stored or returned to the frontend.
 """
 from typing import List, Dict, Optional
 import re
 import json
 from sqlalchemy.orm import Session
+
+
+# ---------------------------------------------------------------------------
+# Citation normalization — convert any LLM citation variant to [D{n}:p{N}]
+# ---------------------------------------------------------------------------
+
+def normalize_citation_token(raw: str, default_doc_index: int = 1) -> Optional[str]:
+    """
+    Normalize a single LLM-generated citation token to canonical [D{n}:p{N}] format.
+
+    Handles known LLM variants:
+      [D1:p15]           → pass through (already canonical)
+      [p15:table_block]  → [D1:p15]  (page at start, source type at end)
+      [Table 7:p15]      → [D1:p15]  (table label with page at end)
+      [Source:p15]       → [D1:p15]  (any label with :pN at end)
+
+    Returns None if no page number can be extracted.
+    """
+    if not raw:
+        return None
+
+    # Already canonical: [D{n}:p{N}]
+    if re.fullmatch(r'\[D\d+:p\d+\]', raw):
+        return raw
+
+    # Page at start: [p15:anything] — e.g. [p15:table_block]
+    m = re.match(r'\[p(\d+):', raw)
+    if m:
+        return f'[D{default_doc_index}:p{m.group(1)}]'
+
+    # Page at end after colon: [anything:p15] — e.g. [Table 7:p15], [Source:p15]
+    m = re.search(r':\s*p(\d+)\]', raw)
+    if m:
+        return f'[D{default_doc_index}:p{m.group(1)}]'
+
+    return None
+
+
+def normalize_citations(citations: List[str], default_doc_index: int = 1) -> List[str]:
+    """
+    Normalize a list of LLM-generated citation tokens to canonical [D{n}:p{N}] format.
+    Tokens that cannot be parsed are silently dropped.
+    """
+    result = []
+    for c in citations:
+        normalized = normalize_citation_token(c, default_doc_index)
+        if normalized:
+            result.append(normalized)
+    return result
 
 from app.db_models_chat import DocumentChunk
 from app.db_models_documents import Document

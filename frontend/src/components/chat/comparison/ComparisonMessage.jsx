@@ -20,42 +20,18 @@ import { TooltipProvider } from "../../ui/tooltip";
 import { useComparison, useChatActions } from "../../../store";
 import ComparisonSummaryCard from "./ComparisonSummaryCard";
 import PairedChunksView from "./PairedChunksView";
-import ComparisonCitationLink from "./ComparisonCitationLink";
+import CitationLink from "../../common/CitationLink";
+import { splitTextWithCitations } from "@/utils/citations";
 
-/**
- * Process text to render citations as interactive elements
- */
 function renderCitationText(text, context) {
   if (!text) return text;
-
-  const citationRegex = /\[D\d+:p\d+\]/g;
-  const parts = [];
-  let lastIndex = 0;
-  let match;
-
-  while ((match = citationRegex.exec(text)) !== null) {
-    // Add text before citation
-    if (match.index > lastIndex) {
-      parts.push(text.substring(lastIndex, match.index));
-    }
-    // Add citation as interactive element
-    const token = match[0];
-    parts.push(
-      <ComparisonCitationLink
-        key={`cite-${match.index}`}
-        token={token}
-        context={context}
-      />
-    );
-    lastIndex = match.index + match[0].length;
-  }
-
-  // Add remaining text
-  if (lastIndex < text.length) {
-    parts.push(text.substring(lastIndex));
-  }
-
-  return parts.length > 0 ? parts : text;
+  const parts = splitTextWithCitations(text);
+  if (parts.length === 1 && typeof parts[0] === "string") return text;
+  return parts.map((part, i) =>
+    typeof part === "string" ? part : (
+      <CitationLink key={i} token={part.token} comparisonContext={context} variant="inline" />
+    )
+  );
 }
 
 const ComparisonMessage = memo(function ComparisonMessage({ message, onOpenComparisonPanel }) {

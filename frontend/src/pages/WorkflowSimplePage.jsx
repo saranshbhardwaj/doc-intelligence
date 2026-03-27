@@ -371,7 +371,7 @@ export default function WorkflowSimplePage() {
         <div
           className={`${
             mobilePanel === "documents" ? "flex" : "hidden"
-          } md:flex w-full md:w-72 flex-shrink-0 bg-card rounded-xl border border-border flex-col overflow-hidden min-h-0`}
+          } workflow-shell md:flex w-full md:w-72 flex-shrink-0 flex-col overflow-hidden min-h-0`}
         >
           {/* Header */}
           <div className="p-4 border-b border-border flex-shrink-0">
@@ -468,7 +468,7 @@ export default function WorkflowSimplePage() {
         <div
           className={`${
             mobilePanel === "workflow" ? "flex" : "hidden"
-          } md:flex flex-1 bg-card rounded-xl border border-border flex-col overflow-hidden min-h-0 relative`}
+          } workflow-shell md:flex flex-1 flex-col overflow-hidden min-h-0 relative`}
         >
           {showConfigView && selectedWorkflow ? (
             /* ── CONFIG VIEW ── */
@@ -738,7 +738,7 @@ export default function WorkflowSimplePage() {
         <div
           className={`${
             mobilePanel === "results" ? "block" : "hidden"
-          } md:block w-full md:w-80 flex-shrink-0 bg-card rounded-xl border border-border flex-col overflow-hidden min-h-0 flex`}
+          } workflow-shell md:block w-full md:w-80 flex-shrink-0 flex-col overflow-hidden min-h-0 flex`}
         >
           {/* Header */}
           <div className="p-5 border-b border-border flex items-center justify-between flex-shrink-0">

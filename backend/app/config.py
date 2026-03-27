@@ -42,6 +42,7 @@ class Settings(BaseSettings):
     excel_schema_only: bool = True  # If True, only use schema (skip generic analyzer)
     excel_skip_schema: bool = False  # If True, skip schema (use generic analyzer only)
     # Default (both False) = Hybrid mode: schema first, generic fallback
+    re_template_prompt_version: str = "v1"  # Active prompt version for template fill LLM calls
 
     # ===== PARSER TIMEOUTS =====
     parser_timeout_seconds: int = 300  # Generic parser timeout

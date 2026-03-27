@@ -340,6 +340,11 @@ class ChatSession(Base):
     last_summarized_index = Column(Integer, nullable=True, server_default='0')  # Message index summarized up to
     last_summary_updated_at = Column(DateTime(timezone=True), nullable=True)  # When summary was last updated
 
+    # Stable citation document index: {"D1": "doc-uuid-A", "D2": "doc-uuid-B", ...}
+    # Assigned once (by session_documents.added_at order), never changes for the session lifetime.
+    # Used to resolve [D1:p5] citation tokens in LLM responses consistently across all turns.
+    document_index = Column(JSONB, nullable=True, server_default='{}')
+
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
 

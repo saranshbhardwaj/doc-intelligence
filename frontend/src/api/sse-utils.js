@@ -70,7 +70,7 @@ export async function streamJobProgress(
     autoReconnect = true,
     fetchInitialState = false,
     getJobStatus = null,
-    timeoutMs = 900000, // 15 minutes default timeout
+    timeoutMs = 9000000, // 15 minutes default timeout
   }
 ) {
   const baseURL = api.defaults.baseURL || "";

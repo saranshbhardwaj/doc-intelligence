@@ -1,12 +1,4 @@
-/**
- * StatsHeader Component
- *
- * Displays key metrics at the top of Library page
- * Inspiration-aligned design with larger rounded icons and extrabold values
- */
-
 import { FileText, Folder, Clock, CheckCircle } from "lucide-react";
-import { Card } from "../ui/card";
 
 export default function StatsHeader({
   totalDocuments = 0,
@@ -20,55 +12,53 @@ export default function StatsHeader({
       value: totalDocuments,
       icon: FileText,
       color: "text-primary",
-      bgColor: "bg-primary/10",
     },
     {
       label: "Collections",
       value: totalCollections,
       icon: Folder,
       color: "text-blue-600 dark:text-blue-400",
-      bgColor: "bg-blue-500/10",
     },
     {
       label: "Processing",
       value: processingCount,
       icon: Clock,
       color: "text-warning",
-      bgColor: "bg-warning/10",
     },
     {
       label: "Ready",
       value: readyCount,
       icon: CheckCircle,
       color: "text-success",
-      bgColor: "bg-success/10",
     },
   ];
 
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-      {stats.map((stat, index) => {
-        const Icon = stat.icon;
-        return (
-          <Card
-            key={stat.label}
-            className="rounded-2xl p-5 transition-all hover:shadow-md animate-scale-up"
-            style={{ animationDelay: `${index * 50}ms` }}
-          >
-            <div className="flex items-center gap-4">
-              <div className={`p-3 rounded-2xl ${stat.bgColor} flex-shrink-0`}>
-                <Icon className={`w-5 h-5 ${stat.color}`} />
+    <section className="library-shell mb-5 px-5 py-4 sm:px-6">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+        <div className="space-y-1">
+          <p className="shell-eyebrow">Workspace</p>
+          <h1 className="shell-title">Library</h1>
+          <p className="shell-subtitle">
+            Review collections, upload source files, and track indexing status in one place.
+          </p>
+        </div>
+
+        <div className="grid grid-cols-2 gap-x-5 gap-y-4 sm:grid-cols-4 lg:min-w-[32rem]">
+          {stats.map((stat) => {
+            const Icon = stat.icon;
+            return (
+              <div key={stat.label} className="library-metric">
+                <div className="flex items-center gap-2 text-muted-foreground">
+                  <Icon className={`h-4 w-4 ${stat.color}`} />
+                  <span className="library-metric-label">{stat.label}</span>
+                </div>
+                <p className="library-metric-value">{stat.value}</p>
               </div>
-              <div className="flex-1">
-                <p className="text-sm text-muted-foreground">{stat.label}</p>
-                <p className="text-2xl font-extrabold text-foreground">
-                  {stat.value}
-                </p>
-              </div>
-            </div>
-          </Card>
-        );
-      })}
-    </div>
+            );
+          })}
+        </div>
+      </div>
+    </section>
   );
 }

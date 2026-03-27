@@ -209,9 +209,13 @@ class TemplateRepository:
                 else_=0
             )).label("completed"),
             func.sum(case(
-                (TemplateFillRun.status.in_(["queued", "processing", "awaiting_review"]), 1),
+                (TemplateFillRun.status.in_(["queued", "processing"]), 1),
                 else_=0
-            )).label("in_progress"),
+            )).label("processing"),
+            func.sum(case(
+                (TemplateFillRun.status == "awaiting_review", 1),
+                else_=0
+            )).label("awaiting_review"),
             func.sum(case(
                 (TemplateFillRun.status == "failed", 1),
                 else_=0
@@ -222,17 +226,24 @@ class TemplateRepository:
 
         total_runs = result.total or 0
         completed_count = result.completed or 0
-        in_progress_count = result.in_progress or 0
+        processing_count = result.processing or 0
+        awaiting_review_count = result.awaiting_review or 0
+        in_progress_count = processing_count + awaiting_review_count
         failed_count = result.failed or 0
 
         # Determine if deletion is safe
         can_delete = in_progress_count == 0
         warning_message = None
 
-        if not can_delete:
+        if processing_count > 0:
             warning_message = (
-                f"Cannot delete: {in_progress_count} fill run(s) are currently in progress. "
-                f"Please wait for them to complete or fail them first."
+                f"Cannot delete: {processing_count} fill run(s) are currently processing. "
+                f"Please wait for them to complete or fail before deleting."
+            )
+        elif awaiting_review_count > 0:
+            warning_message = (
+                f"Cannot delete: {awaiting_review_count} fill run(s) are awaiting review. "
+                f"Please approve or delete them before deleting this template."
             )
         elif total_runs > 0:
             warning_message = (
@@ -246,6 +257,8 @@ class TemplateRepository:
             "template_name": template.name,
             "total_fill_runs": total_runs,
             "completed_runs": completed_count,
+            "processing_runs": processing_count,
+            "awaiting_review_runs": awaiting_review_count,
             "in_progress_runs": in_progress_count,
             "failed_runs": failed_count,
             "last_used_at": template.last_used_at.isoformat() if template.last_used_at else None,
@@ -262,6 +275,7 @@ class TemplateRepository:
         org_id: str,
         user_id: str,
         template_snapshot: Dict,
+        name: Optional[str] = None,
     ) -> TemplateFillRun:
         """Create a new template fill run."""
         fill_run = TemplateFillRun(
@@ -270,6 +284,7 @@ class TemplateRepository:
             document_id=document_id,
             org_id=org_id,
             user_id=user_id,
+            name=name,
             template_snapshot=template_snapshot,
             field_mapping={"pdf_fields": [], "mappings": []},
             extracted_data={},

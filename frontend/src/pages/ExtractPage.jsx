@@ -206,7 +206,7 @@ export default function ExtractPage() {
         <div
           className={`${
             mobilePanel === "source" ? "block" : "hidden"
-          } md:block w-full md:w-[420px] md:flex-shrink-0 bg-card rounded-lg border border-border p-4 md:p-6 overflow-y-auto`}
+          } workflow-shell md:block w-full md:w-[420px] md:flex-shrink-0 p-4 md:p-6 overflow-y-auto`}
         >
           <h2 className="text-lg font-semibold text-foreground mb-4">
             Extract Document
@@ -345,7 +345,7 @@ export default function ExtractPage() {
         <div
           className={`${
             mobilePanel === "recent" ? "block" : "hidden"
-          } md:block flex-1 bg-card rounded-lg border border-border p-4 md:p-6 overflow-y-auto`}
+          } workflow-shell md:block flex-1 p-4 md:p-6 overflow-y-auto`}
         >
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-lg font-semibold text-foreground">

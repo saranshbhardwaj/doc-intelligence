@@ -34,6 +34,7 @@ import {
   Loader2,
   Bot,
   X,
+  ChevronDown,
 } from "lucide-react";
 import { Button } from "../ui/button";
 import {
@@ -49,7 +50,8 @@ import { useComparison, usePdfViewer, useChatActions, useStore } from "../../sto
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import ComparisonPanel from "../comparison/ComparisonPanel";
-import ChatCitationLink from "./ChatCitationLink";
+import CitationLink from "../common/CitationLink";
+import { splitTextWithCitations } from "../../utils/citations";
 import ChatMessageFeedback from "./ChatMessageFeedback";
 import {
   ResizablePanelGroup,
@@ -163,39 +165,15 @@ export default function ActiveChat({
     return () => window.removeEventListener("resize", updateViewport);
   }, []);
 
-  // Helper functions for processing citations in text
-  const CITATION_REGEX = /\[ref:[a-f0-9]+:p\d+\]/gi;
-
   const renderCitationsInText = (text, context) => {
     if (!text || !context?.citations?.length) return text;
-
-    const parts = [];
-    let lastIndex = 0;
-    const regex = new RegExp(CITATION_REGEX);
-    let match;
-
-    while ((match = regex.exec(text)) !== null) {
-      // Add text before citation
-      if (match.index > lastIndex) {
-        parts.push(text.substring(lastIndex, match.index));
-      }
-      // Add citation as interactive component
-      parts.push(
-        <ChatCitationLink
-          key={`cite-${match.index}`}
-          token={match[0]}
-          citationContext={context}
-        />
-      );
-      lastIndex = match.index + match[0].length;
-    }
-
-    // Add remaining text
-    if (lastIndex < text.length) {
-      parts.push(text.substring(lastIndex));
-    }
-
-    return parts.length > 0 ? parts : text;
+    const parts = splitTextWithCitations(text);
+    if (parts.length === 1 && typeof parts[0] === "string") return text;
+    return parts.map((part, i) =>
+      typeof part === "string" ? part : (
+        <CitationLink key={i} token={part.token} citationContext={context} variant="inline" />
+      )
+    );
   };
 
   const processChildrenForCitations = (children, context) => {
@@ -263,15 +241,22 @@ export default function ActiveChat({
         minSize={35}
       >
         <div className="w-full flex flex-col h-full min-w-0 overflow-hidden relative">
-          <div className="absolute right-3 top-3 z-20">
+          <div className="absolute right-5 top-2 z-20">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="sm" className="h-8 shrink-0 px-2 bg-card/90">
-                  <Download className="w-4 h-4 md:mr-2" />
-                  <span className="hidden md:inline">Export</span>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-10 shrink-0 rounded-full border border-border/70 bg-background/85 pl-2 pr-3 shadow-lg backdrop-blur-md hover:bg-background hover:shadow-xl"
+                >
+                  <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary/10 text-primary">
+                    <Download className="h-3.5 w-3.5" />
+                  </span>
+                  <span className="text-xs font-medium text-foreground">Export</span>
+                  <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-48">
+              <DropdownMenuContent align="end" sideOffset={10} className="w-48 rounded-xl">
                 <DropdownMenuItem onClick={() => onExportSession?.("markdown")}>
                   <FileText className="w-4 h-4 mr-2" />
                   <div className="flex flex-col">

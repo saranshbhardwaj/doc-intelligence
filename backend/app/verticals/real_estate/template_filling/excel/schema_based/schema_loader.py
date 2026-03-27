@@ -36,6 +36,7 @@ class TemplateSchema:
         self.version = schema_data["version"]
         self.name = schema_data["name"]
         self.description = schema_data.get("description", "")
+        self.total_sheets = schema_data.get("total_sheets", 0)
         self.fingerprint = schema_data.get("fingerprint", [])
         self.fields = schema_data.get("fields", [])
         self.tables = schema_data.get("tables", [])

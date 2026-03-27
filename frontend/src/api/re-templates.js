@@ -106,10 +106,12 @@ export async function waitForTemplateAnalysis(getToken, templateId, maxWaitMs = 
 /**
  * Fill Excel template with data from document (alias for startTemplateFill)
  */
-export async function fillRETemplate(getToken, templateId, documentId) {
+export async function fillRETemplate(getToken, templateId, documentId, options = {}) {
   const api = createAuthenticatedApi(getToken);
+  const { name } = options;
   const response = await api.post(`/api/v1/re/templates/${templateId}/fill`, {
     document_id: documentId,
+    ...(name ? { name } : {}),
   });
   return response.data;
 }
@@ -117,8 +119,8 @@ export async function fillRETemplate(getToken, templateId, documentId) {
 /**
  * Start a template fill run (same as fillRETemplate)
  */
-export async function startTemplateFill(getToken, templateId, documentId) {
-  return fillRETemplate(getToken, templateId, documentId);
+export async function startTemplateFill(getToken, templateId, documentId, options = {}) {
+  return fillRETemplate(getToken, templateId, documentId, options);
 }
 
 /**

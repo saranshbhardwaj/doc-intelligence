@@ -1,7 +1,12 @@
 """Template filling functionality for Excel templates."""
 
+import os
 import re
+import zipfile
+from copy import deepcopy
+from dataclasses import dataclass
 from typing import Any, Dict, List, Optional
+
 from openpyxl.cell import Cell, MergedCell
 from openpyxl.worksheet.worksheet import Worksheet
 
@@ -14,6 +19,241 @@ from app.verticals.real_estate.template_filling.excel.schema_based.validation im
     should_fill_cell,
     create_confidence_report,
 )
+
+try:
+    from lxml import etree
+except ImportError:  # pragma: no cover - exercised only when lxml is unavailable
+    etree = None
+
+
+WORKSHEET_XML_NS = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+X14_NS = "http://schemas.microsoft.com/office/spreadsheetml/2009/9/main"
+EXTLST_TAG = f"{{{WORKSHEET_XML_NS}}}extLst"
+WORKSHEET_TAG = f"{{{WORKSHEET_XML_NS}}}worksheet"
+WORKSHEET_PART_PREFIX = "xl/worksheets/"
+
+
+@dataclass(frozen=True)
+class PreservedWorksheetExtLst:
+    """Captured worksheet extension block that openpyxl drops on load/save."""
+
+    extlst_xml: bytes
+    namespaces: Dict[str, str]
+
+
+def _xml_parser():
+    """Create a strict XML parser that preserves worksheet content."""
+    if etree is None:
+        return None
+    return etree.XMLParser(remove_blank_text=False, recover=False)
+
+
+def _is_worksheet_part(name: str) -> bool:
+    """Return True when the ZIP entry is a worksheet XML part."""
+    return name.startswith(WORKSHEET_PART_PREFIX) and name.endswith(".xml")
+
+
+def _contains_x14_data_validation(extlst_element) -> bool:
+    """Return True if the worksheet extLst contains x14 data validation metadata."""
+    if etree is None:
+        return False
+
+    for node in extlst_element.iter():
+        if not isinstance(node.tag, str):
+            continue
+        qname = etree.QName(node)
+        if qname.namespace == X14_NS and qname.localname in {"dataValidation", "dataValidations"}:
+            return True
+    return False
+
+
+def _find_prefix_for_namespace(element, namespace_uri: str) -> Optional[str]:
+    """Find an in-scope prefix for a namespace URI."""
+    if etree is None:
+        return None
+
+    current = element
+    while current is not None:
+        for prefix, uri in current.nsmap.items():
+            if prefix and uri == namespace_uri:
+                return prefix
+        current = current.getparent()
+    return None
+
+
+def _collect_extlst_namespaces(extlst_element) -> Dict[str, str]:
+    """Collect namespace prefixes used by extLst elements and attributes."""
+    if etree is None:
+        return {}
+
+    namespaces: Dict[str, str] = {}
+
+    for node in extlst_element.iter():
+        if not isinstance(node.tag, str):
+            continue
+
+        node_qname = etree.QName(node)
+        if node.prefix and node_qname.namespace:
+            namespaces[node.prefix] = node_qname.namespace
+
+        for attr_name in node.attrib:
+            if not isinstance(attr_name, str) or not attr_name.startswith("{"):
+                continue
+
+            attr_qname = etree.QName(attr_name)
+            if not attr_qname.namespace:
+                continue
+
+            prefix = _find_prefix_for_namespace(node, attr_qname.namespace)
+            if prefix:
+                namespaces[prefix] = attr_qname.namespace
+
+    return namespaces
+
+
+def _extract_dropdown_extlsts(template_path: str) -> Dict[str, PreservedWorksheetExtLst]:
+    """
+    Capture worksheet extLst blocks containing x14 dropdown metadata.
+
+    openpyxl strips these extensions on load/save, so we preserve them from the original ZIP
+    and patch them back into the saved workbook later.
+    """
+    if etree is None:
+        logger.warning("lxml is not installed; skipping x14 dropdown preservation")
+        return {}
+
+    preserved: Dict[str, PreservedWorksheetExtLst] = {}
+
+    try:
+        with zipfile.ZipFile(template_path, "r") as workbook_zip:
+            for name in workbook_zip.namelist():
+                if not _is_worksheet_part(name):
+                    continue
+
+                worksheet_xml = workbook_zip.read(name)
+                root = etree.fromstring(worksheet_xml, parser=_xml_parser())
+                extlst_element = root.find(EXTLST_TAG)
+
+                if extlst_element is None or not _contains_x14_data_validation(extlst_element):
+                    continue
+
+                namespaces = _collect_extlst_namespaces(extlst_element)
+                preserved[name] = PreservedWorksheetExtLst(
+                    extlst_xml=etree.tostring(extlst_element, encoding="UTF-8"),
+                    namespaces=namespaces,
+                )
+                logger.info(
+                    "Preserved dropdown extLst from %s with namespaces: %s",
+                    name,
+                    sorted(namespaces.keys()),
+                )
+    except Exception as exc:
+        logger.warning("Could not preserve x14 dropdown metadata from template %s: %s", template_path, exc)
+        return {}
+
+    return preserved
+
+
+def _ensure_root_namespaces(root, required_namespaces: Dict[str, str]):
+    """Rebuild the worksheet root with any missing namespace declarations."""
+    if etree is None or not required_namespaces:
+        return root
+
+    merged_nsmap = dict(root.nsmap)
+    needs_rebuild = False
+
+    for prefix, namespace_uri in required_namespaces.items():
+        if not prefix:
+            continue
+
+        existing_uri = merged_nsmap.get(prefix)
+        if existing_uri == namespace_uri:
+            continue
+
+        if existing_uri and existing_uri != namespace_uri:
+            logger.warning(
+                "Worksheet root already uses prefix %s for %s; leaving preserved extLst namespace local",
+                prefix,
+                existing_uri,
+            )
+            continue
+
+        merged_nsmap[prefix] = namespace_uri
+        needs_rebuild = True
+
+    if not needs_rebuild:
+        return root
+
+    rebuilt_root = etree.Element(root.tag, nsmap=merged_nsmap)
+    rebuilt_root.text = root.text
+    rebuilt_root.tail = root.tail
+
+    for attr_name, attr_value in root.attrib.items():
+        rebuilt_root.set(attr_name, attr_value)
+
+    for child in root:
+        rebuilt_root.append(deepcopy(child))
+
+    return rebuilt_root
+
+
+def _patch_dropdown_extlst(worksheet_xml: bytes, preserved_extlst: PreservedWorksheetExtLst) -> bytes:
+    """Patch the preserved extLst block back into a saved worksheet XML document."""
+    if etree is None:
+        return worksheet_xml
+
+    root = etree.fromstring(worksheet_xml, parser=_xml_parser())
+    if root.tag != WORKSHEET_TAG:
+        raise ValueError(f"Unexpected worksheet root tag: {root.tag}")
+
+    existing_extlst = root.find(EXTLST_TAG)
+    if existing_extlst is not None:
+        root.remove(existing_extlst)
+
+    root = _ensure_root_namespaces(root, preserved_extlst.namespaces)
+    extlst_element = etree.fromstring(preserved_extlst.extlst_xml, parser=_xml_parser())
+    root.append(extlst_element)
+
+    patched_xml = etree.tostring(root, encoding="UTF-8", xml_declaration=True)
+
+    # Validate the final XML before writing it back into the ZIP.
+    etree.fromstring(patched_xml, parser=_xml_parser())
+    return patched_xml
+
+
+def _restore_dropdown_extlsts(output_path: str, preserved_extlsts: Dict[str, PreservedWorksheetExtLst]) -> None:
+    """Restore preserved worksheet dropdown extLst blocks after openpyxl saves the workbook."""
+    if etree is None or not preserved_extlsts:
+        return
+
+    temp_output_path = output_path + ".x14patch"
+
+    try:
+        with zipfile.ZipFile(output_path, "r") as input_zip:
+            with zipfile.ZipFile(temp_output_path, "w", compression=zipfile.ZIP_DEFLATED) as patched_zip:
+                for zip_info in input_zip.infolist():
+                    entry_bytes = input_zip.read(zip_info.filename)
+                    preserved_extlst = preserved_extlsts.get(zip_info.filename)
+
+                    if preserved_extlst is not None:
+                        entry_bytes = _patch_dropdown_extlst(entry_bytes, preserved_extlst)
+                        logger.info(
+                            "Restored dropdown extLst into %s with namespaces: %s",
+                            zip_info.filename,
+                            sorted(preserved_extlst.namespaces.keys()),
+                        )
+
+                    patched_zip.writestr(zip_info, entry_bytes)
+
+        os.replace(temp_output_path, output_path)
+        logger.info("Applied worksheet dropdown extension patch to %s", output_path)
+    except Exception as exc:
+        logger.warning("Failed to restore dropdown extLst metadata into %s: %s", output_path, exc)
+        if os.path.exists(temp_output_path):
+            try:
+                os.remove(temp_output_path)
+            except OSError:
+                pass
 
 
 class TemplateFiller:
@@ -49,6 +289,9 @@ class TemplateFiller:
             # Only use keep_vba=True for .xlsm files to avoid corruption
             is_macro_enabled = template_path.lower().endswith('.xlsm')
 
+            # Preserve worksheet dropdown metadata that openpyxl silently strips on load/save.
+            preserved_extlsts = _extract_dropdown_extlsts(template_path)
+
             # Load template (data_only=False to preserve formulas)
             if workbook is None:
                 workbook = load_workbook(template_path, data_only=False, keep_vba=is_macro_enabled)
@@ -62,7 +305,7 @@ class TemplateFiller:
                 "high_confidence": 0,      # >= 0.85
                 "needs_review": 0,         # 0.70-0.84
                 "low_confidence": 0,       # 0.50-0.69
-                "skipped_low_confidence": 0,  # < 0.50
+                "skipped_low_confidence": 0,  # < 0.10
                 "validation_errors": 0,
             }
             needs_review_cells: List[Dict[str, Any]] = []
@@ -317,6 +560,10 @@ class TemplateFiller:
             # Save filled workbook
             workbook.save(output_path)
             workbook.close()
+
+            # Re-inject x14 dropdown extension metadata after openpyxl writes the workbook.
+            _restore_dropdown_extlsts(output_path, preserved_extlsts)
+
 
             summary = {
                 "total_cells_filled": cells_filled,

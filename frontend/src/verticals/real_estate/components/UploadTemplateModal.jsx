@@ -56,6 +56,7 @@ export default function UploadTemplateModal({
   const [selectedFile, setSelectedFile] = useState(null);
   const [dragActive, setDragActive] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState(null);
   const fileInputRef = useRef(null);
 
   // Form fields
@@ -140,6 +141,7 @@ export default function UploadTemplateModal({
       return;
     }
 
+    setUploadError(null);
     try {
       setUploading(true);
       await onUpload?.(selectedFile.file, {
@@ -148,15 +150,17 @@ export default function UploadTemplateModal({
         category,
       });
 
-      // Reset form and close — analysis continues in background
+      // Reset form and close
       setSelectedFile(null);
       setTemplateName("");
       setDescription("");
       setCategory("custom");
+      setUploadError(null);
       onOpenChange?.(false);
     } catch (error) {
       console.error("Upload failed:", error);
-      toast.error("Upload failed", { description: error.message });
+      const detail = error.response?.data?.detail || error.message;
+      setUploadError(detail);
     } finally {
       setUploading(false);
     }
@@ -232,6 +236,9 @@ export default function UploadTemplateModal({
 
               <p className="text-xs text-muted-foreground mt-3">
                 Max file size: 10MB • Excel (.xlsx) only
+              </p>
+              <p className="text-xs text-muted-foreground mt-1">
+                Supported format: RE Investment Model
               </p>
             </div>
           </div>
@@ -361,6 +368,14 @@ export default function UploadTemplateModal({
             </div>
           )}
         </div>
+
+        {/* Upload error */}
+        {uploadError && (
+          <div className="flex items-start gap-2 p-3 rounded-md bg-destructive/10 border border-destructive/30 flex-shrink-0">
+            <AlertCircle className="h-4 w-4 text-destructive mt-0.5 shrink-0" />
+            <p className="text-sm text-destructive">{uploadError}</p>
+          </div>
+        )}
 
         {/* Footer */}
         <div className="flex items-center justify-between pt-4 border-t border-border flex-shrink-0">

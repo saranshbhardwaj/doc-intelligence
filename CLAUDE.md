@@ -369,6 +369,7 @@ Current head: `f3a4b5c6d7e8`
 ---
 
 ## Common Gotchas
+- **Avoid N+1 DB/API patterns**: Never loop individual queries/API calls when a batch alternative exists. Use batch endpoints, JOINs, or `include_documents`-style flags. Example: `listCollections(getToken, { includeDocuments: true })` instead of listing then fetching each.
 - **`stream_chat()` yields dicts**, not strings: `{"type": "chunk", "text": str}` or `{"type": "usage", "data": {...}}`. Always check `item["type"] == "chunk"` before appending.
 - **Zustand selectors**: Actions must be **explicitly listed** in `useChatActions()` / other selectors in `store/index.js` to be accessible via `actions.*`.
 - **SSE error propagation**: Every Celery task exception path must call `tracker.mark_error()` — otherwise frontend stays stuck in "processing" state indefinitely.

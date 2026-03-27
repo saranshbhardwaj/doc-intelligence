@@ -37,6 +37,7 @@ from app.core.rag.chat_persistence import ChatPersistence
 from app.core.rag.comparison_flow import ComparisonChatHandler
 from app.core.rag.document_matching import DocumentMatcher
 from app.core.rag.low_signal import is_low_signal_message, low_signal_response
+from app.repositories.chat_repository import ChatRepository
 
 # Adaptive retrieval sizing by query type: (min_candidates, max_candidates, min_top_k, max_top_k)
 _RETRIEVAL_SIZING = {
@@ -109,6 +110,7 @@ class RAGService:
 
         # Persistence helper
         self.persistence = ChatPersistence()
+        self.chat_repo = ChatRepository()
 
         # Comparison context for SSE emission (set during comparison queries)
         self.last_comparison_context = None
@@ -602,10 +604,23 @@ class RAGService:
             )
 
         # ------------------------------------------------------------------
-        # STEP 3.5: Build citation context for frontend (general chat mode)
+        # STEP 3.5: Build stable doc_id_to_index + citation context (general chat mode)
+        # get_or_build_document_index assigns D-numbers once per session (by added_at order)
+        # and persists them — D1 always refers to the same document across all turns.
+        doc_index = self.chat_repo.get_or_build_document_index(session_id) if session_id else {}
+        # Invert {"D1": uuid, "D2": uuid} → {uuid: 1, uuid: 2} for prompt labeling
+        doc_id_to_index: Dict[str, int] = {}
+        for label, doc_id in doc_index.items():
+            try:
+                doc_id_to_index[doc_id] = int(label[1:])  # "D1" → 1
+            except (ValueError, IndexError):
+                pass
+
         if relevant_chunks:
             citation_start = time.monotonic()
-            self.last_citation_context = self._build_citation_context(relevant_chunks)
+            self.last_citation_context = self._build_citation_context(
+                relevant_chunks, doc_id_to_index=doc_id_to_index
+            )
             stage_timings_ms["citations"] = round((time.monotonic() - citation_start) * 1000, 2)
             logger.info(
                 "Citation context built",
@@ -625,7 +640,8 @@ class RAGService:
             user_message=user_message,
             relevant_chunks=relevant_chunks,
             recent_messages=recent_messages,
-            summary_text=summary_text
+            summary_text=summary_text,
+            doc_id_to_index=doc_id_to_index or None,
         )
         stage_timings_ms["prompt_build"] = round((time.monotonic() - prompt_start) * 1000, 2)
         logger.info(
@@ -834,18 +850,27 @@ class RAGService:
             QueryType.COMPARISON: 20
         }.get(query_type, 18)
 
-    def _build_citation_context(self, chunks: List[Dict]) -> Dict:
+    def _build_citation_context(
+        self,
+        chunks: List[Dict],
+        doc_id_to_index: Optional[Dict[str, int]] = None,
+    ) -> Dict:
         """
         Build citation context for frontend resolution using DocumentRepository.
 
-        Creates a mapping of chunk ID prefixes to document information,
-        enabling clickable citations in the UI with O(1) lookup.
+        The context object is sent to the frontend via SSE and used to resolve
+        [Dn:pN] citation tokens in LLM responses to clickable PDF page links.
 
         Args:
-            chunks: List of retrieved chunks
+            chunks: List of retrieved chunks.
+            doc_id_to_index: Stable {doc_id: D-number} mapping from the session's
+                             document_index. If None, a local first-appearance index is used.
 
         Returns:
-            Dict with citations array and document_map
+            Dict with:
+              - citations: list of citation metadata (doc_index, page, chunk_id, bbox, ...)
+              - document_index: {"D1": doc_id, "D2": doc_id, ...} for frontend resolution
+              - document_map: {doc_id: filename} for fast filename lookup
         """
         # Collect unique document IDs
         doc_ids = list(set(
@@ -854,11 +879,20 @@ class RAGService:
         ))
 
         if not doc_ids:
-            return {"citations": [], "document_map": {}}
+            return {"citations": [], "document_index": {}, "document_map": {}}
 
         # Batch fetch document info (1 query, not N)
         doc_info_list = self.document_repo.get_doc_info_by_ids(doc_ids)
         doc_map = {d['id']: d for d in doc_info_list}
+
+        # Build or fall back to local first-appearance index
+        _local_index: Dict[str, int] = {}
+        def _get_d_num(doc_id: str) -> int:
+            if doc_id_to_index and doc_id in doc_id_to_index:
+                return doc_id_to_index[doc_id]
+            if doc_id not in _local_index:
+                _local_index[doc_id] = len(_local_index) + 1
+            return _local_index[doc_id]
 
         # Build citation entries
         citations = []
@@ -873,19 +907,31 @@ class RAGService:
             metadata = chunk.get('chunk_metadata') or {}
 
             # Use bbox page if available (physical PDF page from Azure DI bounding_regions)
-            # This is more accurate than page_number column which may contain document's internal numbering
             bbox = metadata.get('bbox', {})
             page = bbox.get('page') if isinstance(bbox, dict) and bbox else chunk.get('page_number', 1)
+            d_num = _get_d_num(doc_id)
 
             citations.append({
-                "ref": chunk_id[:8],  # Short reference for LLM
-                "chunk_id": chunk_id,  # Full ID for lookup
+                "doc_index": d_num,          # D-number for [Dn:pN] resolution
+                "chunk_id": chunk_id,
                 "document_id": doc_id,
                 "filename": doc_info.get('filename', 'Unknown'),
-                "page": page,  # Physical PDF page number
+                "page": page,
                 "section": metadata.get('section_heading', ''),
-                "bbox": bbox or None,  # For PDF highlighting (includes accurate page number)
+                "bbox": bbox or None,
             })
+
+        # Build the document_index payload: {"D1": doc_id, "D2": doc_id, ...}
+        # Either from the stable session index or from local first-appearance ordering
+        if doc_id_to_index:
+            # Only include documents actually present in this response's chunks
+            doc_index_payload = {
+                f"D{idx}": did
+                for did, idx in doc_id_to_index.items()
+                if did in doc_map
+            }
+        else:
+            doc_index_payload = {f"D{idx}": did for did, idx in _local_index.items()}
 
         logger.debug(
             "Built citation context",
@@ -898,7 +944,8 @@ class RAGService:
 
         return {
             "citations": citations,
-            "document_map": {d['id']: d['filename'] for d in doc_info_list}
+            "document_index": doc_index_payload,
+            "document_map": {d['id']: d['filename'] for d in doc_info_list},
         }
 
     # All conversation memory & budget helpers moved to modular components.

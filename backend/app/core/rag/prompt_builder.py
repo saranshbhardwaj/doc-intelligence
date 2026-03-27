@@ -34,8 +34,8 @@ class PromptBuilder:
         "- Only use information from the provided document excerpts\n"
         "- If the documents don't contain relevant information, say so clearly\n"
         "- If evidence is insufficient, say so and ask a brief follow-up\n"
-        "- Cite sources using the format [ref:chunk_id:pN] where chunk_id is provided with each source and N is the page number\n"
-        "  Example: \"Revenue increased by 15% [ref:a1b2c3d4:p5] compared to prior quarter.\"\n"
+        "- Cite sources using the format [Dn:pN] where n is the document number and N is the page number\n"
+        "  Example: \"Revenue increased by 15% [D1:p5] compared to prior quarter.\"\n"
         "- Every factual claim should include a citation\n"
         "- Be concise but thorough\n"
         "- Use bullet points for clarity when appropriate\n"
@@ -79,14 +79,39 @@ class PromptBuilder:
             sections.append("=== RECENT MESSAGES ===\n" + "\n".join(recent_lines) + "\n")
         return "\n".join(sections) if sections else "[No prior conversation]"
 
-    def _format_chunks(self, relevant_chunks: List[Dict[str, Any]]) -> str:
-        """Format retrieved chunks into a numbered source block for the LLM prompt."""
+    def _format_chunks(
+        self,
+        relevant_chunks: List[Dict[str, Any]],
+        doc_id_to_index: Optional[Dict[str, int]] = None,
+    ) -> str:
+        """Format retrieved chunks into a numbered source block for the LLM prompt.
+
+        Each chunk is annotated with a [Dn:pN] citation hint so the LLM can
+        reproduce the canonical citation format in its response.
+
+        Args:
+            relevant_chunks: Retrieved document chunks.
+            doc_id_to_index: Mapping of document_id → D-number (1-based).
+                             Built from the session's stable document_index.
+                             If None, documents are assigned indices by first appearance.
+        """
         context_sections: List[str] = []
+        # Build a local first-appearance index as fallback when doc_id_to_index not provided
+        _local_index: Dict[str, int] = {}
+
         for i, chunk in enumerate(relevant_chunks, 1):
-            chunk_id = str(chunk.get('id', ''))[:8]  # First 8 chars of UUID
+            doc_id = str(chunk.get('document_id', ''))
             page = chunk.get('page_number', 1)
-            citation_hint = f"[Citation: ref:{chunk_id}:p{page}]"
-            source_info = f"Source {i}: {chunk['document_id']} (Page {page}) {citation_hint}"
+
+            if doc_id_to_index is not None:
+                d_num = doc_id_to_index.get(doc_id, 1)
+            else:
+                if doc_id not in _local_index:
+                    _local_index[doc_id] = len(_local_index) + 1
+                d_num = _local_index[doc_id]
+
+            citation_hint = f"[D{d_num}:p{page}]"
+            source_info = f"Source {i}: {doc_id} (Page {page}) {citation_hint}"
             if chunk.get('section_heading'):
                 source_info += f" - {chunk['section_heading']}"
             context_sections.append(f"{source_info}\n{chunk['text']}\n")
@@ -97,7 +122,8 @@ class PromptBuilder:
         user_message: str,
         relevant_chunks: List[Dict[str, Any]],
         recent_messages: List[Dict[str, Any]],
-        summary_text: Optional[str] = None
+        summary_text: Optional[str] = None,
+        doc_id_to_index: Optional[Dict[str, int]] = None,
     ) -> str:
         if not relevant_chunks:
             convo_sections = self.format_conversation(recent_messages, summary_text)
@@ -107,7 +133,7 @@ class PromptBuilder:
                 "DOCUMENT EXCERPTS:\n\n[No relevant document excerpts found for this query]\n\n---\n\n"
                 f"USER QUESTION: {user_message}\n\nANSWER:" )
 
-        context = self._format_chunks(relevant_chunks)
+        context = self._format_chunks(relevant_chunks, doc_id_to_index=doc_id_to_index)
         convo_sections = self.format_conversation(recent_messages, summary_text)
         return (
             f"{self.SYSTEM_INSTRUCTIONS_WITH_CHUNKS}\n"
@@ -121,7 +147,8 @@ class PromptBuilder:
         user_message: str,
         relevant_chunks: List[Dict[str, Any]],
         recent_messages: List[Dict[str, Any]],
-        summary_text: Optional[str] = None
+        summary_text: Optional[str] = None,
+        doc_id_to_index: Optional[Dict[str, int]] = None,
     ) -> tuple:
         """
         Return (system_prompt, user_content) for Anthropic prompt caching.
@@ -157,7 +184,7 @@ class PromptBuilder:
             recent_section = "=== RECENT MESSAGES ===\n" + "\n".join(lines) + "\n\n"
 
         if relevant_chunks:
-            context = self._format_chunks(relevant_chunks)
+            context = self._format_chunks(relevant_chunks, doc_id_to_index=doc_id_to_index)
             user_content = (
                 f"{recent_section}"
                 f"DOCUMENT EXCERPTS:\n\n{context}\n\n---\n\n"

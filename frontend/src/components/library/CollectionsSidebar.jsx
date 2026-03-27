@@ -10,7 +10,6 @@
  *   - onSelectCollection: (collection) => void
  *   - onCreateCollection: (name) => void
  *   - onDeleteCollection: (collectionId) => void
- *   - onRequestCreate: () => void  — called by external "Create Collection" buttons
  */
 
 import { useState, useMemo, useEffect } from "react";
@@ -37,7 +36,6 @@ export default function CollectionsSidebar({
   onSelectCollection,
   onCreateCollection,
   onDeleteCollection,
-  onRequestCreate,
   requestCreate = 0,
 }) {
   const [searchQuery, setSearchQuery] = useState("");
@@ -67,46 +65,46 @@ export default function CollectionsSidebar({
     setShowNewCollection(false);
   };
 
-  // Expose show-create so parent can call it
-  const triggerCreate = () => setShowNewCollection(true);
-
   return (
-    <div className="glass-sidebar p-4 h-full flex flex-col rounded-2xl border border-border/50">
-      {/* Header */}
-      <div className="flex items-center justify-between mb-3">
-        <h2 className="text-xs font-bold uppercase tracking-wider text-muted-foreground">
-          Collections
-        </h2>
-        <Button
-          size="sm"
-          variant="ghost"
-          onClick={() => setShowNewCollection(true)}
-          className="h-7 w-7 p-0"
-        >
-          <Plus className="w-4 h-4" />
-        </Button>
+    <div className="h-full flex min-h-0 flex-col px-4 py-4 sm:px-5">
+      <div className="shrink-0">
+        <div className="mb-4 flex items-start justify-between gap-3 border-b border-border/70 pb-4">
+          <div>
+            <h2 className="text-[0.72rem] font-semibold uppercase tracking-[0.22em] text-muted-foreground">
+              Collections
+            </h2>
+            <p className="mt-2 text-sm text-muted-foreground">
+              {collections.length} total
+            </p>
+          </div>
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => setShowNewCollection(true)}
+            className="h-9 w-9 rounded-full"
+          >
+            <Plus className="w-4 h-4" />
+          </Button>
+        </div>
+
+        <div className="relative mb-3">
+          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder="Find a collection"
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="h-10 rounded-xl border-border/70 bg-background/70 pl-8 text-sm"
+          />
+        </div>
+
+        {searchQuery && (
+          <p className="mb-2 text-xs text-muted-foreground">
+            {filteredCollections.length} match{filteredCollections.length === 1 ? "" : "es"}
+          </p>
+        )}
       </div>
 
-      {/* Search */}
-      <div className="relative mb-3">
-        <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-        <Input
-          placeholder="Search collections..."
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          className="pl-8 h-9 text-sm"
-        />
-      </div>
-
-      {/* Results count */}
-      {searchQuery && (
-        <p className="text-xs text-muted-foreground mb-2">
-          {filteredCollections.length} of {collections.length} collections
-        </p>
-      )}
-
-      {/* Collections List */}
-      <div className="flex-1 overflow-y-auto space-y-0.5 scrollbar-thin">
+      <div className="library-scrollbar flex-1 space-y-1 overflow-y-auto pr-1">
         {loading ? (
           <div className="flex justify-center py-8">
             <Spinner size="sm" />
@@ -124,10 +122,8 @@ export default function CollectionsSidebar({
             return (
               <div
                 key={col.id}
-                className={`group flex items-center gap-2 py-2.5 px-3 rounded-lg transition-all cursor-pointer ${
-                  isActive
-                    ? "bg-primary/10 border-l-2 border-primary"
-                    : "hover:bg-muted/50 border-l-2 border-transparent"
+                className={`library-sidebar-item group cursor-pointer ${
+                  isActive ? "library-sidebar-item-active" : ""
                 }`}
                 onClick={() => onSelectCollection?.(col)}
               >
@@ -138,23 +134,25 @@ export default function CollectionsSidebar({
                 />
                 <div className="flex-1 min-w-0">
                   <p
-                    className={`text-sm font-medium truncate ${
-                      isActive ? "text-primary" : "text-foreground"
+                    className={`truncate text-sm font-medium ${
+                      isActive ? "text-foreground" : "text-foreground"
                     }`}
                   >
                     {col.name}
                   </p>
-                  <p className="text-xs text-muted-foreground">
-                    {col.document_count || 0} docs
+                  <p className="text-[0.7rem] uppercase tracking-[0.18em] text-muted-foreground">
+                    Workspace
                   </p>
                 </div>
+                <span className="library-sidebar-count">
+                  {col.document_count || 0}
+                </span>
 
-                {/* Delete button - only show on hover */}
                 <AlertDialog>
                   <AlertDialogTrigger asChild>
                     <button
                       onClick={(e) => e.stopPropagation()}
-                      className="opacity-0 group-hover:opacity-100 transition-opacity p-1 hover:bg-destructive/10 rounded"
+                      className="rounded-full p-1 opacity-0 transition-opacity group-hover:opacity-100 hover:bg-destructive/10"
                     >
                       <Trash2 className="w-3.5 h-3.5 text-muted-foreground hover:text-destructive" />
                     </button>
@@ -184,22 +182,21 @@ export default function CollectionsSidebar({
         )}
       </div>
 
-      {/* New Collection Form */}
       {showNewCollection && (
-        <div className="mt-3 pt-3 border-t border-border">
+        <div className="mt-4 shrink-0 border-t border-border/70 pt-4">
           <Input
             placeholder="Collection name"
             value={newCollectionName}
             onChange={(e) => setNewCollectionName(e.target.value)}
             onKeyPress={(e) => e.key === "Enter" && handleCreateCollection()}
-            className="mb-2 h-9 text-sm"
+            className="mb-2 h-10 rounded-xl border-border/70 bg-background/70 text-sm"
             autoFocus
           />
           <div className="flex gap-2">
             <Button
               size="sm"
               onClick={handleCreateCollection}
-              className="flex-1 h-8 rounded-full"
+              className="h-9 flex-1 rounded-full"
             >
               Create
             </Button>
@@ -210,7 +207,7 @@ export default function CollectionsSidebar({
                 setShowNewCollection(false);
                 setNewCollectionName("");
               }}
-              className="flex-1 h-8 rounded-full"
+              className="h-9 flex-1 rounded-full"
             >
               Cancel
             </Button>
