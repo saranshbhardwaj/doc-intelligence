@@ -1,1 +1,14 @@
+# Gitignore for evals/
+
+# Regular datasets: contain actual offering memorandum text — never commit
 datasets/
+
+# Golden datasets: committed regression baselines — tracked in git
+!datasets/golden/
+!datasets/golden/**
+
+# Saved eval result files (large JSON)
+results/
+
+# Environment — contains API keys, never commit
+.env

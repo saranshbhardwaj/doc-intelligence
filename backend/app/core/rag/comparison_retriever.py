@@ -23,6 +23,7 @@ from app.config import settings
 from app.core.rag.metadata_booster import MetadataBooster
 from app.core.rag.context_expander import ContextExpander
 from app.repositories.document_repository import DocumentRepository
+from app.database import AsyncSessionLocal
 from sqlalchemy.orm import Session
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -105,7 +106,7 @@ class ComparisonRetriever:
             self.reranker = reranker
         else:
             self.reranker = get_reranker() if settings.rag_use_reranker else None
-        self.metadata_booster = metadata_booster or MetadataBooster.for_reranker()
+        self.metadata_booster = metadata_booster or MetadataBooster.for_comparison()
         self.context_expander = context_expander or ContextExpander()
         self.document_repo = DocumentRepository()
 
@@ -313,6 +314,15 @@ class ComparisonRetriever:
             )
             return []
 
+        # Step 1b: Apply comparison-specific metadata boost and re-sort.
+        # This promotes table/KV chunks over narrative fluff regardless of what
+        # query_understanding.table_boost was set to by the LLM.
+        boost_input = query_understanding if query_understanding else {"query_type": "data_query"}
+        candidates = self.metadata_booster.apply_boost(
+            candidates, boost_input, score_field="hybrid_score"
+        )
+        candidates.sort(key=lambda c: c.get("hybrid_score", 0.0), reverse=True)
+
         # Step 2: Re-rank with cross-encoder (disabled for comparison by default).
         # Comparison pairs chunks by embedding cosine similarity after retrieval, so
         # the reranker adds ~76s of CPU inference with minimal benefit. Controlled by
@@ -343,31 +353,35 @@ class ComparisonRetriever:
                 }
             )
         else:
-            reranked = candidates[:chunks_per_doc]
+            # Return all candidates so the pairing step and fact extractor see
+            # the full retrieval pool. The fact extractor filters to relevant facts.
+            reranked = candidates
             logger.debug(
-                "Skipping comparison doc rerank for tiny candidate pool",
+                "Skipping comparison doc rerank — returning all candidates",
                 extra={
                     "doc_id": doc_id,
                     "retrieval_ms": retrieval_ms,
                     "candidate_count": len(candidates),
-                    "min_candidates_for_rerank": rerank_min_candidates,
                     "selected_count": len(reranked)
                 }
             )
 
-        # Step 3: Expand context if async_session available.
-        # Expansion runs BEFORE embedding cosine pairing so that expanded narrative chunks
-        # pair correctly with narrative chunks from other documents (table ↔ narrative pairing
-        # has lower raw cosine similarity than narrative ↔ narrative).
-        if async_session and reranked:
+        # Step 3: Expand context using a per-call session.
+        # Each concurrent _retrieve_single_doc call opens its own short-lived session so
+        # that parallel asyncio.gather calls don't share a session — SQLAlchemy AsyncSession
+        # does not permit concurrent operations on the same instance (ISCE error).
+        # Expansion runs BEFORE embedding cosine pairing so expanded narrative chunks pair
+        # correctly (table ↔ narrative has lower cosine similarity than narrative ↔ narrative).
+        if reranked:
             try:
                 before_expansion = len(reranked)
-                reranked = await self.context_expander.expand_with_batch(
-                    chunks=reranked,
-                    session=async_session,
-                    max_expansion_per_chunk=2,
-                    query_type=QueryType.COMPARISON
-                )
+                async with AsyncSessionLocal() as local_session:
+                    reranked = await self.context_expander.expand_with_batch(
+                        chunks=reranked,
+                        session=local_session,
+                        max_expansion_per_chunk=2,
+                        query_type=QueryType.COMPARISON
+                    )
                 logger.debug(
                     f"Context expansion for {doc_id}: {len(reranked) - before_expansion} additional chunks"
                 )

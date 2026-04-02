@@ -362,17 +362,21 @@ class TemplateRepository:
             "model_name",
             "llm_batches_count",
             "cache_hit_rate",
+            "llm_io_log",
+            "prompt_version",
         ]
 
         # JSONB fields that need explicit dirty tracking
-        jsonb_fields = ["field_mapping", "extracted_data", "artifact"]
+        jsonb_fields = ["field_mapping", "extracted_data", "artifact", "llm_io_log"]
 
         for field, value in kwargs.items():
-            if field in allowed_fields:
-                setattr(fill_run, field, value)
-                # For JSONB columns, explicitly mark as modified to ensure SQLAlchemy detects the change
-                if field in jsonb_fields:
-                    flag_modified(fill_run, field)
+            if field not in allowed_fields:
+                logger.warning(f"update_fill_run: ignoring unknown field '{field}' for fill_run {fill_run_id}")
+                continue
+            setattr(fill_run, field, value)
+            # For JSONB columns, explicitly mark as modified to ensure SQLAlchemy detects the change
+            if field in jsonb_fields:
+                flag_modified(fill_run, field)
 
         self.db.commit()
         self.db.refresh(fill_run)

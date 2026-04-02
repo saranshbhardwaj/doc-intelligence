@@ -11,6 +11,7 @@ from fastapi import APIRouter, Form, HTTPException, Depends, Body
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.auth import get_current_user
 from app.db_models_users import User
 from app.database import get_db
@@ -125,7 +126,7 @@ async def chat_with_session(
     )
 
     # Initialize RAG service (still needs db session for vector search)
-    rag_service = RAGService(db)
+    rag_service = RAGService(db, capture_io_log=settings.capture_llm_io_log)
 
     log_shadow_credits(
         user=user,
@@ -330,7 +331,7 @@ async def confirm_comparison_selection(
     enforce_chat_message_limit(user)
 
     # Initialize RAG service
-    rag_service = RAGService(db)
+    rag_service = RAGService(db, capture_io_log=settings.capture_llm_io_log)
 
     log_shadow_credits(
         user=user,

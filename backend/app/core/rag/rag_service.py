@@ -29,7 +29,11 @@ from app.core.rag.budget_enforcer import BudgetEnforcer
 from app.core.rag.hybrid_retriever import HybridRetriever
 from app.core.rag.reranker import Reranker
 from app.core.rag.comparison_retriever import ComparisonRetriever
-from app.core.rag.query_understanding import QueryUnderstandingService, QueryType
+from app.core.rag.query_understanding import (
+    QueryUnderstandingService,
+    QueryType,
+    is_narrow_explicit_fact_lookup,
+)
 from app.core.rag.fact_extractor import FactExtractor
 from app.core.rag.context_expander import ContextExpander
 from app.utils.chunk_metadata import validate_and_normalize_chunks
@@ -37,14 +41,24 @@ from app.core.rag.chat_persistence import ChatPersistence
 from app.core.rag.comparison_flow import ComparisonChatHandler
 from app.core.rag.document_matching import DocumentMatcher
 from app.core.rag.low_signal import is_low_signal_message, low_signal_response
+from app.core.rag.eval_contract import (
+    RAG_EVAL_CONTRACT_VERSION,
+    serialize_chunk_for_eval,
+    serialize_query_understanding,
+)
 from app.repositories.chat_repository import ChatRepository
 
 # Adaptive retrieval sizing by query type: (min_candidates, max_candidates, min_top_k, max_top_k)
+# Defaults: 15 candidates, 8 final (reduced from 18/12 for better quality per research)
+# 6-9 chunks is the quality sweet spot; chunks 9-12 add noise without improving relevance
 _RETRIEVAL_SIZING = {
-    QueryType.DATA_EXTRACTION: (25, None, 12, None),   # at least 25/12, no upper cap
-    QueryType.SUMMARIZATION:   (15, 20, 8, 10),
-    QueryType.ENTITY_LOOKUP:   (12, 20, 6, 10),
+    QueryType.DATA_EXTRACTION: (20, None, 10, None),   # needs more: financial tables across pages
+    QueryType.SUMMARIZATION:   (12, 18, 6, 8),         # breadth but fewer final
+    QueryType.ENTITY_LOOKUP:   (10, 15, 5, 7),         # narrow lookups
+    # GENERAL_QA and COMPARISON use defaults (15 → 8)
 }
+_DOC_SCOPE_MATCH_THRESHOLD = 0.70
+_DATA_EXTRACTION_SCOPE_CONFIDENCE_THRESHOLD = 0.65
 import asyncio
 import functools
 import json
@@ -65,7 +79,7 @@ class RAGService:
     6. Save history: Persist messages to database
     """
 
-    def __init__(self, db: Session, reranker: Reranker | None = None):
+    def __init__(self, db: Session, reranker: Reranker | None = None, capture_io_log: bool = False):
         """
         Initialize RAG service.
 
@@ -86,7 +100,7 @@ class RAGService:
         self.chat_llm_service = ChatLLMService(self.llm_client)
 
         # Inject modular components
-        self.prompt_builder = PromptBuilder()
+        self.prompt_builder = PromptBuilder(prompt_version=settings.rag_prompt_version)
         self.memory = ConversationMemory(self.chat_llm_service)
         self.budget = BudgetEnforcer()
         self.hybrid_retriever = HybridRetriever(db)  # Hybrid retrieval (semantic + keyword)
@@ -103,7 +117,7 @@ class RAGService:
         )
 
         # Fact extractor (for Map-Reduce comparison flow)
-        self.fact_extractor = FactExtractor()
+        self.fact_extractor = FactExtractor(prompt_version=settings.rag_prompt_version)
 
         # Context expander (for expanding chunks with related context)
         self.context_expander = ContextExpander()
@@ -111,6 +125,13 @@ class RAGService:
         # Persistence helper
         self.persistence = ChatPersistence()
         self.chat_repo = ChatRepository()
+
+        self.capture_io_log = capture_io_log
+        if capture_io_log:
+            from app.repositories.io_log_repository import IOLogRepository
+            self._io_log_repo = IOLogRepository()
+        else:
+            self._io_log_repo = None
 
         # Comparison context for SSE emission (set during comparison queries)
         self.last_comparison_context = None
@@ -130,11 +151,20 @@ class RAGService:
             prompt_builder=self.prompt_builder,
             llm_client=self.llm_client,
             save_messages=self.persistence.save_chat_messages,
-            on_comparison_context=self._set_comparison_context
+            on_comparison_context=self._set_comparison_context,
+            on_citation_context=self._set_citation_context_from_chunks,
+            capture_io_log=capture_io_log,
+            io_log_repo=self._io_log_repo,
         )
 
     def _set_comparison_context(self, comparison_data: Dict):
         self.last_comparison_context = comparison_data
+
+    def _set_citation_context_from_chunks(self, chunks: List[Dict], doc_id_to_index: Dict[str, int]):
+        """Build and store citation context from comparison chunks for SSE emission."""
+        self.last_citation_context = self._build_citation_context(
+            chunks, doc_id_to_index=doc_id_to_index
+        )
 
     async def chat(
         self,
@@ -211,10 +241,12 @@ class RAGService:
         doc_filenames = [d["filename"] for d in doc_info]
 
         # Analyze query with LLM (cheap Haiku call)
+        # Pass recent_messages so the model can detect follow-ups and rewrite queries
         query_understanding_start = time.monotonic()
         understanding = await self.query_understanding.understand(
             query=user_message,
-            document_filenames=doc_filenames
+            document_filenames=doc_filenames,
+            recent_messages=recent_messages if recent_messages else None,
         )
         query_understanding_ms = round((time.monotonic() - query_understanding_start) * 1000, 2)
         stage_timings_ms["query_understanding"] = query_understanding_ms
@@ -224,6 +256,36 @@ class RAGService:
                 "session_id": session_id,
                 "query_understanding_ms": query_understanding_ms,
                 "query_type": understanding.query_type.value
+            }
+        )
+
+        # Decide whether to include conversation history in the prompt.
+        # Standalone questions (needs_history=False) don't benefit from history —
+        # omitting it improves cache hit rate and removes irrelevant context.
+        # Always include history for the first 2 turns (session may not have warmed up yet).
+        include_history = (
+            understanding.needs_history
+            or len(history_messages) <= 2
+        )
+
+        # Use rewritten query for retrieval when the model produced one (follow-up rewrites).
+        # Keep original user_message for the USER QUESTION section of the prompt.
+        retrieval_query = (
+            understanding.rewritten_query
+            if understanding.needs_history and understanding.rewritten_query
+            else understanding.reformulated_query
+        )
+        narrow_explicit_fact_lookup = is_narrow_explicit_fact_lookup(understanding)
+
+        logger.info(
+            "History and retrieval query decision",
+            extra={
+                "session_id": session_id,
+                "include_history": include_history,
+                "needs_history": understanding.needs_history,
+                "has_rewritten_query": bool(understanding.rewritten_query),
+                "history_messages_count": len(history_messages),
+                "narrow_explicit_fact_lookup": narrow_explicit_fact_lookup,
             }
         )
 
@@ -355,7 +417,8 @@ class RAGService:
                 document_ids=final_doc_ids,
                 summary_text=summary_text,
                 recent_messages=recent_messages,
-                query_understanding=understanding  # For HyDE enhancement
+                query_understanding=understanding,
+                include_history=include_history,
             ):
                 yield event  # Already a (event_type, data) tuple
             self.last_comparison_context = None
@@ -368,18 +431,31 @@ class RAGService:
         # restrict retrieval to that document so short/sparse docs aren't
         # outranked by denser documents in the reranker.
         scoped_doc_ids = document_ids
+        did_scope_to_single_doc = False
+        allow_data_extraction_scope = (
+            understanding.query_type == QueryType.DATA_EXTRACTION
+            and narrow_explicit_fact_lookup
+            and (
+                understanding.confidence is None
+                or understanding.confidence >= _DATA_EXTRACTION_SCOPE_CONFIDENCE_THRESHOLD
+            )
+        )
         if (
             document_ids
             and len(document_ids) > 1
-            and understanding.query_type in (QueryType.SUMMARIZATION, QueryType.ENTITY_LOOKUP)
             and understanding.entities
+            and (
+                understanding.query_type in (QueryType.SUMMARIZATION, QueryType.ENTITY_LOOKUP)
+                or allow_data_extraction_scope
+            )
         ):
             matches = self.document_matcher.match_entities_with_scores(
                 understanding.entities, doc_info
             )
-            high_conf = [m for m in matches if m["score"] >= 0.70]
+            high_conf = [m for m in matches if m["score"] >= _DOC_SCOPE_MATCH_THRESHOLD]
             if len(high_conf) == 1:
                 scoped_doc_ids = [high_conf[0]["id"]]
+                did_scope_to_single_doc = True
                 logger.info(
                     "Document-scoped retrieval activated",
                     extra={
@@ -387,8 +463,27 @@ class RAGService:
                         "matched_doc": high_conf[0]["filename"],
                         "score": high_conf[0]["score"],
                         "query_type": understanding.query_type.value,
+                        "narrow_explicit_fact_lookup": narrow_explicit_fact_lookup,
                     }
                 )
+
+        if did_scope_to_single_doc and narrow_explicit_fact_lookup:
+            retrieval_candidates = max(
+                1,
+                min(retrieval_candidates, settings.rag_scoped_retrieval_candidates)
+            )
+            final_top_k = max(
+                1,
+                min(final_top_k, settings.rag_scoped_final_top_k)
+            )
+            logger.info(
+                "Scoped retrieval budget applied",
+                extra={
+                    "session_id": session_id,
+                    "retrieval_candidates": retrieval_candidates,
+                    "final_top_k": final_top_k,
+                }
+            )
 
         # ------------------------------------------------------------------
         # STEP 1: Hybrid retrieval (semantic + keyword search) - STANDARD FLOW
@@ -404,7 +499,7 @@ class RAGService:
         # Use reformulated query for better keyword matching, but pass understanding for HyDE
         # Retrieve more candidates for potential re-ranking
         hybrid_results = self.hybrid_retriever.retrieve(
-            query=understanding.reformulated_query,  # Use reformulated query for keyword search
+            query=retrieval_query,  # rewritten (follow-up) or reformulated query
             collection_id=collection_id,
             top_k=retrieval_candidates,
             document_ids=scoped_doc_ids,  # May be narrowed to a single matched document
@@ -484,10 +579,23 @@ class RAGService:
                     extra={"session_id": session_id}
                 )
 
-        # Edge case: Handle when no relevant chunks are found
+        # Edge case: no relevant chunks found — short-circuit without calling the LLM.
+        # An LLM call here is wasteful: the answer is always the same shape ("nothing found"),
+        # and we'd be spending tokens just to produce a canned response.
         if not relevant_chunks:
+            import random
+            _NO_RESULTS_RESPONSES = [
+                "I couldn't find relevant content in your documents for that question. "
+                "Try rephrasing, or ask about a specific metric, section, or topic you know is covered.",
+                "Nothing relevant came up in the documents for that query. "
+                "You could try asking in a different way, or focus on a specific term or section.",
+                "I didn't find matching content in your documents. "
+                "If you know roughly where the information lives, try mentioning the section or page — it helps me narrow the search.",
+                "That query didn't match anything in the documents. "
+                "Try breaking it into a more specific question, or ask about a particular metric or time period.",
+            ]
             logger.warning(
-                "No relevant chunks found for user query",
+                "No relevant chunks found for user query — returning short-circuit response",
                 extra={
                     "user_id": user_id,
                     "session_id": session_id,
@@ -495,7 +603,19 @@ class RAGService:
                     "query_length": len(user_message)
                 }
             )
-            # Continue with empty context - let LLM respond that it can't find relevant info
+            no_results_response = random.choice(_NO_RESULTS_RESPONSES)
+            yield ("chunk", no_results_response)
+            await self.persistence.save_chat_messages(
+                session_id=session_id,
+                user_message=user_message,
+                assistant_message=no_results_response,
+                source_chunks=[],
+                usage_data=None,
+                comparison_metadata=None,
+                citation_context=None,
+                org_id=org_id
+            )
+            return
 
         # ------------------------------------------------------------------
         # STEP 3: Validate and normalize chunk metadata
@@ -642,6 +762,7 @@ class RAGService:
             recent_messages=recent_messages,
             summary_text=summary_text,
             doc_id_to_index=doc_id_to_index or None,
+            include_history=include_history,
         )
         stage_timings_ms["prompt_build"] = round((time.monotonic() - prompt_start) * 1000, 2)
         logger.info(
@@ -681,7 +802,7 @@ class RAGService:
                     )
 
             # Persist chat messages only after successful streaming
-            await self.persistence.save_chat_messages(
+            assistant_msg_id = await self.persistence.save_chat_messages(
                 session_id=session_id,
                 user_message=user_message,
                 assistant_message=full_response,
@@ -691,6 +812,38 @@ class RAGService:
                 citation_context=self.last_citation_context,
                 org_id=org_id
             )
+
+            if self.capture_io_log and self._io_log_repo and assistant_msg_id:
+                llm_duration_ms = int((time.monotonic() - llm_start) * 1000)
+                self._io_log_repo.save_io_log(
+                    source_type="rag_chat",
+                    source_id=assistant_msg_id,
+                    stage="rag_chat",
+                    system_prompt=system_prompt,
+                    user_message=user_content,
+                    output=full_response,
+                    metadata={
+                        "rag_eval_contract_version": RAG_EVAL_CONTRACT_VERSION,
+                        "session_id": session_id,
+                        "user_question": user_message,
+                        "document_ids": document_ids or [],
+                        "collection_id": collection_id,
+                        "chunk_ids": [c["id"] for c in relevant_chunks],
+                        "chunk_count": len(relevant_chunks),
+                        # Retrieval quality signals (for eval export)
+                        "chunk_scores": [serialize_chunk_for_eval(c) for c in relevant_chunks],
+                        # Chunk text snippets for context var in generation eval
+                        "chunk_texts": [c.get("text", "")[:500] for c in relevant_chunks],
+                        # Query understanding output
+                        "query_understanding": serialize_query_understanding(understanding),
+                    },
+                    input_tokens=usage_data.get("input_tokens", 0) if usage_data else 0,
+                    output_tokens=usage_data.get("output_tokens", 0) if usage_data else 0,
+                    cache_creation_tokens=usage_data.get("cache_creation_input_tokens", 0) if usage_data else 0,
+                    cache_read_tokens=usage_data.get("cache_read_input_tokens", 0) if usage_data else 0,
+                    duration_ms=llm_duration_ms,
+                    prompt_version=settings.rag_prompt_version,
+                )
 
             total_latency = time.monotonic() - start_time
             stage_timings_ms["llm_stream"] = round((time.monotonic() - llm_start) * 1000, 2)
@@ -896,6 +1049,8 @@ class RAGService:
 
         # Build citation entries
         citations = []
+        seen_page_keys: set = set()  # prevent duplicate (d_num, page) entries
+
         for chunk in chunks:
             chunk_id = str(chunk.get('id', ''))
             if not chunk_id:
@@ -905,21 +1060,51 @@ class RAGService:
             doc_info = doc_map.get(doc_id, {})
             # chunk_metadata is guaranteed to be a dict after validate_and_normalize_chunks
             metadata = chunk.get('chunk_metadata') or {}
-
-            # Use bbox page if available (physical PDF page from Azure DI bounding_regions)
-            bbox = metadata.get('bbox', {})
-            page = bbox.get('page') if isinstance(bbox, dict) and bbox else chunk.get('page_number', 1)
             d_num = _get_d_num(doc_id)
-
-            citations.append({
-                "doc_index": d_num,          # D-number for [Dn:pN] resolution
+            base_entry = {
                 "chunk_id": chunk_id,
                 "document_id": doc_id,
                 "filename": doc_info.get('filename', 'Unknown'),
-                "page": page,
                 "section": metadata.get('section_heading', ''),
-                "bbox": bbox or None,
-            })
+            }
+
+            # Narrative chunks that span multiple pages store paragraph_pages:
+            # [{page, char_offset, bbox}, ...] — one entry per page transition.
+            # Register a citation entry per page so [Page N] markers in chunk text
+            # resolve correctly. Table/KV chunks don't have paragraph_pages and fall
+            # through to the single bbox.page path below.
+            paragraph_pages = metadata.get('paragraph_pages')
+            if paragraph_pages:
+                for pp in paragraph_pages:
+                    pp_page = pp.get('page')
+                    if not pp_page:
+                        continue
+                    key = (d_num, pp_page)
+                    if key in seen_page_keys:
+                        continue
+                    seen_page_keys.add(key)
+                    pp_bbox = pp.get('bbox')
+                    if pp_bbox:
+                        pp_bbox = {**pp_bbox, "page": pp_page}
+                    citations.append({
+                        **base_entry,
+                        "doc_index": d_num,
+                        "page": pp_page,
+                        "bbox": pp_bbox or None,
+                    })
+            else:
+                # Single-page chunk (tables, KV pairs, or pre-paragraph_pages narratives)
+                bbox = metadata.get('bbox', {})
+                page = bbox.get('page') if isinstance(bbox, dict) and bbox else chunk.get('page_number', 1)
+                key = (d_num, page)
+                if key not in seen_page_keys:
+                    seen_page_keys.add(key)
+                    citations.append({
+                        **base_entry,
+                        "doc_index": d_num,
+                        "page": page,
+                        "bbox": bbox or None,
+                    })
 
         # Build the document_index payload: {"D1": doc_id, "D2": doc_id, ...}
         # Either from the stable session index or from local first-appearance ordering

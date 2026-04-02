@@ -19,54 +19,9 @@ if TYPE_CHECKING:
 
 
 class PromptBuilder:
-    SYSTEM_INSTRUCTIONS_NO_CHUNKS = (
-        "You are a financial analyst AI assistant. Answer the user's question based on the provided document excerpts and prior conversation.\n\n"
-        "IMPORTANT INSTRUCTIONS:\n"
-        "- Only use information from the provided document excerpts\n"
-        "- If there are no relevant excerpts, say you don't have enough evidence and ask a brief follow-up\n"
-        "- If the documents don't contain relevant information, say so clearly\n"
-        "- Be concise but thorough\n"
-    )
-
-    SYSTEM_INSTRUCTIONS_WITH_CHUNKS = (
-        "You are a financial analyst AI assistant. Answer the user's question based on the provided document excerpts and prior conversation.\n\n"
-        "IMPORTANT INSTRUCTIONS:\n"
-        "- Only use information from the provided document excerpts\n"
-        "- If the documents don't contain relevant information, say so clearly\n"
-        "- If evidence is insufficient, say so and ask a brief follow-up\n"
-        "- Cite sources using the format [Dn:pN] where n is the document number and N is the page number\n"
-        "  Example: \"Revenue increased by 15% [D1:p5] compared to prior quarter.\"\n"
-        "- Every factual claim should include a citation\n"
-        "- Be concise but thorough\n"
-        "- Use bullet points for clarity when appropriate\n"
-    )
-
-    COMPARISON_SYSTEM_INSTRUCTIONS = (
-        "You are a financial analyst AI assistant comparing multiple documents.\n\n"
-        "TASK: Compare the documents based on the user's question.\n\n"
-        "OUTPUT FORMAT:\n"
-        "1. Start with a comparison table (markdown) showing key metrics side-by-side\n"
-        "2. Follow with 2-3 paragraphs analyzing the most important differences\n"
-        "3. Provide a clear conclusion or recommendation if appropriate\n\n"
-        "COMPARISON TABLE FORMAT (2 documents):\n"
-        "| Metric | Document A | Document B | Difference |\n"
-        "|--------|------------|------------|------------|\n"
-        "| Cap Rate | 6.2% [D1:p5] | 5.8% [D2:p3] | +0.4% |\n\n"
-        "COMPARISON TABLE FORMAT (3+ documents):\n"
-        "| Metric | Document A | Document B | Document C |\n"
-        "|--------|------------|------------|------------|\n"
-        "| Cap Rate | 6.2% [D1:p5] | 5.8% [D2:p3] | 5.5% [D3:p7] |\n\n"
-        "CITATION FORMAT:\n"
-        "- Use [D1:pN] for Document 1 citations\n"
-        "- Use [D2:pN] for Document 2 citations\n"
-        "- Use [D3:pN] for Document 3 citations (if comparing 3 documents)\n\n"
-        "IMPORTANT:\n"
-        "- Be specific with numbers and metrics\n"
-        "- Highlight material differences across ALL documents\n"
-        "- Only use information from the provided paired/clustered content\n"
-        "- Every quantitative claim must have a citation\n"
-        "- For 3+ documents, identify patterns and outliers\n"
-    )
+    def __init__(self, prompt_version: str | None = None):
+        from app.core.rag.prompts import get_rag_prompt_set
+        self._prompts = get_rag_prompt_set(prompt_version)
 
     def format_conversation(self, recent_messages: List[Dict[str, Any]], summary_text: Optional[str]) -> str:
         sections: List[str] = []
@@ -101,7 +56,23 @@ class PromptBuilder:
 
         for i, chunk in enumerate(relevant_chunks, 1):
             doc_id = str(chunk.get('document_id', ''))
-            page = chunk.get('page_number', 1)
+            metadata = chunk.get('chunk_metadata') or {}
+
+            # Determine source page label for the citation hint.
+            # For multi-page chunks, paragraph_pages tracks which page each portion
+            # of the text starts on. Show the full range so the LLM can use the
+            # [Page N] markers embedded in the chunk text to cite accurately.
+            paragraph_pages = metadata.get('paragraph_pages')
+            if paragraph_pages and len(paragraph_pages) > 1:
+                first_page = paragraph_pages[0]['page']
+                last_page = paragraph_pages[-1]['page']
+                page_label = f"{first_page}-{last_page}"
+                # citation_hint uses the anchor (first) page; LLM refines via [Page N] markers
+                citation_page = first_page
+            else:
+                bbox = metadata.get('bbox', {})
+                citation_page = (bbox.get('page') if isinstance(bbox, dict) and bbox else None) or chunk.get('page_number', 1)
+                page_label = str(citation_page)
 
             if doc_id_to_index is not None:
                 d_num = doc_id_to_index.get(doc_id, 1)
@@ -110,8 +81,8 @@ class PromptBuilder:
                     _local_index[doc_id] = len(_local_index) + 1
                 d_num = _local_index[doc_id]
 
-            citation_hint = f"[D{d_num}:p{page}]"
-            source_info = f"Source {i}: {doc_id} (Page {page}) {citation_hint}"
+            citation_hint = f"[D{d_num}:p{citation_page}]"
+            source_info = f"Source {i}: {doc_id} (Page {page_label}) {citation_hint}"
             if chunk.get('section_heading'):
                 source_info += f" - {chunk['section_heading']}"
             context_sections.append(f"{source_info}\n{chunk['text']}\n")
@@ -128,7 +99,7 @@ class PromptBuilder:
         if not relevant_chunks:
             convo_sections = self.format_conversation(recent_messages, summary_text)
             return (
-                f"{self.SYSTEM_INSTRUCTIONS_NO_CHUNKS}\n"
+                f"{self._prompts.system_instructions_no_chunks}\n"
                 f"CONVERSATION CONTEXT:\n{convo_sections}\n\n"
                 "DOCUMENT EXCERPTS:\n\n[No relevant document excerpts found for this query]\n\n---\n\n"
                 f"USER QUESTION: {user_message}\n\nANSWER:" )
@@ -136,7 +107,7 @@ class PromptBuilder:
         context = self._format_chunks(relevant_chunks, doc_id_to_index=doc_id_to_index)
         convo_sections = self.format_conversation(recent_messages, summary_text)
         return (
-            f"{self.SYSTEM_INSTRUCTIONS_WITH_CHUNKS}\n"
+            f"{self._prompts.system_instructions_with_chunks}\n"
             f"CONVERSATION CONTEXT:\n{convo_sections}\n\n"
             "DOCUMENT EXCERPTS:\n\n"
             f"{context}\n\n---\n\n"
@@ -149,37 +120,41 @@ class PromptBuilder:
         recent_messages: List[Dict[str, Any]],
         summary_text: Optional[str] = None,
         doc_id_to_index: Optional[Dict[str, int]] = None,
+        include_history: bool = True,
     ) -> tuple:
         """
         Return (system_prompt, user_content) for Anthropic prompt caching.
 
         System prompt (stable between compaction points — cached by Anthropic):
           - Role instructions
-          - Conversation summary (if any)
+          - Conversation summary (if any, only when include_history=True)
 
         User content (changes every turn — not cached):
-          - Recent verbatim messages
+          - Recent verbatim messages (only when include_history=True)
           - Document chunks
           - User question
 
         The system prompt is marked with cache_control: ephemeral by the LLM client,
         giving a 5-minute cache TTL. Between compaction points the system prompt is
         byte-identical → cache hits → ~10x cheaper input token cost.
+
+        When include_history=False (standalone questions), the system prompt contains
+        only the instructions — identical across ALL sessions → maximum cache hit rate.
         """
         # --- System prompt (cached) ---
         instructions = (
-            self.SYSTEM_INSTRUCTIONS_WITH_CHUNKS
+            self._prompts.system_instructions_with_chunks
             if relevant_chunks
-            else self.SYSTEM_INSTRUCTIONS_NO_CHUNKS
+            else self._prompts.system_instructions_no_chunks
         )
         system_parts = [instructions]
-        if summary_text:
+        if include_history and summary_text:
             system_parts.append(f"\n=== CONVERSATION SUMMARY ===\n{summary_text.strip()}")
         system_prompt = "\n".join(system_parts)
 
         # --- User content (dynamic, not cached) ---
         recent_section = ""
-        if recent_messages:
+        if include_history and recent_messages:
             lines = [f"{m['role'].title()}: {m['content']}" for m in recent_messages]
             recent_section = "=== RECENT MESSAGES ===\n" + "\n".join(lines) + "\n\n"
 
@@ -233,7 +208,7 @@ class PromptBuilder:
 
         # Build document headers
         prompt_parts = [
-            self.COMPARISON_SYSTEM_INSTRUCTIONS,
+            self._prompts.comparison_system_instructions,
             "\n## Documents Being Compared\n",
         ]
 
@@ -337,7 +312,7 @@ class PromptBuilder:
             Formatted comparison prompt ready for LLM
         """
         prompt_parts = [
-            self.COMPARISON_SYSTEM_INSTRUCTIONS,
+            self._prompts.comparison_system_instructions,
             "\n## Documents Being Compared\n",
         ]
 

@@ -81,6 +81,23 @@ export default function LibraryPage() {
   const [mobileCollectionsOpen, setMobileCollectionsOpen] = useState(false);
   const [createRequestCount, setCreateRequestCount] = useState(0);
 
+  // Overlay live progress from Zustand indexingJobs onto API-fetched documents.
+  // Keeps progress accurate after SPA navigation: the SSE stream survives navigation
+  // but the local `documents` state is re-fetched fresh from DB on every mount.
+  const displayDocuments = useMemo(() => {
+    if (Object.keys(indexingJobs).length === 0) return documents;
+    return documents.map((doc) => {
+      const job = indexingJobs[doc.id];
+      if (!job || !job.isProcessing) return doc;
+      return {
+        ...doc,
+        status: "processing",
+        status_detail: job.current_stage || job.message || "Processing...",
+        progress_percent: job.progress_percent || 0,
+      };
+    });
+  }, [documents, indexingJobs]);
+
   // Calculate stats from current page of documents
   const stats = useMemo(() => {
     return {
@@ -153,6 +170,24 @@ export default function LibraryPage() {
     [getToken, page, pageSize, sortBy, sortOrder, searchQuery, statusFilter]
   );
 
+  // Re-fetch when a job is removed from the store (completed or cleared), so the
+  // table shows the final DB status without requiring a manual refresh.
+  // The length check exits early on every progress tick — only does work on removal.
+  const prevIndexingJobKeysRef = useRef(Object.keys(indexingJobs));
+  useEffect(() => {
+    const currentKeys = Object.keys(indexingJobs);
+    const prevKeys = prevIndexingJobKeysRef.current;
+    prevIndexingJobKeysRef.current = currentKeys;
+
+    if (currentKeys.length >= prevKeys.length) return; // no removals — skip
+
+    const removed = prevKeys.filter((id) => !indexingJobs[id]);
+    if (removed.length > 0 && selectedCollection) {
+      fetchDocuments(selectedCollection.id);
+      fetchCollections();
+    }
+  }, [indexingJobs, fetchDocuments, fetchCollections, selectedCollection]);
+
   // Initial load
   useEffect(() => {
     fetchCollections();
@@ -198,11 +233,7 @@ export default function LibraryPage() {
       setSearchParams({ collection: res.id });
     } catch (error) {
       console.error("Failed to create collection:", error);
-      alert(
-        error.response?.data?.detail ||
-          error.message ||
-          "Failed to create collection"
-      );
+      toast.error(error.response?.data?.detail || error.message || "Failed to create collection");
     }
   };
 
@@ -224,13 +255,13 @@ export default function LibraryPage() {
       }
     } catch (error) {
       console.error("Failed to delete collection:", error);
-      alert(error.response?.data?.detail || "Failed to delete collection");
+      toast.error(error.response?.data?.detail || "Failed to delete collection");
     }
   };
 
   const handleUploadFiles = async (files) => {
     if (!uploadCollection) {
-      alert("Please select a collection");
+      toast.warning("Please select a collection");
       return;
     }
 
@@ -330,7 +361,7 @@ export default function LibraryPage() {
                 )
               );
 
-              alert(`Failed to index ${file.name}: ${error.message}`);
+              toast.error(`Failed to index ${file.name}`, { description: error.message });
             },
             {
               autoReconnect: true,
@@ -351,7 +382,7 @@ export default function LibraryPage() {
         }
       } catch (error) {
         console.error(`Failed to upload ${file.name}:`, error);
-        alert(`Failed to upload ${file.name}`);
+        toast.error(`Failed to upload ${file.name}`);
       }
     });
 
@@ -477,7 +508,7 @@ export default function LibraryPage() {
   };
 
   return (
-    <AppLayout breadcrumbs={[{ label: "Library" }]}>
+    <AppLayout breadcrumbs={[{ label: "Library" }]} lockViewport>
       <div className="flex h-full min-h-0 flex-col px-6 pb-6 pt-4">
         <StatsHeader
           totalDocuments={stats.totalDocuments}
@@ -538,7 +569,7 @@ export default function LibraryPage() {
 
                 <div className="panel-scroll px-4 py-4 sm:px-5 sm:py-5">
                   <DocumentsTable
-                    documents={documents}
+                    documents={displayDocuments}
                     loading={loadingDocs}
                     getToken={getToken}
                     onDeleteDocument={handleDeleteDocument}

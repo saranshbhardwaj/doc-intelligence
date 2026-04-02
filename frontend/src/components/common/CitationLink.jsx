@@ -130,11 +130,26 @@ export default function CitationLink({
 
     try {
       if (comparisonDocument) {
+        // Prefer citationContext (built by _build_citation_context, bbox.page priority)
+        // over comparisonContext which only has paired/clustered chunks and may use
+        // page_number instead of bbox.page for unpaired chunks.
+        if (chatCitation) {
+          await setActivePdfDocument(chatCitation.document_id, getToken);
+          const bbox = chatCitation.bbox || {
+            page: chatCitation.page, x0: 0, y0: 0, x1: 1, y1: 1,
+          };
+          highlightChunk(
+            { ...bbox, page: chatCitation.page, docId: chatCitation.document_id },
+            getToken
+          );
+          return;
+        }
+        // Fallback: no citationContext — use comparisonContext with parsed.page for safety
         await setActivePdfDocument(comparisonDocument.id, getToken);
         const bbox = comparisonChunk?.bbox || null;
         highlightChunk(
           {
-            page: bbox?.page || parsed.page,
+            page: parsed.page,
             x0: bbox?.x0 ?? 0,
             y0: bbox?.y0 ?? 0,
             x1: bbox?.x1 ?? 1,

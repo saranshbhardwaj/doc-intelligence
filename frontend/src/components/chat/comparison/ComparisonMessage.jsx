@@ -11,7 +11,6 @@
  */
 
 import { useState, memo } from "react";
-import React from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { ChevronDown, ChevronUp } from "lucide-react";
@@ -21,18 +20,7 @@ import { useComparison, useChatActions } from "../../../store";
 import ComparisonSummaryCard from "./ComparisonSummaryCard";
 import PairedChunksView from "./PairedChunksView";
 import CitationLink from "../../common/CitationLink";
-import { splitTextWithCitations } from "@/utils/citations";
-
-function renderCitationText(text, context) {
-  if (!text) return text;
-  const parts = splitTextWithCitations(text);
-  if (parts.length === 1 && typeof parts[0] === "string") return text;
-  return parts.map((part, i) =>
-    typeof part === "string" ? part : (
-      <CitationLink key={i} token={part.token} comparisonContext={context} variant="inline" />
-    )
-  );
-}
+import { remarkCitations } from "@/utils/citations";
 
 const ComparisonMessage = memo(function ComparisonMessage({ message, onOpenComparisonPanel }) {
   const [isExpanded, setIsExpanded] = useState(false);
@@ -53,55 +41,15 @@ const ComparisonMessage = memo(function ComparisonMessage({ message, onOpenCompa
   const numClusters = context?.clustered_chunks?.length || 0;
   const isTwoDoc = context?.num_documents === 2;
 
-  /**
-   * Custom markdown components for rendering with citations
-   */
   const markdownComponents = {
-    p: ({ children, ...props }) => {
-      const processedChildren = React.Children.map(children, (child) => {
-        if (typeof child === "string") {
-          return renderCitationText(child, resolvedContext);
-        }
-        return child;
-      });
-      return <p {...props}>{processedChildren}</p>;
-    },
-    td: ({ children, ...props }) => {
-      const processedChildren = React.Children.map(children, (child) => {
-        if (typeof child === "string") {
-          return renderCitationText(child, resolvedContext);
-        }
-        return child;
-      });
-      return <td {...props}>{processedChildren}</td>;
-    },
-    th: ({ children, ...props }) => {
-      const processedChildren = React.Children.map(children, (child) => {
-        if (typeof child === "string") {
-          return renderCitationText(child, resolvedContext);
-        }
-        return child;
-      });
-      return <th {...props}>{processedChildren}</th>;
-    },
-    li: ({ children, ...props }) => {
-      const processedChildren = React.Children.map(children, (child) => {
-        if (typeof child === "string") {
-          return renderCitationText(child, resolvedContext);
-        }
-        return child;
-      });
-      return <li {...props}>{processedChildren}</li>;
-    },
-    strong: ({ children, ...props }) => {
-      const processedChildren = React.Children.map(children, (child) => {
-        if (typeof child === "string") {
-          return renderCitationText(child, resolvedContext);
-        }
-        return child;
-      });
-      return <strong {...props}>{processedChildren}</strong>;
-    },
+    citation: ({ node }) => (
+      <CitationLink
+        token={node.properties?.token || node.token}
+        comparisonContext={resolvedContext}
+        citationContext={message.citation_context}
+        variant="inline"
+      />
+    ),
   };
 
   return (
@@ -168,7 +116,7 @@ const ComparisonMessage = memo(function ComparisonMessage({ message, onOpenCompa
             prose-headings:font-bold prose-headings:text-foreground
           ">
             <ReactMarkdown
-              remarkPlugins={[remarkGfm]}
+              remarkPlugins={[remarkCitations, remarkGfm]}
               components={markdownComponents}
             >
               {message.content}

@@ -137,7 +137,12 @@ async def stream_job_progress(job_id: str, token: Optional[str] = Query(None)):
         """Async generator bridging Redis pub/sub to SSE.
 
         Defensive behaviors:
-          - Sends initial snapshot from DB (atomic ownership check already done)
+          - Subscribes to pub/sub BEFORE reading DB to close the race where the
+            job completes between the DB read and the subscribe call. Events
+            published in that gap would otherwise be lost, leaving the client
+            stuck. Subscribe-then-read guarantees the buffer captures any event
+            published after we join the channel.
+          - Sends initial snapshot from DB for immediate feedback
           - Falls back to lightweight periodic keepalive comments
           - Auto-terminates on complete/error/end events
           - Timeout guard
@@ -146,13 +151,17 @@ async def stream_job_progress(job_id: str, token: Optional[str] = Query(None)):
 
         end_sent = False  # Track if we've sent end event
 
-        # Initial DB snapshot (single query) for immediate feedback
+        # Subscribe BEFORE reading DB — events published between the read and
+        # a post-read subscribe would be lost forever (TOCTOU race).
+        pubsub = safe_subscribe(job_id)
+
+        # DB snapshot after subscribing: any terminal event published after this
+        # read is already buffered in pubsub and will be delivered below.
         job_repo = JobRepository()
         job = job_repo.get_job(job_id)
 
         if not job:
-            # Send proper error event instead of raising 404
-            # This allows frontend to handle gracefully and clear state
+            pubsub.close()
             logger.warning(f"[SSE] Job {job_id} not found - sending error event", extra={"job_id": job_id})
             yield ServerSentEvent(
                 data=json.dumps({
@@ -166,6 +175,7 @@ async def stream_job_progress(job_id: str, token: Optional[str] = Query(None)):
             return
 
         if job.status == "completed":
+            pubsub.close()
             complete_data = build_entity_complete_event(job)
             yield ServerSentEvent(data=json.dumps(complete_data), event="complete")
             yield ServerSentEvent(data=json.dumps({'reason': 'completed', 'job_id': job_id}), event="end")
@@ -178,6 +188,7 @@ async def stream_job_progress(job_id: str, token: Optional[str] = Query(None)):
                 from app.repositories.template_repository import TemplateRepository
                 fill_run = TemplateRepository.get_fill_run_by_id(job.entity_id)
                 if fill_run and fill_run.status == "awaiting_review":
+                    pubsub.close()
                     yield ServerSentEvent(data=json.dumps({
                         'message': job.message or 'Mapping complete - ready for review',
                         'fill_run_id': job.entity_id,
@@ -187,6 +198,7 @@ async def stream_job_progress(job_id: str, token: Optional[str] = Query(None)):
                     return
 
         if job.status == "failed":
+            pubsub.close()
             yield ServerSentEvent(data=json.dumps({
                 'stage': job.error_stage,
                 'message': job.error_message,
@@ -196,7 +208,8 @@ async def stream_job_progress(job_id: str, token: Optional[str] = Query(None)):
             yield ServerSentEvent(data=json.dumps({'reason': 'failed', 'job_id': job_id}), event="end")
             return
 
-        # In-progress initial event
+        # In-progress: send current DB snapshot so client has immediate feedback,
+        # then drain pub/sub for live updates (including anything buffered above).
         yield ServerSentEvent(data=json.dumps({
             'status': job.status,
             'current_stage': job.current_stage,
@@ -205,7 +218,6 @@ async def stream_job_progress(job_id: str, token: Optional[str] = Query(None)):
             'details': job.details or {}
         }), event="progress")
 
-        pubsub = safe_subscribe(job_id)
         max_duration = 800  # seconds
         elapsed = 0
         keepalive_interval = 8  # seconds for keepalive comment

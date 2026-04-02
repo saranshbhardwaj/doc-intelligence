@@ -43,6 +43,13 @@ class Settings(BaseSettings):
     excel_skip_schema: bool = False  # If True, skip schema (use generic analyzer only)
     # Default (both False) = Hybrid mode: schema first, generic fallback
     re_template_prompt_version: str = "v1"  # Active prompt version for template fill LLM calls
+    rag_prompt_version: str = "v1"  # Active prompt version for RAG chat LLM calls
+
+    # ===== LLM I/O CAPTURE (Eval / Debugging) =====
+    # Off by default — never store full prompts in production unless explicitly enabled.
+    # Set CAPTURE_LLM_IO_LOG=true to capture prompts/responses into llm_io_logs table
+    # for eval dataset export. Applies to all verticals (template fill, RAG, PE).
+    capture_llm_io_log: bool = True
 
     # ===== PARSER TIMEOUTS =====
     parser_timeout_seconds: int = 300  # Generic parser timeout
@@ -118,7 +125,8 @@ class Settings(BaseSettings):
 
     # ===== CHAT MEMORY SETTINGS =====
     # Number of most recent messages (user+assistant turns) to include verbatim
-    chat_verbatim_message_count: int = 4
+    # Increased from 4 to 6 — gives 3 full user-assistant turns when history is included
+    chat_verbatim_message_count: int = 6
     # Compact conversation history when (summary + recent messages) exceed this char count.
     # Keeps conversation portion of the prompt under budget so chunks are never trimmed.
     # Budget breakdown: total=50k, chunks=~30k, instructions=~1.7k → ~15k for conversation.
@@ -179,11 +187,15 @@ class Settings(BaseSettings):
     rag_hybrid_rrf_k: int = 60
 
     # Number of candidates to retrieve from each search method before merging
-    rag_retrieval_candidates: int = 18
+    rag_retrieval_candidates: int = 15
 
     # Final number of chunks to return after re-ranking (Phase 2)
-    # Increased to 12 to provide room for context expansion
-    rag_final_top_k: int = 12
+    # Reduced from 12 to 8 — research shows 6-9 chunks is quality sweet spot
+    rag_final_top_k: int = 8
+
+    # Tighter budgets for narrow single-document fact lookups.
+    rag_scoped_retrieval_candidates: int = 10
+    rag_scoped_final_top_k: int = 5
 
     # Semantic similarity floors (raw cosine similarity) for filtering low-signal hits
     rag_chat_semantic_similarity_floor: float = 0.12
@@ -193,12 +205,12 @@ class Settings(BaseSettings):
     # Schema-based comparison system for multi-document analysis
     comparison_enabled: bool = True  # Enable document comparison feature
     comparison_similarity_threshold: float = 0.40  # Min similarity for pairing chunks (0-1); tuned for embedding cosine (not cross-encoder)
-    comparison_chunks_per_doc: int = 10  # Chunks to retrieve per document
+    comparison_chunks_per_doc: int = 8  # Chunks to retrieve per document (reduced from 10)
     comparison_max_pairs: int = 8  # Max pairs/clusters to include in prompt
     comparison_max_documents: int = 3  # Max number of documents to compare (2-3)
     # Early-exit pairing/clustering when retrieval signal is weak
     # Set to 0 to disable score-based early-exit
-    comparison_pairing_min_top_score: float = 0.08
+    comparison_pairing_min_top_score: float = 0.00
     comparison_pairing_min_chunks_per_doc: int = 1
 
     # ===== RAG RE-RANKER SETTINGS =====

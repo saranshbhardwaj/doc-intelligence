@@ -25,7 +25,7 @@
  *   - Editable session title
  */
 
-import { useState, useRef, useEffect, useLayoutEffect } from "react";
+import { useState, useRef, useEffect, useLayoutEffect, useMemo, memo } from "react";
 import {
   Send,
   Download,
@@ -51,7 +51,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import ComparisonPanel from "../comparison/ComparisonPanel";
 import CitationLink from "../common/CitationLink";
-import { splitTextWithCitations } from "../../utils/citations";
+import { splitTextWithCitations, remarkCitations } from "../../utils/citations";
 import ChatMessageFeedback from "./ChatMessageFeedback";
 import {
   ResizablePanelGroup,
@@ -165,30 +165,24 @@ export default function ActiveChat({
     return () => window.removeEventListener("resize", updateViewport);
   }, []);
 
-  const renderCitationsInText = (text, context) => {
-    if (!text || !context?.citations?.length) return text;
-    const parts = splitTextWithCitations(text);
-    if (parts.length === 1 && typeof parts[0] === "string") return text;
-    return parts.map((part, i) =>
-      typeof part === "string" ? part : (
-        <CitationLink key={i} token={part.token} citationContext={context} variant="inline" />
-      )
+  // Memoized markdown renderer — stable identity prevents historical messages from
+  // re-rendering during streaming (streaming updates only re-render its own instance).
+  const MemoizedMarkdown = useMemo(() => memo(function MemoizedMarkdown({ content, context }) {
+    const components = {
+      citation: ({ node }) => (
+        <CitationLink
+          token={node.properties?.token || node.token}
+          citationContext={context}
+          variant="inline"
+        />
+      ),
+    };
+    return (
+      <ReactMarkdown remarkPlugins={[remarkCitations, remarkGfm]} components={components}>
+        {content}
+      </ReactMarkdown>
     );
-  };
-
-  const processChildrenForCitations = (children, context) => {
-    if (typeof children === "string") {
-      return renderCitationsInText(children, context);
-    }
-    if (Array.isArray(children)) {
-      return children.map((child, i) =>
-        typeof child === "string"
-          ? renderCitationsInText(child, context)
-          : child
-      );
-    }
-    return children;
-  };
+  }), []);
 
   // Handler for opening full comparison panel
   const handleOpenComparisonPanel = () => {
@@ -375,28 +369,10 @@ export default function ActiveChat({
                         prose-h4:text-base prose-h4:mt-4 prose-h4:mb-2
                         prose-headings:font-bold prose-headings:text-foreground
                       ">
-                        <ReactMarkdown
-                          remarkPlugins={[remarkGfm]}
-                          components={{
-                            p: ({ children }) => (
-                              <p>{processChildrenForCitations(children, msg.citation_context || citationContext)}</p>
-                            ),
-                            li: ({ children }) => (
-                              <li>{processChildrenForCitations(children, msg.citation_context || citationContext)}</li>
-                            ),
-                            td: ({ children }) => (
-                              <td>{processChildrenForCitations(children, msg.citation_context || citationContext)}</td>
-                            ),
-                            th: ({ children }) => (
-                              <th>{processChildrenForCitations(children, msg.citation_context || citationContext)}</th>
-                            ),
-                            strong: ({ children }) => (
-                              <strong>{processChildrenForCitations(children, msg.citation_context || citationContext)}</strong>
-                            ),
-                          }}
-                        >
-                          {msg.content}
-                        </ReactMarkdown>
+                        <MemoizedMarkdown
+                          content={msg.content}
+                          context={msg.citation_context || citationContext}
+                        />
                       </div>
                     </div>
                     {msg.id && (
@@ -500,28 +476,10 @@ export default function ActiveChat({
                       prose-h4:text-base prose-h4:mt-4 prose-h4:mb-2
                       prose-headings:font-bold prose-headings:text-foreground
                     ">
-                      <ReactMarkdown
-                        remarkPlugins={[remarkGfm]}
-                        components={{
-                          p: ({ children }) => (
-                            <p>{processChildrenForCitations(children, citationContext)}</p>
-                          ),
-                          li: ({ children }) => (
-                            <li>{processChildrenForCitations(children, citationContext)}</li>
-                          ),
-                          td: ({ children }) => (
-                            <td>{processChildrenForCitations(children, citationContext)}</td>
-                          ),
-                          th: ({ children }) => (
-                            <th>{processChildrenForCitations(children, citationContext)}</th>
-                          ),
-                          strong: ({ children }) => (
-                            <strong>{processChildrenForCitations(children, citationContext)}</strong>
-                          ),
-                        }}
-                      >
-                        {streamingMessage}
-                      </ReactMarkdown>
+                      <MemoizedMarkdown
+                        content={streamingMessage}
+                        context={citationContext}
+                      />
                     </div>
                   )}
                   {/* Typing indicator */}

@@ -23,18 +23,12 @@ class ChatPersistence:
         comparison_metadata: Optional[str] = None,
         citation_context: Optional[Dict[str, Any]] = None,
         org_id: Optional[str] = None
-    ):
+    ) -> Optional[str]:
         """
         Save user message and assistant response to database.
 
-        Args:
-            session_id: Chat session ID
-            user_message: User's message
-            assistant_message: Assistant's response
-            source_chunks: List of chunk IDs used for response
-            usage_data: Optional token usage data from LLM API
-            comparison_metadata: Optional serialized comparison context
-            citation_context: Optional citation context for frontend resolution
+        Returns:
+            The assistant ChatMessage.id (str) on success, None on failure.
         """
         import json
 
@@ -186,6 +180,8 @@ class ChatPersistence:
                     "chunks_used": len(source_chunks)
                 }
             )
+
+            return assistant_msg_saved.id if assistant_msg_saved else None
 
         except Exception as save_error:
             # Edge case: Message saving failed - log comprehensive error

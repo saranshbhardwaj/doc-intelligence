@@ -8,7 +8,7 @@ import hashlib
 import json
 import re
 import time
-from datetime import datetime, timezone
+
 from difflib import SequenceMatcher
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -123,14 +123,31 @@ def _resolve_column_map(
 class TemplateFillLLMService:
     """LLM service for intelligent template filling operations with guaranteed valid JSON."""
 
-    def __init__(self, prompt_version: str | None = None):
-        """Initialize LLM service with Anthropic client and versioned prompts."""
+    def __init__(
+        self,
+        prompt_version: str | None = None,
+        capture_io_log: bool = False,
+        fill_run_id: str | None = None,
+    ):
+        """Initialize LLM service with Anthropic client and versioned prompts.
+
+        Args:
+            prompt_version: Prompt set version to use (defaults to settings.re_template_prompt_version).
+            capture_io_log: When True, persist each LLM call's prompt/response to llm_io_logs.
+                            Off by default — never enable in production unless debugging/eval export.
+            fill_run_id: Fill run ID used as source_id in llm_io_logs (required when capture_io_log=True).
+        """
         self.client = Anthropic(api_key=settings.anthropic_api_key)
-        self.model = settings.synthesis_llm_model  # Use Haiku 4.5 for cost-effective template filling
-        # Use Haiku's max output (16,384 tokens) for large PDFs
+        self.model = settings.synthesis_llm_model
         self.max_tokens = settings.synthesis_llm_max_tokens
         self.prompts = get_prompt_set(prompt_version)
-        self.io_log: list[dict] = []  # Per-call records for debugging & evals
+        self.capture_io_log = capture_io_log
+        self.fill_run_id = fill_run_id or "unknown"
+        if capture_io_log:
+            from app.repositories.io_log_repository import IOLogRepository
+            self._io_log_repo = IOLogRepository()
+        else:
+            self._io_log_repo = None
 
     async def detect_pdf_fields(
         self,
@@ -183,18 +200,20 @@ class TemplateFillLLMService:
             cache_creation = getattr(usage, "cache_creation_input_tokens", 0) or 0
             cache_read = getattr(usage, "cache_read_input_tokens", 0) or 0
 
-            self.io_log.append({
-                "stage": "detect_fields",
-                "prompt_version": self.prompts.version,
-                "user_message": pair.user_message,
-                "output": result,
-                "input_tokens": input_tokens,
-                "output_tokens": output_tokens,
-                "cache_creation_tokens": cache_creation,
-                "cache_read_tokens": cache_read,
-                "duration_ms": int((time.time() - t0) * 1000),
-                "timestamp": datetime.now(timezone.utc).isoformat(),
-            })
+            if self.capture_io_log and self._io_log_repo:
+                self._io_log_repo.save_io_log(
+                    source_type="template_fill",
+                    source_id=self.fill_run_id,
+                    stage="detect_fields",
+                    prompt_version=self.prompts.version,
+                    user_message=pair.user_message,
+                    output=result,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    cache_creation_tokens=cache_creation,
+                    cache_read_tokens=cache_read,
+                    duration_ms=int((time.time() - t0) * 1000),
+                )
 
             return result
 
@@ -304,19 +323,27 @@ class TemplateFillLLMService:
             f"({not_found_count} not present in this PDF)"
         )
 
-        # Capture I/O for debugging & evals
-        self.io_log.append({
-            "stage": "extract_schema_fields",
-            "prompt_version": self.prompts.version,
-            "user_message": user_message,
-            "output": parsed.model_dump() if parsed else None,
-            "input_tokens": input_tokens,
-            "output_tokens": output_tokens,
-            "cache_creation_tokens": cache_creation,
-            "cache_read_tokens": cache_read,
-            "duration_ms": duration_ms,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        })
+        if self.capture_io_log and self._io_log_repo:
+            self._io_log_repo.save_io_log(
+                source_type="template_fill",
+                source_id=self.fill_run_id,
+                stage="extract_schema_fields",
+                prompt_version=self.prompts.version,
+                system_prompt=system_prompt,
+                user_message=user_message,
+                output=parsed.model_dump() if parsed else None,
+                metadata={
+                    "unmapped_fields": [
+                        {"id": f.get("id"), "data_type": f.get("data_type"), "pdf_aliases": f.get("pdf_aliases", [])}
+                        for f in unmapped_fields
+                    ],
+                },
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                cache_creation_tokens=cache_creation,
+                cache_read_tokens=cache_read,
+                duration_ms=duration_ms,
+            )
 
         return result_by_field
 
@@ -801,20 +828,22 @@ For each requested schema table:
         cache_creation = getattr(usage, "cache_creation_input_tokens", 0) or 0
         cache_read = getattr(usage, "cache_read_input_tokens", 0) or 0
 
-        self.io_log.append({
-            "stage": "extract_table_values_rag_single",
-            "prompt_version": self.prompts.version,
-            # system_prompt stored here — context_json is ephemeral (not reconstructible from fill run)
-            "system_prompt": pair.system_prompt,
-            "user_message": pair.user_message,
-            "output": result_dict,
-            "input_tokens": input_tokens,
-            "output_tokens": output_tokens,
-            "cache_creation_tokens": cache_creation,
-            "cache_read_tokens": cache_read,
-            "duration_ms": int((time.time() - t0) * 1000),
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        })
+        if self.capture_io_log and self._io_log_repo:
+            self._io_log_repo.save_io_log(
+                source_type="template_fill",
+                source_id=self.fill_run_id,
+                stage="extract_table_values_rag_single",
+                prompt_version=self.prompts.version,
+                # system_prompt stored here — context_json is ephemeral (not reconstructible from fill run)
+                system_prompt=pair.system_prompt,
+                user_message=pair.user_message,
+                output=result_dict,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                cache_creation_tokens=cache_creation,
+                cache_read_tokens=cache_read,
+                duration_ms=int((time.time() - t0) * 1000),
+            )
 
         return result_dict
 
@@ -930,19 +959,22 @@ For each requested schema table:
             cache_creation = getattr(usage, "cache_creation_input_tokens", 0) or 0
             cache_read = getattr(usage, "cache_read_input_tokens", 0) or 0
 
-        # Capture I/O
-        self.io_log.append({
-            "stage": "extract_table_values_rag",
-            "prompt_version": self.prompts.version,
-            "user_message": user_message,
-            "output": result,
-            "input_tokens": input_tokens,
-            "output_tokens": output_tokens,
-            "cache_creation_tokens": cache_creation,
-            "cache_read_tokens": cache_read,
-            "duration_ms": duration_ms,
-            "timestamp": datetime.now(timezone.utc).isoformat(),
-        })
+        if self.capture_io_log and self._io_log_repo:
+            self._io_log_repo.save_io_log(
+                source_type="template_fill",
+                source_id=self.fill_run_id,
+                stage="extract_table_values_rag",
+                prompt_version=self.prompts.version,
+                system_prompt=system_prompt,
+                user_message=user_message,
+                output=result,
+                metadata={"table_ids": [r.get("table_id") for r in table_requests]},
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                cache_creation_tokens=cache_creation,
+                cache_read_tokens=cache_read,
+                duration_ms=duration_ms,
+            )
 
         result_dict: Dict[str, Any] = {}
         for table_result in result.get("results", []):
@@ -1195,19 +1227,20 @@ For each requested schema table:
                     f"{batch_result.get('high_confidence_count', 0)} high confidence"
                 )
 
-                # Capture I/O per batch
-                self.io_log.append({
-                    "stage": f"auto_map_fields_batch_{batch_num}",
-                    "prompt_version": self.prompts.version,
-                    "user_message": user_message,
-                    "output": batch_result,
-                    "input_tokens": input_tokens if usage else 0,
-                    "output_tokens": output_tokens if usage else 0,
-                    "cache_creation_tokens": cache_creation if usage else 0,
-                    "cache_read_tokens": cache_read if usage else 0,
-                    "duration_ms": batch_duration_ms,
-                    "timestamp": datetime.now(timezone.utc).isoformat(),
-                })
+                if self.capture_io_log and self._io_log_repo:
+                    self._io_log_repo.save_io_log(
+                        source_type="template_fill",
+                        source_id=self.fill_run_id,
+                        stage=f"auto_map_fields_batch_{batch_num}",
+                        prompt_version=self.prompts.version,
+                        user_message=user_message,
+                        output=batch_result,
+                        input_tokens=input_tokens if usage else 0,
+                        output_tokens=output_tokens if usage else 0,
+                        cache_creation_tokens=cache_creation if usage else 0,
+                        cache_read_tokens=cache_read if usage else 0,
+                        duration_ms=batch_duration_ms,
+                    )
 
                 # Call progress callback if provided
                 if on_batch_complete:

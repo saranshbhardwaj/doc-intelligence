@@ -899,7 +899,11 @@ def auto_map_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                     schema_tables = schema_obj.tables or []
 
                     if unmapped_fields or schema_tables:
-                        llm_service_targeted = TemplateFillLLMService(prompt_version=settings.re_template_prompt_version)
+                        llm_service_targeted = TemplateFillLLMService(
+                            prompt_version=settings.re_template_prompt_version,
+                            capture_io_log=settings.capture_llm_io_log,
+                            fill_run_id=fill_run_id,
+                        )
 
                     if unmapped_fields:
                         logger.info(
@@ -1078,7 +1082,11 @@ def auto_map_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
             # Only run LLM if there are unmapped cells
             if filtered_excel_schema:
                 # Initialize LLM service
-                llm_service = TemplateFillLLMService(prompt_version=settings.re_template_prompt_version)
+                llm_service = TemplateFillLLMService(
+                    prompt_version=settings.re_template_prompt_version,
+                    capture_io_log=settings.capture_llm_io_log,
+                    fill_run_id=fill_run_id,
+                )
 
                 # Progress callback for batch processing
                 def on_batch_complete(batch_num, total_batches, batch_mappings):
@@ -1242,16 +1250,6 @@ def auto_map_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                 "cache_hit_rate": llm_cache_hit_rate,
                 "cost_usd": llm_cost,
             })
-
-        combined_io_log = []
-        if llm_service_targeted is not None:
-            combined_io_log.extend(llm_service_targeted.io_log)
-        if llm_service is not None:
-            combined_io_log.extend(llm_service.io_log)
-
-        if combined_io_log:
-            metadata_params["prompt_version"] = settings.re_template_prompt_version
-            metadata_params["llm_io_log"] = combined_io_log
 
         metadata_params["status"] = "awaiting_review"
         metadata_params["current_stage"] = "auto_mapping"

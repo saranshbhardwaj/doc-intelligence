@@ -1,0 +1,38 @@
+description: "Doc Intelligence — LLM Eval Suite"
+
+providers:
+  - id: file://providers/extract_schema_fields.py
+    label: haiku-e2e-schema
+  - id: file://providers/extract_table_values.py
+    label: haiku-e2e-tables
+  - id: file://providers/rag_chat.py
+    label: haiku-rag
+  - id: file://providers/rag_retrieval.py
+    label: haiku-retrieval
+  - id: file://providers/rag_comparison.py
+    label: haiku-rag-comparison
+
+evaluateOptions:
+  rubricModel: "anthropic:claude-haiku-4-5-20251001"
+
+prompts:
+  - "{{user_message}}"
+
+defaultTest:
+  options:
+    provider:
+      id: "openai:gpt-4o-mini"
+    transform: "output.replace(/^```(?:json)?\\s*/,'').replace(/\\s*```$/,'')"
+  assert:
+    - type: cost
+      threshold: 0.10
+    - type: latency
+      threshold: 30000
+
+tests:
+  - datasets/golden/tulsa-self-storage/extract_schema_fields.jsonl
+  - datasets/golden/tulsa-self-storage/extract_table_values_rag.jsonl
+  # Uncomment after capturing RAG golden data (see README for workflow):
+  - datasets/golden/rag-chat/rag_generation.jsonl
+  - datasets/golden/rag-chat/rag_retrieval.jsonl
+  - datasets/golden/rag-chat/rag_comparison.jsonl

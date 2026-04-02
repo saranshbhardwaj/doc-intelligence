@@ -85,9 +85,53 @@ class QueryUnderstanding(BaseModel):
         description="Boost factor for narrative chunks (0.5-2.0, default 1.0)",
     )
 
+    # Conversation dependency
+    needs_history: bool = Field(
+        default=False,
+        description="True only if the query references prior conversation context "
+                    "(pronouns 'it/that/those/the one', follow-ups 'what about/also/and the', "
+                    "or explicit back-references 'you mentioned/earlier/previously'). "
+                    "False for self-contained questions that can be answered without prior context."
+    )
+
+    # Rewritten query for follow-ups (populated only when needs_history=True)
+    rewritten_query: Optional[str] = Field(
+        default=None,
+        description="Self-contained rewrite of the query using conversation context. "
+                    "Populated when needs_history=True and recent_messages are provided. "
+                    "Used for retrieval; original query still appears in USER QUESTION."
+    )
+
     # Metadata
     confidence: float = Field(
         ge=0.0, le=1.0, description="Overall confidence in the analysis (0-1)"
+    )
+
+
+def is_narrow_explicit_fact_lookup(query_understanding: Optional["QueryUnderstanding"]) -> bool:
+    """Return True for narrow fact lookups that should avoid broad retrieval behaviors."""
+    if not query_understanding:
+        return False
+
+    if query_understanding.query_type != QueryType.DATA_EXTRACTION:
+        return False
+
+    data_fields = list(getattr(query_understanding, "data_fields", []) or [])
+    if not (1 <= len(data_fields) <= 2):
+        return False
+
+    entities = list(getattr(query_understanding, "entities", []) or [])
+    return any(
+        getattr(entity, "name", "").strip()
+        and getattr(entity, "entity_type", "") in {
+            "document",
+            "property",
+            "deal",
+            "organization",
+            "person",
+            "other",
+        }
+        for entity in entities
     )
 
 
@@ -120,6 +164,7 @@ class QueryUnderstandingService:
         query: str,
         document_filenames: Optional[List[str]] = None,
         domain_context: str = "financial documents",
+        recent_messages: Optional[List[dict]] = None,
     ) -> QueryUnderstanding:
         """Analyze query and return structured understanding.
 
@@ -132,13 +177,20 @@ class QueryUnderstandingService:
             QueryUnderstanding with all fields populated
         """
 
-        docs_context = ""
+        # Build dynamic context for the user message (keeps system_prompt fully static → cache hits).
+        user_context_parts = [f"Query: {query}"]
         if document_filenames:
-            docs_context = f"\n\nAvailable documents: {', '.join(document_filenames)}"
+            user_context_parts.append(f"Available documents: {', '.join(document_filenames)}")
+        if recent_messages:
+            last_turns = recent_messages[-4:]
+            lines = [f"{m['role'].title()}: {m['content'][:300]}" for m in last_turns]
+            user_context_parts.append("Recent conversation:\n" + "\n".join(lines))
+        user_text = "\n\n".join(user_context_parts)
 
+        # system_prompt is fully static (no session/turn-specific data) → maximum cache hit rate.
         system_prompt = f"""You are a query analyzer for {domain_context} RAG system.
 
-Analyze the user's query and provide structured understanding.{docs_context}
+Analyze the user's query and provide structured understanding.
 
 INSTRUCTIONS:
 
@@ -172,18 +224,28 @@ INSTRUCTIONS:
 6. **data_fields**: If data extraction, list specific fields requested
 
 7. **table_boost** and **narrative_boost**: Set retrieval boosting (0.5-2.0, default 1.0):
+   - Comparison queries about financial metrics (cap rates, NOI, rent, occupancy, etc.): table_boost=1.5, narrative_boost=0.85
    - Data queries (numbers, metrics): table_boost=1.2, narrative_boost=0.9
    - Narrative queries (explanations, summaries): table_boost=1.0, narrative_boost=1.1
    - General queries: both=1.0
+
+8. **needs_history**: Set to true ONLY if the query uses back-references that require
+   prior conversation to interpret (e.g., "what about that one?", "also compare the other",
+   "you mentioned earlier", "what about for X?"). Self-contained questions → false.
+
+9. **rewritten_query**: If needs_history=true AND recent conversation is provided, rewrite the
+   query as a fully self-contained question using context from the conversation.
+   Example: "What about for Lane Prairie?" → "What are the cap rates for Lane Prairie Storage?"
+   Leave null if needs_history=false.
 
 Be concise and accurate. Focus on extraction, not explanation."""
 
         try:
             result = await self.llm_client.extract_structured_data_with_schema(
-                text=query,
+                text=user_text,
                 system_prompt=system_prompt,
                 pydantic_model=QueryUnderstanding,
-                use_cache=True,
+                use_cache=True,  # system_prompt is static → cache hits across sessions
             )
 
             understanding = QueryUnderstanding(**result["data"])
@@ -195,6 +257,8 @@ Be concise and accurate. Focus on extraction, not explanation."""
                     "query_type": understanding.query_type.value,
                     "entities": [e.name for e in understanding.entities],
                     "confidence": understanding.confidence,
+                    "needs_history": understanding.needs_history,
+                    "has_rewritten_query": bool(understanding.rewritten_query),
                 },
             )
 

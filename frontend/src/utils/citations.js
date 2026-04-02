@@ -13,6 +13,89 @@
 export const CITATION_REGEX = /\[D\d+:p\d+\]|\[ref:[a-f0-9]+:p\d+\]/g;
 
 /**
+ * Remark plugin that converts [Dn:pN] citation tokens into custom `citation`
+ * mdast nodes BEFORE remark-gfm runs its link-reference pass.
+ *
+ * This prevents remark-gfm from misinterpreting [D2:p6] as a GFM shortcut
+ * link reference (which strips the brackets and makes the token undetectable
+ * by later string-based citation processing).
+ *
+ * The plugin visits every `text` node in the mdast tree, finds citation tokens,
+ * and replaces them with an inline sequence of plain `text` nodes and `citation`
+ * nodes. react-markdown renders `citation` nodes via a custom component.
+ *
+ * Usage:
+ *   import { remarkCitations } from "@/utils/citations";
+ *   <ReactMarkdown remarkPlugins={[remarkGfm, remarkCitations]} components={{ citation: CitationNode }} />
+ *
+ * Note: must be listed AFTER remarkGfm so it runs on the already-parsed tree,
+ * but citation nodes are injected before remark-gfm's link-reference resolution
+ * happens (remarkGfm only parses, it doesn't resolve references at AST time).
+ * Actually: list it BEFORE remarkGfm so citations are extracted first.
+ */
+export function remarkCitations() {
+  return (tree) => {
+    // Dynamic import to avoid bundling issues — visit is an ESM-only package
+    // We use a synchronous tree walk instead.
+    visitTextNodes(tree);
+  };
+}
+
+function visitTextNodes(node) {
+  if (!node) return;
+
+  if (node.type === "text" && node.value) {
+    const regex = new RegExp(CITATION_REGEX.source, "g");
+    if (!regex.test(node.value)) return; // fast path — no citations
+
+    // Replace this text node with a sequence of text + citation nodes
+    // by mutating the parent's children array.
+    // We do this by marking it for replacement and returning the new nodes.
+    node.__citationExpand = true;
+    return;
+  }
+
+  if (Array.isArray(node.children)) {
+    const newChildren = [];
+    for (const child of node.children) {
+      visitTextNodes(child);
+      if (child.__citationExpand) {
+        newChildren.push(...expandTextNode(child));
+      } else {
+        newChildren.push(child);
+      }
+    }
+    node.children = newChildren;
+  }
+}
+
+function expandTextNode(textNode) {
+  const text = textNode.value;
+  const regex = new RegExp(CITATION_REGEX.source, "g");
+  const nodes = [];
+  let lastIndex = 0;
+  let match;
+
+  while ((match = regex.exec(text)) !== null) {
+    if (match.index > lastIndex) {
+      nodes.push({ type: "text", value: text.slice(lastIndex, match.index) });
+    }
+    nodes.push({
+      type: "citation",
+      value: match[0],
+      data: { hName: "citation", hProperties: { token: match[0] } },
+    });
+    lastIndex = match.index + match[0].length;
+  }
+
+  if (lastIndex < text.length) {
+    nodes.push({ type: "text", value: text.slice(lastIndex) });
+  }
+
+  return nodes;
+}
+
+/**
  * Parse a single citation token to structured data.
  *
  * Handles:

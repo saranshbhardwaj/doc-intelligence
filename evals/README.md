@@ -1,79 +1,273 @@
-# RE Template Fill — promptfoo Evals
+# Doc Intelligence — promptfoo Evals
 
-Evaluates the LLM stages of the template fill pipeline against structural assertions.
-Test fixtures are exported from real fill runs stored in the database.
+Evaluates the LLM stages of the template fill pipeline and RAG chat.
+Test fixtures are exported from real runs stored in the database.
+
+---
 
 ## Setup
 
 ```bash
 npm install -g promptfoo
-# or use without installing: npx promptfoo
+# or run without installing:
+npx promptfoo eval
 ```
+
+Set your API key (same one the backend uses):
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...
+```
+
+---
+
+## Provider Architecture
+
+| Provider | Label | What it tests |
+|----------|-------|---------------|
+| `providers/extract_schema_fields.py` | `haiku-e2e-schema` | Schema field extraction (template fill) |
+| `providers/extract_table_values.py` | `haiku-e2e-tables` | Table value extraction (template fill) |
+| `providers/rag_chat.py` | `haiku-rag` | RAG generation — replays stored prompts, returns `{text, context}` |
+| `providers/rag_retrieval.py` | `haiku-retrieval` | RAG retrieval — calls real pipeline, checks page recall |
+| `providers/rag_comparison.py` | `haiku-rag-comparison` | Comparison generation — replays stored comparison prompts and derives judge context from the prompt itself |
+
+**Why separate retrieval and generation evals?**
+If retrieval degrades, generation metrics drop too — but you can't tell which broke.
+Testing independently pinpoints the failure: `rag_retrieval` catches retrieval regressions,
+`rag_generation` catches prompt/model regressions.
+
+**Why custom Python providers instead of promptfoo's built-in Anthropic provider?**
+- Anthropic requires streaming when `max_tokens > ~21k` — built-in provider would fail
+- Schema/table providers use structured output (`output_format`) — requires custom parsing
+- `rag_retrieval` calls the actual DB/vector pipeline, not an LLM
+
+**Provider routing**: Each test case JSONL includes `"providers": ["label"]` so
+promptfoo routes it to the correct provider — no cross-product between stages.
+
+---
 
 ## Workflow
 
-### 1. Run a fill to produce io_log data
+### Template Fill (extract_schema_fields, extract_table_values)
 
-Complete at least one fill run end-to-end. The `llm_io_log` column on `template_fill_runs` must be populated.
-
-### 2. Export test fixtures
-
-```bash
-cd backend
-python -m scripts.export_eval_dataset --output ../evals/datasets
-```
-
-Options:
-- `--stage all|detect_fields|extract_schema_fields|auto_map_fields|extract_table_values_rag_single`
-- `--limit N` — process only the N most recent fill runs
-- `--version v1` — override which prompt version to use for system prompt reconstruction
-
-### 3. Run evals
+These have golden datasets already committed. Run immediately:
 
 ```bash
 cd evals
-
-# Single stage
-npx promptfoo eval --tests datasets/extract_schema_fields.jsonl
-
-# All stages (update promptfoo.yaml tests: field first)
 npx promptfoo eval
-
-# View results in browser
-npx promptfoo view
 ```
 
-## Prompt version comparison (v1 → v2)
+### RAG Chat Eval (rag_generation + rag_retrieval + rag_comparison)
+
+**Step 1 — Enable IO capture**
 
 ```bash
-# 1. Create prompts/v2.py, register in prompts/__init__.py
+# In backend/.env or docker-compose env:
+CAPTURE_LLM_IO_LOG=true
+# Restart the API service
+```
 
-# 2. Export with v2 system prompts
+Fresh RAG golden exports should be captured after this implementation is deployed.
+The exporter now skips older rows that do not include the current versioned RAG eval contract.
+
+**Step 2 — Produce real data**
+
+Open the app and use it normally with `CAPTURE_LLM_IO_LOG=true`:
+- **Regular chat**: ask 3-5 factual questions about a document (note the session_id from the URL or DB)
+- **Comparison chat**: compare 2 documents on a specific topic
+
+Find the session_id:
+```sql
+SELECT metadata->>'session_id', COUNT(*) FROM llm_io_logs
+WHERE stage IN ('rag_chat', 'rag_chat_comparison')
+GROUP BY 1 ORDER BY 2 DESC LIMIT 10;
+```
+
+**Step 3 — Export golden fixtures by session**
+
+```bash
 cd backend
-python -m scripts.export_eval_dataset --version v2 --output ../evals/datasets/v2
 
-# 3. Compare: run v1 baseline then v2
-cd ../evals
-npx promptfoo eval --tests datasets/extract_schema_fields.jsonl --output results/v1.json
-npx promptfoo eval --tests datasets/v2/extract_schema_fields.jsonl --output results/v2.json
+# Generation eval (replays LLM call, checks faithfulness + citations)
+python -m scripts.export_eval_dataset \
+  --stage rag_generation \
+  --session-id <UUID> \
+  --golden \
+  --output ../evals/datasets/golden/rag-chat
+
+# Retrieval eval (calls real pipeline, checks page recall)
+python -m scripts.export_eval_dataset \
+  --stage rag_retrieval \
+  --session-id <UUID> \
+  --golden \
+  --output ../evals/datasets/golden/rag-chat
+
+# Comparison eval (replays comparison prompt, checks multi-doc coverage)
+python -m scripts.export_eval_dataset \
+  --stage rag_comparison \
+  --session-id <UUID> \
+  --golden \
+  --output ../evals/datasets/golden/rag-chat
+```
+
+`--session-id` exports all QA pairs from that session — use instead of `--limit N`
+so the golden set is curated by session, not random recency.
+If a session contains rows with missing prompt-visible context or missing eval metadata,
+those rows are skipped instead of being exported as weak golden fixtures.
+
+**Step 4 — Activate in config**
+
+Uncomment in `promptfooconfig.yaml`:
+```yaml
+tests:
+  - datasets/golden/rag-chat/rag_generation.jsonl
+  - datasets/golden/rag-chat/rag_retrieval.jsonl
+  - datasets/golden/rag-chat/rag_comparison.jsonl
+```
+
+**Step 5 — Run**
+
+```bash
+cd evals
+npx promptfoo eval
 npx promptfoo view
 ```
+
+---
+
+## Regression Testing: Prompt Changes
+
+Use this workflow before and after editing any prompt in `template_filling/prompts/`.
+
+```bash
+# 1. Save current baseline BEFORE making any changes
+cd evals
+npx promptfoo eval --output results/v1_baseline.json
+
+# 2. Edit prompt (e.g. prompts/v1.py) or create prompts/v2.py
+
+# 3. If you changed v1 in-place, just re-run and compare:
+npx promptfoo eval --output results/v1_after.json
+npx promptfoo view
+# Both runs appear in the UI — compare pass rates, costs, values.
+
+# 4. If you created a new version (v2.py), re-export with that version:
+cd backend
+python -m scripts.export_eval_dataset --golden --version v2 \
+  --output ../evals/datasets/golden_v2
+
+cd evals
+npx promptfoo eval --tests datasets/golden_v2/extract_schema_fields.jsonl \
+  --output results/v2.json
+npx promptfoo view
+```
+
+Golden assertions fail if:
+- `total_found` drops (fewer fields extracted = regression)
+- A previously correct field value changes
+- A previously correct table cell value changes
+- RAG response fails the factual grounding rubric
+
+---
+
+## Prompt Comparison (Two Providers Side-by-Side)
+
+To compare two prompt versions on the same test cases, register both as providers
+in `promptfooconfig.yaml` (each with a different label) and remove the `providers`
+filter from the test case JSONL so promptfoo runs both:
+
+```yaml
+providers:
+  - id: file://providers/extract_schema_fields.py
+    label: haiku-e2e-schema-v1
+  - id: file://providers/extract_schema_fields.py
+    label: haiku-e2e-schema-v2
+```
+
+Then set the `PROMPT_VERSION` env var (or a custom var) inside each provider
+to select which prompt set to load. `npx promptfoo view` renders both side-by-side.
+
+---
+
+## Diagnosing Low Field Coverage
+
+When fewer fields are mapped than expected, use the diagnostic script:
+
+```bash
+cd backend
+python -m scripts.analyze_fill_coverage --fill-run-id <uuid>
+```
+
+Output groups the 235 YAML schema fields into:
+
+| Status | Meaning |
+|--------|---------|
+| `ALIAS_MATCH` | Filled by deterministic alias matching (Stage 1, no LLM) |
+| `FOUND` | LLM extracted a non-null value |
+| `NULL` | LLM looked but value is genuinely absent from PDF |
+| `NOT_SENT` | Never included in an LLM request — routing/batching gap (bug!) |
+
+For a machine-readable JSON report:
+```bash
+python -m scripts.analyze_fill_coverage --fill-run-id <uuid> --json > report.json
+```
+
+---
 
 ## Files
 
 | File | Purpose |
 |------|---------|
-| `promptfoo.yaml` | Main config — providers, prompts, default test file |
-| `.gitignore` | Ignores `datasets/` (contain actual offering memo text) |
-| `datasets/*.jsonl` | Generated test fixtures (gitignored) |
+| `promptfooconfig.yaml` | Main config — providers, prompts, tests list |
+| `providers/extract_schema_fields.py` | Template fill: schema field extraction (streaming + structured output) |
+| `providers/extract_table_values.py` | Template fill: table value extraction (streaming, JSON output) |
+| `providers/rag_chat.py` | RAG generation: replays stored prompts, returns `{text, context}` |
+| `providers/rag_retrieval.py` | RAG retrieval: calls real hybrid retrieval + reranker pipeline |
+| `providers/rag_comparison.py` | RAG comparison: replays stored comparison prompts |
+| `.gitignore` | Ignores `datasets/` but tracks `datasets/golden/` |
+| `datasets/golden/` | Committed regression baselines (JSONL, one file per stage) |
+| `datasets/` | Generated fixtures from latest runs (gitignored) |
+| `results/` | Saved eval results for comparison (gitignored) |
 
-## Assertions
+---
 
-Each stage asserts structural validity of the LLM output:
+## Assertions Reference
 
-| Stage | Assertions |
-|-------|-----------|
-| `detect_fields` | is-json, `fields` array, `total_fields` number, confidence in [0,1] |
-| `extract_schema_fields` | is-json, `results` array, `total_found` number, confidence in [0,1] |
-| `extract_table_values_rag_single` | is-json, `results` array, `total_tables` number |
-| `auto_map_fields` | is-json, `mappings` array, `total_mapped` number, confidence in [0,1] |
+| Assertion | Stage | What it checks |
+|-----------|-------|---------------|
+| `is-json` | all structured | Output is valid JSON |
+| `javascript: results !== undefined` | all structured | Structural shape present |
+| `javascript: total_found >= N` | schema fields | **Golden**: field count floor (finding more is OK, fewer = regression) |
+| `javascript: coverage_rate_90pct` | schema fields | **Golden**: at least 90% of reference count extracted |
+| `javascript: field_id === value` | schema fields | **Golden**: specific field value unchanged |
+| `javascript: table_rows >= N` | tables | **Golden**: row count floor per table |
+| `javascript: table_cells_filled >= N` | tables | **Golden**: filled cell count floor per table |
+| `javascript: String(r.values[col]) === val` | tables | **Golden**: specific cell value (String() coerces number → string) |
+| `javascript: JSON.parse(output).chunk_count >= 1` | rag_retrieval | Retrieved at least one chunk |
+| `retrieval/page_recall_80` | rag_retrieval | **Golden**: ≥80% of golden page+doc pairs appear in results (stable across re-indexing) |
+| `javascript: JSON.parse(output).text.length > 50` | rag_generation | Response is non-trivial |
+| `javascript: /\[D\d+:p\d+\]/.test(...)` | rag_generation | Response contains at least one citation |
+| `context-faithfulness` | rag_generation / rag_comparison | LLM response is grounded in provided context |
+| `answer-relevance` | rag_generation / rag_comparison | Response addresses the question |
+| `llm-rubric` | rag_generation | **Golden**: factually grounded, cites, no hallucinations |
+| `comparison/multi_doc_reference` | rag_comparison | References Document A/B or [D1/D2] |
+| `comparison/structured_output` | rag_comparison | Contains table, bullets, or headers |
+| `llm-rubric` | rag_comparison | **Golden**: balanced coverage of both docs, no hallucination |
+| `cost < 0.10` | all | Per-call cost guard (Haiku pricing) |
+| `latency < 30000` | all | Per-call latency guard (30 s) |
+
+### Judge LLM (context-faithfulness, answer-relevance, llm-rubric)
+
+`context-faithfulness`, `answer-relevance`, and `llm-rubric` all require a judge LLM.
+The default config now uses Claude Haiku as the judge so the eval stack can run off the same Anthropic credentials as the backend. For stricter golden promotion, you can override it with a stronger judge model:
+```yaml
+evaluateOptions:
+  rubricModel: "anthropic:claude-sonnet-4-5-20250929"
+```
+If you prefer OpenAI for judging, set `OPENAI_API_KEY` in `evals/.env` and swap the rubric model.
+
+### context-faithfulness with {text, context} output
+
+The `rag_generation` and `rag_comparison` providers return JSON `{"text": ..., "context": ...}`.
+promptfoo reads `vars.context` for context-based metrics. The `transform` in `defaultTest`
+strips markdown fences from JSON output — harmless on prose text since the regex won't match.
+For both RAG providers, `context` should come from the stored prompt, not from metadata snapshots.

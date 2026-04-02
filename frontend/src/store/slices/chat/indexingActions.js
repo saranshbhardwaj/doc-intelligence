@@ -2,6 +2,7 @@
  * Indexing actions
  */
 import { streamJobProgress } from "../../../api/sse-utils";
+import { getJobStatus } from "../../../api/chat";
 
 export const createChatIndexingActions = (set, get) => ({
   startDocumentIndexing: (jobId, documentId, collectionId, cleanup) => {
@@ -121,12 +122,10 @@ export const createChatIndexingActions = (set, get) => ({
                   ? errorData
                   : errorData?.message || "Indexing failed";
 
-              if (errorData?.type === "not_found") {
-                get().clearIndexingJob(docId);
-                return;
-              }
-
-              if (errorData?.type === "connection_error") {
+              if (
+                errorData?.type === "not_found" ||
+                errorData?.type === "connection_error"
+              ) {
                 get().clearIndexingJob(docId);
                 return;
               }
@@ -134,21 +133,26 @@ export const createChatIndexingActions = (set, get) => ({
               get().failIndexing(docId, errorMsg);
             },
             onEnd: () => {},
+            fetchInitialState: true,
+            getJobStatus,
           });
 
-          set((state) => ({
-            chat: {
-              ...state.chat,
-              indexingJobs: {
-                ...state.chat.indexingJobs,
-                [docId]: {
-                  ...state.chat.indexingJobs[docId],
-                  cleanup,
-                  isProcessing: true,
+          // Guard: if the job was already completed/cleared by onComplete above,
+          // don't re-add it. Spreading a missing entry would create a zombie
+          // job with isProcessing: true that never resolves.
+          set((state) => {
+            const existing = state.chat.indexingJobs[docId];
+            if (!existing) return state;
+            return {
+              chat: {
+                ...state.chat,
+                indexingJobs: {
+                  ...state.chat.indexingJobs,
+                  [docId]: { ...existing, cleanup, isProcessing: true },
                 },
               },
-            },
-          }));
+            };
+          });
         } catch (err) {
           console.error(`Reconnection failed for document ${docId}:`, err);
           get().failIndexing(docId, "Failed to reconnect");

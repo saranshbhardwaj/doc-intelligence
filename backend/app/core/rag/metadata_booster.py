@@ -5,7 +5,7 @@ Shared utility for applying metadata-based boosting to chunk scores.
 Used by both hybrid_retriever and re-ranker with configurable weights.
 """
 
-from typing import List, Dict, Optional, Union, TYPE_CHECKING
+from typing import List, Dict, Union, TYPE_CHECKING
 import logging
 
 if TYPE_CHECKING:
@@ -197,6 +197,31 @@ class MetadataBooster:
             short_chunk_penalty=0.9,
             short_chunk_threshold=100,
             long_chunk_boost=1.05,
+            long_chunk_threshold=1000
+        )
+
+    @classmethod
+    def for_comparison(cls) -> "MetadataBooster":
+        """
+        Factory method for comparison retrieval (strong table boost).
+
+        Comparison queries are almost always about financial metrics, so tables
+        and key-value chunks should rank well above narrative fluff.
+        Applied as a post-retrieval re-sort in ComparisonRetriever.
+        """
+        return cls(
+            table_boost_data_query=1.5,        # 50% boost — comparison = financial tables
+            key_value_boost_data_query=1.4,    # 40% boost for key-value structured data
+            narrative_penalty_data_query=0.85,  # 15% penalty for narrative fluff
+            narrative_boost_narrative_query=1.0,
+            table_neutral_narrative_query=1.0,
+            key_value_neutral_narrative_query=1.0,
+            section_heading_boost=1.05,         # Minor boost for labelled financial sections
+            first_pages_boost=1.0,              # Disabled — financial data is spread throughout OMs
+            first_pages_threshold=2,
+            short_chunk_penalty=0.9,            # Penalise fragment/heading-only chunks
+            short_chunk_threshold=100,
+            long_chunk_boost=1.0,               # Disabled — long chunks tend to be narrative, not tables
             long_chunk_threshold=1000
         )
 

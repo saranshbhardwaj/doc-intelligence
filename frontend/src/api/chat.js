@@ -140,9 +140,9 @@ export async function connectToIndexingProgress(
 
 /**
  * Get job status for document indexing
- * Used by SSE utility for initial state fetching
+ * Used by SSE utility for initial state fetching and reconnection.
  */
-async function getJobStatus(jobId, getToken) {
+export async function getJobStatus(jobId, getToken) {
   const api = createAuthenticatedApi(getToken);
   const response = await api.get(`/api/jobs/${jobId}/status`);
   return response.data;
