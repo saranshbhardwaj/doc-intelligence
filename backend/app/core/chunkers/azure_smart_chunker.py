@@ -850,76 +850,139 @@ class AzureSmartChunker(DocumentChunker):
             return []
 
         kv_chunks = []
-        MAX_KV_PAIRS_PER_CHUNK = 100
+        max_kv_pairs_per_chunk = 40
+        max_kv_chunk_tokens = max(200, self.max_tokens)
 
-        # Group KV pairs by page ranges
-        for i in range(0, len(kv_pairs), MAX_KV_PAIRS_PER_CHUNK):
-            chunk_kv_pairs = kv_pairs[i:i + MAX_KV_PAIRS_PER_CHUNK]
+        # Group by page first so citation anchors remain page-accurate.
+        kv_by_page: Dict[int, List[Dict]] = {}
+        for kv in kv_pairs:
+            page_num = kv.get("page_number")
+            if not page_num:
+                continue
+            kv_by_page.setdefault(page_num, []).append(kv)
 
-            # Calculate individual bbox for each KV pair and add to KV data
-            enriched_kv_pairs = []
-            for kv in chunk_kv_pairs:
-                # Calculate bbox from bounding_regions
-                kv_bbox = self._calculate_single_kv_bbox(kv)
-
-                # Create enriched KV pair with bbox
-                enriched_kv = dict(kv)  # Copy all original fields
-                if kv_bbox:
-                    enriched_kv["bbox"] = kv_bbox  # Add individual bbox for this KV pair
-
-                enriched_kv_pairs.append(enriched_kv)
-
-            # Build searchable text (concatenated KV pairs for RAG)
-            text_lines = []
-            for kv in enriched_kv_pairs:
-                key = kv.get("key", "")
-                value = kv.get("value", "")
-                if key and value:
-                    text_lines.append(f"{key}: {value}")
-                elif key:
-                    text_lines.append(f"{key}:")
-
-            chunk_text = "\n".join(text_lines)
-
-            # Determine page range
-            pages = [kv.get("page_number") for kv in enriched_kv_pairs if kv.get("page_number")]
-            page_range = [min(pages), max(pages)] if pages else [1, 1]
-
-            # Build metadata
-            chunk_metadata = {
-                "page_number": page_range[0],
-                "section_type": "key_value_pairs",
-                "is_tabular": False,
-                "char_count": len(chunk_text),
-                "token_count": count_tokens(chunk_text),
-                "chunk_type": "key_value",
-                "page_range": page_range,
-                "key_value_pairs": enriched_kv_pairs,  # NOW includes individual bbox for each KV
-                "total_kv_pairs": len(enriched_kv_pairs),
-                "source_parser": "azure_document_intelligence",
-            }
-
-            # DEBUG: Log first KV pair's bbox in chunk
-            if i == 0 and enriched_kv_pairs:
-                first_kv = enriched_kv_pairs[0]
-                logger.info(f"[CHUNKER] First KV pair in chunk: '{first_kv.get('key')}', "
-                          f"has bbox: {'bbox' in first_kv}, bbox={first_kv.get('bbox')}")
-
-            # NOTE: We no longer store a single merged chunk-level bbox
-            # Each KV pair now has its own individual bbox
-
-            # Create chunk
-            chunk = Chunk(
-                chunk_id=generate_chunk_id(f"kv_chunk", start_index + len(kv_chunks), "kv"),
-                text=chunk_text,  # Searchable text for RAG
-                narrative_text="",
-                tables=[],
-                metadata=chunk_metadata
+        for page_num in sorted(kv_by_page.keys()):
+            page_pairs = kv_by_page[page_num]
+            page_batches = self._split_kv_pairs_by_size(
+                page_pairs,
+                max_pairs=max_kv_pairs_per_chunk,
+                max_tokens=max_kv_chunk_tokens,
             )
 
-            kv_chunks.append(chunk)
+            for batch in page_batches:
+                # Calculate individual bbox for each KV pair and add to KV data.
+                enriched_kv_pairs = []
+                for kv in batch:
+                    kv_bbox = self._calculate_single_kv_bbox(kv)
+
+                    enriched_kv = dict(kv)
+                    if kv_bbox:
+                        enriched_kv["bbox"] = kv_bbox
+
+                    enriched_kv_pairs.append(enriched_kv)
+
+                # Build searchable text and include explicit page marker for citation clarity.
+                text_lines = [f"[Page {page_num}]"]
+                for kv in enriched_kv_pairs:
+                    key = kv.get("key", "")
+                    value = kv.get("value", "")
+                    if key and value:
+                        text_lines.append(f"{key}: {value}")
+                    elif key:
+                        text_lines.append(f"{key}:")
+
+                chunk_text = "\n".join(text_lines)
+                page_bbox = self._merge_enriched_kv_bboxes(enriched_kv_pairs, page_num)
+
+                chunk_metadata = {
+                    "section_id": f"kv_page_{page_num}",
+                    "page_number": page_num,
+                    "section_type": "key_value_pairs",
+                    "is_tabular": False,
+                    "char_count": len(chunk_text),
+                    "token_count": count_tokens(chunk_text),
+                    "chunk_type": "key_value",
+                    "page_range": [page_num, page_num],
+                    "key_value_pairs": enriched_kv_pairs,
+                    "total_kv_pairs": len(enriched_kv_pairs),
+                    "source_parser": "azure_document_intelligence",
+                    # Mirror narrative paragraph_pages format for citation resolver compatibility.
+                    "kv_pages": [{"page": page_num, "char_offset": 0, "bbox": page_bbox}],
+                    "bbox": page_bbox,
+                }
+
+                chunk = Chunk(
+                    chunk_id=generate_chunk_id("kv_chunk", start_index + len(kv_chunks), "kv"),
+                    text=chunk_text,
+                    narrative_text="",
+                    tables=[],
+                    metadata=chunk_metadata,
+                )
+
+                kv_chunks.append(chunk)
+
+        if kv_chunks:
+            first_chunk_pairs = kv_chunks[0].metadata.get("key_value_pairs", [])
+            first_kv = first_chunk_pairs[0] if first_chunk_pairs else None
+            if first_kv:
+                logger.info(
+                    f"[CHUNKER] First KV pair in chunk: '{first_kv.get('key')}', "
+                    f"has bbox: {'bbox' in first_kv}, bbox={first_kv.get('bbox')}"
+                )
 
         return kv_chunks
+
+    def _split_kv_pairs_by_size(
+        self,
+        kv_pairs: List[Dict],
+        max_pairs: int,
+        max_tokens: int,
+    ) -> List[List[Dict]]:
+        """Split same-page KV pairs into size-bounded batches."""
+        batches: List[List[Dict]] = []
+        current_batch: List[Dict] = []
+        current_tokens = 0
+
+        for kv in kv_pairs:
+            key = kv.get("key", "")
+            value = kv.get("value", "")
+            line = f"{key}: {value}" if key and value else f"{key}:"
+            line_tokens = max(1, count_tokens(line))
+
+            reached_pair_limit = len(current_batch) >= max_pairs
+            reached_token_limit = (current_tokens + line_tokens) > max_tokens
+
+            if current_batch and (reached_pair_limit or reached_token_limit):
+                batches.append(current_batch)
+                current_batch = []
+                current_tokens = 0
+
+            current_batch.append(kv)
+            current_tokens += line_tokens
+
+        if current_batch:
+            batches.append(current_batch)
+
+        return batches
+
+    def _merge_enriched_kv_bboxes(self, kv_pairs: List[Dict], page_num: int) -> Optional[Dict]:
+        """Merge per-KV bboxes on a page into one representative bbox."""
+        bboxes = []
+        for kv in kv_pairs:
+            bbox = kv.get("bbox")
+            if isinstance(bbox, dict) and bbox.get("page") == page_num:
+                bboxes.append(bbox)
+
+        if not bboxes:
+            return None
+
+        return {
+            "page": page_num,
+            "x0": min(b["x0"] for b in bboxes),
+            "y0": min(b["y0"] for b in bboxes),
+            "x1": max(b["x1"] for b in bboxes),
+            "y1": max(b["y1"] for b in bboxes),
+        }
 
     def _update_sibling_relationships(self, chunks: List[Chunk]) -> None:
         """

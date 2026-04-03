@@ -23,7 +23,7 @@ class DetectedField(BaseModel):
     type: str = Field(description="Data type: text, number, currency, percentage, date")
     extracted_value: str = Field(description="Actual value found in the PDF")
     confidence: float = Field(ge=0.0, le=1.0, description="Confidence in extraction (0.0-1.0)")
-    citations: List[str] = Field(description="Citation tokens where field was found (e.g., ['[D1:p2]'])")
+    citations: List[str] = Field(description="Citation tokens where field was found (e.g., ['[S1:p2]'])")
     description: str = Field(description="Brief explanation of what this field represents")
 
 
@@ -72,7 +72,7 @@ class SchemaFieldResult(BaseModel):
     field_id: str = Field(description="Schema field ID (from YAML)")
     value: Optional[str] = Field(None, description="Extracted value, null if not found in PDF")
     confidence: float = Field(ge=0.0, le=1.0, description="Extraction confidence (0.0-1.0)")
-    citations: List[str] = Field(default_factory=list, description="Citation tokens like [D1:p5]")
+    citations: List[str] = Field(default_factory=list, description="Citation tokens like [S1:p5]")
     reasoning: Optional[str] = Field(
         None,
         description="AI reasoning for this extraction (e.g., 'Found in KV pair', 'Extracted from Table X, column Y')",
@@ -102,7 +102,7 @@ class SchemaTableRowResult(BaseModel):
         )
     )
     confidence: float = Field(ge=0.0, le=1.0, description="Extraction confidence for this row")
-    citations: List[str] = Field(default_factory=list, description="Citation tokens like [D1:p5]")
+    citations: List[str] = Field(default_factory=list, description="Citation tokens like [S1:p5]")
     reasoning: Optional[str] = Field(
         None,
         description="AI reasoning for this row extraction (e.g., 'Matched row label', 'Extracted from Table X with column mapping')",
@@ -188,7 +188,7 @@ class V1PromptSet(PromptSet):
             '      "field_id": "field_id_here",\n'
             '      "value": "extracted value or null",\n'
             '      "confidence": 0.95,\n'
-            '      "citations": ["[D1:p3]"],\n'
+            '      "citations": ["[S1:p3]"],\n'
             '      "reasoning": "Found as currency: $2,500,000 in KV pair Listing Price"\n'
             "    }\n"
             "  ],\n"
@@ -228,7 +228,7 @@ class V1PromptSet(PromptSet):
             "- Use `excel_column` keys only in the `values` map.\n"
             "- If a column is missing, return null for that column.\n"
             "- Use row_labels when provided; if row_labels are empty or blank, use row_index order.\n"
-            "- Provide citations like [D1:p15] and reasoning per row.\n"
+            "- Provide citations like [S1:p15] and reasoning per row.\n"
             "- Never fabricate values.\n"
             "- For each row, values MUST include ALL excel_column keys from that table's columns.\n\n"
             "Return ONLY a JSON object matching this exact structure, no markdown:\n"
@@ -242,7 +242,7 @@ class V1PromptSet(PromptSet):
             '          "row_label": null,\n'
             '          "values": {"G": "5 x 10", "H": "26", "I": "50"},\n'
             '          "confidence": 0.95,\n'
-            '          "citations": ["[D1:p15]"],\n'
+            '          "citations": ["[S1:p15]"],\n'
             '          "reasoning": "Extracted from Table 7 NON-CLIMATE rows"\n'
             "        }\n"
             "      ]\n"
@@ -470,7 +470,7 @@ Map the PDF fields (from system prompt) to the cells in these sheets."""
 Your task is to identify every piece of structured information that could be extracted and used to fill an Excel template.
 
 **CRITICAL: Citation Format**
-Each chunk in the PDF content is prefixed with a citation token like [D1:p5] (Document 1, Page 5).
+Each chunk in the PDF content is prefixed with a citation token like [S1:p5] (Source 1, Page 5).
 You MUST include these citation tokens in your response to indicate where each field was found.
 
 **CRITICAL: Chunk Metadata Usage**
@@ -592,7 +592,7 @@ Each chunk has metadata in the header:
             "- Use `excel_column` keys only in the `values` map.\n"
             "- If a column is missing, return null for that column.\n"
             "- Use row_labels when provided; if row_labels are empty or blank, ignore them and use row_index order.\n"
-            "- Provide citations like [D1:p5] and a brief reasoning per row (reasoning is required).\n"
+            "- Provide citations like [S1:p5] and a brief reasoning per row (reasoning is required).\n"
             "- Never fabricate values.\n"
             "\nCRITICAL: For each row, the `values` dict MUST include ALL excel_column keys "
             "listed in the table's `columns` array. "
@@ -609,7 +609,7 @@ Each chunk has metadata in the header:
             '          "row_label": null,\n'
             '          "values": {"G": "5 x 10", "H": "26", "I": "50"},\n'
             '          "confidence": 0.95,\n'
-            '          "citations": ["[D1:p15]"],\n'
+            '          "citations": ["[S1:p15]"],\n'
             '          "reasoning": "Extracted from Table 7"\n'
             "        }\n"
             "      ]\n"

@@ -18,8 +18,8 @@ function parseCitationPage(citation) {
   if (!citation) return null;
   const text = String(citation);
 
-  // Canonical format: [D1:p15]
-  let match = text.match(/\[D\d+:p(\d+)\]/i);
+  // Canonical format: [S1:p15] or legacy [D1:p15]
+  let match = text.match(/\[(?:S|D)\d+:p(\d+)\]/i);
 
   // Table format from extraction output: [Table 7:p15]
   if (!match) {

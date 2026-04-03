@@ -52,7 +52,7 @@ from app.repositories.chat_repository import ChatRepository
 # Defaults: 15 candidates, 8 final (reduced from 18/12 for better quality per research)
 # 6-9 chunks is the quality sweet spot; chunks 9-12 add noise without improving relevance
 _RETRIEVAL_SIZING = {
-    QueryType.DATA_EXTRACTION: (20, None, 10, None),   # needs more: financial tables across pages
+    QueryType.DATA_EXTRACTION: (20, None, 8, None),    # financial tables need retrieval breadth, but 8 final chunks is optimal per research
     QueryType.SUMMARIZATION:   (12, 18, 6, 8),         # breadth but fewer final
     QueryType.ENTITY_LOOKUP:   (10, 15, 5, 7),         # narrow lookups
     # GENERAL_QA and COMPARISON use defaults (15 → 8)
@@ -160,11 +160,9 @@ class RAGService:
     def _set_comparison_context(self, comparison_data: Dict):
         self.last_comparison_context = comparison_data
 
-    def _set_citation_context_from_chunks(self, chunks: List[Dict], doc_id_to_index: Dict[str, int]):
+    def _set_citation_context_from_chunks(self, chunks: List[Dict]):
         """Build and store citation context from comparison chunks for SSE emission."""
-        self.last_citation_context = self._build_citation_context(
-            chunks, doc_id_to_index=doc_id_to_index
-        )
+        self.last_citation_context = self._build_citation_context(chunks)
 
     async def chat(
         self,
@@ -285,6 +283,11 @@ class RAGService:
                 "needs_history": understanding.needs_history,
                 "has_rewritten_query": bool(understanding.rewritten_query),
                 "history_messages_count": len(history_messages),
+                "query_type": understanding.query_type.value if understanding.query_type else None,
+                "confidence": understanding.confidence,
+                "data_fields_count": len(understanding.data_fields or []),
+                "data_fields": (understanding.data_fields or [])[:5],
+                "entity_types": [e.entity_type for e in (understanding.entities or [])],
                 "narrow_explicit_fact_lookup": narrow_explicit_fact_lookup,
             }
         )
@@ -467,7 +470,9 @@ class RAGService:
                     }
                 )
 
-        if did_scope_to_single_doc and narrow_explicit_fact_lookup:
+        already_single_doc_scope = bool(document_ids and len(document_ids) == 1)
+
+        if (did_scope_to_single_doc or already_single_doc_scope) and narrow_explicit_fact_lookup:
             retrieval_candidates = max(
                 1,
                 min(retrieval_candidates, settings.rag_scoped_retrieval_candidates)
@@ -482,6 +487,7 @@ class RAGService:
                     "session_id": session_id,
                     "retrieval_candidates": retrieval_candidates,
                     "final_top_k": final_top_k,
+                    "scope_source": "matcher" if did_scope_to_single_doc else "session_single_doc",
                 }
             )
 
@@ -724,23 +730,11 @@ class RAGService:
             )
 
         # ------------------------------------------------------------------
-        # STEP 3.5: Build stable doc_id_to_index + citation context (general chat mode)
-        # get_or_build_document_index assigns D-numbers once per session (by added_at order)
-        # and persists them — D1 always refers to the same document across all turns.
-        doc_index = self.chat_repo.get_or_build_document_index(session_id) if session_id else {}
-        # Invert {"D1": uuid, "D2": uuid} → {uuid: 1, uuid: 2} for prompt labeling
-        doc_id_to_index: Dict[str, int] = {}
-        for label, doc_id in doc_index.items():
-            try:
-                doc_id_to_index[doc_id] = int(label[1:])  # "D1" → 1
-            except (ValueError, IndexError):
-                pass
-
+        # STEP 3.5: Build citation context (general chat mode)
+        # Citations use sequential [Sn:pN] format where n is the chunk position.
         if relevant_chunks:
             citation_start = time.monotonic()
-            self.last_citation_context = self._build_citation_context(
-                relevant_chunks, doc_id_to_index=doc_id_to_index
-            )
+            self.last_citation_context = self._build_citation_context(relevant_chunks)
             stage_timings_ms["citations"] = round((time.monotonic() - citation_start) * 1000, 2)
             logger.info(
                 "Citation context built",
@@ -761,7 +755,6 @@ class RAGService:
             relevant_chunks=relevant_chunks,
             recent_messages=recent_messages,
             summary_text=summary_text,
-            doc_id_to_index=doc_id_to_index or None,
             include_history=include_history,
         )
         stage_timings_ms["prompt_build"] = round((time.monotonic() - prompt_start) * 1000, 2)
@@ -1009,21 +1002,21 @@ class RAGService:
         doc_id_to_index: Optional[Dict[str, int]] = None,
     ) -> Dict:
         """
-        Build citation context for frontend resolution using DocumentRepository.
+        Build citation context for frontend resolution using [Sn:pN] format.
 
         The context object is sent to the frontend via SSE and used to resolve
-        [Dn:pN] citation tokens in LLM responses to clickable PDF page links.
+        [Sn:pN] citation tokens in LLM responses to clickable PDF page links.
+        Each chunk gets a sequential source index (1-based) matching its position in the prompt.
 
         Args:
-            chunks: List of retrieved chunks.
-            doc_id_to_index: Stable {doc_id: D-number} mapping from the session's
-                             document_index. If None, a local first-appearance index is used.
+            chunks: List of retrieved chunks (in order as shown to LLM).
+            doc_id_to_index: Deprecated (not used). Kept for API compatibility.
 
         Returns:
             Dict with:
-              - citations: list of citation metadata (doc_index, page, chunk_id, bbox, ...)
-              - document_index: {"D1": doc_id, "D2": doc_id, ...} for frontend resolution
-              - document_map: {doc_id: filename} for fast filename lookup
+              - citations: list of citation metadata indexed by source position
+                (source_index, page, chunk_id, bbox, ...)
+              - document_map: {doc_id: filename} for display purposes
         """
         # Collect unique document IDs
         doc_ids = list(set(
@@ -1032,36 +1025,26 @@ class RAGService:
         ))
 
         if not doc_ids:
-            return {"citations": [], "document_index": {}, "document_map": {}}
+            return {"citations": [], "document_map": {}}
 
         # Batch fetch document info (1 query, not N)
         doc_info_list = self.document_repo.get_doc_info_by_ids(doc_ids)
         doc_map = {d['id']: d for d in doc_info_list}
 
-        # Build or fall back to local first-appearance index
-        _local_index: Dict[str, int] = {}
-        def _get_d_num(doc_id: str) -> int:
-            if doc_id_to_index and doc_id in doc_id_to_index:
-                return doc_id_to_index[doc_id]
-            if doc_id not in _local_index:
-                _local_index[doc_id] = len(_local_index) + 1
-            return _local_index[doc_id]
-
-        # Build citation entries
+        # Build citation entries with sequential source indices
         citations = []
-        seen_page_keys: set = set()  # prevent duplicate (d_num, page) entries
 
-        for chunk in chunks:
+        for source_idx, chunk in enumerate(chunks, 1):
             chunk_id = str(chunk.get('id', ''))
             if not chunk_id:
                 continue
 
             doc_id = chunk.get('document_id')
             doc_info = doc_map.get(doc_id, {})
-            # chunk_metadata is guaranteed to be a dict after validate_and_normalize_chunks
             metadata = chunk.get('chunk_metadata') or {}
-            d_num = _get_d_num(doc_id)
+
             base_entry = {
+                "source_index": source_idx,
                 "chunk_id": chunk_id,
                 "document_id": doc_id,
                 "filename": doc_info.get('filename', 'Unknown'),
@@ -1070,53 +1053,44 @@ class RAGService:
 
             # Narrative chunks that span multiple pages store paragraph_pages:
             # [{page, char_offset, bbox}, ...] — one entry per page transition.
-            # Register a citation entry per page so [Page N] markers in chunk text
-            # resolve correctly. Table/KV chunks don't have paragraph_pages and fall
-            # through to the single bbox.page path below.
+            # KV chunks can store kv_pages with similar structure for page-accurate
+            # citation resolution.
             paragraph_pages = metadata.get('paragraph_pages')
             if paragraph_pages:
                 for pp in paragraph_pages:
                     pp_page = pp.get('page')
                     if not pp_page:
                         continue
-                    key = (d_num, pp_page)
-                    if key in seen_page_keys:
-                        continue
-                    seen_page_keys.add(key)
                     pp_bbox = pp.get('bbox')
                     if pp_bbox:
                         pp_bbox = {**pp_bbox, "page": pp_page}
                     citations.append({
                         **base_entry,
-                        "doc_index": d_num,
                         "page": pp_page,
                         "bbox": pp_bbox or None,
                     })
-            else:
-                # Single-page chunk (tables, KV pairs, or pre-paragraph_pages narratives)
-                bbox = metadata.get('bbox', {})
-                page = bbox.get('page') if isinstance(bbox, dict) and bbox else chunk.get('page_number', 1)
-                key = (d_num, page)
-                if key not in seen_page_keys:
-                    seen_page_keys.add(key)
+            elif metadata.get('kv_pages'):
+                for kvp in metadata.get('kv_pages'):
+                    kv_page = kvp.get('page')
+                    if not kv_page:
+                        continue
+                    kv_bbox = kvp.get('bbox')
+                    if kv_bbox:
+                        kv_bbox = {**kv_bbox, "page": kv_page}
                     citations.append({
                         **base_entry,
-                        "doc_index": d_num,
-                        "page": page,
-                        "bbox": bbox or None,
+                        "page": kv_page,
+                        "bbox": kv_bbox or None,
                     })
-
-        # Build the document_index payload: {"D1": doc_id, "D2": doc_id, ...}
-        # Either from the stable session index or from local first-appearance ordering
-        if doc_id_to_index:
-            # Only include documents actually present in this response's chunks
-            doc_index_payload = {
-                f"D{idx}": did
-                for did, idx in doc_id_to_index.items()
-                if did in doc_map
-            }
-        else:
-            doc_index_payload = {f"D{idx}": did for did, idx in _local_index.items()}
+            else:
+                # Single-page chunk (tables, KV pairs, or single-page narratives)
+                bbox = metadata.get('bbox', {})
+                page = bbox.get('page') if isinstance(bbox, dict) and bbox else chunk.get('page_number', 1)
+                citations.append({
+                    **base_entry,
+                    "page": page,
+                    "bbox": bbox or None,
+                })
 
         logger.debug(
             "Built citation context",
@@ -1129,7 +1103,6 @@ class RAGService:
 
         return {
             "citations": citations,
-            "document_index": doc_index_payload,
             "document_map": {d['id']: d['filename'] for d in doc_info_list},
         }
 

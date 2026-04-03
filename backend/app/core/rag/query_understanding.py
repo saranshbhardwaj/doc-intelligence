@@ -116,12 +116,15 @@ def is_narrow_explicit_fact_lookup(query_understanding: Optional["QueryUnderstan
     if query_understanding.query_type != QueryType.DATA_EXTRACTION:
         return False
 
-    data_fields = list(getattr(query_understanding, "data_fields", []) or [])
-    if not (1 <= len(data_fields) <= 2):
-        return False
-
+    data_fields = [
+        field.strip().lower()
+        for field in (getattr(query_understanding, "data_fields", []) or [])
+        if isinstance(field, str) and field.strip()
+    ]
     entities = list(getattr(query_understanding, "entities", []) or [])
-    return any(
+    confidence = getattr(query_understanding, "confidence", 0.0) or 0.0
+
+    has_specific_target = any(
         getattr(entity, "name", "").strip()
         and getattr(entity, "entity_type", "") in {
             "document",
@@ -133,6 +136,36 @@ def is_narrow_explicit_fact_lookup(query_understanding: Optional["QueryUnderstan
         }
         for entity in entities
     )
+
+    if not has_specific_target:
+        return False
+
+    metric_like_fields = {
+        "price", "asking price", "purchase price", "valuation", "value",
+        "noi", "cap rate", "irr", "equity multiple", "rent", "occupancy",
+        "yield", "leverage", "loan", "interest rate", "expense", "revenue",
+        "cash flow",
+    }
+
+    # Strong signal when LLM returns a compact explicit field list.
+    if 1 <= len(data_fields) <= 3:
+        return True
+
+    # Fallback when data_fields is empty but entities still indicate a narrow metric lookup.
+    has_metric_or_date_entity = any(
+        getattr(entity, "entity_type", "") in {"metric", "date"}
+        for entity in entities
+    )
+    if len(data_fields) == 0 and has_metric_or_date_entity and confidence >= 0.55:
+        return True
+
+    # Medium-confidence fallback for slightly longer metric-centric field lists.
+    if 1 <= len(data_fields) <= 5:
+        joined_fields = " ".join(data_fields)
+        if any(term in joined_fields for term in metric_like_fields) and confidence >= 0.6:
+            return True
+
+    return False
 
 
 class QueryUnderstandingService:

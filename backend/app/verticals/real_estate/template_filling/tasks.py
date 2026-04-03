@@ -453,7 +453,7 @@ def detect_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                 )
                 if isinstance(kv_page_number, str) and kv_page_number.isdigit():
                     kv_page_number = int(kv_page_number)
-                citation = f"[D1:p{kv_page_number}]"
+                citation = f"[S{field_id_counter}:p{kv_page_number}]"
 
                 if not key:
                     continue
@@ -531,7 +531,7 @@ def detect_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                 )
             if isinstance(table_page, str) and table_page.isdigit():
                 table_page = int(table_page)
-            citation = f"[D1:p{table_page}]"
+            citation = f"[S{field_id_counter}:p{table_page}]"
 
             # Extract table data for per-column fields (schema matching - Stage 1)
             table_data_rows = table_dict.get("table_data", [])
@@ -610,7 +610,7 @@ def detect_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
             narrative_page = metadata_dict.get("page_number") or chunk.page_number
             if isinstance(narrative_page, str) and narrative_page.isdigit():
                 narrative_page = int(narrative_page)
-            citation = f"[D1:p{narrative_page}]"
+            citation = f"[S{field_id_counter}:p{narrative_page}]"
 
             # Create one narrative_block field with full text for LLM context
             # Narrative provides market/economic/demographic context for better field matching

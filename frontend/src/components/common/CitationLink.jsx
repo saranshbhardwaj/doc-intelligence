@@ -1,5 +1,5 @@
 /**
- * Unified citation link component — canonical format: [Dn:pN]
+ * Unified citation link component — canonical format: [Sn:pN]
  *
  * Replaces:
  *   - ChatCitationLink       (general chat inline citations)
@@ -7,7 +7,7 @@
  *   - CitationBadge          (RE template fill field badges)
  *
  * Props:
- *   token             {string}   Citation token e.g. "[D1:p5]"
+ *   token             {string}   Citation token e.g. "[S1:p5]"
  *   citationContext   {object}   General chat citation context (SSE event payload)
  *   comparisonContext {object}   PE comparison context (comparison_context store value)
  *   onCitationClick   {function} RE template fill: called with bbox object or page number
@@ -34,27 +34,34 @@ import {
 } from "@/utils/citations";
 
 // ---------------------------------------------------------------------------
-// Comparison chunk resolution (mirrors ComparisonCitationLink chunk lookup)
+// Comparison chunk resolution — match by page across paired/clustered chunks
 // ---------------------------------------------------------------------------
-function resolveComparisonChunk(resolvedContext, parsed, document) {
+function resolveComparisonChunk(resolvedContext, parsed) {
   if (!parsed || !resolvedContext) return null;
   const pairs = resolvedContext.paired_chunks || [];
   const clusters = resolvedContext.clustered_chunks || [];
 
+  // Try to find chunk by page in paired chunks (for 2-document comparisons)
   for (const pair of pairs) {
-    if (parsed.docIndex === 0 && pair.chunk_a?.page === parsed.page)
+    if (pair.chunk_a?.page === parsed.page)
       return { bbox: pair.chunk_a?.bbox, text: pair.chunk_a?.text };
-    if (parsed.docIndex === 1 && pair.chunk_b?.page === parsed.page)
+    if (pair.chunk_b?.page === parsed.page)
       return { bbox: pair.chunk_b?.bbox, text: pair.chunk_b?.text };
   }
+
+  // Try clustered chunks (for 3+ document comparisons)
   for (const cluster of clusters) {
-    const chunk = cluster.chunks?.[document?.id];
-    if (chunk?.page === parsed.page) return { bbox: chunk.bbox, text: chunk.text };
+    for (const chunk of Object.values(cluster.chunks || {})) {
+      if (chunk?.page === parsed.page)
+        return { bbox: chunk.bbox, text: chunk.text };
+    }
   }
+
+  // Fallback: return first available chunk with bbox
   for (const pair of pairs) {
-    if (parsed.docIndex === 0 && pair.chunk_a?.bbox)
+    if (pair.chunk_a?.bbox)
       return { bbox: pair.chunk_a?.bbox, text: pair.chunk_a?.text };
-    if (parsed.docIndex === 1 && pair.chunk_b?.bbox)
+    if (pair.chunk_b?.bbox)
       return { bbox: pair.chunk_b?.bbox, text: pair.chunk_b?.text };
   }
   return null;
@@ -88,20 +95,15 @@ export default function CitationLink({
   );
 
   // Comparison resolution
-  const comparisonDocument = useMemo(() => {
-    if (!comparisonContext?.documents || !parsed) return null;
-    return comparisonContext.documents[parsed.docIndex] || null;
-  }, [comparisonContext, parsed]);
-
   const comparisonChunk = useMemo(
-    () => resolveComparisonChunk(comparisonContext, parsed, comparisonDocument),
-    [comparisonContext, parsed, comparisonDocument]
+    () => resolveComparisonChunk(comparisonContext, parsed),
+    [comparisonContext, parsed]
   );
 
   const canNavigate =
     parsed !== null &&
     (chatCitation !== null ||
-      comparisonDocument !== null ||
+      comparisonChunk !== null ||
       onCitationClick !== undefined);
 
   // Unresolvable inline token — plain monospace fallback
@@ -119,7 +121,7 @@ export default function CitationLink({
     e.stopPropagation();
 
     // RE template fill: parent owns navigation
-    if (onCitationClick && !chatCitation && !comparisonDocument) {
+    if (onCitationClick && !chatCitation && !comparisonChunk) {
       if (externalBbox?.page) {
         onCitationClick({ ...externalBbox, page: Number(externalBbox.page) });
       } else {
@@ -129,48 +131,37 @@ export default function CitationLink({
     }
 
     try {
-      if (comparisonDocument) {
-        // Prefer citationContext (built by _build_citation_context, bbox.page priority)
-        // over comparisonContext which only has paired/clustered chunks and may use
-        // page_number instead of bbox.page for unpaired chunks.
-        if (chatCitation) {
-          await setActivePdfDocument(chatCitation.document_id, getToken);
-          const bbox = chatCitation.bbox || {
-            page: chatCitation.page, x0: 0, y0: 0, x1: 1, y1: 1,
-          };
-          highlightChunk(
-            { ...bbox, page: chatCitation.page, docId: chatCitation.document_id },
-            getToken
-          );
-          return;
-        }
-        // Fallback: no citationContext — use comparisonContext with parsed.page for safety
-        await setActivePdfDocument(comparisonDocument.id, getToken);
-        const bbox = comparisonChunk?.bbox || null;
-        highlightChunk(
-          {
-            page: parsed.page,
-            x0: bbox?.x0 ?? 0,
-            y0: bbox?.y0 ?? 0,
-            x1: bbox?.x1 ?? 1,
-            y1: bbox?.y1 ?? 1,
-            docId: comparisonDocument.id,
-          },
-          getToken
-        );
-        return;
-      }
-
       if (chatCitation) {
         await setActivePdfDocument(chatCitation.document_id, getToken);
         const bbox = chatCitation.bbox || {
-          page: chatCitation.page,
-          x0: 0, y0: 0, x1: 1, y1: 1,
+          page: chatCitation.page, x0: 0, y0: 0, x1: 1, y1: 1,
         };
         highlightChunk(
           { ...bbox, page: chatCitation.page, docId: chatCitation.document_id },
           getToken
         );
+        return;
+      }
+
+      if (comparisonChunk && comparisonContext?.documents?.length > 0) {
+        // For comparison context, use first document as fallback
+        // (chunk resolution is already based on page matching across documents)
+        const doc = comparisonContext.documents[0];
+        if (doc) {
+          await setActivePdfDocument(doc.id, getToken);
+          const bbox = comparisonChunk.bbox || null;
+          highlightChunk(
+            {
+              page: parsed.page,
+              x0: bbox?.x0 ?? 0,
+              y0: bbox?.y0 ?? 0,
+              x1: bbox?.x1 ?? 1,
+              y1: bbox?.y1 ?? 1,
+              docId: doc.id,
+            },
+            getToken
+          );
+        }
       }
     } catch (err) {
       console.error("CitationLink navigation failed:", err);
@@ -182,9 +173,8 @@ export default function CitationLink({
   // -------------------------------------------------------------------
   const filename =
     chatCitation?.filename ||
-    comparisonDocument?.filename?.split("/").pop() ||
-    comparisonDocument?.label ||
-    `Doc ${(parsed.docIndex || 0) + 1}`;
+    comparisonContext?.documents?.[0]?.filename?.split("/").pop() ||
+    `Source ${(parsed.sourceIndex || 1)}`;
 
   const section = chatCitation?.section || null;
   const snippetText = comparisonChunk?.text || null;

@@ -151,7 +151,7 @@ class TemplateFillRun(Base):
     artifact = Column(JSONB)
 
     # Processing status
-    # States: queued → detecting_fields → mapping → extracting → filling → completed/failed
+    # States: queued → detecting_fields → fields_detected → mapping → awaiting_review → filling → completed/failed
     status = Column(String(20), default="queued", index=True, nullable=False)
     current_stage = Column(String(50))
 

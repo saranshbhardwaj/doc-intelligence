@@ -35,6 +35,7 @@ export const createTemplateFillSlice = (set, get) => ({
     pdfUrl: null,
     pdfUrlExpiry: null,
     pdfRefreshTimer: null,
+    pdfError: null,
 
     // Selected text from PDF
     selectedText: null, // { text, page }
@@ -81,6 +82,7 @@ export const createTemplateFillSlice = (set, get) => ({
               pdfUrl: null,
               pdfUrlExpiry: null,
               pdfRefreshTimer: null,
+              pdfError: null,
               selectedText: null,
               cachedWorkbook: null,
               cachedWorkbookTemplateId: null,
@@ -120,6 +122,7 @@ export const createTemplateFillSlice = (set, get) => ({
               ...state.templateFill,
               pdfUrl: null,
               pdfUrlExpiry: null,
+              pdfError: 'Source PDF document was deleted from the library.',
             },
           }));
         }
@@ -147,6 +150,18 @@ export const createTemplateFillSlice = (set, get) => ({
     try {
       const urlData = await getDocumentDownloadUrl(getToken, documentId);
 
+      if (urlData?.missing) {
+        set((state) => ({
+          templateFill: {
+            ...state.templateFill,
+            pdfUrl: null,
+            pdfUrlExpiry: null,
+            pdfError: 'Source PDF document was deleted from the library.',
+          },
+        }));
+        return;
+      }
+
       if (urlData.url) {
         const expiry = Date.now() + urlData.expires_in * 1000;
 
@@ -155,6 +170,7 @@ export const createTemplateFillSlice = (set, get) => ({
             ...state.templateFill,
             pdfUrl: urlData.url,
             pdfUrlExpiry: expiry,
+            pdfError: null,
           },
         }));
 
@@ -168,19 +184,29 @@ export const createTemplateFillSlice = (set, get) => ({
             ...state.templateFill,
             pdfUrl: null,
             pdfUrlExpiry: null,
-            error: 'Failed to load PDF',
+            pdfError: 'Failed to load PDF preview.',
           },
         }));
       }
     } catch (err) {
-      console.error('❌ Failed to load PDF URL:', err);
-      console.error('❌ Error details:', err.response?.data);
+      const isNotFound = err?.response?.status === 404;
+      const pdfError = isNotFound
+        ? 'Source PDF document was deleted from the library.'
+        : 'Failed to load PDF preview.';
+
+      // Expected 404s are handled as non-fatal missing-source state.
+      // Keep logging for unexpected failures only.
+      if (!isNotFound) {
+        console.error('❌ Failed to load PDF URL:', err);
+        console.error('❌ Error details:', err.response?.data);
+      }
+
       set((state) => ({
         templateFill: {
           ...state.templateFill,
           pdfUrl: null,
           pdfUrlExpiry: null,
-          error: 'Failed to load PDF',
+          pdfError,
         },
       }));
     }
@@ -414,6 +440,7 @@ export const createTemplateFillSlice = (set, get) => ({
         pdfUrl: null,
         pdfUrlExpiry: null,
         pdfRefreshTimer: null,
+        pdfError: null,
         selectedText: null,
         pdfPopoutWindow: null,
         excelPopoutWindow: null,
@@ -434,6 +461,7 @@ export const createTemplateFillSlice = (set, get) => ({
       templateFill: {
         ...state.templateFill,
         error: null,
+        pdfError: null,
       },
     }));
   },

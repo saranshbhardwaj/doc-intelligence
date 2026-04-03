@@ -557,10 +557,14 @@ async def delete_template(
         if not result["success"]:
             raise HTTPException(status_code=400, detail=result["error"])
 
-        return {
+        response = {
             "message": result["message"],
             "affected_fill_runs": result["affected_fill_runs"],
         }
+        if result.get("warnings"):
+            response["warnings"] = result["warnings"]
+
+        return response
 
     except HTTPException:
         raise
@@ -918,7 +922,7 @@ async def update_extracted_data(
                     "value": "Manually edited value",
                     "confidence": 1.0,
                     "user_edited": true,
-                    "citations": ["[D1:p2]"]
+                    "citations": ["[S1:p2]"]
                 },
                 ...
             },

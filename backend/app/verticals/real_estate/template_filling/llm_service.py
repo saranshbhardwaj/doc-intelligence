@@ -417,7 +417,7 @@ class TemplateFillLLMService:
     #         '      "field_id": "field_id_here",\n'
     #         '      "value": "extracted value or null",\n'
     #         '      "confidence": 0.95,\n'
-    #         '      "citations": ["[D1:p3]"],\n'
+    #         '      "citations": ["[S1:p3]"],\n'
     #         '      "reasoning": "Found as currency: $2,500,000 in KV pair Listing Price"\n'
     #         "    }\n"
     #         "  ],\n"
@@ -695,7 +695,7 @@ For each requested schema table:
             f"- `row_label` should match one of the provided row_labels if available.\n"
             f"- Values must respect data_type: number, currency, percentage, date, text.\n"
             f"- Use `column_map` when provided; leave missing columns as null.\n"
-            f"- Provide citations like [D1:p5] and a brief reasoning per row (reasoning is required).\n"
+            f"- Provide citations like [S1:p5] and a brief reasoning per row (reasoning is required).\n"
         )
 
         system_arg = [
@@ -993,7 +993,7 @@ For each requested schema table:
 
         for i, chunk in enumerate(chunks):
             page_num = self._resolve_chunk_page(chunk)
-            citation = f"[D1:p{page_num}]" if page_num > 0 else chunk.get("citation", "[?]")
+            citation = f"[S{i+1}:p{page_num}]" if page_num > 0 else chunk.get("citation", "[?]")
             text = chunk.get("text", "")
             section = chunk.get("section_heading", "")
             is_table = chunk.get("is_tabular", False)

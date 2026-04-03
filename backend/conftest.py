@@ -14,6 +14,22 @@ os.environ["ANTHROPIC_API_KEY"] = "test-api-key"
 from app.database import Base
 
 
+def _disable_unsupported_vector_indexes_for_tests() -> None:
+    """Drop indexes that are not portable across local pgvector versions.
+
+    Some local Postgres/pgvector combinations do not support creating HNSW
+    indexes without explicit operator classes during metadata.create_all().
+    These indexes are performance-only and not required for integration tests.
+    """
+    table = Base.metadata.tables.get("document_chunks")
+    if table is None:
+        return
+
+    unsupported = {idx for idx in table.indexes if idx.name == "idx_document_chunks_embedding"}
+    for idx in unsupported:
+        table.indexes.remove(idx)
+
+
 @pytest.fixture(scope="session")
 def test_engine():
     """Create PostgreSQL test engine.
@@ -31,6 +47,8 @@ def test_engine():
     import app.db_models_workflows
     import app.db_models_documents
     import app.db_models_templates
+
+    _disable_unsupported_vector_indexes_for_tests()
 
     # Enable pgvector extension (if using vector columns)
     try:

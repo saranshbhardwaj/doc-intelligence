@@ -9,8 +9,8 @@
  * the field mapping) carries the document_index that resolves Dn → document_id.
  */
 
-/** Regex that matches canonical [D1:p5] and legacy [ref:hex:pN] citation tokens. */
-export const CITATION_REGEX = /\[D\d+:p\d+\]|\[ref:[a-f0-9]+:p\d+\]/g;
+/** Regex that matches canonical [S1:p5] and legacy [ref:hex:pN] citation tokens. */
+export const CITATION_REGEX = /\[S\d+:p\d+\]|\[ref:[a-f0-9]+:p\d+\]/g;
 
 /**
  * Remark plugin that converts [Dn:pN] citation tokens into custom `citation`
@@ -99,28 +99,28 @@ function expandTextNode(textNode) {
  * Parse a single citation token to structured data.
  *
  * Handles:
- *   [D1:p5]              → { docIndex: 0, page: 5 }  (canonical)
- *   [ref:a1b2c3d4:p5]    → { docIndex: 0, page: 5 }  (legacy chat format — page only, assume D1)
+ *   [S1:p5]              → { sourceIndex: 0, page: 5 }  (canonical, 1-based → 0-based)
+ *   [ref:a1b2c3d4:p5]    → { sourceIndex: 0, page: 5 }  (legacy chat format — page only, assume S1)
  *
  * Returns null if the token cannot be parsed.
  *
  * @param {string} token
- * @returns {{ docIndex: number, page: number } | null}
+ * @returns {{ sourceIndex: number, page: number } | null}
  */
 export function parseCitation(token) {
   if (!token) return null;
 
-  // Canonical: [D{n}:p{N}]
-  const m = token.match(/\[D(\d+):p(\d+)\]/);
+  // Canonical: [S{n}:p{N}]
+  const m = token.match(/\[S(\d+):p(\d+)\]/);
   if (m) {
-    return { docIndex: parseInt(m[1], 10) - 1, page: parseInt(m[2], 10) };
+    return { sourceIndex: parseInt(m[1], 10) - 1, page: parseInt(m[2], 10) };
   }
 
   // Legacy: [ref:{hex8}:p{N}] — old chat format stored in DB before migration
-  // We can only recover the page; document is assumed to be D1 (index 0).
+  // We can only recover the page; source is assumed to be S1 (index 0).
   const leg = token.match(/\[ref:[a-f0-9]+:p(\d+)\]/i);
   if (leg) {
-    return { docIndex: 0, page: parseInt(leg[1], 10) };
+    return { sourceIndex: 0, page: parseInt(leg[1], 10) };
   }
 
   return null;
@@ -131,12 +131,11 @@ export function parseCitation(token) {
  *
  * citationContext shape (from backend SSE event):
  *   {
- *     citations: [{ doc_index, page, chunk_id, document_id, filename, section, bbox }, ...],
- *     document_index: { "D1": "doc-uuid-A", "D2": "doc-uuid-B" },
+ *     citations: [{ source_index, page, chunk_id, document_id, filename, section, bbox }, ...],
  *     document_map: { "doc-uuid": "filename.pdf" }
  *   }
  *
- * Returns a Map keyed by "D{n}:p{N}" → citation metadata object.
+ * Returns a Map keyed by "S{n}:p{N}" → citation metadata object.
  *
  * @param {object} citationContext
  * @returns {Map<string, object>}
@@ -146,7 +145,7 @@ export function buildCitationLookup(citationContext) {
 
   const map = new Map();
   for (const c of citationContext.citations) {
-    const key = `D${c.doc_index}:p${c.page}`;
+    const key = `S${c.source_index}:p${c.page}`;
     if (!map.has(key)) {
       map.set(key, c);
     }
@@ -157,13 +156,13 @@ export function buildCitationLookup(citationContext) {
 /**
  * Resolve a parsed citation to rich metadata using a citation lookup map.
  *
- * @param {{ docIndex: number, page: number }} parsed  - Output of parseCitation()
- * @param {Map<string, object>} lookupMap              - Output of buildCitationLookup()
+ * @param {{ sourceIndex: number, page: number }} parsed  - Output of parseCitation()
+ * @param {Map<string, object>} lookupMap                - Output of buildCitationLookup()
  * @returns {object | null}  Citation metadata or null if not found
  */
 export function resolveCitation(parsed, lookupMap) {
   if (!parsed || !lookupMap) return null;
-  const key = `D${parsed.docIndex + 1}:p${parsed.page}`;
+  const key = `S${parsed.sourceIndex + 1}:p${parsed.page}`;
   return lookupMap.get(key) || null;
 }
 
@@ -172,12 +171,12 @@ export function resolveCitation(parsed, lookupMap) {
  * Used to render citation tokens as interactive components inside prose.
  *
  * Example:
- *   "Revenue grew 15% [D1:p5] vs prior year [D2:p3]."
- *   → ["Revenue grew 15% ", { token: "[D1:p5]", docIndex: 0, page: 5 },
- *       " vs prior year ", { token: "[D2:p3]", docIndex: 1, page: 3 }, "."]
+ *   "Revenue grew 15% [S1:p5] vs prior year [S2:p3]."
+ *   → ["Revenue grew 15% ", { token: "[S1:p5]", sourceIndex: 0, page: 5 },
+ *       " vs prior year ", { token: "[S2:p3]", sourceIndex: 1, page: 3 }, "."]
  *
  * @param {string} text
- * @returns {Array<string | { token: string, docIndex: number, page: number }>}
+ * @returns {Array<string | { token: string, sourceIndex: number, page: number }>}
  */
 export function splitTextWithCitations(text) {
   if (!text) return [text];

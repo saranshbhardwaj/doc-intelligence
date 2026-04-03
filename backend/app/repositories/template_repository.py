@@ -14,6 +14,9 @@ from app.db_models_templates import ExcelTemplate, TemplateFillRun
 from app.utils.logging import logger
 
 
+TERMINAL_TEMPLATE_FILL_RUN_STATUSES = {"completed", "failed"}
+
+
 class TemplateRepository:
     """Repository for template and fill run CRUD operations."""
 
@@ -152,27 +155,45 @@ class TemplateRepository:
                 "in_progress_runs": usage["in_progress_runs"],
             }
 
-        # Hard delete file from R2 storage
+        file_path = template.file_path
+
+        # Hard delete from database first.
+        # This avoids irreversible storage deletion when DB delete fails.
+        try:
+            self.db.delete(template)
+            self.db.commit()
+        except Exception as e:
+            self.db.rollback()
+            logger.error(f"Failed to delete template from database: {e}", exc_info=True)
+            return {
+                "success": False,
+                "error": "Failed to delete template from database",
+            }
+
+        warnings: List[str] = []
+
+        # Best-effort storage cleanup after DB commit.
         try:
             storage = get_storage_backend()
-            storage.delete(template.file_path)
-            logger.info(f"Deleted template file from storage: {template.file_path}")
+            storage.delete(file_path)
+            logger.info(f"Deleted template file from storage: {file_path}")
         except Exception as e:
-            logger.warning(f"Failed to delete template file from storage: {e}")
-            # Continue with DB deletion even if storage deletion fails
-
-        # Hard delete from database
-        # Note: fill_runs.template_id will be SET NULL due to FK constraint
-        self.db.delete(template)
-        self.db.commit()
+            warning = f"Template deleted but failed to delete storage file: {e}"
+            warnings.append(warning)
+            logger.warning(warning)
 
         logger.info(f"Permanently deleted template: {template_id} (affected {affected_runs} fill runs)")
 
-        return {
+        response = {
             "success": True,
             "message": "Template deleted successfully",
             "affected_fill_runs": affected_runs,
         }
+
+        if warnings:
+            response["warnings"] = warnings
+
+        return response
 
     def increment_usage(self, template_id: str) -> Optional[ExcelTemplate]:
         """Increment template usage count."""
@@ -201,49 +222,47 @@ class TemplateRepository:
         if not template:
             return None
 
-        # Use SQL aggregation to count fill runs by status
-        result = self.db.query(
-            func.count(TemplateFillRun.id).label("total"),
-            func.sum(case(
-                (TemplateFillRun.status == "completed", 1),
-                else_=0
-            )).label("completed"),
-            func.sum(case(
-                (TemplateFillRun.status.in_(["queued", "processing"]), 1),
-                else_=0
-            )).label("processing"),
-            func.sum(case(
-                (TemplateFillRun.status == "awaiting_review", 1),
-                else_=0
-            )).label("awaiting_review"),
-            func.sum(case(
-                (TemplateFillRun.status == "failed", 1),
-                else_=0
-            )).label("failed")
+        # Use SQL aggregation to count fill runs by status.
+        status_rows = self.db.query(
+            TemplateFillRun.status,
+            func.count(TemplateFillRun.id).label("count"),
         ).filter(
             TemplateFillRun.template_id == template_id
-        ).first()
+        ).group_by(
+            TemplateFillRun.status
+        ).all()
 
-        total_runs = result.total or 0
-        completed_count = result.completed or 0
-        processing_count = result.processing or 0
-        awaiting_review_count = result.awaiting_review or 0
-        in_progress_count = processing_count + awaiting_review_count
-        failed_count = result.failed or 0
+        status_counts: Dict[str, int] = {
+            (status or "unknown"): int(count or 0)
+            for status, count in status_rows
+        }
+
+        total_runs = sum(status_counts.values())
+        completed_count = status_counts.get("completed", 0)
+        failed_count = status_counts.get("failed", 0)
+        awaiting_review_count = status_counts.get("awaiting_review", 0)
+        in_progress_count = sum(
+            count
+            for status, count in status_counts.items()
+            if status not in TERMINAL_TEMPLATE_FILL_RUN_STATUSES
+        )
+        processing_count = max(0, in_progress_count - awaiting_review_count)
 
         # Determine if deletion is safe
         can_delete = in_progress_count == 0
         warning_message = None
 
-        if processing_count > 0:
+        if in_progress_count > 0:
+            active_status_parts = [
+                f"{status}={count}"
+                for status, count in sorted(status_counts.items())
+                if status not in TERMINAL_TEMPLATE_FILL_RUN_STATUSES
+            ]
+            active_status_text = ", ".join(active_status_parts)
             warning_message = (
-                f"Cannot delete: {processing_count} fill run(s) are currently processing. "
+                f"Cannot delete: {in_progress_count} fill run(s) are still in progress "
+                f"({active_status_text}). "
                 f"Please wait for them to complete or fail before deleting."
-            )
-        elif awaiting_review_count > 0:
-            warning_message = (
-                f"Cannot delete: {awaiting_review_count} fill run(s) are awaiting review. "
-                f"Please approve or delete them before deleting this template."
             )
         elif total_runs > 0:
             warning_message = (
@@ -255,12 +274,14 @@ class TemplateRepository:
         return {
             "template_id": template_id,
             "template_name": template.name,
+            "total_runs": total_runs,
             "total_fill_runs": total_runs,
             "completed_runs": completed_count,
             "processing_runs": processing_count,
             "awaiting_review_runs": awaiting_review_count,
             "in_progress_runs": in_progress_count,
             "failed_runs": failed_count,
+            "status_breakdown": status_counts,
             "last_used_at": template.last_used_at.isoformat() if template.last_used_at else None,
             "can_delete": can_delete,
             "warning": warning_message,

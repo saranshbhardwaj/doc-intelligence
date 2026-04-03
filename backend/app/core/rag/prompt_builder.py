@@ -41,18 +41,15 @@ class PromptBuilder:
     ) -> str:
         """Format retrieved chunks into a numbered source block for the LLM prompt.
 
-        Each chunk is annotated with a [Dn:pN] citation hint so the LLM can
-        reproduce the canonical citation format in its response.
+        Each chunk is annotated with a [Sn:pN] citation hint where n is the sequential
+        chunk position (1-based) and N is the page number. This allows the LLM to cite
+        chunks unambiguously without needing to know document IDs.
 
         Args:
             relevant_chunks: Retrieved document chunks.
-            doc_id_to_index: Mapping of document_id → D-number (1-based).
-                             Built from the session's stable document_index.
-                             If None, documents are assigned indices by first appearance.
+            doc_id_to_index: Deprecated (not used). Kept for API compatibility.
         """
         context_sections: List[str] = []
-        # Build a local first-appearance index as fallback when doc_id_to_index not provided
-        _local_index: Dict[str, int] = {}
 
         for i, chunk in enumerate(relevant_chunks, 1):
             doc_id = str(chunk.get('document_id', ''))
@@ -63,25 +60,31 @@ class PromptBuilder:
             # of the text starts on. Show the full range so the LLM can use the
             # [Page N] markers embedded in the chunk text to cite accurately.
             paragraph_pages = metadata.get('paragraph_pages')
+            kv_pages = metadata.get('kv_pages')
+
             if paragraph_pages and len(paragraph_pages) > 1:
                 first_page = paragraph_pages[0]['page']
                 last_page = paragraph_pages[-1]['page']
                 page_label = f"{first_page}-{last_page}"
                 # citation_hint uses the anchor (first) page; LLM refines via [Page N] markers
                 citation_page = first_page
+            elif kv_pages:
+                kv_page_values = [p.get('page') for p in kv_pages if p.get('page')]
+                if len(kv_page_values) > 1:
+                    first_page = kv_page_values[0]
+                    last_page = kv_page_values[-1]
+                    page_label = f"{first_page}-{last_page}"
+                    citation_page = first_page
+                else:
+                    citation_page = kv_page_values[0] if kv_page_values else chunk.get('page_number', 1)
+                    page_label = str(citation_page)
             else:
                 bbox = metadata.get('bbox', {})
                 citation_page = (bbox.get('page') if isinstance(bbox, dict) and bbox else None) or chunk.get('page_number', 1)
                 page_label = str(citation_page)
 
-            if doc_id_to_index is not None:
-                d_num = doc_id_to_index.get(doc_id, 1)
-            else:
-                if doc_id not in _local_index:
-                    _local_index[doc_id] = len(_local_index) + 1
-                d_num = _local_index[doc_id]
-
-            citation_hint = f"[D{d_num}:p{citation_page}]"
+            # Source index is the chunk's position (1-based)
+            citation_hint = f"[S{i}:p{citation_page}]"
             source_info = f"Source {i}: {doc_id} (Page {page_label}) {citation_hint}"
             if chunk.get('section_heading'):
                 source_info += f" - {chunk['section_heading']}"
@@ -223,7 +226,9 @@ class PromptBuilder:
         if convo_sections and convo_sections != "[No prior conversation]":
             prompt_parts.append(f"\nCONVERSATION CONTEXT:\n{convo_sections}\n")
 
-        # Add paired or clustered content
+        # Add paired or clustered content with sequential source indices
+        source_counter = 1
+
         if num_docs == 2 and comparison_context.paired_chunks:
             # 2-document comparison: Use paired chunks
             prompt_parts.append("\n## Paired Content (Related Sections)\n")
@@ -233,13 +238,15 @@ class PromptBuilder:
 
                 # Document A chunk
                 page_a = pair.chunk_a.get('page_number', '?')
-                prompt_parts.append(f"**From {docs[0].filename} (Page {page_a}) [D1:p{page_a}]:**\n")
+                prompt_parts.append(f"**From {docs[0].filename} (Page {page_a}) [S{source_counter}:p{page_a}]:**\n")
                 prompt_parts.append(f"{pair.chunk_a.get('text', '')}\n")
+                source_counter += 1
 
                 # Document B chunk
                 page_b = pair.chunk_b.get('page_number', '?')
-                prompt_parts.append(f"**From {docs[1].filename} (Page {page_b}) [D2:p{page_b}]:**\n")
+                prompt_parts.append(f"**From {docs[1].filename} (Page {page_b}) [S{source_counter}:p{page_b}]:**\n")
                 prompt_parts.append(f"{pair.chunk_b.get('text', '')}\n")
+                source_counter += 1
 
         elif num_docs >= 3 and comparison_context.clustered_chunks:
             # 3+ document comparison: Use clustered chunks
@@ -254,8 +261,9 @@ class PromptBuilder:
 
                     if chunk:
                         page = chunk.get('page_number', '?')
-                        prompt_parts.append(f"**From {doc.filename} (Page {page}) [D{doc_idx+1}:p{page}]:**\n")
+                        prompt_parts.append(f"**From {doc.filename} (Page {page}) [S{source_counter}:p{page}]:**\n")
                         prompt_parts.append(f"{chunk.get('text', '')}\n")
+                        source_counter += 1
                     else:
                         prompt_parts.append(f"**From {doc.filename}:** [No corresponding content found]\n")
 
@@ -272,12 +280,12 @@ class PromptBuilder:
             prompt_parts.append("1. A markdown comparison table (3-8 rows) with Difference column\n")
             prompt_parts.append("2. 2-3 paragraphs analyzing the key differences\n")
             prompt_parts.append("3. Clear recommendation or conclusion\n\n")
-            prompt_parts.append("Every claim must have a citation [D1:pN] or [D2:pN].\n\n")
+            prompt_parts.append("Every claim must have a citation [Sn:pN] where n is the source number shown above.\n\n")
         else:
             prompt_parts.append(f"1. A markdown comparison table (3-8 rows) with {num_docs} columns\n")
             prompt_parts.append(f"2. 2-3 paragraphs analyzing patterns and outliers across {num_docs} documents\n")
             prompt_parts.append("3. Clear recommendation highlighting best/worst options\n\n")
-            prompt_parts.append(f"Every claim must have a citation [D1:pN], [D2:pN], [D3:pN], etc.\n\n")
+            prompt_parts.append(f"Every claim must have a citation [Sn:pN] where n is the source number shown above.\n\n")
 
         prompt_parts.append("ANSWER:\n")
 
@@ -336,9 +344,12 @@ class PromptBuilder:
 
             if facts.facts:
                 for fact in facts.facts:
-                    # Format: fact_statement [D{i}:p{page}]
+                    # Format: fact_statement [S{source_chunk_index}:p{page}]
+                    # source_chunk_index comes from fact extractor and is the position
+                    # of the chunk this fact was extracted from
+                    source_idx = getattr(fact, 'source_chunk_index', 1)
                     prompt_parts.append(
-                        f"- {fact.fact} [D{i+1}:p{fact.source_page}]\n"
+                        f"- {fact.fact} [S{source_idx}:p{fact.source_page}]\n"
                     )
             else:
                 prompt_parts.append("- [No specific facts extracted]\n")
@@ -364,13 +375,12 @@ class PromptBuilder:
             prompt_parts.append("1. A markdown comparison table with Difference column\n")
             prompt_parts.append("2. 2-3 paragraphs analyzing the key differences\n")
             prompt_parts.append("3. Clear recommendation or conclusion\n\n")
-            prompt_parts.append("Every claim must have a citation [D1:pN] or [D2:pN].\n\n")
+            prompt_parts.append("Every claim must have a citation [Sn:pN] where n is the source number shown above.\n\n")
         else:
             prompt_parts.append(f"1. A markdown comparison table with {num_docs} document columns\n")
             prompt_parts.append(f"2. 2-3 paragraphs analyzing patterns and outliers across {num_docs} documents\n")
             prompt_parts.append("3. Clear recommendation highlighting best/worst options\n\n")
-            doc_citations = ", ".join([f"[D{i+1}:pN]" for i in range(num_docs)])
-            prompt_parts.append(f"Every claim must have a citation: {doc_citations}\n\n")
+            prompt_parts.append(f"Every claim must have a citation [Sn:pN] where n is the source number shown above.\n\n")
 
         prompt_parts.append("ANSWER:\n")
 

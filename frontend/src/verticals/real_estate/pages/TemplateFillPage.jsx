@@ -156,6 +156,7 @@ export default function TemplateFillPage() {
   const {
     fillRun,
     pdfUrl,
+    pdfError,
     selectedText,
     isLoading,
     error,
@@ -708,12 +709,14 @@ export default function TemplateFillPage() {
                         </div>
                       </div>
                       <p className="text-sm font-medium text-foreground">
-                        {!fillRun.document_id ? 'Source Document Deleted' : 'PDF Not Available'}
+                        {!fillRun.document_id || pdfError?.toLowerCase().includes('deleted')
+                          ? 'Source Document Deleted'
+                          : 'PDF Not Available'}
                       </p>
                       <p className="text-xs text-muted-foreground">
-                        {!fillRun.document_id
+                        {pdfError || (!fillRun.document_id
                           ? 'The source PDF document for this fill run has been deleted.'
-                          : 'The PDF is loading or temporarily unavailable.'}
+                          : 'The PDF is loading or temporarily unavailable.')}
                       </p>
                     </div>
                   </div>

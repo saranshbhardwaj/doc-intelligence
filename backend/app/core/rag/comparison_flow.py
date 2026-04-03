@@ -203,19 +203,13 @@ class ComparisonChatHandler:
 
             if chunks_per_doc:
                 # Build citation context from ALL chunks (paired + clustered + unpaired).
-                # This reuses the same _build_citation_context() logic as regular chat,
-                # ensuring correct page resolution (bbox.page → page_number) and proper
-                # bbox coordinates for all chunk types. Sent to frontend via SSE so that
-                # clicking [Dn:pN] citations navigates to the correct page.
+                # Citations use sequential [Sn:pN] format where n is the chunk position.
+                # Sent to frontend via SSE so clicking [Sn:pN] citations navigates to the correct page.
                 if self.on_citation_context:
                     all_chunks_flat = [
                         c for doc_chunks in chunks_per_doc.values() for c in doc_chunks
                     ]
-                    doc_id_to_index = {
-                        doc.id: i + 1
-                        for i, doc in enumerate(comparison_context.documents)
-                    }
-                    self.on_citation_context(all_chunks_flat, doc_id_to_index)
+                    self.on_citation_context(all_chunks_flat)
 
                 fact_tasks = []
                 for doc in comparison_context.documents:
