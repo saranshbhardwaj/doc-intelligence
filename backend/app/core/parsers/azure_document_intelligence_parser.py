@@ -659,8 +659,21 @@ class AzureDocumentIntelligenceParser(DocumentParser):
                                 break
 
             # Group paragraphs by role
-            paragraphs_by_role = {}
+            table_bboxes = self._extract_table_bboxes(page_data.table_data)
+            table_associated_paragraphs = []
+            narrative_paragraphs = []
+
             for para in page_paragraphs:
+                role = para.get("role") or "content"
+                # Only filter content paragraphs. Keep headings/titles for structure.
+                if role == "content" and self._is_table_associated_paragraph(para, table_bboxes):
+                    para["_is_table_associated"] = True
+                    table_associated_paragraphs.append(para)
+                    continue
+                narrative_paragraphs.append(para)
+
+            paragraphs_by_role = {}
+            for para in narrative_paragraphs:
                 role = para.get("role") or "content"
                 paragraphs_by_role.setdefault(role, []).append(para)
 
@@ -689,8 +702,9 @@ class AzureDocumentIntelligenceParser(DocumentParser):
                 "char_count": page_data.char_count,
 
                 # Rich structure
-                "paragraphs": page_paragraphs,
+                "paragraphs": narrative_paragraphs,
                 "paragraphs_by_role": paragraphs_by_role,
+                "table_associated_paragraphs": table_associated_paragraphs,
                 "tables": page_data.table_data,
                 "figures": page_figures,
 
@@ -724,6 +738,84 @@ class AzureDocumentIntelligenceParser(DocumentParser):
         )
 
         return enhanced_pages
+
+    def _extract_table_bboxes(self, tables: List[Dict]) -> List[Dict[str, float]]:
+        """Extract axis-aligned table bboxes from table bounding polygons."""
+        bboxes: List[Dict[str, float]] = []
+        for table in tables or []:
+            for br in table.get("bounding_regions", []) or []:
+                polygon = br.get("polygon")
+                if not polygon or len(polygon) < 8:
+                    continue
+                xs = polygon[0::2]
+                ys = polygon[1::2]
+                bboxes.append({
+                    "x0": min(xs),
+                    "y0": min(ys),
+                    "x1": max(xs),
+                    "y1": max(ys),
+                })
+        return bboxes
+
+    def _is_table_associated_paragraph(self, para: Dict, table_bboxes: List[Dict[str, float]]) -> bool:
+        """Return True when paragraph bbox significantly overlaps any table bbox."""
+        if not table_bboxes:
+            return False
+
+        para_bbox = self._paragraph_bbox(para)
+        if not para_bbox:
+            return False
+
+        para_area = self._bbox_area(para_bbox)
+        if para_area <= 0:
+            return False
+
+        for table_bbox in table_bboxes:
+            inter = self._intersection_area(para_bbox, table_bbox)
+            if inter <= 0:
+                continue
+            # Paragraph is considered tabular when most of its area sits inside a table.
+            if inter / para_area >= 0.55:
+                return True
+
+        return False
+
+    def _paragraph_bbox(self, para: Dict) -> Optional[Dict[str, float]]:
+        """Merge all paragraph regions into a single axis-aligned bbox."""
+        bboxes = []
+        for br in para.get("bounding_regions", []) or []:
+            polygon = br.get("polygon")
+            if not polygon or len(polygon) < 8:
+                continue
+            xs = polygon[0::2]
+            ys = polygon[1::2]
+            bboxes.append((min(xs), min(ys), max(xs), max(ys)))
+
+        if not bboxes:
+            return None
+
+        return {
+            "x0": min(b[0] for b in bboxes),
+            "y0": min(b[1] for b in bboxes),
+            "x1": max(b[2] for b in bboxes),
+            "y1": max(b[3] for b in bboxes),
+        }
+
+    @staticmethod
+    def _bbox_area(bbox: Dict[str, float]) -> float:
+        width = max(0.0, bbox["x1"] - bbox["x0"])
+        height = max(0.0, bbox["y1"] - bbox["y0"])
+        return width * height
+
+    @staticmethod
+    def _intersection_area(a: Dict[str, float], b: Dict[str, float]) -> float:
+        x0 = max(a["x0"], b["x0"])
+        y0 = max(a["y0"], b["y0"])
+        x1 = min(a["x1"], b["x1"])
+        y1 = min(a["y1"], b["y1"])
+        if x1 <= x0 or y1 <= y0:
+            return 0.0
+        return (x1 - x0) * (y1 - y0)
 
     def _count_paragraph_roles(self, paragraphs: List[Dict]) -> Dict[str, int]:
         """Count paragraphs by role.

@@ -54,6 +54,13 @@ class AzureSmartChunker(DocumentChunker):
     - link_tables_to_narrative: Link table chunks to narrative (default: True)
     """
 
+    _BOILERPLATE_HEADINGS = {
+        "table of contents",
+        "contents",
+        "confidential",
+        "disclaimer",
+    }
+
     def __init__(
         self,
         max_tokens: int = 500,
@@ -612,11 +619,12 @@ class AzureSmartChunker(DocumentChunker):
         prev_section_paragraphs: List[Dict] = []
 
         for section in section_groups:
-            if section.section_heading:
-                last_seen_heading = section.section_heading
+            clean_section_heading = self._clean_heading(section.section_heading)
+            if clean_section_heading:
+                last_seen_heading = clean_section_heading
 
             # Effective heading: own section first, then nearest ancestor heading.
-            effective_heading = section.section_heading or last_seen_heading
+            effective_heading = clean_section_heading or last_seen_heading
 
             for table_data in section.tables:
                 table_counter += 1
@@ -773,6 +781,20 @@ class AzureSmartChunker(DocumentChunker):
 
         return table_chunks
 
+    def _clean_heading(self, heading: Optional[str]) -> Optional[str]:
+        """Return a heading suitable for chunk prefixing, or None if boilerplate."""
+        if not heading:
+            return None
+        normalized = heading.strip()
+        if not normalized:
+            return None
+        lowered = normalized.lower()
+        if lowered in self._BOILERPLATE_HEADINGS:
+            return None
+        if lowered.startswith("table of contents"):
+            return None
+        return normalized
+
     def _find_preceding_paragraph(
         self,
         paragraphs: List[Dict],
@@ -787,16 +809,41 @@ class AzureSmartChunker(DocumentChunker):
         for para in paragraphs:
             if para.get("_page_number", 0) <= table_page:
                 best = para.get("content", "")
-        return best[:200] if best else ""
+        if not best:
+            return ""
+
+        cleaned = best.strip()
+        # Ignore fragmentary text (single chars, bullets, etc.) as table context.
+        if len(cleaned) < 12:
+            return ""
+        return cleaned[:200]
+
+    def _table_header_lines(self, table_data: dict) -> List[str]:
+        """Build stable table title/header lines from structured table metadata."""
+        lines: List[str] = []
+
+        table_name = (table_data.get("table_name") or "").strip()
+        if table_name:
+            lines.append(table_name)
+
+        header_cells = [str(c or "").strip() for c in table_data.get("column_headers", [])]
+        non_empty_headers = [c for c in header_cells if c]
+        # Include explicit header rows only when they contain multiple non-empty labels.
+        if len(non_empty_headers) > 1:
+            lines.append("\t".join(header_cells))
+
+        return lines
 
     def _split_table_by_rows(self, table_data: dict, max_tokens: int) -> List[str]:
         """Split table text into row-group segments of ~max_tokens each.
 
-        Each segment repeats the header row so it is self-contained for embedding.
+        Each segment repeats title/header lines so it is self-contained for embedding.
         Falls back to char-truncation when no structured row data is available.
         """
         rows = table_data.get("table_data", [])  # List[List[str]] from Azure DI parser
         full_text = table_data.get("text", "")
+        header_lines = self._table_header_lines(table_data)
+        header_tokens = sum(count_tokens(line) for line in header_lines)
 
         if not rows or not full_text:
             # No structured rows — truncate full text as a single group
@@ -804,20 +851,17 @@ class AzureSmartChunker(DocumentChunker):
                 return [full_text]
             return [full_text[:max_tokens * 4]]
 
-        header = rows[0]
-        header_text = "\t".join(str(c) for c in header)
-        header_tokens = count_tokens(header_text)
-
         groups: List[str] = []
-        current_lines: List[str] = [header_text]
+        current_lines: List[str] = list(header_lines)
         current_tokens = header_tokens
 
-        for row in rows[1:]:
+        for row in rows:
             row_text = "\t".join(str(c) for c in row)
             row_tokens = count_tokens(row_text)
-            if current_tokens + row_tokens > max_tokens and len(current_lines) > 1:
+            if current_tokens + row_tokens > max_tokens and current_lines:
                 groups.append("\n".join(current_lines))
-                current_lines = [header_text, row_text]
+                current_lines = list(header_lines)
+                current_lines.append(row_text)
                 current_tokens = header_tokens + row_tokens
             else:
                 current_lines.append(row_text)

@@ -92,15 +92,20 @@ class MetadataBooster:
         """
         # Check if query_analysis is a QueryUnderstanding object
         if hasattr(query_analysis, 'table_boost'):
-            # Use LLM-determined boost values from QueryUnderstanding
+            # Use LLM-determined boost values from QueryUnderstanding.
             table_boost_override = query_analysis.table_boost
             narrative_boost_override = query_analysis.narrative_boost
-            query_type = "generic_query"  # Not used when overrides present
+            raw_query_type = getattr(query_analysis, "query_type", None)
+            query_type = getattr(raw_query_type, "value", raw_query_type) or "generic_query"
         else:
             # Legacy dict format
             table_boost_override = None
             narrative_boost_override = None
             query_type = query_analysis.get("query_type", "generic_query")
+
+        query_type = str(query_type).strip().lower()
+        is_data_query = query_type in {"data_query", "data_extraction"}
+        is_narrative_query = query_type in {"narrative_query", "summarization"}
 
         for chunk in results:
             boost = 1.0
@@ -117,7 +122,7 @@ class MetadataBooster:
 
             # 1. Content type boost (query-adaptive)
             if is_key_value:
-                if query_type == "data_query":
+                if is_data_query:
                     boost *= self.key_value_boost_data_query
                 else:
                     boost *= self.key_value_neutral_narrative_query
@@ -125,7 +130,7 @@ class MetadataBooster:
                 if table_boost_override is not None:
                     # Use LLM-determined boost
                     boost *= table_boost_override
-                elif query_type == "data_query":
+                elif is_data_query:
                     # Data queries prefer tables
                     boost *= self.table_boost_data_query
                 else:
@@ -136,10 +141,10 @@ class MetadataBooster:
                 if narrative_boost_override is not None:
                     # Use LLM-determined boost
                     boost *= narrative_boost_override
-                elif query_type == "data_query":
+                elif is_data_query:
                     # Data queries penalize narrative (might be verbose/fluff)
                     boost *= self.narrative_penalty_data_query
-                elif query_type == "narrative_query":
+                elif is_narrative_query:
                     # Narrative queries prefer narrative content
                     boost *= self.narrative_boost_narrative_query
                 # Generic queries: no boost (1.0)

@@ -512,6 +512,7 @@ class RAGService:
             query_understanding=understanding,  # For HyDE enhancement
             min_semantic_similarity=settings.rag_chat_semantic_similarity_floor
         )
+
         retrieval_ms = round((time.monotonic() - retrieval_start) * 1000, 2)
         stage_timings_ms["retrieval"] = retrieval_ms
 
