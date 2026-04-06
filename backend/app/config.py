@@ -197,6 +197,13 @@ class Settings(BaseSettings):
     rag_scoped_retrieval_candidates: int = 10
     rag_scoped_final_top_k: int = 5
 
+    # Scope-aware ranking and guardrails (single-doc / ambiguous multi-doc handling)
+    rag_scope_match_reweight_enabled: bool = True
+    rag_scope_match_boost_weight: float = 0.30
+    rag_scope_mismatch_penalty_weight: float = 0.30
+    rag_scope_guardrail_regenerate_enabled: bool = True
+    rag_scope_guardrail_require_citations: bool = False
+
     # Semantic similarity floors (raw cosine similarity) for filtering low-signal hits
     rag_chat_semantic_similarity_floor: float = 0.12
     rag_workflow_semantic_similarity_floor: float = 0.06

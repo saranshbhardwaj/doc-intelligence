@@ -105,11 +105,11 @@ export default function ChatPage() {
     }
   };
 
-  const handleStartChat = async (documentIds) => {
+  const handleStartChat = async (documentIds, title) => {
     try {
       // Create new session with selected documents
       const session = await actions.createNewSession(getToken, {
-        title: "New Chat",
+        title: title || "New Chat",
         documentIds,
       });
       setShowNewChatDialog(false);

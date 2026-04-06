@@ -95,31 +95,48 @@ export function CitationBadge({
 }
 
 /**
+ * Resolve bbox from citation_context lookup (S{n} → bbox).
+ * Parallel to how RAG chat resolves citations from citation_context sent via SSE.
+ * Falls back to extractedData.bbox for backwards compatibility with old fill runs.
+ */
+function resolveBboxFromContext(citation, citationContext) {
+  if (!citationContext?.citations) return null;
+  const m = String(citation).match(/\[(?:S|D)(\d+):/);
+  if (!m) return null;
+  const sourceIndex = parseInt(m[1], 10);
+  const entry = citationContext.citations.find(c => c.source_index === sourceIndex);
+  return entry?.bbox ?? null;
+}
+
+/**
  * Multiple citation badges
  */
 export function CitationBadges({
   citations = [],
   onCitationClick,
   className,
-  extractedData = {}
+  extractedData = {},
+  citationContext = null,
 }) {
   if (!citations || citations.length === 0) return null;
 
   const citationArray = Array.isArray(citations) ? citations : [citations];
-  // Extract bbox from field data if available
-  const bbox = extractedData?.bbox || null;
 
   return (
     <div className={cn("flex items-center flex-wrap gap-1.5", className)}>
-      {citationArray.map((citation, index) => (
-        <CitationBadge
-          key={`${citation}-${index}`}
-          citation={citation}
-          onClick={onCitationClick}
-          sourceText={extractedData?.source_text}
-          bbox={bbox}
-        />
-      ))}
+      {citationArray.map((citation, index) => {
+        // Prefer context-based lookup (exact per-value bbox); fall back to field-level bbox
+        const bbox = resolveBboxFromContext(citation, citationContext) ?? extractedData?.bbox ?? null;
+        return (
+          <CitationBadge
+            key={`${citation}-${index}`}
+            citation={citation}
+            onClick={onCitationClick}
+            sourceText={extractedData?.source_text}
+            bbox={bbox}
+          />
+        );
+      })}
     </div>
   );
 }
@@ -132,7 +149,8 @@ export function CitationSection({
   onCitationClick,
   label = "Source",
   className,
-  extractedData
+  extractedData,
+  citationContext = null,
 }) {
   if (!citations || citations.length === 0) return null;
 
@@ -143,6 +161,7 @@ export function CitationSection({
         citations={citations}
         onCitationClick={onCitationClick}
         extractedData={extractedData}
+        citationContext={citationContext}
       />
     </div>
   );

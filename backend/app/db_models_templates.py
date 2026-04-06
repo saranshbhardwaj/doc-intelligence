@@ -144,6 +144,11 @@ class TemplateFillRun(Base):
     # }
     extracted_data = Column(JSONB, default={})
 
+    # Pre-built citation lookup: {citations: [{source_index, field_id, page, filename, bbox}, ...]}
+    # Parallel to rag_service._build_citation_context() — built at detect_fields_task time.
+    # Frontend resolves [S{n}:p{N}] tokens → bbox for PDF highlighting without array searching.
+    citation_context = Column(JSONB, nullable=True)
+
     # Output artifact (filled Excel file)
     # Same pattern as WorkflowRun:
     # {"backend": "r2", "key": "fills/abc123.xlsx", "size": 45120}

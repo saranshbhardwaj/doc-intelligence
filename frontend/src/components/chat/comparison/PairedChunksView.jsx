@@ -85,9 +85,9 @@ export default function PairedChunksView({ context, internalScroll = true }) {
               data-comparison-topic={toTopicSlug(chunk.topic)}
             >
               {isPaired ? (
-                <ChunkPairCard pair={chunk} docIndex={idx} />
+                <ChunkPairCard pair={chunk} docIndex={idx} documents={context.documents} />
               ) : (
-                <ChunkClusterCard cluster={chunk} docIndex={idx} />
+                <ChunkClusterCard cluster={chunk} docIndex={idx} documents={context.documents} />
               )}
             </div>
           ))

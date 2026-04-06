@@ -245,7 +245,8 @@ export function sendChatMessage(
               const data = JSON.parse(eventData);
               onChunk?.(data.chunk);
             } else if (eventType === "done") {
-              onComplete?.();
+              const doneData = eventData ? JSON.parse(eventData) : {};
+              onComplete?.(doneData);
             } else if (eventType === "error" && eventData) {
               const data = JSON.parse(eventData);
               onError?.(new Error(data.error));
@@ -427,6 +428,7 @@ export function confirmComparison(
     onComplete,
     onError,
     onComparisonContext,
+    onCitationContext,
     onThinking,
   } = callbacks;
 
@@ -494,11 +496,15 @@ export function confirmComparison(
             } else if (eventType === "comparison_context" && eventData) {
               const data = JSON.parse(eventData);
               onComparisonContext?.(data);
+            } else if (eventType === "citation_context" && eventData) {
+              const data = JSON.parse(eventData);
+              onCitationContext?.(data);
             } else if (eventType === "chunk" && eventData) {
               const data = JSON.parse(eventData);
               onChunk?.(data.chunk);
             } else if (eventType === "done") {
-              onComplete?.();
+              const doneData = eventData ? JSON.parse(eventData) : {};
+              onComplete?.(doneData);
             } else if (eventType === "error" && eventData) {
               const data = JSON.parse(eventData);
               onError?.(new Error(data.error));

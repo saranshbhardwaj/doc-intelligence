@@ -289,12 +289,17 @@ export default function ExcelGrid({
 
                   // Get display value
                   let displayValue = '';
+                  let isTemplateDefault = false;
                   if (hasFormula) {
                     displayValue = `=${cell.f}`;
                   } else if (mappedValue) {
                     displayValue = mappedValue;
                   } else if (cell) {
-                    displayValue = cell.w || cell.v || '';
+                    const rawValue = cell.w || cell.v || '';
+                    if (rawValue) {
+                      displayValue = rawValue;
+                      isTemplateDefault = true;
+                    }
                   }
 
                   // Check if value is long enough to need expansion
@@ -377,6 +382,8 @@ export default function ExcelGrid({
                           ? `${mapping.excel_label || ''} (${Math.round((mapping.confidence || 0) * 100)}% confidence)`
                           : isYamlUnmapped
                           ? `Target cell not mapped yet (${cellAddress})`
+                          : isTemplateDefault
+                          ? `Template default value (${cellAddress})`
                           : cellAddress
                       }
                     >
@@ -392,8 +399,9 @@ export default function ExcelGrid({
                           <>
                             <div className={isExpanded ? "whitespace-pre-wrap" : "truncate"} style={{
                               fontWeight: excelStyle.fontWeight,
-                              fontStyle: excelStyle.fontStyle,
-                              color: excelStyle.color
+                              fontStyle: isTemplateDefault ? 'italic' : excelStyle.fontStyle,
+                              color: isTemplateDefault ? 'hsl(var(--muted-foreground))' : excelStyle.color,
+                              opacity: isTemplateDefault ? 0.6 : undefined,
                             }}>
                               {displayValue || <span className="text-muted-foreground/40">—</span>}
                             </div>

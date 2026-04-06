@@ -205,11 +205,21 @@ class ComparisonChatHandler:
                 # Build citation context from ALL chunks (paired + clustered + unpaired).
                 # Citations use sequential [Sn:pN] format where n is the chunk position.
                 # Sent to frontend via SSE so clicking [Sn:pN] citations navigates to the correct page.
+                all_chunks_flat = [
+                    c for doc_chunks in chunks_per_doc.values() for c in doc_chunks
+                ]
+                built_citation_context = None
                 if self.on_citation_context:
-                    all_chunks_flat = [
-                        c for doc_chunks in chunks_per_doc.values() for c in doc_chunks
-                    ]
-                    self.on_citation_context(all_chunks_flat)
+                    built_citation_context = self.on_citation_context(all_chunks_flat)
+
+                # Build global index BEFORE fact tasks so each fact gets the correct
+                # sequential position in all_chunks_flat (not a per-doc local index).
+                # e.g. DocA chunks → S1-S8, DocB chunks → S9-S16.
+                global_chunk_id_to_index: Dict[str, int] = {
+                    c.get("id"): idx
+                    for idx, c in enumerate(all_chunks_flat, 1)
+                    if c.get("id")
+                }
 
                 fact_tasks = []
                 for doc in comparison_context.documents:
@@ -224,7 +234,8 @@ class ComparisonChatHandler:
                                     else []
                                 ),
                                 document_name=doc.filename,
-                                document_id=doc.id
+                                document_id=doc.id,
+                                global_chunk_id_to_index=global_chunk_id_to_index,
                             )
                         )
                 if fact_tasks:
@@ -416,7 +427,8 @@ class ComparisonChatHandler:
             assistant_message=assistant_message,
             source_chunks=all_chunk_ids,
             usage_data=usage_info,
-            comparison_metadata=json.dumps(comparison_data) if comparison_data else None
+            comparison_metadata=json.dumps(comparison_data) if comparison_data else None,
+            citation_context=built_citation_context,
         )
 
         if self.capture_io_log and self._io_log_repo and assistant_msg_id:

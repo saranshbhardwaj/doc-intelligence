@@ -18,6 +18,7 @@ export default function ExcelGridView({
   extractedData = {},
   fieldMapping = {},
   templateId,
+  citationContext = null,
   onCitationClick,
 }) {
   // Load Excel workbook using custom hook
@@ -302,6 +303,7 @@ export default function ExcelGridView({
               fillRunId={fillRunId}
               fieldMapping={fieldMapping}
               extractedData={extractedData}
+              citationContext={citationContext}
               onClose={() => setSelectedCell(null)}
               onCitationClick={onCitationClick}
             />

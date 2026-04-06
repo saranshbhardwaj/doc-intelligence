@@ -385,10 +385,11 @@ class TemplateRepository:
             "cache_hit_rate",
             "llm_io_log",
             "prompt_version",
+            "citation_context",
         ]
 
         # JSONB fields that need explicit dirty tracking
-        jsonb_fields = ["field_mapping", "extracted_data", "artifact", "llm_io_log"]
+        jsonb_fields = ["field_mapping", "extracted_data", "artifact", "llm_io_log", "citation_context"]
 
         for field, value in kwargs.items():
             if field not in allowed_fields:

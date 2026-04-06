@@ -1,30 +1,47 @@
 // src/components/dashboard/UsageStats.jsx
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { FileSpreadsheet, MessageSquare } from "lucide-react";
+
+function UsageBar({ used, limit, window: resetWindow }) {
+  if (!limit) return (
+    <p className="text-xs text-muted-foreground">Unlimited</p>
+  );
+
+  const pct = Math.min((used / limit) * 100, 100);
+  const barColor = pct >= 90 ? "bg-destructive" : pct >= 80 ? "bg-yellow-500" : "bg-primary";
+  const resetLabel = resetWindow === "monthly" ? "Resets on the 1st of each month" : "Resets at midnight UTC";
+
+  return (
+    <div className="space-y-2">
+      <div className="flex items-center justify-between text-sm">
+        <span className="font-medium">{used} / {limit}</span>
+        <span className="text-xs text-muted-foreground">{pct.toFixed(0)}% used</span>
+      </div>
+      <div className="w-full bg-muted rounded-full h-2">
+        <div
+          className={`h-2 rounded-full transition-all duration-300 ${barColor}`}
+          style={{ width: `${pct}%` }}
+        />
+      </div>
+      <p className="text-xs text-muted-foreground">{resetLabel}</p>
+      {pct >= 90 && (
+        <div className="p-2 bg-destructive/10 border border-destructive/20 rounded text-xs text-destructive">
+          Limit almost reached — {resetLabel.toLowerCase()}.
+        </div>
+      )}
+    </div>
+  );
+}
 
 export default function UsageStats({ userInfo }) {
-  const { usage, tier, subscription } = userInfo;
-  const isFree = tier === "free";
+  const { tier, limits } = userInfo;
+  const fills = limits?.template_fill_runs;
+  const chats = limits?.chat_messages;
 
-  // Calculate progress bar percentage
-  const progressPercentage = Math.min(usage.percentage_used, 100);
-
-  // Determine color based on usage
-  const getProgressColor = () => {
-    if (progressPercentage >= 90) return "bg-destructive";
-    if (progressPercentage >= 75) return "bg-yellow-500";
-    return "bg-primary";
-  };
-
-  // Format tier name
-  const getTierDisplay = () => {
-    return tier.charAt(0).toUpperCase() + tier.slice(1);
-  };
-
-  // Format tier badge variant
+  const getTierDisplay = () => tier.charAt(0).toUpperCase() + tier.slice(1);
   const getTierBadgeVariant = () => {
-    if (tier === "admin") return "default";
-    if (tier === "pro") return "default";
+    if (tier === "admin" || tier === "pro") return "default";
     if (tier === "standard") return "secondary";
     return "outline";
   };
@@ -35,11 +52,7 @@ export default function UsageStats({ userInfo }) {
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div className="min-w-0">
             <CardTitle>Usage Statistics</CardTitle>
-            <CardDescription>
-              {isFree
-                ? "One-time page limit for free tier"
-                : "Monthly page limit resets at the end of billing period"}
-            </CardDescription>
+            <CardDescription>Your monthly fills and daily chat activity</CardDescription>
           </div>
           <Badge variant={getTierBadgeVariant()} className="w-fit">
             {getTierDisplay()} Tier
@@ -47,90 +60,32 @@ export default function UsageStats({ userInfo }) {
         </div>
       </CardHeader>
       <CardContent>
-        <div className="space-y-6">
-          {/* Pages Used/Remaining */}
-          <div>
-            <div className="flex items-center justify-between gap-3 mb-2">
-              <span className="text-sm font-medium min-w-0">
-                Pages Processed
-              </span>
-              <span className="text-sm font-medium shrink-0">
-                {usage.pages_used} / {usage.pages_limit}
-              </span>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6">
+          {/* Template Fill Runs */}
+          <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              <FileSpreadsheet className="h-4 w-4 text-muted-foreground" />
+              <span className="text-sm font-medium">Template Fills This Month</span>
             </div>
-
-            {/* Progress Bar */}
-            <div className="w-full bg-muted rounded-full h-2">
-              <div
-                className={`h-2 rounded-full transition-all duration-300 ${getProgressColor()}`}
-                style={{ width: `${progressPercentage}%` }}
-              />
-            </div>
-
-            <div className="flex items-center justify-between mt-2 text-xs text-muted-foreground gap-2">
-              <span>
-                {usage.pages_remaining} pages remaining
-              </span>
-              <span>
-                {progressPercentage.toFixed(1)}% used
-              </span>
-            </div>
-          </div>
-
-          {/* Warning Messages */}
-          {progressPercentage >= 90 && (
-            <div className="p-3 bg-destructive/10 border border-destructive/20 rounded-lg text-sm text-destructive">
-              <strong>Limit almost reached!</strong> You've used {progressPercentage.toFixed(0)}% of your {isFree ? "one-time" : "monthly"} page limit.
-              {isFree && " Upgrade to continue processing documents."}
-            </div>
-          )}
-
-          {/* Stats Grid */}
-          <div className="grid grid-cols-2 gap-4 pt-4 border-t">
-            <div>
-              <div className="text-xs text-muted-foreground mb-1">
-                Total Processed
-              </div>
-              <div className="text-2xl font-bold">
-                {usage.total_pages_processed.toLocaleString()}
-              </div>
-            </div>
-
-            {!isFree && (
-              <div>
-                <div className="text-xs text-muted-foreground mb-1">
-                  This Month
-                </div>
-                <div className="text-2xl font-bold">
-                  {usage.pages_this_month.toLocaleString()}
-                </div>
-              </div>
-            )}
-
-            {!isFree && subscription.billing_period_end && (
-              <div className="col-span-2">
-                <div className="text-xs text-muted-foreground mb-1">
-                  Billing Period Ends
-                </div>
-                <div className="text-sm font-medium">
-                  {new Date(subscription.billing_period_end).toLocaleDateString(undefined, {
-                    year: 'numeric',
-                    month: 'long',
-                    day: 'numeric'
-                  })}
-                </div>
-              </div>
+            {fills ? (
+              <UsageBar used={fills.used} limit={fills.limit} window={fills.window} />
+            ) : (
+              <p className="text-xs text-muted-foreground">No data</p>
             )}
           </div>
 
-          {/* Upgrade CTA for free tier */}
-          {isFree && progressPercentage >= 75 && (
-            <div className="pt-4 border-t">
-              <button className="w-full px-4 py-2 bg-primary text-primary-foreground rounded-lg hover:bg-primary/90 transition-colors text-sm font-medium">
-                Upgrade to Pro
-              </button>
+          {/* Chat Messages */}
+          <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              <MessageSquare className="h-4 w-4 text-muted-foreground" />
+              <span className="text-sm font-medium">Chat Messages Today</span>
             </div>
-          )}
+            {chats ? (
+              <UsageBar used={chats.used} limit={chats.limit} window={chats.window} />
+            ) : (
+              <p className="text-xs text-muted-foreground">No data</p>
+            )}
+          </div>
         </div>
       </CardContent>
     </Card>

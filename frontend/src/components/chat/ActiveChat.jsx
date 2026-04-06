@@ -46,7 +46,7 @@ import {
 import Spinner from "../common/Spinner";
 import { ComparisonMessage, StreamingComparisonContent } from "./comparison";
 import ComparisonDocumentPicker from "./comparison/ComparisonDocumentPicker";
-import { useComparison, usePdfViewer, useChatActions, useStore } from "../../store";
+import { useComparison, usePdfViewer, useChatActions, useStore, useUser } from "../../store";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import ComparisonPanel from "../comparison/ComparisonPanel";
@@ -59,6 +59,7 @@ import {
   ResizableHandle,
 } from "../ui/resizable";
 import DocumentViewer from "../pdf/DocumentViewer";
+import { toast } from "sonner";
 
 export default function ActiveChat({
   currentSession,
@@ -76,7 +77,17 @@ export default function ActiveChat({
   onUpdateSessionTitle,
   onExportSession,
 }) {
+  const chatLimits = useUser()?.info?.limits?.chat_messages;
   const [message, setMessage] = useState("");
+
+  useEffect(() => {
+    if (!chatLimits?.limit || chatLimits.used < 40) return;
+    if (chatLimits.used >= 45) {
+      toast.error(`${chatLimits.used}/${chatLimits.limit} chat messages used today — almost at your daily limit.`, { duration: 6000 });
+    } else {
+      toast.warning(`Heads up: ${chatLimits.used} of ${chatLimits.limit} chat messages used today.`, { duration: 5000 });
+    }
+  }, [chatLimits?.used]);
   const [showComparisonPanel, setShowComparisonPanel] = useState(false);
   const [showPdfPanel, setShowPdfPanel] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
@@ -84,6 +95,7 @@ export default function ActiveChat({
   const messagesContainerRef = useRef(null);
   const shouldAutoScrollRef = useRef(true);
   const messagesScrollTopRef = useRef(0);
+  const messagesScrollRatioRef = useRef(1);
   const textareaRef = useRef(null);
 
   const handleTextareaInput = (e) => {
@@ -133,10 +145,17 @@ export default function ActiveChat({
   }, [currentSession?.id]);
 
   // Preserve chat scroll position when PDF panel toggles (e.g., citation click).
+  // Use ratio-based restore: absolute scrollTop breaks when column width changes and text reflows.
   useLayoutEffect(() => {
     const container = messagesContainerRef.current;
     if (!container) return;
-    container.scrollTop = messagesScrollTopRef.current;
+    const ratio = messagesScrollRatioRef.current;
+    // If user was at/near bottom (ratio > 0.95), pin to bottom; otherwise restore ratio.
+    if (ratio > 0.95) {
+      container.scrollTop = container.scrollHeight;
+    } else {
+      container.scrollTop = ratio * container.scrollHeight;
+    }
   }, [showPdfPanel]);
 
   const handleSendMessage = (e) => {
@@ -199,7 +218,9 @@ export default function ActiveChat({
   useEffect(() => {
     if (pdfViewer.activeDocumentId && pdfViewer.urlCache[pdfViewer.activeDocumentId]?.url) {
       if (messagesContainerRef.current) {
-        messagesScrollTopRef.current = messagesContainerRef.current.scrollTop;
+        const c = messagesContainerRef.current;
+        messagesScrollTopRef.current = c.scrollTop;
+        messagesScrollRatioRef.current = c.scrollHeight > 0 ? c.scrollTop / c.scrollHeight : 1;
       }
       setShowPdfPanel(true);
     }
@@ -209,7 +230,9 @@ export default function ActiveChat({
   useEffect(() => {
     if (pdfViewer.highlightBbox) {
       if (messagesContainerRef.current) {
-        messagesScrollTopRef.current = messagesContainerRef.current.scrollTop;
+        const c = messagesContainerRef.current;
+        messagesScrollTopRef.current = c.scrollTop;
+        messagesScrollRatioRef.current = c.scrollHeight > 0 ? c.scrollTop / c.scrollHeight : 1;
       }
       setShowPdfPanel(true);
     }
@@ -391,6 +414,7 @@ export default function ActiveChat({
               <ComparisonDocumentPicker
                 documents={comparison.selectionDocuments}
                 preSelected={comparison.selectionPreSelected}
+                originalQuery={comparison.selectionQuery}
                 message={comparison.selectionMessage}
                 onConfirm={(docIds) => {
                   actions.confirmComparisonSelection(

@@ -127,9 +127,6 @@ export default function SessionSidebar({
 
         {currentSession && (
           <div className="chat-section px-3 py-2.5">
-            <div className="mb-1.5 text-[11px] font-medium text-muted-foreground">
-              Current
-            </div>
             {isEditingTitle ? (
               <div className="flex items-center gap-1.5">
                 <Input
@@ -147,6 +144,7 @@ export default function SessionSidebar({
                       setIsEditingTitle(false);
                     }
                   }}
+                  autoFocus
                   className="h-8 rounded-xl border-border/70 bg-background/70 text-xs"
                   placeholder="Session title"
                 />
@@ -175,16 +173,19 @@ export default function SessionSidebar({
                 </button>
               </div>
             ) : (
-              <div className="flex items-center justify-between gap-2">
-                <p className="truncate text-sm font-medium text-foreground">
+              <div
+                className="flex items-center gap-2 rounded-lg px-2 py-1.5 bg-primary/5 border border-primary/15 group cursor-default"
+              >
+                <span className="w-2 h-2 rounded-full bg-primary flex-shrink-0" />
+                <p className="truncate text-sm font-semibold text-foreground flex-1">
                   {currentSession.title || "Untitled Chat"}
                 </p>
                 <button
                   onClick={() => setIsEditingTitle(true)}
-                  className="rounded-full p-1 hover:bg-muted"
-                  title="Edit title"
+                  className="rounded-full p-1 opacity-0 group-hover:opacity-100 hover:bg-primary/10 transition-opacity flex-shrink-0"
+                  title="Rename session"
                 >
-                  <Pencil className="w-3.5 h-3.5 text-muted-foreground" />
+                  <Pencil className="w-3 h-3 text-primary" />
                 </button>
               </div>
             )}

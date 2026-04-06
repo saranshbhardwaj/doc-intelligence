@@ -14,6 +14,7 @@ import { FileText } from "lucide-react";
 import { Badge } from "../../ui/badge";
 import { Card } from "../../ui/card";
 import { Button } from "../../ui/button";
+import ReactMarkdown from "react-markdown";
 import { useChatActions } from "../../../store";
 import SimilarityIndicator from "./SimilarityIndicator";
 
@@ -23,13 +24,7 @@ const DOC_COLORS = {
   C: "border-orange-200 bg-orange-50 dark:bg-orange-950/30",
 };
 
-const DOC_LABELS = {
-  A: "Doc A",
-  B: "Doc B",
-  C: "Doc C",
-};
-
-export default function ChunkClusterCard({ cluster, docIndex = 0 }) {
+export default function ChunkClusterCard({ cluster, docIndex = 0, documents = [] }) {
   const { highlightChunk } = useChatActions();
   const { chunks, avg_similarity, topic } = cluster;
 
@@ -80,7 +75,7 @@ export default function ChunkClusterCard({ cluster, docIndex = 0 }) {
               <div className="flex items-center justify-between mb-2">
                 <Badge variant="secondary" className="text-xs">
                   <FileText className="w-3 h-3 mr-1" />
-                  {DOC_LABELS[docLabel]}
+                  {(() => { const name = documents[idx]?.filename?.replace(/\.[^/.]+$/, "") || `Doc ${docLabel}`; return name.length > 22 ? name.slice(0, 22) + "…" : name; })()}
                 </Badge>
                 {chunk.page && (
                   <Button
@@ -93,9 +88,9 @@ export default function ChunkClusterCard({ cluster, docIndex = 0 }) {
                   </Button>
                 )}
               </div>
-              <p className="text-xs text-foreground/80 leading-relaxed line-clamp-4">
-                {chunk.text}
-              </p>
+              <div className="text-xs text-foreground/80 leading-relaxed prose prose-sm dark:prose-invert max-w-none line-clamp-4">
+                <ReactMarkdown>{chunk.text}</ReactMarkdown>
+              </div>
             </div>
           );
         })}

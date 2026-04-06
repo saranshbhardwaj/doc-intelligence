@@ -132,6 +132,7 @@ class FillRunStatus(BaseModel):
     created_at: datetime
     completed_at: Optional[datetime]
     document_metadata: Optional[Dict[str, Any]]  # PDF metadata for viewer
+    citation_context: Optional[Dict[str, Any]] = None  # S{n}→{bbox,page,filename} lookup for PDF highlighting
 
 
 class FillRunListItem(BaseModel):
@@ -776,6 +777,7 @@ async def get_fill_status(
             created_at=fill_run.created_at,
             completed_at=fill_run.completed_at,
             document_metadata=document_metadata,
+            citation_context=fill_run.citation_context,
         )
 
     except HTTPException:

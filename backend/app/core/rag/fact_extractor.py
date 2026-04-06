@@ -13,7 +13,7 @@ This approach:
 """
 
 import logging
-from typing import List, TYPE_CHECKING
+from typing import Dict, List, Optional, TYPE_CHECKING
 from pydantic import BaseModel, Field
 
 if TYPE_CHECKING:
@@ -73,7 +73,8 @@ class FactExtractor:
         query: str,
         comparison_aspects: List[str],
         document_name: str,
-        document_id: str
+        document_id: str,
+        global_chunk_id_to_index: Optional[Dict[str, int]] = None,
     ) -> DocumentFacts:
         """
         Extract query-relevant facts from chunks.
@@ -136,7 +137,12 @@ class FactExtractor:
             for f in extracted_fact_dicts:
                 # Look up the source_chunk_id in our mapping to get the 1-based index
                 source_chunk_id = f.get("source_chunk_id", "unknown")
-                source_chunk_index = chunk_id_to_index.get(source_chunk_id, 1)
+                if global_chunk_id_to_index:
+                    source_chunk_index = global_chunk_id_to_index.get(
+                        source_chunk_id, chunk_id_to_index.get(source_chunk_id, 1)
+                    )
+                else:
+                    source_chunk_index = chunk_id_to_index.get(source_chunk_id, 1)
                 # Add source_chunk_index to the fact data
                 f["source_chunk_index"] = source_chunk_index
                 augmented_facts.append(ExtractedFact(**f))

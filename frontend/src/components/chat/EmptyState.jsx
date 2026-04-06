@@ -77,6 +77,7 @@ export default function EmptyState({
   const [localSelectedDocs, setLocalSelectedDocs] = useState(selectedDocumentIds);
   const [selectedDocsInfo, setSelectedDocsInfo] = useState([]);
   const [documentSearchQuery, setDocumentSearchQuery] = useState("");
+  const [sessionTitle, setSessionTitle] = useState("");
 
   // Auto-select first collection
   useEffect(() => {
@@ -138,7 +139,7 @@ export default function EmptyState({
 
   const handleStartChat = () => {
     if (localSelectedDocs.length > 0) {
-      onStartChat?.(localSelectedDocs);
+      onStartChat?.(localSelectedDocs, sessionTitle.trim() || null);
     }
   };
 
@@ -173,6 +174,7 @@ export default function EmptyState({
   const handleCancel = () => {
     setLocalSelectedDocs([]);
     setSelectedDocsInfo([]);
+    setSessionTitle("");
     onSelectDocuments?.([]);
     onOpenChange?.(false);
   };
@@ -198,7 +200,7 @@ export default function EmptyState({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-5xl w-full h-[88vh] max-h-[900px] p-0 flex flex-col overflow-hidden gap-0">
         {/* Header */}
-        <div className="p-6 md:p-8 border-b border-border flex-shrink-0">
+        <div className="p-6 md:p-8 border-b border-border flex-shrink-0 space-y-4">
           <div className="flex justify-between items-start flex-wrap gap-4">
             <div>
               <DialogTitle className="text-2xl md:text-3xl font-black text-foreground tracking-tight leading-tight">
@@ -218,6 +220,20 @@ export default function EmptyState({
                 className="pl-9 h-9 w-44 md:w-56"
               />
             </div>
+          </div>
+          {/* Session name */}
+          <div className="flex items-center gap-3 max-w-md">
+            <label className="text-sm font-medium text-foreground whitespace-nowrap">
+              Session name
+            </label>
+            <Input
+              placeholder="e.g. Q3 Deal Review"
+              value={sessionTitle}
+              onChange={(e) => setSessionTitle(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && handleStartChat()}
+              className="h-9 text-sm"
+              autoFocus={false}
+            />
           </div>
         </div>
 

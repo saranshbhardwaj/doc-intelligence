@@ -9,16 +9,26 @@
  * - Breadcrumb support
  */
 
-import { Link, useLocation } from "react-router-dom";
+import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useAppAuth } from "@/hooks/useAppAuth";
-import { Library, MessageSquare, Play, Zap, FileSpreadsheet, LayoutDashboard, Menu, LogOut } from "lucide-react";
-import { useState } from "react";
-import DarkModeToggle from "../common/DarkModeToggle";
+import { Library, MessageSquare, Play, Zap, FileSpreadsheet, LayoutDashboard, Menu, LogOut, Sun, Moon, BarChart2, ChevronRight } from "lucide-react";
+import { useUser, useUserActions } from "../../store";
+import { useState, useEffect } from "react";
 import NetworkStatus from "../common/NetworkStatus";
 import { useDarkMode } from "../../hooks/useDarkMode";
 import VerticalDropdown from "../navigation/VerticalDropdown";
 import { getVerticalNavigation } from "../../config/verticals";
 import { Sheet, SheetContent, SheetTitle, SheetDescription } from "../ui/sheet";
+import { Badge } from "../ui/badge";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+  DropdownMenuGroup,
+  DropdownMenuLabel,
+} from "../ui/dropdown-menu";
 
 // Icon mapping for vertical navigation
 const ICON_MAP = {
@@ -31,12 +41,55 @@ const ICON_MAP = {
   'dashboard': LayoutDashboard,
 };
 
+function UsageBar({ label, used, limit }) {
+  if (!limit) return null;
+  const pct = Math.min((used / limit) * 100, 100);
+  const barColor = pct >= 90 ? 'bg-destructive' : pct >= 80 ? 'bg-yellow-500' : 'bg-primary';
+  const textColor = pct >= 90 ? 'text-destructive' : pct >= 80 ? 'text-yellow-500' : 'text-muted-foreground';
+  return (
+    <div className="space-y-1">
+      <div className="flex items-center justify-between">
+        <span className="text-xs text-muted-foreground">{label}</span>
+        <span className={`text-xs font-medium tabular-nums ${textColor}`}>{used}<span className="opacity-50">/{limit}</span></span>
+      </div>
+      <div className="h-1 w-full rounded-full bg-muted overflow-hidden">
+        <div className={`h-full rounded-full transition-all duration-500 ${barColor}`} style={{ width: `${pct}%` }} />
+      </div>
+    </div>
+  );
+}
+
+function TierBadge({ tier }) {
+  if (!tier) return null;
+  const variants = {
+    admin: 'bg-primary/10 text-primary border-primary/20',
+    pro: 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20',
+    standard: 'bg-muted text-muted-foreground border-border',
+    free: 'bg-muted text-muted-foreground border-border',
+  };
+  const cls = variants[tier] ?? variants.free;
+  return (
+    <span className={`inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide border ${cls}`}>
+      {tier}
+    </span>
+  );
+}
+
 export default function AppLayout({ children, lockViewport = false, headerLeft = null, headerRight = null, hideNav = false }) {
   const location = useLocation();
   const { isDark, toggle } = useDarkMode();
-  const { user, signOut } = useAppAuth();
+  const { user, signOut, getToken } = useAppAuth();
+  const userState = useUser();
+  const userLimits = userState?.info?.limits;
+  const { fetchUserInfo } = useUserActions();
+
+  useEffect(() => {
+    if (!userState?.info) {
+      fetchUserInfo(getToken);
+    }
+  }, []);
+  const navigate = useNavigate();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
-  const [userMenuOpen, setUserMenuOpen] = useState(false);
 
   // Detect current vertical from URL
   const currentVertical = (() => {
@@ -171,43 +224,113 @@ export default function AppLayout({ children, lockViewport = false, headerLeft =
                   {headerRight}
                 </div>
               )}
-              <DarkModeToggle
-                isDark={isDark}
-                toggle={toggle}
-                variant="inline"
-              />
               {/* User avatar / menu */}
-              <div className="relative">
-                <button
-                  type="button"
-                  onClick={() => setUserMenuOpen((o) => !o)}
-                  className="w-9 h-9 rounded-full bg-primary/10 text-primary font-semibold text-sm flex items-center justify-center hover:bg-primary/20 hover:ring-2 hover:ring-primary/30 transition-all duration-200"
-                  aria-label="User menu"
-                >
-                  {user?.firstName?.[0] ?? user?.email?.[0]?.toUpperCase() ?? "U"}
-                </button>
-                {userMenuOpen && (
-                  <div
-                    className="absolute right-0 mt-2 w-52 rounded-lg border border-border bg-card shadow-lg py-1 z-50"
-                    onBlur={() => setUserMenuOpen(false)}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type="button"
+                    className="w-8 h-8 rounded-full overflow-hidden bg-gradient-to-br from-primary/20 to-primary/10 text-primary font-semibold text-sm flex items-center justify-center hover:opacity-90 ring-1 ring-primary/20 hover:ring-primary/40 transition-all duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
+                    aria-label="User menu"
                   >
-                    <div className="px-3 py-2 border-b border-border">
-                      <p className="text-xs font-medium text-foreground truncate">
-                        {user?.firstName} {user?.lastName}
-                      </p>
-                      <p className="text-xs text-muted-foreground truncate">{user?.email}</p>
+                    {user?.profilePictureUrl
+                      ? <img src={user.profilePictureUrl} alt="" className="w-full h-full object-cover" />
+                      : (user?.firstName?.[0] ?? user?.email?.[0]?.toUpperCase() ?? "U")
+                    }
+                  </button>
+                </DropdownMenuTrigger>
+
+                <DropdownMenuContent align="end" sideOffset={8} className="w-64 p-0 overflow-hidden">
+                  {/* Profile header */}
+                  <div className="px-4 pt-4 pb-3 bg-gradient-to-b from-primary/5 to-transparent border-b border-border">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-full overflow-hidden bg-gradient-to-br from-primary/25 to-primary/10 ring-2 ring-primary/20 text-primary font-bold text-base flex items-center justify-center shrink-0">
+                        {user?.profilePictureUrl
+                          ? <img src={user.profilePictureUrl} alt="" className="w-full h-full object-cover" />
+                          : (user?.firstName?.[0] ?? user?.email?.[0]?.toUpperCase() ?? "U")
+                        }
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <p className="text-sm font-semibold text-foreground truncate leading-tight">
+                            {user?.firstName} {user?.lastName}
+                          </p>
+                          <TierBadge tier={userState?.info?.tier} />
+                        </div>
+                        <p className="text-xs text-muted-foreground truncate mt-0.5">{user?.email}</p>
+                      </div>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => { setUserMenuOpen(false); signOut?.(); }}
-                      className="w-full flex items-center gap-2 px-3 py-2 text-sm text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                  </div>
+
+                  {/* Usage */}
+                  {userLimits && (
+                    <>
+                      <DropdownMenuItem
+                        className="flex-col items-stretch gap-2.5 px-4 py-3 cursor-pointer focus:bg-muted/60 rounded-none"
+                        onSelect={() => navigate('/app/dashboard')}
+                      >
+                        <div className="flex items-center justify-between mb-0.5">
+                          <span className="text-xs font-medium text-foreground">Usage</span>
+                          <span className="flex items-center gap-1 text-xs text-primary">
+                            <BarChart2 className="w-3 h-3" />
+                            View details
+                            <ChevronRight className="w-3 h-3" />
+                          </span>
+                        </div>
+                        <UsageBar
+                          label="Template fills this month"
+                          used={userLimits.template_fill_runs?.used ?? 0}
+                          limit={userLimits.template_fill_runs?.limit ?? 0}
+                        />
+                        <UsageBar
+                          label="Chat messages today"
+                          used={userLimits.chat_messages?.used ?? 0}
+                          limit={userLimits.chat_messages?.limit ?? 0}
+                        />
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator className="my-0" />
+                    </>
+                  )}
+
+                  {/* Navigation */}
+                  <DropdownMenuGroup className="p-1">
+                    <DropdownMenuItem asChild>
+                      <Link to="/app/dashboard" className="flex items-center gap-2.5 cursor-pointer">
+                        <LayoutDashboard className="w-4 h-4 text-muted-foreground" />
+                        <span>Dashboard</span>
+                      </Link>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem asChild>
+                      <Link to="/app/library" className="flex items-center gap-2.5 cursor-pointer">
+                        <Library className="w-4 h-4 text-muted-foreground" />
+                        <span>Library</span>
+                      </Link>
+                    </DropdownMenuItem>
+                  </DropdownMenuGroup>
+
+                  <DropdownMenuSeparator className="my-0" />
+
+                  {/* Appearance */}
+                  <DropdownMenuGroup className="p-1">
+                    <DropdownMenuItem onSelect={(e) => { e.preventDefault(); toggle(); }} className="flex items-center gap-2.5 cursor-pointer">
+                      {isDark ? <Sun className="w-4 h-4 text-muted-foreground" /> : <Moon className="w-4 h-4 text-muted-foreground" />}
+                      <span>{isDark ? 'Light mode' : 'Dark mode'}</span>
+                    </DropdownMenuItem>
+                  </DropdownMenuGroup>
+
+                  <DropdownMenuSeparator className="my-0" />
+
+                  {/* Sign out */}
+                  <DropdownMenuGroup className="p-1">
+                    <DropdownMenuItem
+                      onSelect={() => signOut?.()}
+                      className="flex items-center gap-2.5 cursor-pointer text-destructive focus:text-destructive focus:bg-destructive/8"
                     >
                       <LogOut className="w-4 h-4" />
-                      Sign out
-                    </button>
-                  </div>
-                )}
-              </div>
+                      <span>Sign out</span>
+                    </DropdownMenuItem>
+                  </DropdownMenuGroup>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
           </div>
         </div>

@@ -14,7 +14,9 @@ import { FileText } from "lucide-react";
 import { Badge } from "../../ui/badge";
 import { Card } from "../../ui/card";
 import { Button } from "../../ui/button";
+import ReactMarkdown from "react-markdown";
 import { useChatActions } from "../../../store";
+import { useAppAuth } from "@/hooks/useAppAuth";
 import SimilarityIndicator from "./SimilarityIndicator";
 
 const DOC_STYLES = {
@@ -23,18 +25,13 @@ const DOC_STYLES = {
   C: "border-l-4 border-l-doc-c bg-doc-c/5",
 };
 
-const DOC_LABELS = {
-  A: "Doc A",
-  B: "Doc B",
-  C: "Doc C",
-};
-
-export default function ChunkPairCard({ pair, docIndex = 0 }) {
-  const { highlightChunk } = useChatActions();
+export default function ChunkPairCard({ pair, documents = [] }) {
+  const { getToken } = useAppAuth();
+  const { highlightChunk, setActivePdfDocument } = useChatActions();
   const { chunk_a, chunk_b, similarity, topic } = pair;
 
-  const handleCitationClick = (chunk, docLabel) => {
-    // Dispatch highlight action with bbox
+  const handleCitationClick = async (chunk, docId) => {
+    if (!docId) return;
     const bbox = chunk.bbox || {
       page: chunk.page,
       x0: 0,
@@ -42,16 +39,16 @@ export default function ChunkPairCard({ pair, docIndex = 0 }) {
       x1: 1,
       y1: 1,
     };
-    highlightChunk({
-      ...bbox,
-      docId: docLabel,
-      chunkText: chunk.text?.substring(0, 50),
-    });
+    await setActivePdfDocument(docId, getToken);
+    highlightChunk({ ...bbox, docId, chunkText: chunk.text?.substring(0, 50) });
   };
 
   const documentLabels = ["A", "B", "C"];
   const docALabel = documentLabels[0];
   const docBLabel = documentLabels[1];
+  const docAName = documents[0]?.filename?.replace(/\.[^/.]+$/, "") || "Doc A";
+  const docBName = documents[1]?.filename?.replace(/\.[^/.]+$/, "") || "Doc B";
+  const truncate = (s, n) => s.length > n ? s.slice(0, n) + "…" : s;
 
   return (
     <Card className="p-5 border border-border/50 mb-4 hover:shadow-lg transition-all animate-fade-in">
@@ -72,23 +69,23 @@ export default function ChunkPairCard({ pair, docIndex = 0 }) {
           <div className="flex items-center justify-between mb-3">
             <Badge className="bg-doc-a/10 text-doc-a border-0 text-xs font-medium px-2.5 py-1">
               <FileText className="w-3 h-3 mr-1.5" />
-              {DOC_LABELS[docALabel]}
+              {truncate(docAName, 22)}
             </Badge>
             {chunk_a.page && (
               <Button
                 variant="ghost"
                 size="sm"
                 className="text-xs h-7 px-2.5 text-muted-foreground hover:text-foreground"
-                onClick={() => handleCitationClick(chunk_a, docALabel)}
+                onClick={() => handleCitationClick(chunk_a, documents[0]?.id)}
               >
                 <span className="mr-1">p.</span>
                 <span className="font-medium">{chunk_a.page}</span>
               </Button>
             )}
           </div>
-          <p className="text-sm text-foreground/85 leading-relaxed line-clamp-5">
-            {chunk_a.text}
-          </p>
+          <div className="text-sm text-foreground/85 leading-relaxed prose prose-sm dark:prose-invert max-w-none line-clamp-5">
+            <ReactMarkdown>{chunk_a.text}</ReactMarkdown>
+          </div>
         </div>
 
         {/* Chunk B */}
@@ -96,23 +93,23 @@ export default function ChunkPairCard({ pair, docIndex = 0 }) {
           <div className="flex items-center justify-between mb-3">
             <Badge className="bg-doc-b/10 text-doc-b border-0 text-xs font-medium px-2.5 py-1">
               <FileText className="w-3 h-3 mr-1.5" />
-              {DOC_LABELS[docBLabel]}
+              {truncate(docBName, 22)}
             </Badge>
             {chunk_b.page && (
               <Button
                 variant="ghost"
                 size="sm"
                 className="text-xs h-7 px-2.5 text-muted-foreground hover:text-foreground"
-                onClick={() => handleCitationClick(chunk_b, docBLabel)}
+                onClick={() => handleCitationClick(chunk_b, documents[1]?.id)}
               >
                 <span className="mr-1">p.</span>
                 <span className="font-medium">{chunk_b.page}</span>
               </Button>
             )}
           </div>
-          <p className="text-sm text-foreground/85 leading-relaxed line-clamp-5">
-            {chunk_b.text}
-          </p>
+          <div className="text-sm text-foreground/85 leading-relaxed prose prose-sm dark:prose-invert max-w-none line-clamp-5">
+            <ReactMarkdown>{chunk_b.text}</ReactMarkdown>
+          </div>
         </div>
       </div>
     </Card>

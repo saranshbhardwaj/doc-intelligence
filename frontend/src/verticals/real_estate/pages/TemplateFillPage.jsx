@@ -10,7 +10,7 @@ import { useAppAuth } from "@/hooks/useAppAuth";
 import DocumentViewer from '../../../components/pdf/DocumentViewer';
 import FieldsList from '../components/FieldsList';
 import ExcelGridView from '../components/ExcelGridView';
-import { useTemplateFill, useTemplateFillActions } from '../../../store';
+import { useTemplateFill, useTemplateFillActions, useUser } from '../../../store';
 import { Loader2, AlertCircle, FileText, Table, List, Download, ArrowLeft, CheckCircle2, ExternalLink, X, Sparkles, Search, GitMerge, FileSpreadsheet, PartyPopper } from 'lucide-react';
 import { Badge } from '../../../components/ui/badge';
 import { Button } from '../../../components/ui/button';
@@ -21,6 +21,7 @@ import { Card } from '../../../components/ui/card';
 import { Alert, AlertDescription, AlertTitle } from '../../../components/ui/alert';
 import AppLayout from '../../../components/layout/AppLayout';
 import { streamTemplateFillProgress, continueFillRun, downloadFilledExcel, startTemplateFill } from '../../../api/re-templates';
+import { toast } from 'sonner';
 import FeedbackButton from '../../../components/feedback/FeedbackButton';
 import CompletionFeedbackModal from '../../../components/feedback/CompletionFeedbackModal';
 import { shouldPromptForFeedback } from '../../../utils/feedbackRules';
@@ -171,7 +172,19 @@ export default function TemplateFillPage() {
     navigatePdfToPage,
     cleanupPopouts,
   } = useTemplateFillActions();
+  const userLimits = useUser()?.info?.limits;
   const progressStateToken = `${fillRun?.status || ''}|${fillRun?.artifact?.key || ''}|${fillRun?.artifact?.filename || ''}`;
+
+  // Warn when approaching monthly template fill limit
+  useEffect(() => {
+    const fills = userLimits?.template_fill_runs;
+    if (!fills?.limit || fills.used < 40) return;
+    if (fills.used >= 45) {
+      toast.error(`${fills.used}/${fills.limit} template fills used this month — you're almost at your limit.`, { duration: 6000 });
+    } else {
+      toast.warning(`Heads up: ${fills.used} of ${fills.limit} template fills used this month.`, { duration: 5000 });
+    }
+  }, [userLimits?.template_fill_runs?.used]);
 
   // Load fill run data on mount
   useEffect(() => {
@@ -426,7 +439,11 @@ export default function TemplateFillPage() {
       } catch (err) {
         console.error('Failed to continue fill run:', err);
         setJobStatus('failed');
-        setJobMessage('Failed to continue fill run');
+        if (err?.response?.status === 403 || err?.status === 403) {
+          setJobMessage('Monthly template fill limit reached. Contact support to increase your limit.');
+        } else {
+          setJobMessage('Failed to continue fill run');
+        }
       }
     } else {
       // For other statuses, navigate back to templates
@@ -758,7 +775,7 @@ export default function TemplateFillPage() {
                       <List className="h-4 w-4" />
                       <span className="text-sm font-medium">Extracted Fields</span>
                       <Badge variant="secondary">
-                        {fillRun.total_fields_detected || 0}
+                        {fillRun.field_mapping?.pdf_fields?.length || 0}
                       </Badge>
                     </TabsTrigger>
                   </TabsList>
@@ -786,11 +803,13 @@ export default function TemplateFillPage() {
                 </div>
               </div>
 
+
               <TabsContent value="fields" className="flex-1 min-h-0 overflow-auto m-0">
                 <FieldsList
                   fillRunId={fillRunId}
                   extractedData={fillRun.extracted_data}
                   fieldMapping={fillRun.field_mapping}
+                  citationContext={fillRun.citation_context}
                   selectedText={selectedText}
                   onCitationClick={handleCitationClick}
                 />
@@ -830,6 +849,7 @@ export default function TemplateFillPage() {
                     extractedData={fillRun.extracted_data}
                     fieldMapping={fillRun.field_mapping}
                     templateId={fillRun.template_id}
+                    citationContext={fillRun.citation_context}
                     onCitationClick={handleCitationClick}
                   />
                 )}

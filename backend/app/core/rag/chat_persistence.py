@@ -181,7 +181,10 @@ class ChatPersistence:
                 }
             )
 
-            return assistant_msg_saved.id if assistant_msg_saved else None
+            return (
+                user_msg_saved.id if user_msg_saved else None,
+                assistant_msg_saved.id if assistant_msg_saved else None,
+            )
 
         except Exception as save_error:
             # Edge case: Message saving failed - log comprehensive error

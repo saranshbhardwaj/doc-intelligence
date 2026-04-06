@@ -169,6 +169,14 @@ export const createChatComparisonActions = (set, get) => ({
             },
           }));
         },
+        onCitationContext: (context) => {
+          set((state) => ({
+            chat: {
+              ...state.chat,
+              citationContext: context,
+            },
+          }));
+        },
         onChunk: (chunk) => {
           set((state) => ({
             chat: {
@@ -179,26 +187,38 @@ export const createChatComparisonActions = (set, get) => ({
             },
           }));
         },
-        onComplete: () => {
+        onComplete: (doneData = {}) => {
           const streamingMessage = get().chat.streamingMessage;
           const comparisonState = get().chat.comparison;
+          const citationContext = get().chat.citationContext;
           const assistantMessage = {
             role: "assistant",
             content: streamingMessage,
             created_at: new Date().toISOString(),
+            ...(doneData.assistant_message_id ? { id: doneData.assistant_message_id } : {}),
             ...(comparisonState?.isActive && comparisonState?.context
               ? { comparison_metadata: comparisonState.context }
               : {}),
+            ...(citationContext?.citations?.length > 0
+              ? { citation_context: citationContext }
+              : {}),
           };
 
-          set((state) => ({
-            chat: {
-              ...state.chat,
-              messages: [...state.chat.messages, assistantMessage],
-              isStreaming: false,
-              streamingMessage: "",
-            },
-          }));
+          set((state) => {
+            const messages = [...state.chat.messages];
+            if (doneData.user_message_id && messages.length > 0) {
+              const lastIdx = messages.length - 1;
+              messages[lastIdx] = { ...messages[lastIdx], id: doneData.user_message_id };
+            }
+            return {
+              chat: {
+                ...state.chat,
+                messages: [...messages, assistantMessage],
+                isStreaming: false,
+                streamingMessage: "",
+              },
+            };
+          });
 
           get().fetchSessions(getToken);
         },

@@ -11,7 +11,7 @@ Responsibilities limited to orchestration:
 
 Other concerns (prompt construction, memory management, budget logic) are delegated.
 """
-from typing import List, Dict, Any, Optional, AsyncIterator
+from typing import List, Dict, Any, Optional, AsyncIterator, Set, Tuple
 from sqlalchemy.orm import Session
 from sqlalchemy import select
 from app.db_models_chat import DocumentChunk, CollectionDocument
@@ -32,6 +32,7 @@ from app.core.rag.comparison_retriever import ComparisonRetriever
 from app.core.rag.query_understanding import (
     QueryUnderstandingService,
     QueryType,
+    ScopeMode,
     is_narrow_explicit_fact_lookup,
 )
 from app.core.rag.fact_extractor import FactExtractor
@@ -59,9 +60,11 @@ _RETRIEVAL_SIZING = {
 }
 _DOC_SCOPE_MATCH_THRESHOLD = 0.70
 _DATA_EXTRACTION_SCOPE_CONFIDENCE_THRESHOLD = 0.65
+_SCOPE_GUARDRAIL_MIN_CONFIDENCE = 0.55
 import asyncio
 import functools
 import json
+import re
 import time
 from app.services.service_locator import get_reranker
 
@@ -139,6 +142,9 @@ class RAGService:
         # Citation context for SSE emission (set during general chat queries)
         self.last_citation_context = None
 
+        # Saved message IDs from last persistence call — emitted in done event
+        self.last_saved_message_ids = (None, None)  # (user_msg_id, assistant_msg_id)
+
         # Document matching helper
         self.document_matcher = DocumentMatcher(db)
         self.document_repo = DocumentRepository()
@@ -160,9 +166,13 @@ class RAGService:
     def _set_comparison_context(self, comparison_data: Dict):
         self.last_comparison_context = comparison_data
 
-    def _set_citation_context_from_chunks(self, chunks: List[Dict]):
-        """Build and store citation context from comparison chunks for SSE emission."""
+    def _set_citation_context_from_chunks(self, chunks: List[Dict]) -> Dict:
+        """Build and store citation context from comparison chunks for SSE emission.
+
+        Returns the built context so callers (e.g. comparison_flow) can persist it.
+        """
         self.last_citation_context = self._build_citation_context(chunks)
+        return self.last_citation_context
 
     async def chat(
         self,
@@ -217,7 +227,7 @@ class RAGService:
         if is_low_signal_message(user_message):
             assistant_message = low_signal_response(user_message)
             yield ("chunk", assistant_message)
-            await self.persistence.save_chat_messages(
+            saved_ids = await self.persistence.save_chat_messages(
                 session_id=session_id,
                 user_message=user_message,
                 assistant_message=assistant_message,
@@ -225,6 +235,7 @@ class RAGService:
                 usage_data=None,
                 org_id=org_id
             )
+            self.last_saved_message_ids = saved_ids
             self.last_comparison_context = None
             return
 
@@ -284,6 +295,11 @@ class RAGService:
                 "has_rewritten_query": bool(understanding.rewritten_query),
                 "history_messages_count": len(history_messages),
                 "query_type": understanding.query_type.value if understanding.query_type else None,
+                "scope_mode": getattr(getattr(understanding, "scope_mode", None), "value", None),
+                "scope_confidence": getattr(understanding, "scope_confidence", None),
+                "target_property_names": (getattr(understanding, "target_property_names", []) or [])[:3],
+                "target_geo_city": getattr(understanding, "target_geo_city", None),
+                "target_geo_state": getattr(understanding, "target_geo_state", None),
                 "confidence": understanding.confidence,
                 "data_fields_count": len(understanding.data_fields or []),
                 "data_fields": (understanding.data_fields or [])[:5],
@@ -433,11 +449,37 @@ class RAGService:
         # ENTITY_LOOKUP) and exactly one document matches with high confidence,
         # restrict retrieval to that document so short/sparse docs aren't
         # outranked by denser documents in the reranker.
+        scope_mode = getattr(getattr(understanding, "scope_mode", None), "value", None) or ScopeMode.AMBIGUOUS.value
+        scope_confidence = getattr(understanding, "scope_confidence", 0.0) or 0.0
+        scope_target_ids = self._match_scope_targets_to_documents(understanding, doc_info)
+
+        # If scope is ambiguous for non-comparison queries across multiple docs,
+        # ask the user to select intended documents.
+        if (
+            document_ids
+            and len(document_ids) > 1
+            and understanding.query_type != QueryType.COMPARISON
+            and scope_mode == ScopeMode.AMBIGUOUS.value
+            and scope_confidence >= 0.45
+        ):
+            selection_docs = [{"id": d["id"], "name": d["filename"]} for d in doc_info]
+            pre_selected = [doc_id for doc_id in scope_target_ids if doc_id in {d["id"] for d in doc_info}][:3]
+            selection_event = {
+                "type": "selection_needed",
+                "documents": selection_docs,
+                "pre_selected": pre_selected,
+                "original_query": user_message,
+                "message": "Your query could refer to multiple documents. Select one or more documents to continue:",
+            }
+            yield ("comparison_selection", selection_event)
+            return
+
         scoped_doc_ids = document_ids
         did_scope_to_single_doc = False
         allow_data_extraction_scope = (
             understanding.query_type == QueryType.DATA_EXTRACTION
             and narrow_explicit_fact_lookup
+            and scope_mode not in {ScopeMode.MULTI_DOC.value, ScopeMode.GLOBAL.value}
             and (
                 understanding.confidence is None
                 or understanding.confidence >= _DATA_EXTRACTION_SCOPE_CONFIDENCE_THRESHOLD
@@ -452,23 +494,39 @@ class RAGService:
                 or allow_data_extraction_scope
             )
         ):
-            matches = self.document_matcher.match_entities_with_scores(
-                understanding.entities, doc_info
-            )
-            high_conf = [m for m in matches if m["score"] >= _DOC_SCOPE_MATCH_THRESHOLD]
-            if len(high_conf) == 1:
-                scoped_doc_ids = [high_conf[0]["id"]]
+            # Scope-mode single_doc has priority when we have exactly one target match.
+            if scope_mode == ScopeMode.SINGLE_DOC.value and len(scope_target_ids) == 1:
+                scoped_doc_ids = [scope_target_ids[0]]
                 did_scope_to_single_doc = True
+                matched_filename = next((d["filename"] for d in doc_info if d["id"] == scope_target_ids[0]), None)
                 logger.info(
-                    "Document-scoped retrieval activated",
+                    "Document-scoped retrieval activated (scope_mode=single_doc)",
                     extra={
                         "session_id": session_id,
-                        "matched_doc": high_conf[0]["filename"],
-                        "score": high_conf[0]["score"],
+                        "matched_doc": matched_filename,
                         "query_type": understanding.query_type.value,
+                        "scope_confidence": scope_confidence,
                         "narrow_explicit_fact_lookup": narrow_explicit_fact_lookup,
                     }
                 )
+            else:
+                matches = self.document_matcher.match_entities_with_scores(
+                    understanding.entities, doc_info
+                )
+                high_conf = [m for m in matches if m["score"] >= _DOC_SCOPE_MATCH_THRESHOLD]
+                if len(high_conf) == 1:
+                    scoped_doc_ids = [high_conf[0]["id"]]
+                    did_scope_to_single_doc = True
+                    logger.info(
+                        "Document-scoped retrieval activated",
+                        extra={
+                            "session_id": session_id,
+                            "matched_doc": high_conf[0]["filename"],
+                            "score": high_conf[0]["score"],
+                            "query_type": understanding.query_type.value,
+                            "narrow_explicit_fact_lookup": narrow_explicit_fact_lookup,
+                        }
+                    )
 
         already_single_doc_scope = bool(document_ids and len(document_ids) == 1)
 
@@ -511,6 +569,20 @@ class RAGService:
             document_ids=scoped_doc_ids,  # May be narrowed to a single matched document
             query_understanding=understanding,  # For HyDE enhancement
             min_semantic_similarity=settings.rag_chat_semantic_similarity_floor
+        )
+
+        doc_profiles = self._build_document_profiles(doc_info)
+        self._annotate_scope_match_features(
+            chunks=hybrid_results,
+            query_understanding=understanding,
+            doc_profiles=doc_profiles,
+            collection_id=collection_id,
+            requested_doc_ids=set(scoped_doc_ids or []),
+        )
+        self._apply_scope_score_adjustment(
+            chunks=hybrid_results,
+            score_field="hybrid_score",
+            requested_doc_ids=set(scoped_doc_ids or []),
         )
 
         retrieval_ms = round((time.monotonic() - retrieval_start) * 1000, 2)
@@ -586,6 +658,19 @@ class RAGService:
                     extra={"session_id": session_id}
                 )
 
+        # Scope features already annotated on hybrid_results (pre-rerank); surviving chunks
+        # carry those annotations. Only re-apply score adjustment for the rerank_score field.
+        self._apply_scope_score_adjustment(
+            chunks=relevant_chunks,
+            score_field="rerank_score" if should_rerank else "hybrid_score",
+            requested_doc_ids=set(scoped_doc_ids or []),
+        )
+        relevant_chunks = sorted(
+            relevant_chunks,
+            key=lambda x: x.get("rerank_score", x.get("hybrid_score", 0.0)),
+            reverse=True,
+        )[:final_top_k]
+
         # Edge case: no relevant chunks found — short-circuit without calling the LLM.
         # An LLM call here is wasteful: the answer is always the same shape ("nothing found"),
         # and we'd be spending tokens just to produce a canned response.
@@ -612,7 +697,7 @@ class RAGService:
             )
             no_results_response = random.choice(_NO_RESULTS_RESPONSES)
             yield ("chunk", no_results_response)
-            await self.persistence.save_chat_messages(
+            saved_ids = await self.persistence.save_chat_messages(
                 session_id=session_id,
                 user_message=user_message,
                 assistant_message=no_results_response,
@@ -622,6 +707,7 @@ class RAGService:
                 citation_context=None,
                 org_id=org_id
             )
+            self.last_saved_message_ids = saved_ids
             return
 
         # ------------------------------------------------------------------
@@ -776,13 +862,24 @@ class RAGService:
         full_response = ""
         usage_data = None
         llm_start = time.monotonic()
+        use_scope_guardrail = (
+            settings.rag_scope_guardrail_regenerate_enabled
+            and bool(document_ids and len(document_ids) > 1)
+            and bool(scope_target_ids or scoped_doc_ids)
+            and scope_confidence >= _SCOPE_GUARDRAIL_MIN_CONFIDENCE
+            and scope_mode in {ScopeMode.SINGLE_DOC.value, ScopeMode.AMBIGUOUS.value}
+        )
+        requested_doc_set = set(scope_target_ids or scoped_doc_ids or [])
+        guardrail_regenerated = False
+        requested_entity_mismatch = False
         try:
             async for item in self.llm_client.stream_chat(user_content, system_prompt=system_prompt):
                 # Handle different stream item types
                 if item["type"] == "chunk":
                     text_chunk = item["text"]
                     full_response += text_chunk
-                    yield ("chunk", text_chunk)
+                    if not use_scope_guardrail:
+                        yield ("chunk", text_chunk)
                 elif item["type"] == "usage":
                     # Capture usage data for persistence
                     usage_data = item["data"]
@@ -795,8 +892,50 @@ class RAGService:
                         }
                     )
 
+            if use_scope_guardrail and full_response:
+                cited_doc_ids = self._extract_cited_document_ids(full_response, self.last_citation_context)
+                requested_entity_mismatch = self._has_requested_entity_mismatch(
+                    cited_doc_ids=cited_doc_ids,
+                    requested_doc_ids=requested_doc_set,
+                )
+
+                if requested_entity_mismatch:
+                    logger.warning(
+                        "Requested entity mismatch detected; regenerating response with stricter scope",
+                        extra={
+                            "session_id": session_id,
+                            "requested_doc_ids": list(requested_doc_set),
+                            "cited_doc_ids": list(cited_doc_ids),
+                        },
+                    )
+                    scoped_chunks = [
+                        chunk for chunk in relevant_chunks
+                        if chunk.get("document_id") in requested_doc_set
+                    ]
+                    if scoped_chunks:
+                        scoped_system_prompt, scoped_user_content = self.prompt_builder.build_split(
+                            user_message=user_message,
+                            relevant_chunks=scoped_chunks,
+                            recent_messages=recent_messages,
+                            summary_text=summary_text,
+                            include_history=include_history,
+                        )
+                        full_response, usage_data = await self._collect_full_response(
+                            user_content=scoped_user_content,
+                            system_prompt=scoped_system_prompt,
+                        )
+                        self.last_citation_context = self._build_citation_context(scoped_chunks)
+                        guardrail_regenerated = True
+                    else:
+                        logger.warning(
+                            "Scope guardrail could not regenerate because scoped chunk set was empty",
+                            extra={"session_id": session_id, "requested_doc_ids": list(requested_doc_set)},
+                        )
+
+                yield ("chunk", full_response)
+
             # Persist chat messages only after successful streaming
-            assistant_msg_id = await self.persistence.save_chat_messages(
+            saved_ids = await self.persistence.save_chat_messages(
                 session_id=session_id,
                 user_message=user_message,
                 assistant_message=full_response,
@@ -806,6 +945,8 @@ class RAGService:
                 citation_context=self.last_citation_context,
                 org_id=org_id
             )
+            self.last_saved_message_ids = saved_ids
+            _, assistant_msg_id = saved_ids if saved_ids else (None, None)
 
             if self.capture_io_log and self._io_log_repo and assistant_msg_id:
                 llm_duration_ms = int((time.monotonic() - llm_start) * 1000)
@@ -830,6 +971,8 @@ class RAGService:
                         "chunk_texts": [c.get("text", "")[:500] for c in relevant_chunks],
                         # Query understanding output
                         "query_understanding": serialize_query_understanding(understanding),
+                        "requested_entity_mismatch": requested_entity_mismatch,
+                        "guardrail_regenerated": guardrail_regenerated,
                     },
                     input_tokens=usage_data.get("input_tokens", 0) if usage_data else 0,
                     output_tokens=usage_data.get("output_tokens", 0) if usage_data else 0,
@@ -960,6 +1103,190 @@ class RAGService:
             })
 
         return chunks
+
+    def _match_scope_targets_to_documents(self, query_understanding, documents: List[Dict[str, Any]]) -> List[str]:
+        """Resolve scope targets (property/deal/doc names + geo hints) to document IDs."""
+        if not documents or not query_understanding:
+            return []
+
+        targets: List[str] = []
+        targets.extend([name for name in (getattr(query_understanding, "target_property_names", []) or []) if isinstance(name, str)])
+
+        for entity in (getattr(query_understanding, "entities", []) or []):
+            entity_type = getattr(entity, "entity_type", "")
+            if entity_type in {"document", "property", "deal", "organization", "other"}:
+                name = getattr(entity, "name", "")
+                if name:
+                    targets.append(name)
+
+        # Geo hints can map to filename tokens in many OM naming conventions.
+        city = getattr(query_understanding, "target_geo_city", None)
+        state = getattr(query_understanding, "target_geo_state", None)
+        if city:
+            targets.append(city)
+        if state:
+            targets.append(state)
+
+        deduped_targets = []
+        seen = set()
+        for target in targets:
+            norm = re.sub(r"\s+", " ", (target or "").strip().lower())
+            if len(norm) < 3 or norm in seen:
+                continue
+            seen.add(norm)
+            deduped_targets.append(target)
+
+        matched_ids: List[str] = []
+        for target in deduped_targets[:12]:
+            match = self.document_matcher.fuzzy_match_document(target, documents, threshold=0.5)
+            if match and match["id"] not in matched_ids:
+                matched_ids.append(match["id"])
+
+        return matched_ids
+
+    async def _collect_full_response(self, user_content: str, system_prompt: str) -> Tuple[str, Optional[Dict[str, Any]]]:
+        """Collect full LLM response without streaming to caller."""
+        full_response = ""
+        usage_data: Optional[Dict[str, Any]] = None
+        async for item in self.llm_client.stream_chat(user_content, system_prompt=system_prompt):
+            if item["type"] == "chunk":
+                full_response += item["text"]
+            elif item["type"] == "usage":
+                usage_data = item["data"]
+        return full_response, usage_data
+
+    def _build_document_profiles(self, documents: List[Dict[str, Any]]) -> Dict[str, Dict[str, Any]]:
+        """Build lightweight per-document profile from filenames for scope matching."""
+        profiles: Dict[str, Dict[str, Any]] = {}
+        for doc in documents or []:
+            doc_id = doc.get("id")
+            filename = doc.get("filename", "")
+            if not doc_id:
+                continue
+            stem = re.sub(r"\.[A-Za-z0-9]+$", "", filename)
+            normalized_stem = self._normalize_scope_text(stem)
+            alias_tokens = {normalized_stem}
+            for token in re.split(r"[_\-\s]+", stem):
+                norm_token = self._normalize_scope_text(token)
+                if len(norm_token) >= 3:
+                    alias_tokens.add(norm_token)
+            profiles[doc_id] = {
+                "filename": filename,
+                "normalized_stem": normalized_stem,
+                "aliases": alias_tokens,
+            }
+        return profiles
+
+    def _annotate_scope_match_features(
+        self,
+        chunks: List[Dict[str, Any]],
+        query_understanding,
+        doc_profiles: Dict[str, Dict[str, Any]],
+        collection_id: Optional[str],
+        requested_doc_ids: Set[str],
+    ) -> None:
+        """Attach chunk-level scope features used by ranking and guardrails."""
+        target_names = [
+            self._normalize_scope_text(name)
+            for name in (getattr(query_understanding, "target_property_names", []) or [])
+            if isinstance(name, str) and name.strip()
+        ]
+        target_city = self._normalize_scope_text(getattr(query_understanding, "target_geo_city", "") or "")
+        target_state = self._normalize_scope_text(getattr(query_understanding, "target_geo_state", "") or "")
+
+        for chunk in chunks or []:
+            doc_id = chunk.get("document_id")
+            profile = doc_profiles.get(doc_id, {})
+            aliases = profile.get("aliases", set())
+
+            property_exact_match = any(
+                target and (
+                    target == profile.get("normalized_stem")
+                    or target in aliases
+                    or target in profile.get("normalized_stem", "")
+                )
+                for target in target_names
+            )
+            geo_match = bool(
+                (target_city and target_city in profile.get("normalized_stem", ""))
+                or (target_state and target_state in profile.get("normalized_stem", ""))
+            )
+            requested_scope_match = bool(doc_id and requested_doc_ids and doc_id in requested_doc_ids)
+
+            entity_doc_match_score = 0.0
+            if property_exact_match:
+                entity_doc_match_score += 0.55
+            if geo_match:
+                entity_doc_match_score += 0.25
+            if requested_scope_match:
+                entity_doc_match_score += 0.35
+            entity_doc_match_score = min(entity_doc_match_score, 1.0)
+
+            chunk["collection_id"] = collection_id
+            chunk["canonical_document_key"] = f"{collection_id}:{doc_id}" if collection_id and doc_id else str(doc_id or "")
+            chunk["property_name_exact_match"] = property_exact_match
+            chunk["geo_match"] = geo_match
+            chunk["requested_scope_match"] = requested_scope_match
+            chunk["entity_doc_match_score"] = round(entity_doc_match_score, 4)
+
+    def _apply_scope_score_adjustment(
+        self,
+        chunks: List[Dict[str, Any]],
+        score_field: str,
+        requested_doc_ids: Set[str],
+    ) -> None:
+        """Apply lightweight scope-aware boost/penalty to retrieval or rerank score."""
+        if not settings.rag_scope_match_reweight_enabled:
+            return
+        boost_weight = max(0.0, settings.rag_scope_match_boost_weight)
+        mismatch_penalty = max(0.0, min(settings.rag_scope_mismatch_penalty_weight, 0.9))
+
+        for chunk in chunks or []:
+            base_score = float(chunk.get(score_field, 0.0) or 0.0)
+            match_score = float(chunk.get("entity_doc_match_score", 0.0) or 0.0)
+            adjusted = base_score * (1.0 + (boost_weight * match_score))
+
+            if requested_doc_ids and chunk.get("document_id") not in requested_doc_ids:
+                adjusted *= (1.0 - mismatch_penalty)
+
+            chunk[f"{score_field}_scope_adjusted"] = round(adjusted, 6)
+            chunk[score_field] = adjusted
+
+    def _extract_cited_document_ids(self, response_text: str, citation_context: Optional[Dict[str, Any]]) -> Set[str]:
+        """Resolve cited [Sn:pN] references in model output into concrete document IDs."""
+        if not response_text or not citation_context:
+            return set()
+        refs = re.findall(r"\[S(\d+):p(\d+)\]", response_text)
+        if not refs:
+            return set()
+
+        citations = citation_context.get("citations", []) or []
+        cited_doc_ids: Set[str] = set()
+        for src_idx, page in refs:
+            src_int = int(src_idx)
+            page_int = int(page)
+            exact = next(
+                (c for c in citations if c.get("source_index") == src_int and c.get("page") == page_int),
+                None,
+            )
+            fallback = exact or next((c for c in citations if c.get("source_index") == src_int), None)
+            if fallback and fallback.get("document_id"):
+                cited_doc_ids.add(str(fallback["document_id"]))
+        return cited_doc_ids
+
+    def _has_requested_entity_mismatch(self, cited_doc_ids: Set[str], requested_doc_ids: Set[str]) -> bool:
+        """Detect when cited docs do not align with requested scope docs."""
+        if not requested_doc_ids:
+            return False
+        if not cited_doc_ids:
+            return bool(settings.rag_scope_guardrail_require_citations)
+        return not cited_doc_ids.issubset(requested_doc_ids)
+
+    @staticmethod
+    def _normalize_scope_text(value: str) -> str:
+        if not value:
+            return ""
+        return re.sub(r"\s+", " ", re.sub(r"[^a-z0-9\s]", " ", value.lower())).strip()
 
     def _get_max_expansion(self, query_type: QueryType) -> int:
         """
