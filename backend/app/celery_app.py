@@ -57,6 +57,13 @@ celery_app.conf.update(
     result_extended=True,            # Store full traceback for debugging failed tasks
 )
 
+# In debug mode, disable task time limits so breakpoints don't kill tasks mid-session
+if _is_debug_enabled():
+    celery_app.conf.update(
+        task_time_limit=None,
+        task_soft_time_limit=None,
+    )
+
 # Priority queue routing: business-critical tasks → "critical" queue,
 # background indexing → "default" queue.
 # Workers subscribe to specific queues via -Q flag in docker-compose.

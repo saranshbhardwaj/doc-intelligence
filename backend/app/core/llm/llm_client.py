@@ -38,12 +38,20 @@ class LLMClient:
     Note: Extraction-specific summarization moved to ExtractionLLMService.
     """
 
-    def __init__(self, api_key: str, model: str, max_tokens: int, max_input_chars: int, timeout_seconds: int = 120):
+    def __init__(
+        self,
+        api_key: str,
+        model: str,
+        max_tokens: int,
+        max_input_chars: int,
+        timeout_seconds: int = 120,
+        max_retries: int = 2,
+    ):
         # Create timeout object for Anthropic SDK
         # read timeout is the important one for long-running API calls
         timeout = Timeout(timeout=float(timeout_seconds), read=float(timeout_seconds), write=10.0, connect=5.0)
-        self.client = Anthropic(api_key=api_key, timeout=timeout)
-        self.async_client = AsyncAnthropic(api_key=api_key, timeout=timeout, max_retries=2)
+        self.client = Anthropic(api_key=api_key, timeout=timeout, max_retries=max_retries)
+        self.async_client = AsyncAnthropic(api_key=api_key, timeout=timeout, max_retries=max_retries)
 
         # Expensive LLM (for structured extraction)
         self.model = model
@@ -322,7 +330,8 @@ class LLMClient:
         text: str,
         system_prompt: str,
         pydantic_model: type[BaseModel],
-        use_cache: bool = False
+        use_cache: bool = False,
+        max_retries_override: int | None = None,
     ) -> Dict:
         """
         Extract data with GUARANTEED schema compliance using Claude structured outputs.
@@ -372,11 +381,12 @@ class LLMClient:
             }
         )
         
-        # Retry logic for transient errors
-        max_retries = 3
+        # Retry logic for transient errors.
+        # max_retries_override is the number of retries AFTER the first attempt.
+        max_attempts = 3 if max_retries_override is None else max(1, int(max_retries_override) + 1)
         retry_delay = 2
         
-        for attempt in range(max_retries):
+        for attempt in range(max_attempts):
             try:
                 # Build request with structured outputs
                 if use_cache:
@@ -419,9 +429,9 @@ class LLMClient:
                     "Error code: 529" in error_str
                 )
                 
-                if is_retryable and attempt < max_retries - 1:
+                if is_retryable and attempt < max_attempts - 1:
                     wait_time = retry_delay * (2 ** attempt)
-                    logger.warning(f"API error, retrying in {wait_time}s (attempt {attempt + 1}/{max_retries})")
+                    logger.warning(f"API error, retrying in {wait_time}s (attempt {attempt + 1}/{max_attempts})")
                     await asyncio.sleep(wait_time)
                 else:
                     raise

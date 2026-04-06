@@ -482,7 +482,7 @@ export default function RoomDocuments() {
     <PELayout>
       <div className="flex flex-col h-full bg-background">
         {/* Page header */}
-        <div className="px-6 py-4 border-b border-border flex items-center justify-between shrink-0 bg-card/60">
+        <div className="glass-sidebar px-6 py-4 border-b border-border/40 flex items-center justify-between shrink-0">
           <div>
             <h1 className="text-xl font-semibold font-display">Documents</h1>
             <p className="text-xs text-muted-foreground">{effectiveDocs.length} total</p>
@@ -528,7 +528,7 @@ export default function RoomDocuments() {
         {!loading && (
           <div className="flex flex-1 overflow-hidden">
             {/* Left sidebar — folders */}
-            <aside className="w-56 shrink-0 border-r border-border flex flex-col overflow-hidden bg-muted/20">
+            <aside className="glass-panel w-56 shrink-0 border-r border-border/40 flex flex-col overflow-hidden">
               {/* New Folder button */}
               <div className="p-3 border-b border-border shrink-0">
                 {newFolderInputVisible ? (
@@ -670,7 +670,7 @@ export default function RoomDocuments() {
                 <div className="flex-1 flex items-center justify-center p-6">
                   {effectiveDocs.length === 0 ? (
                     <div className="pe-card-muted flex flex-col items-center justify-center py-16 rounded-xl max-w-sm">
-                      <div className="w-16 h-16 bg-primary/10 rounded-2xl flex items-center justify-center mb-4">
+                      <div className="w-16 h-16 glass-card rounded-2xl flex items-center justify-center mb-4">
                         <Upload className="w-8 h-8 text-primary opacity-60" />
                       </div>
                       <p className="text-sm font-semibold">No documents yet</p>

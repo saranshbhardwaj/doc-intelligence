@@ -11,6 +11,7 @@ import { cn } from "../../../lib/utils";
 export default function ComparisonDocumentPicker({
   documents = [],
   preSelected = [],
+  originalQuery = "",
   message = "Select 2-3 documents to compare:",
   onConfirm,
   onSkip,
@@ -34,6 +35,13 @@ export default function ComparisonDocumentPicker({
       </div>
 
       <p className="text-sm text-muted-foreground mb-3">{message}</p>
+
+      {originalQuery?.trim() && (
+        <div className="mb-3 rounded-md border bg-background/70 px-3 py-2">
+          <p className="text-[11px] uppercase tracking-wide text-muted-foreground">Your question</p>
+          <p className="text-sm text-foreground">{originalQuery}</p>
+        </div>
+      )}
 
       <div className="space-y-2 mb-4 max-h-60 overflow-y-auto scrollbar-thin">
         {documents.map((doc) => (

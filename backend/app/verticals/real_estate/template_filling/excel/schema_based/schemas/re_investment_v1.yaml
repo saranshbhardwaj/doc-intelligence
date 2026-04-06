@@ -6,6 +6,7 @@ schema_id: "re_investment_v1"
 version: "1.0"
 name: "RE Investment Model"
 description: "Standard real estate investment analysis model with 21 sheets"
+total_sheets: 21
 
 # Fingerprint cells - used to identify this template (check 3-5 unique cells)
 fingerprint:

@@ -18,7 +18,7 @@ from app.utils.logging import logger
 CONFIDENCE_THRESHOLDS = {
     "auto_fill": 0.85,       # Fill automatically, high trust
     "needs_review": 0.70,    # Fill but flag for user review
-    "skip": 0.50,            # Don't fill, show as unmapped
+    "skip": 0.10,            # Don't fill, show as unmapped
 }
 
 

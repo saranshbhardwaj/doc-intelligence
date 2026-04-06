@@ -160,12 +160,6 @@ Triggered when `len(conversation_history_chars) > chat_conversation_char_budget 
 Implemented in `memory.py` → calls `llm_service.py` for summarization.
 `stream_chat()` yields dicts `{"type": "chunk", "text": str}` | `{"type": "usage", "data": {...}}` — NOT raw strings.
 
-### Thinking messages (user-facing, warmer language)
-1. "Understanding your question..."
-2. "Finding relevant context..."
-3. "Preparing context..."
-4. "Composing response..."
-
 ---
 
 ## SSE / Real-Time Progress Pattern
@@ -288,11 +282,7 @@ Orchestrated by `start_fill_run_chain`.
 - **Adding new color tokens**: Always follow this 3-step pattern:
   1. Define CSS variables in `frontend/src/index.css` under `:root {}` (light) and `.dark {}` using HSL components (no `hsl()` wrapper so opacity modifiers work)
   2. Register in `frontend/tailwind.config.js` under `theme.extend.colors` as `"hsl(var(--my-token))"`
-  3. Use in components as `bg-my-token`, `text-my-token`, etc. — **never** put raw color values in JS files
-- **Doc type badge tokens**: `dt-*` namespace (`bg-dt-customer`, `text-dt-customer-foreground`, etc.)
-  - CSS vars: `--dt-X` (bg) and `--dt-X-fg` (text) in `index.css`
-  - Registered in `tailwind.config.js` under `colors.dt`
-  - Label/color mapping: `frontend/src/verticals/private_equity/constants.js` (`DOC_TYPE_LABELS`, `DOC_TYPE_COLORS`)
+  3. Use in components as `bg-my-token`, `text-my-token`, etc. — 
 - **Error UI**: Inline error cards (shadcn `Alert` or custom div with `AlertCircle` icon), NOT browser `alert()`
 - **Progress UI**: Inline progress with shadcn `Progress` component + status message
 - **Icons**: lucide-react
@@ -369,6 +359,7 @@ Current head: `f3a4b5c6d7e8`
 ---
 
 ## Common Gotchas
+- **Avoid N+1 DB/API patterns**: Never loop individual queries/API calls when a batch alternative exists. Use batch endpoints, JOINs, or `include_documents`-style flags. Example: `listCollections(getToken, { includeDocuments: true })` instead of listing then fetching each.
 - **`stream_chat()` yields dicts**, not strings: `{"type": "chunk", "text": str}` or `{"type": "usage", "data": {...}}`. Always check `item["type"] == "chunk"` before appending.
 - **Zustand selectors**: Actions must be **explicitly listed** in `useChatActions()` / other selectors in `store/index.js` to be accessible via `actions.*`.
 - **SSE error propagation**: Every Celery task exception path must call `tracker.mark_error()` — otherwise frontend stays stuck in "processing" state indefinitely.
@@ -376,3 +367,6 @@ Current head: `f3a4b5c6d7e8`
 - **Embedding model change**: Requires DB migration (alter vector column dimension) + full re-embed of all chunks via script.
 - **Chat error display**: Error in `isProcessing` block disappears when processing stops — keep error state in separate block.
 - **No `alert()`**: Always use inline shadcn error components.
+
+## Important
+- The code you write will be reviewed by Codex and senior engineer, so be mindful of it while designing and writring code.

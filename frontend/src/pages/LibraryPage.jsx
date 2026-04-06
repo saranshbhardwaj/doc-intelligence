@@ -81,6 +81,23 @@ export default function LibraryPage() {
   const [mobileCollectionsOpen, setMobileCollectionsOpen] = useState(false);
   const [createRequestCount, setCreateRequestCount] = useState(0);
 
+  // Overlay live progress from Zustand indexingJobs onto API-fetched documents.
+  // Keeps progress accurate after SPA navigation: the SSE stream survives navigation
+  // but the local `documents` state is re-fetched fresh from DB on every mount.
+  const displayDocuments = useMemo(() => {
+    if (Object.keys(indexingJobs).length === 0) return documents;
+    return documents.map((doc) => {
+      const job = indexingJobs[doc.id];
+      if (!job || !job.isProcessing) return doc;
+      return {
+        ...doc,
+        status: "processing",
+        status_detail: job.current_stage || job.message || "Processing...",
+        progress_percent: job.progress_percent || 0,
+      };
+    });
+  }, [documents, indexingJobs]);
+
   // Calculate stats from current page of documents
   const stats = useMemo(() => {
     return {
@@ -153,6 +170,24 @@ export default function LibraryPage() {
     [getToken, page, pageSize, sortBy, sortOrder, searchQuery, statusFilter]
   );
 
+  // Re-fetch when a job is removed from the store (completed or cleared), so the
+  // table shows the final DB status without requiring a manual refresh.
+  // The length check exits early on every progress tick — only does work on removal.
+  const prevIndexingJobKeysRef = useRef(Object.keys(indexingJobs));
+  useEffect(() => {
+    const currentKeys = Object.keys(indexingJobs);
+    const prevKeys = prevIndexingJobKeysRef.current;
+    prevIndexingJobKeysRef.current = currentKeys;
+
+    if (currentKeys.length >= prevKeys.length) return; // no removals — skip
+
+    const removed = prevKeys.filter((id) => !indexingJobs[id]);
+    if (removed.length > 0 && selectedCollection) {
+      fetchDocuments(selectedCollection.id);
+      fetchCollections();
+    }
+  }, [indexingJobs, fetchDocuments, fetchCollections, selectedCollection]);
+
   // Initial load
   useEffect(() => {
     fetchCollections();
@@ -198,11 +233,7 @@ export default function LibraryPage() {
       setSearchParams({ collection: res.id });
     } catch (error) {
       console.error("Failed to create collection:", error);
-      alert(
-        error.response?.data?.detail ||
-          error.message ||
-          "Failed to create collection"
-      );
+      toast.error(error.response?.data?.detail || error.message || "Failed to create collection");
     }
   };
 
@@ -224,13 +255,13 @@ export default function LibraryPage() {
       }
     } catch (error) {
       console.error("Failed to delete collection:", error);
-      alert(error.response?.data?.detail || "Failed to delete collection");
+      toast.error(error.response?.data?.detail || "Failed to delete collection");
     }
   };
 
   const handleUploadFiles = async (files) => {
     if (!uploadCollection) {
-      alert("Please select a collection");
+      toast.warning("Please select a collection");
       return;
     }
 
@@ -330,7 +361,7 @@ export default function LibraryPage() {
                 )
               );
 
-              alert(`Failed to index ${file.name}: ${error.message}`);
+              toast.error(`Failed to index ${file.name}`, { description: error.message });
             },
             {
               autoReconnect: true,
@@ -351,7 +382,7 @@ export default function LibraryPage() {
         }
       } catch (error) {
         console.error(`Failed to upload ${file.name}:`, error);
-        alert(`Failed to upload ${file.name}`);
+        toast.error(`Failed to upload ${file.name}`);
       }
     });
 
@@ -406,8 +437,18 @@ export default function LibraryPage() {
         });
       }
 
-      // Refresh collections (for counts) - don't refresh documents, already updated optimistically
-      await fetchCollections();
+      // Optimistically decrement document_count on the affected collection.
+      // Avoids a stale-read race where fetchCollections() returns the old cached
+      // count before the backend's recompute_collection_stats commit is visible.
+      if (selectedCollection?.id) {
+        setCollections((prev) =>
+          prev.map((c) =>
+            c.id === selectedCollection.id
+              ? { ...c, document_count: Math.max(0, (c.document_count || 0) - 1) }
+              : c
+          )
+        );
+      }
 
       // Purge document references only for hard delete.
       if (result?.action === "deleted") {
@@ -467,9 +508,8 @@ export default function LibraryPage() {
   };
 
   return (
-    <AppLayout breadcrumbs={[{ label: "Library" }]}>
-      <div className="h-full flex flex-col p-6">
-        {/* Stats Header */}
+    <AppLayout breadcrumbs={[{ label: "Library" }]} lockViewport>
+      <div className="flex h-full min-h-0 flex-col px-6 pb-6 pt-4">
         <StatsHeader
           totalDocuments={stats.totalDocuments}
           totalCollections={stats.totalCollections}
@@ -477,29 +517,28 @@ export default function LibraryPage() {
           readyCount={stats.readyCount}
         />
 
-        {/* Main Content */}
-        <div className="flex-1 flex gap-4 md:gap-6 min-h-0">
-          {/* Collections Sidebar */}
-          <div className="hidden md:block w-64 flex-shrink-0">
-            <CollectionsSidebar
-              collections={collections}
-              selectedCollection={selectedCollection}
-              loading={loadingCollections}
-              onSelectCollection={handleSelectCollection}
-              onCreateCollection={handleCreateCollection}
-              onDeleteCollection={handleDeleteCollection}
-              requestCreate={createRequestCount}
-            />
+        <div className="split-row">
+          <div className="hidden w-72 flex-shrink-0 md:flex">
+            <aside className="library-shell panel-shell w-full">
+              <CollectionsSidebar
+                collections={collections}
+                selectedCollection={selectedCollection}
+                loading={loadingCollections}
+                onSelectCollection={handleSelectCollection}
+                onCreateCollection={handleCreateCollection}
+                onDeleteCollection={handleDeleteCollection}
+                requestCreate={createRequestCount}
+              />
+            </aside>
           </div>
 
-          {/* Documents Area */}
-          <div className="flex-1 min-w-0">
+          <div className="min-w-0 flex-1">
             <div className="md:hidden mb-3">
               <Button
                 variant="outline"
                 size="sm"
                 onClick={() => setMobileCollectionsOpen(true)}
-                className="w-full justify-start"
+                className="w-full justify-start rounded-full"
               >
                 <Menu className="w-4 h-4 mr-2" />
                 {selectedCollection
@@ -509,21 +548,28 @@ export default function LibraryPage() {
             </div>
 
             {selectedCollection ? (
-              <div className="h-full flex flex-col">
-                {/* Collection Header */}
-                <div className="mb-4">
-                  <h1 className="text-2xl font-semibold text-foreground mb-1">
-                    {selectedCollection.name}
-                  </h1>
-                  <p className="text-sm text-muted-foreground">
-                    Manage documents in this collection
-                  </p>
+              <section className="library-shell-strong panel-shell h-full">
+                <div className="border-b border-border/70 px-5 py-4 sm:px-6">
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+                    <div>
+                      <h2 className="mt-2 page-title text-[1.7rem]">
+                        {selectedCollection.name}
+                      </h2>
+                    </div>
+                    <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
+                      <span className="rounded-full bg-muted px-3 py-1.5">
+                        {stats.readyCount} ready
+                      </span>
+                      <span className="rounded-full bg-muted px-3 py-1.5">
+                        {stats.processingCount} processing
+                      </span>
+                    </div>
+                  </div>
                 </div>
 
-                {/* Documents Table */}
-                <div className="flex-1 overflow-y-auto">
+                <div className="panel-scroll px-4 py-4 sm:px-5 sm:py-5">
                   <DocumentsTable
-                    documents={documents}
+                    documents={displayDocuments}
                     loading={loadingDocs}
                     getToken={getToken}
                     onDeleteDocument={handleDeleteDocument}
@@ -543,14 +589,14 @@ export default function LibraryPage() {
                     setStatusFilter={setStatusFilter}
                   />
                 </div>
-              </div>
+              </section>
             ) : (
-              <div className="h-full flex items-center justify-center">
+              <div className="library-shell-strong flex h-full items-center justify-center px-6">
                 <div className="text-center max-w-sm">
-                  <div className="w-20 h-20 mx-auto mb-6 bg-primary/10 rounded-3xl flex items-center justify-center shadow-lg border border-primary/10">
+                  <div className="mx-auto mb-6 flex h-20 w-20 items-center justify-center rounded-3xl bg-primary/10">
                     <UploadCloud className="w-10 h-10 text-primary" />
                   </div>
-                  <h3 className="text-xl font-bold text-foreground mb-2">
+                  <h3 className="font-display text-xl font-bold text-foreground mb-2">
                     No Collection Selected
                   </h3>
                   <p className="text-sm text-muted-foreground mb-6">
@@ -594,7 +640,7 @@ export default function LibraryPage() {
       />
 
       <Sheet open={mobileCollectionsOpen} onOpenChange={setMobileCollectionsOpen}>
-        <SheetContent side="left" className="w-[90vw] max-w-sm p-4">
+        <SheetContent side="left" className="w-[90vw] max-w-sm p-0">
           <SheetTitle className="sr-only">Collections</SheetTitle>
           <SheetDescription className="sr-only">
             Select, create, or delete document collections.

@@ -11,14 +11,24 @@
 
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useAppAuth } from "@/hooks/useAppAuth";
-import { Library, MessageSquare, Play, Zap, FileSpreadsheet, LayoutDashboard, Menu, LogOut } from "lucide-react";
-import { useState } from "react";
-import DarkModeToggle from "../common/DarkModeToggle";
+import { Library, MessageSquare, Play, Zap, FileSpreadsheet, LayoutDashboard, Menu, LogOut, Sun, Moon, BarChart2, ChevronRight } from "lucide-react";
+import { useUser, useUserActions } from "../../store";
+import { useState, useEffect } from "react";
 import NetworkStatus from "../common/NetworkStatus";
 import { useDarkMode } from "../../hooks/useDarkMode";
 import VerticalDropdown from "../navigation/VerticalDropdown";
 import { getVerticalNavigation } from "../../config/verticals";
 import { Sheet, SheetContent, SheetTitle, SheetDescription } from "../ui/sheet";
+import { Badge } from "../ui/badge";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+  DropdownMenuGroup,
+  DropdownMenuLabel,
+} from "../ui/dropdown-menu";
 
 // Icon mapping for vertical navigation
 const ICON_MAP = {
@@ -31,13 +41,55 @@ const ICON_MAP = {
   'dashboard': LayoutDashboard,
 };
 
-export default function AppLayout({ children, lockViewport = false }) {
+function UsageBar({ label, used, limit }) {
+  if (!limit) return null;
+  const pct = Math.min((used / limit) * 100, 100);
+  const barColor = pct >= 90 ? 'bg-destructive' : pct >= 80 ? 'bg-yellow-500' : 'bg-primary';
+  const textColor = pct >= 90 ? 'text-destructive' : pct >= 80 ? 'text-yellow-500' : 'text-muted-foreground';
+  return (
+    <div className="space-y-1">
+      <div className="flex items-center justify-between">
+        <span className="text-xs text-muted-foreground">{label}</span>
+        <span className={`text-xs font-medium tabular-nums ${textColor}`}>{used}<span className="opacity-50">/{limit}</span></span>
+      </div>
+      <div className="h-1 w-full rounded-full bg-muted overflow-hidden">
+        <div className={`h-full rounded-full transition-all duration-500 ${barColor}`} style={{ width: `${pct}%` }} />
+      </div>
+    </div>
+  );
+}
+
+function TierBadge({ tier }) {
+  if (!tier) return null;
+  const variants = {
+    admin: 'bg-primary/10 text-primary border-primary/20',
+    pro: 'bg-amber-500/10 text-amber-600 dark:text-amber-400 border-amber-500/20',
+    standard: 'bg-muted text-muted-foreground border-border',
+    free: 'bg-muted text-muted-foreground border-border',
+  };
+  const cls = variants[tier] ?? variants.free;
+  return (
+    <span className={`inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-wide border ${cls}`}>
+      {tier}
+    </span>
+  );
+}
+
+export default function AppLayout({ children, lockViewport = false, headerLeft = null, headerRight = null, hideNav = false }) {
   const location = useLocation();
-  const navigate = useNavigate();
   const { isDark, toggle } = useDarkMode();
-  const { user, signOut } = useAppAuth();
+  const { user, signOut, getToken } = useAppAuth();
+  const userState = useUser();
+  const userLimits = userState?.info?.limits;
+  const { fetchUserInfo } = useUserActions();
+
+  useEffect(() => {
+    if (!userState?.info) {
+      fetchUserInfo(getToken);
+    }
+  }, []);
+  const navigate = useNavigate();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
-  const [userMenuOpen, setUserMenuOpen] = useState(false);
 
   // Detect current vertical from URL
   const currentVertical = (() => {
@@ -80,7 +132,7 @@ export default function AppLayout({ children, lockViewport = false }) {
   return (
     <div className={`${lockViewport ? "h-[100dvh] overflow-hidden" : "min-h-screen"} bg-background flex flex-col`}>
       {/* Header */}
-      <header className="bg-card/80 backdrop-blur-md border-b border-border sticky top-0 z-40">
+      <header className="bg-card/80 backdrop-blur-md sticky top-0 z-40 after:absolute after:bottom-0 after:left-0 after:right-0 after:h-px after:bg-gradient-to-r after:from-transparent after:via-primary/25 after:to-transparent relative">
         <div className="w-full px-4 md:px-6 py-1.5">
           <div className="flex items-center justify-between">
             {/* Logo / Home Link */}
@@ -95,57 +147,67 @@ export default function AppLayout({ children, lockViewport = false }) {
                   className="absolute inset-0 h-full w-full scale-[1.78] object-cover"
                 />
               </span>
-              <span className="text-lg font-extrabold tracking-tight bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
+              <span className="text-xl font-extrabold tracking-tight bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent" style={{letterSpacing: '-0.02em'}}>
                 frearaAI
               </span>
             </Link>
 
+            {/* Page-level left slot (detail pages: back + title) */}
+            {headerLeft && (
+              <div className="hidden md:flex items-center gap-2 ml-2">
+                <div className="h-5 w-px bg-border" />
+                {headerLeft}
+              </div>
+            )}
+
             {/* Navigation */}
-            <nav className="hidden md:flex items-center gap-1">
-              {/* Vertical Dropdown - shown first */}
-              <VerticalDropdown currentVertical={currentVertical} />
+            {!hideNav && (
+              <nav className="hidden md:flex items-center gap-1">
+                {/* Vertical Dropdown - shown first */}
+                <VerticalDropdown currentVertical={currentVertical} />
 
-              {/* Separator if in vertical */}
-              {currentVertical && (
-                <div className="h-6 w-px bg-border mx-2" />
-              )}
+                {/* Separator if in vertical */}
+                {currentVertical && (
+                  <div className="h-6 w-px bg-border mx-2" />
+                )}
 
-              {/* Navigation Links */}
-              {navLinks.map((link) => {
-                const Icon = link.icon;
-                const active = isActive(link.path);
-                const isComingSoon = link.comingSoon;
+                {/* Navigation Links */}
+                {navLinks.map((link) => {
+                  const Icon = link.icon;
+                  const active = isActive(link.path);
+                  const isComingSoon = link.comingSoon;
 
-                return (
-                  <Link
-                    key={link.path}
-                    to={link.path}
-                    onClick={(e) => {
-                      if (isComingSoon) {
-                        e.preventDefault();
-                      }
-                    }}
-                    className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
-                      isComingSoon
-                        ? "text-muted-foreground/50 cursor-not-allowed"
-                        : active
-                        ? "bg-primary/10 text-primary"
-                        : "text-muted-foreground hover:bg-popover"
-                    }`}
-                    aria-current={active ? "page" : undefined}
-                    aria-disabled={isComingSoon}
-                  >
-                    <Icon className="w-4 h-4" />
-                    {link.label}
-                    {isComingSoon && (
-                      <span className="text-xs bg-muted px-1.5 py-0.5 rounded">
-                        Soon
-                      </span>
-                    )}
-                  </Link>
-                );
-              })}
-            </nav>
+                  return (
+                    <Link
+                      key={link.path}
+                      to={link.path}
+                      onClick={(e) => {
+                        if (isComingSoon) {
+                          e.preventDefault();
+                        }
+                      }}
+                      className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-all duration-200 ${
+                        isComingSoon
+                          ? "text-muted-foreground/50 cursor-not-allowed"
+                          : active
+                          ? "bg-primary/10 text-primary shadow-sm"
+                          : "text-muted-foreground hover:bg-primary/10 hover:text-foreground hover:-translate-y-px"
+                      }`}
+                      aria-current={active ? "page" : undefined}
+                      aria-disabled={isComingSoon}
+                    >
+                      <Icon className="w-4 h-4" />
+                      {link.label}
+                      {isComingSoon && (
+                        <span className="text-xs bg-muted px-1.5 py-0.5 rounded">
+                          Soon
+                        </span>
+                      )}
+                    </Link>
+                  );
+                })}
+              </nav>
+            )}
 
             {/* Right Actions */}
             <div className="flex items-center gap-4">
@@ -157,43 +219,118 @@ export default function AppLayout({ children, lockViewport = false }) {
               >
                 <Menu className="w-5 h-5" />
               </button>
-              <DarkModeToggle
-                isDark={isDark}
-                toggle={toggle}
-                variant="inline"
-              />
+              {headerRight && (
+                <div className="hidden md:flex items-center gap-2">
+                  {headerRight}
+                </div>
+              )}
               {/* User avatar / menu */}
-              <div className="relative">
-                <button
-                  type="button"
-                  onClick={() => setUserMenuOpen((o) => !o)}
-                  className="w-9 h-9 rounded-full bg-primary/10 text-primary font-semibold text-sm flex items-center justify-center hover:bg-primary/20 transition-colors"
-                  aria-label="User menu"
-                >
-                  {user?.firstName?.[0] ?? user?.email?.[0]?.toUpperCase() ?? "U"}
-                </button>
-                {userMenuOpen && (
-                  <div
-                    className="absolute right-0 mt-2 w-52 rounded-lg border border-border bg-card shadow-lg py-1 z-50"
-                    onBlur={() => setUserMenuOpen(false)}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <button
+                    type="button"
+                    className="w-8 h-8 rounded-full overflow-hidden bg-gradient-to-br from-primary/20 to-primary/10 text-primary font-semibold text-sm flex items-center justify-center hover:opacity-90 ring-1 ring-primary/20 hover:ring-primary/40 transition-all duration-200 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60"
+                    aria-label="User menu"
                   >
-                    <div className="px-3 py-2 border-b border-border">
-                      <p className="text-xs font-medium text-foreground truncate">
-                        {user?.firstName} {user?.lastName}
-                      </p>
-                      <p className="text-xs text-muted-foreground truncate">{user?.email}</p>
+                    {user?.profilePictureUrl
+                      ? <img src={user.profilePictureUrl} alt="" className="w-full h-full object-cover" />
+                      : (user?.firstName?.[0] ?? user?.email?.[0]?.toUpperCase() ?? "U")
+                    }
+                  </button>
+                </DropdownMenuTrigger>
+
+                <DropdownMenuContent align="end" sideOffset={8} className="w-64 p-0 overflow-hidden">
+                  {/* Profile header */}
+                  <div className="px-4 pt-4 pb-3 bg-gradient-to-b from-primary/5 to-transparent border-b border-border">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-full overflow-hidden bg-gradient-to-br from-primary/25 to-primary/10 ring-2 ring-primary/20 text-primary font-bold text-base flex items-center justify-center shrink-0">
+                        {user?.profilePictureUrl
+                          ? <img src={user.profilePictureUrl} alt="" className="w-full h-full object-cover" />
+                          : (user?.firstName?.[0] ?? user?.email?.[0]?.toUpperCase() ?? "U")
+                        }
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-2">
+                          <p className="text-sm font-semibold text-foreground truncate leading-tight">
+                            {user?.firstName} {user?.lastName}
+                          </p>
+                          <TierBadge tier={userState?.info?.tier} />
+                        </div>
+                        <p className="text-xs text-muted-foreground truncate mt-0.5">{user?.email}</p>
+                      </div>
                     </div>
-                    <button
-                      type="button"
-                      onClick={() => { setUserMenuOpen(false); signOut?.(); }}
-                      className="w-full flex items-center gap-2 px-3 py-2 text-sm text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+                  </div>
+
+                  {/* Usage */}
+                  {userLimits && (
+                    <>
+                      <DropdownMenuItem
+                        className="flex-col items-stretch gap-2.5 px-4 py-3 cursor-pointer focus:bg-muted/60 rounded-none"
+                        onSelect={() => navigate('/app/dashboard')}
+                      >
+                        <div className="flex items-center justify-between mb-0.5">
+                          <span className="text-xs font-medium text-foreground">Usage</span>
+                          <span className="flex items-center gap-1 text-xs text-primary">
+                            <BarChart2 className="w-3 h-3" />
+                            View details
+                            <ChevronRight className="w-3 h-3" />
+                          </span>
+                        </div>
+                        <UsageBar
+                          label="Template fills this month"
+                          used={userLimits.template_fill_runs?.used ?? 0}
+                          limit={userLimits.template_fill_runs?.limit ?? 0}
+                        />
+                        <UsageBar
+                          label="Chat messages today"
+                          used={userLimits.chat_messages?.used ?? 0}
+                          limit={userLimits.chat_messages?.limit ?? 0}
+                        />
+                      </DropdownMenuItem>
+                      <DropdownMenuSeparator className="my-0" />
+                    </>
+                  )}
+
+                  {/* Navigation */}
+                  <DropdownMenuGroup className="p-1">
+                    <DropdownMenuItem asChild>
+                      <Link to="/app/dashboard" className="flex items-center gap-2.5 cursor-pointer">
+                        <LayoutDashboard className="w-4 h-4 text-muted-foreground" />
+                        <span>Dashboard</span>
+                      </Link>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem asChild>
+                      <Link to="/app/library" className="flex items-center gap-2.5 cursor-pointer">
+                        <Library className="w-4 h-4 text-muted-foreground" />
+                        <span>Library</span>
+                      </Link>
+                    </DropdownMenuItem>
+                  </DropdownMenuGroup>
+
+                  <DropdownMenuSeparator className="my-0" />
+
+                  {/* Appearance */}
+                  <DropdownMenuGroup className="p-1">
+                    <DropdownMenuItem onSelect={(e) => { e.preventDefault(); toggle(); }} className="flex items-center gap-2.5 cursor-pointer">
+                      {isDark ? <Sun className="w-4 h-4 text-muted-foreground" /> : <Moon className="w-4 h-4 text-muted-foreground" />}
+                      <span>{isDark ? 'Light mode' : 'Dark mode'}</span>
+                    </DropdownMenuItem>
+                  </DropdownMenuGroup>
+
+                  <DropdownMenuSeparator className="my-0" />
+
+                  {/* Sign out */}
+                  <DropdownMenuGroup className="p-1">
+                    <DropdownMenuItem
+                      onSelect={() => signOut?.()}
+                      className="flex items-center gap-2.5 cursor-pointer text-destructive focus:text-destructive focus:bg-destructive/8"
                     >
                       <LogOut className="w-4 h-4" />
-                      Sign out
-                    </button>
-                  </div>
-                )}
-              </div>
+                      <span>Sign out</span>
+                    </DropdownMenuItem>
+                  </DropdownMenuGroup>
+                </DropdownMenuContent>
+              </DropdownMenu>
             </div>
           </div>
         </div>
@@ -295,7 +432,7 @@ export default function AppLayout({ children, lockViewport = false }) {
       <NetworkStatus />
 
       {/* Main Content */}
-      <main className={lockViewport ? "flex-1 min-h-0 flex flex-col overflow-hidden" : "flex-1 flex flex-col"}>
+      <main className={`${lockViewport ? "flex-1 min-h-0 flex flex-col overflow-hidden" : "flex-1 flex flex-col"} page-enter`}>
         {children}
       </main>
     </div>

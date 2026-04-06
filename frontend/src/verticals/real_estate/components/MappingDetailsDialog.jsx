@@ -48,6 +48,7 @@ export default function MappingDetailsDialog({
   fillRunId,
   fieldMapping,
   extractedData,
+  citationContext = null,
   onClose,
   onCitationClick,
 }) {
@@ -481,6 +482,7 @@ export default function MappingDetailsDialog({
             onCitationClick={onCitationClick}
             label="Source Citations"
             extractedData={pdfField}
+            citationContext={citationContext}
           />
         </div>
       )}

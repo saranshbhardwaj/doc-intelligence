@@ -105,11 +105,11 @@ export default function ChatPage() {
     }
   };
 
-  const handleStartChat = async (documentIds) => {
+  const handleStartChat = async (documentIds, title) => {
     try {
       // Create new session with selected documents
       const session = await actions.createNewSession(getToken, {
-        title: "New Chat",
+        title: title || "New Chat",
         documentIds,
       });
       setShowNewChatDialog(false);
@@ -193,11 +193,10 @@ export default function ChatPage() {
 
   const breadcrumbs = [{ label: "Chat" }];
   return (
-    <AppLayout breadcrumbs={breadcrumbs}>
-      {/* Full-height two-pane layout with independent scroll */}
-      <div className="h-[calc(100vh-64px)] flex md:gap-4 relative">
+    <AppLayout breadcrumbs={breadcrumbs} lockViewport>
+      <div className="relative flex h-full min-h-0 gap-3 px-3 pb-3 pt-2 md:px-4 md:pb-4 md:pt-3">
         {/* Mobile sessions drawer trigger */}
-        <div className="md:hidden absolute left-3 top-3 z-40">
+        <div className="absolute left-3 top-3 z-40 md:hidden">
           <Button
             variant="outline"
             size="sm"
@@ -212,12 +211,12 @@ export default function ChatPage() {
 
         {/* Mobile sessions drawer */}
         <Sheet open={mobileSessionsOpen} onOpenChange={setMobileSessionsOpen}>
-          <SheetContent side="left" className="w-[88vw] max-w-sm p-3">
+          <SheetContent side="left" className="w-[88vw] max-w-sm p-0">
             <SheetTitle className="sr-only">Chat Sessions</SheetTitle>
             <SheetDescription className="sr-only">
               Browse, search, create, and delete chat sessions.
             </SheetDescription>
-            <div className="h-full pt-6">
+            <div className="chat-shell h-full pt-6">
               <SessionSidebar
                 sessions={chat.sessions}
                 currentSession={chat.currentSession}
@@ -238,34 +237,36 @@ export default function ChatPage() {
 
         {/* Left: Session Sidebar (scrollable, collapsible) */}
         <div
-          className={`hidden md:flex flex-col h-full flex-shrink-0 overflow-hidden transition-all duration-300 ${
-            sidebarCollapsed ? "w-0" : "w-80"
+          className={`hidden md:flex h-full flex-shrink-0 overflow-hidden transition-all duration-300 ${
+            sidebarCollapsed ? "w-0" : "w-[18rem]"
           }`}
         >
-          <SessionSidebar
-            sessions={chat.sessions}
-            currentSession={chat.currentSession}
-            sessionsLoading={chat.sessionsLoading}
-            onNewChat={handleNewChat}
-            onSelectSession={handleSelectSession}
-            onDeleteSession={handleDeleteSession}
-            onUpdateSessionTitle={handleUpdateSessionTitle}
-            onOpenDocumentManager={() => setDocumentManagerOpen(true)}
-            onOpenDocument={handleOpenDocument}
-            onRemoveDocument={handleRemoveDocument}
-            isCollapsed={sidebarCollapsed}
-            onToggleCollapse={toggleSidebar}
-          />
+          <div className="chat-shell panel-shell h-full w-full">
+            <SessionSidebar
+              sessions={chat.sessions}
+              currentSession={chat.currentSession}
+              sessionsLoading={chat.sessionsLoading}
+              onNewChat={handleNewChat}
+              onSelectSession={handleSelectSession}
+              onDeleteSession={handleDeleteSession}
+              onUpdateSessionTitle={handleUpdateSessionTitle}
+              onOpenDocumentManager={() => setDocumentManagerOpen(true)}
+              onOpenDocument={handleOpenDocument}
+              onRemoveDocument={handleRemoveDocument}
+              isCollapsed={sidebarCollapsed}
+              onToggleCollapse={toggleSidebar}
+            />
+          </div>
         </div>
 
         {/* Expand Button (shown when sidebar is collapsed) */}
         {sidebarCollapsed && (
-          <div className="hidden md:block absolute left-0 top-0 z-50">
+          <div className="absolute left-0 top-0 z-50 hidden md:block">
             <Button
               variant="ghost"
               size="icon"
               onClick={toggleSidebar}
-              className="h-9 w-9 rounded-r-lg rounded-l-none bg-card border border-l-0 shadow-md hover:bg-muted hover:shadow-lg"
+              className="h-9 w-9 rounded-r-xl rounded-l-none border border-l-0 bg-card shadow-md hover:bg-muted hover:shadow-lg"
               title="Expand sidebar"
             >
               <ChevronRight className="h-4 w-4" />
@@ -274,7 +275,7 @@ export default function ChatPage() {
         )}
 
         {/* Right: Main Chat Area */}
-        <div className="flex-1 min-w-0 min-h-0 overflow-hidden pt-12 md:pt-0">
+        <div className="min-h-0 min-w-0 flex-1 overflow-hidden pt-11 md:pt-0">
           {isInitializing ? (
             <div className="flex items-center justify-center h-full">
               <Spinner />
@@ -282,11 +283,11 @@ export default function ChatPage() {
           ) : !chat.currentSession ? (
             /* No active session placeholder — dialog opens automatically */
             <div className="flex flex-col items-center justify-center h-full gap-4 text-center px-4">
-              <div className="w-16 h-16 bg-primary/10 rounded-2xl flex items-center justify-center">
+              <div className="w-16 h-16 glass-card rounded-2xl flex items-center justify-center">
                 <MessageSquare className="w-8 h-8 text-primary" />
               </div>
               <div>
-                <h3 className="text-lg font-semibold text-foreground">No active session</h3>
+                <h3 className="font-display text-lg font-semibold text-foreground">No active session</h3>
                 <p className="text-sm text-muted-foreground mt-1">
                   Select a session from the sidebar or start a new chat
                 </p>

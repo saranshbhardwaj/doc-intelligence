@@ -24,6 +24,10 @@ export default function FeedbackButton({
   entitySummary,
   variant = "outline",
   size = "sm",
+  className,
+  label = "Give Feedback",
+  submittedLabel = "Update Feedback",
+  iconOnly = false,
 }) {
   const [showModal, setShowModal] = useState(false);
   const [feedbackSubmitted, setFeedbackSubmitted] = useState(false);
@@ -47,9 +51,15 @@ export default function FeedbackButton({
 
   return (
     <>
-      <Button variant={variant} size={size} onClick={() => setShowModal(true)}>
-        <MessageSquare className="w-4 h-4 mr-1.5" />
-        {feedbackSubmitted ? "Update Feedback" : "Give Feedback"}
+      <Button variant={variant} size={size} className={className} onClick={() => setShowModal(true)}>
+        <span className={`${iconOnly ? "" : "mr-1.5"} flex h-5 w-5 items-center justify-center rounded-full bg-primary/10 text-primary`}>
+          <MessageSquare className="w-3.5 h-3.5" />
+        </span>
+        {iconOnly ? (
+          <span className="sr-only">{feedbackSubmitted ? submittedLabel : label}</span>
+        ) : (
+          feedbackSubmitted ? submittedLabel : label
+        )}
       </Button>
       <CompletionFeedbackModal
         isOpen={showModal}

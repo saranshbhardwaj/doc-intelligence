@@ -11,7 +11,6 @@
  */
 
 import { useState, memo } from "react";
-import React from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { ChevronDown, ChevronUp } from "lucide-react";
@@ -20,43 +19,8 @@ import { TooltipProvider } from "../../ui/tooltip";
 import { useComparison, useChatActions } from "../../../store";
 import ComparisonSummaryCard from "./ComparisonSummaryCard";
 import PairedChunksView from "./PairedChunksView";
-import ComparisonCitationLink from "./ComparisonCitationLink";
-
-/**
- * Process text to render citations as interactive elements
- */
-function renderCitationText(text, context) {
-  if (!text) return text;
-
-  const citationRegex = /\[D\d+:p\d+\]/g;
-  const parts = [];
-  let lastIndex = 0;
-  let match;
-
-  while ((match = citationRegex.exec(text)) !== null) {
-    // Add text before citation
-    if (match.index > lastIndex) {
-      parts.push(text.substring(lastIndex, match.index));
-    }
-    // Add citation as interactive element
-    const token = match[0];
-    parts.push(
-      <ComparisonCitationLink
-        key={`cite-${match.index}`}
-        token={token}
-        context={context}
-      />
-    );
-    lastIndex = match.index + match[0].length;
-  }
-
-  // Add remaining text
-  if (lastIndex < text.length) {
-    parts.push(text.substring(lastIndex));
-  }
-
-  return parts.length > 0 ? parts : text;
-}
+import CitationLink from "../../common/CitationLink";
+import { remarkCitations } from "@/utils/citations";
 
 const ComparisonMessage = memo(function ComparisonMessage({ message, onOpenComparisonPanel }) {
   const [isExpanded, setIsExpanded] = useState(false);
@@ -77,55 +41,15 @@ const ComparisonMessage = memo(function ComparisonMessage({ message, onOpenCompa
   const numClusters = context?.clustered_chunks?.length || 0;
   const isTwoDoc = context?.num_documents === 2;
 
-  /**
-   * Custom markdown components for rendering with citations
-   */
   const markdownComponents = {
-    p: ({ children, ...props }) => {
-      const processedChildren = React.Children.map(children, (child) => {
-        if (typeof child === "string") {
-          return renderCitationText(child, resolvedContext);
-        }
-        return child;
-      });
-      return <p {...props}>{processedChildren}</p>;
-    },
-    td: ({ children, ...props }) => {
-      const processedChildren = React.Children.map(children, (child) => {
-        if (typeof child === "string") {
-          return renderCitationText(child, resolvedContext);
-        }
-        return child;
-      });
-      return <td {...props}>{processedChildren}</td>;
-    },
-    th: ({ children, ...props }) => {
-      const processedChildren = React.Children.map(children, (child) => {
-        if (typeof child === "string") {
-          return renderCitationText(child, resolvedContext);
-        }
-        return child;
-      });
-      return <th {...props}>{processedChildren}</th>;
-    },
-    li: ({ children, ...props }) => {
-      const processedChildren = React.Children.map(children, (child) => {
-        if (typeof child === "string") {
-          return renderCitationText(child, resolvedContext);
-        }
-        return child;
-      });
-      return <li {...props}>{processedChildren}</li>;
-    },
-    strong: ({ children, ...props }) => {
-      const processedChildren = React.Children.map(children, (child) => {
-        if (typeof child === "string") {
-          return renderCitationText(child, resolvedContext);
-        }
-        return child;
-      });
-      return <strong {...props}>{processedChildren}</strong>;
-    },
+    citation: ({ node }) => (
+      <CitationLink
+        token={node.properties?.token || node.token}
+        comparisonContext={resolvedContext}
+        citationContext={message.citation_context}
+        variant="inline"
+      />
+    ),
   };
 
   return (
@@ -192,7 +116,7 @@ const ComparisonMessage = memo(function ComparisonMessage({ message, onOpenCompa
             prose-headings:font-bold prose-headings:text-foreground
           ">
             <ReactMarkdown
-              remarkPlugins={[remarkGfm]}
+              remarkPlugins={[remarkCitations, remarkGfm]}
               components={markdownComponents}
             >
               {message.content}

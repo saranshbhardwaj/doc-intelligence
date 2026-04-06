@@ -25,7 +25,7 @@
  *   - Editable session title
  */
 
-import { useState, useRef, useEffect, useLayoutEffect } from "react";
+import { useState, useRef, useEffect, useLayoutEffect, useMemo, memo } from "react";
 import {
   Send,
   Download,
@@ -34,6 +34,7 @@ import {
   Loader2,
   Bot,
   X,
+  ChevronDown,
 } from "lucide-react";
 import { Button } from "../ui/button";
 import {
@@ -45,11 +46,12 @@ import {
 import Spinner from "../common/Spinner";
 import { ComparisonMessage, StreamingComparisonContent } from "./comparison";
 import ComparisonDocumentPicker from "./comparison/ComparisonDocumentPicker";
-import { useComparison, usePdfViewer, useChatActions, useStore } from "../../store";
+import { useComparison, usePdfViewer, useChatActions, useStore, useUser } from "../../store";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import ComparisonPanel from "../comparison/ComparisonPanel";
-import ChatCitationLink from "./ChatCitationLink";
+import CitationLink from "../common/CitationLink";
+import { splitTextWithCitations, remarkCitations } from "../../utils/citations";
 import ChatMessageFeedback from "./ChatMessageFeedback";
 import {
   ResizablePanelGroup,
@@ -57,6 +59,7 @@ import {
   ResizableHandle,
 } from "../ui/resizable";
 import DocumentViewer from "../pdf/DocumentViewer";
+import { toast } from "sonner";
 
 export default function ActiveChat({
   currentSession,
@@ -74,7 +77,17 @@ export default function ActiveChat({
   onUpdateSessionTitle,
   onExportSession,
 }) {
+  const chatLimits = useUser()?.info?.limits?.chat_messages;
   const [message, setMessage] = useState("");
+
+  useEffect(() => {
+    if (!chatLimits?.limit || chatLimits.used < 40) return;
+    if (chatLimits.used >= 45) {
+      toast.error(`${chatLimits.used}/${chatLimits.limit} chat messages used today — almost at your daily limit.`, { duration: 6000 });
+    } else {
+      toast.warning(`Heads up: ${chatLimits.used} of ${chatLimits.limit} chat messages used today.`, { duration: 5000 });
+    }
+  }, [chatLimits?.used]);
   const [showComparisonPanel, setShowComparisonPanel] = useState(false);
   const [showPdfPanel, setShowPdfPanel] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
@@ -82,6 +95,7 @@ export default function ActiveChat({
   const messagesContainerRef = useRef(null);
   const shouldAutoScrollRef = useRef(true);
   const messagesScrollTopRef = useRef(0);
+  const messagesScrollRatioRef = useRef(1);
   const textareaRef = useRef(null);
 
   const handleTextareaInput = (e) => {
@@ -131,10 +145,17 @@ export default function ActiveChat({
   }, [currentSession?.id]);
 
   // Preserve chat scroll position when PDF panel toggles (e.g., citation click).
+  // Use ratio-based restore: absolute scrollTop breaks when column width changes and text reflows.
   useLayoutEffect(() => {
     const container = messagesContainerRef.current;
     if (!container) return;
-    container.scrollTop = messagesScrollTopRef.current;
+    const ratio = messagesScrollRatioRef.current;
+    // If user was at/near bottom (ratio > 0.95), pin to bottom; otherwise restore ratio.
+    if (ratio > 0.95) {
+      container.scrollTop = container.scrollHeight;
+    } else {
+      container.scrollTop = ratio * container.scrollHeight;
+    }
   }, [showPdfPanel]);
 
   const handleSendMessage = (e) => {
@@ -163,54 +184,24 @@ export default function ActiveChat({
     return () => window.removeEventListener("resize", updateViewport);
   }, []);
 
-  // Helper functions for processing citations in text
-  const CITATION_REGEX = /\[ref:[a-f0-9]+:p\d+\]/gi;
-
-  const renderCitationsInText = (text, context) => {
-    if (!text || !context?.citations?.length) return text;
-
-    const parts = [];
-    let lastIndex = 0;
-    const regex = new RegExp(CITATION_REGEX);
-    let match;
-
-    while ((match = regex.exec(text)) !== null) {
-      // Add text before citation
-      if (match.index > lastIndex) {
-        parts.push(text.substring(lastIndex, match.index));
-      }
-      // Add citation as interactive component
-      parts.push(
-        <ChatCitationLink
-          key={`cite-${match.index}`}
-          token={match[0]}
+  // Memoized markdown renderer — stable identity prevents historical messages from
+  // re-rendering during streaming (streaming updates only re-render its own instance).
+  const MemoizedMarkdown = useMemo(() => memo(function MemoizedMarkdown({ content, context }) {
+    const components = {
+      citation: ({ node }) => (
+        <CitationLink
+          token={node.properties?.token || node.token}
           citationContext={context}
+          variant="inline"
         />
-      );
-      lastIndex = match.index + match[0].length;
-    }
-
-    // Add remaining text
-    if (lastIndex < text.length) {
-      parts.push(text.substring(lastIndex));
-    }
-
-    return parts.length > 0 ? parts : text;
-  };
-
-  const processChildrenForCitations = (children, context) => {
-    if (typeof children === "string") {
-      return renderCitationsInText(children, context);
-    }
-    if (Array.isArray(children)) {
-      return children.map((child, i) =>
-        typeof child === "string"
-          ? renderCitationsInText(child, context)
-          : child
-      );
-    }
-    return children;
-  };
+      ),
+    };
+    return (
+      <ReactMarkdown remarkPlugins={[remarkCitations, remarkGfm]} components={components}>
+        {content}
+      </ReactMarkdown>
+    );
+  }), []);
 
   // Handler for opening full comparison panel
   const handleOpenComparisonPanel = () => {
@@ -227,7 +218,9 @@ export default function ActiveChat({
   useEffect(() => {
     if (pdfViewer.activeDocumentId && pdfViewer.urlCache[pdfViewer.activeDocumentId]?.url) {
       if (messagesContainerRef.current) {
-        messagesScrollTopRef.current = messagesContainerRef.current.scrollTop;
+        const c = messagesContainerRef.current;
+        messagesScrollTopRef.current = c.scrollTop;
+        messagesScrollRatioRef.current = c.scrollHeight > 0 ? c.scrollTop / c.scrollHeight : 1;
       }
       setShowPdfPanel(true);
     }
@@ -237,7 +230,9 @@ export default function ActiveChat({
   useEffect(() => {
     if (pdfViewer.highlightBbox) {
       if (messagesContainerRef.current) {
-        messagesScrollTopRef.current = messagesContainerRef.current.scrollTop;
+        const c = messagesContainerRef.current;
+        messagesScrollTopRef.current = c.scrollTop;
+        messagesScrollRatioRef.current = c.scrollHeight > 0 ? c.scrollTop / c.scrollHeight : 1;
       }
       setShowPdfPanel(true);
     }
@@ -263,15 +258,22 @@ export default function ActiveChat({
         minSize={35}
       >
         <div className="w-full flex flex-col h-full min-w-0 overflow-hidden relative">
-          <div className="absolute right-3 top-3 z-20">
+          <div className="absolute right-5 top-2 z-20">
             <DropdownMenu>
               <DropdownMenuTrigger asChild>
-                <Button variant="outline" size="sm" className="h-8 shrink-0 px-2 bg-card/90">
-                  <Download className="w-4 h-4 md:mr-2" />
-                  <span className="hidden md:inline">Export</span>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-10 shrink-0 rounded-full border border-border/70 bg-background/85 pl-2 pr-3 shadow-lg backdrop-blur-md hover:bg-background hover:shadow-xl"
+                >
+                  <span className="flex h-6 w-6 items-center justify-center rounded-full bg-primary/10 text-primary">
+                    <Download className="h-3.5 w-3.5" />
+                  </span>
+                  <span className="text-xs font-medium text-foreground">Export</span>
+                  <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
                 </Button>
               </DropdownMenuTrigger>
-              <DropdownMenuContent align="end" className="w-48">
+              <DropdownMenuContent align="end" sideOffset={10} className="w-48 rounded-xl">
                 <DropdownMenuItem onClick={() => onExportSession?.("markdown")}>
                   <FileText className="w-4 h-4 mr-2" />
                   <div className="flex flex-col">
@@ -390,28 +392,10 @@ export default function ActiveChat({
                         prose-h4:text-base prose-h4:mt-4 prose-h4:mb-2
                         prose-headings:font-bold prose-headings:text-foreground
                       ">
-                        <ReactMarkdown
-                          remarkPlugins={[remarkGfm]}
-                          components={{
-                            p: ({ children }) => (
-                              <p>{processChildrenForCitations(children, msg.citation_context || citationContext)}</p>
-                            ),
-                            li: ({ children }) => (
-                              <li>{processChildrenForCitations(children, msg.citation_context || citationContext)}</li>
-                            ),
-                            td: ({ children }) => (
-                              <td>{processChildrenForCitations(children, msg.citation_context || citationContext)}</td>
-                            ),
-                            th: ({ children }) => (
-                              <th>{processChildrenForCitations(children, msg.citation_context || citationContext)}</th>
-                            ),
-                            strong: ({ children }) => (
-                              <strong>{processChildrenForCitations(children, msg.citation_context || citationContext)}</strong>
-                            ),
-                          }}
-                        >
-                          {msg.content}
-                        </ReactMarkdown>
+                        <MemoizedMarkdown
+                          content={msg.content}
+                          context={msg.citation_context || citationContext}
+                        />
                       </div>
                     </div>
                     {msg.id && (
@@ -430,6 +414,7 @@ export default function ActiveChat({
               <ComparisonDocumentPicker
                 documents={comparison.selectionDocuments}
                 preSelected={comparison.selectionPreSelected}
+                originalQuery={comparison.selectionQuery}
                 message={comparison.selectionMessage}
                 onConfirm={(docIds) => {
                   actions.confirmComparisonSelection(
@@ -515,28 +500,10 @@ export default function ActiveChat({
                       prose-h4:text-base prose-h4:mt-4 prose-h4:mb-2
                       prose-headings:font-bold prose-headings:text-foreground
                     ">
-                      <ReactMarkdown
-                        remarkPlugins={[remarkGfm]}
-                        components={{
-                          p: ({ children }) => (
-                            <p>{processChildrenForCitations(children, citationContext)}</p>
-                          ),
-                          li: ({ children }) => (
-                            <li>{processChildrenForCitations(children, citationContext)}</li>
-                          ),
-                          td: ({ children }) => (
-                            <td>{processChildrenForCitations(children, citationContext)}</td>
-                          ),
-                          th: ({ children }) => (
-                            <th>{processChildrenForCitations(children, citationContext)}</th>
-                          ),
-                          strong: ({ children }) => (
-                            <strong>{processChildrenForCitations(children, citationContext)}</strong>
-                          ),
-                        }}
-                      >
-                        {streamingMessage}
-                      </ReactMarkdown>
+                      <MemoizedMarkdown
+                        content={streamingMessage}
+                        context={citationContext}
+                      />
                     </div>
                   )}
                   {/* Typing indicator */}

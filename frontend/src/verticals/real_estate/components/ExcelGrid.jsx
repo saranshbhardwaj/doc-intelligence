@@ -7,8 +7,69 @@ import React from 'react';
 import * as XLSX from 'xlsx';
 import { Badge } from '../../../components/ui/badge';
 import { Button } from '../../../components/ui/button';
-import { AlertCircle, AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, Columns3, Info, Rows3 } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, ChevronDown, ChevronRight, Info } from 'lucide-react';
 import { getExcelCellStyle } from '../utils/excelCellStyles';
+
+const DEFAULT_VISIBLE_ROW_END = 20;
+const DEFAULT_VISIBLE_COL_END = 10;
+const worksheetViewCache = new WeakMap();
+
+function getSheetWindowCacheKey(displayRowEnd, displayColEnd) {
+  return `${displayRowEnd}:${displayColEnd}`;
+}
+
+function computeInitialColumnWidths(worksheet) {
+  const widths = {};
+  const cols = worksheet['!cols'] || [];
+  const charToPixels = 7.5;
+
+  cols.forEach((colInfo, index) => {
+    if (colInfo && colInfo.wch) {
+      const pixels = Math.max(64, Math.min(400, colInfo.wch * charToPixels));
+      widths[index] = Math.round(pixels);
+    }
+  });
+
+  return widths;
+}
+
+function computeCellStyleCache(worksheet, displayRowEnd, displayColEnd) {
+  const cache = {};
+  const range = XLSX.utils.decode_range(worksheet['!ref'] || 'A1');
+
+  for (let R = range.s.r; R <= displayRowEnd; R++) {
+    for (let C = range.s.c; C <= displayColEnd; C++) {
+      const addr = XLSX.utils.encode_cell({ r: R, c: C });
+      cache[addr] = getExcelCellStyle(worksheet[addr]);
+    }
+  }
+
+  return cache;
+}
+
+export function warmExcelSheetView(worksheet) {
+  if (!worksheet) return null;
+
+  const existing = worksheetViewCache.get(worksheet);
+  if (existing?.initialColumnWidths && existing.windowCaches?.size) {
+    return existing;
+  }
+
+  const range = XLSX.utils.decode_range(worksheet['!ref'] || 'A1');
+  const displayRowEnd = Math.min(DEFAULT_VISIBLE_ROW_END, range.e.r);
+  const displayColEnd = Math.min(DEFAULT_VISIBLE_COL_END, range.e.c);
+  const windowKey = getSheetWindowCacheKey(displayRowEnd, displayColEnd);
+
+  const warmed = {
+    initialColumnWidths: computeInitialColumnWidths(worksheet),
+    windowCaches: new Map([
+      [windowKey, computeCellStyleCache(worksheet, displayRowEnd, displayColEnd)],
+    ]),
+  };
+
+  worksheetViewCache.set(worksheet, warmed);
+  return warmed;
+}
 
 export default function ExcelGrid({
   workbook,
@@ -18,42 +79,42 @@ export default function ExcelGrid({
   isYamlUnmappedCell,
   onCellClick,
   selectedCell,
+  onReady,
 }) {
   const worksheet = workbook.Sheets[sheetName];
   const [expandedCells, setExpandedCells] = React.useState(new Set());
-  const [visibleRowEnd, setVisibleRowEnd] = React.useState(20); // Show first 20 rows initially
-  const [visibleColEnd, setVisibleColEnd] = React.useState(10); // Show first 10 columns initially
+  const [visibleRowEnd, setVisibleRowEnd] = React.useState(DEFAULT_VISIBLE_ROW_END); // Show first rows initially
+  const [visibleColEnd, setVisibleColEnd] = React.useState(DEFAULT_VISIBLE_COL_END); // Show first cols initially
+  const didSignalReadyRef = React.useRef(false);
+
+  // Reset pagination when sheet changes
+  React.useEffect(() => {
+    setVisibleRowEnd(DEFAULT_VISIBLE_ROW_END);
+    setVisibleColEnd(DEFAULT_VISIBLE_COL_END);
+  }, [sheetName]);
+
+  React.useEffect(() => {
+    didSignalReadyRef.current = false;
+  }, [sheetName, workbook]);
   const [resizing, setResizing] = React.useState(null); // { col: number, startX: number, startWidth: number }
 
   // Extract column widths from Excel file
-  const initialColumnWidths = React.useMemo(() => {
-    const widths = {};
-    const cols = worksheet['!cols'] || [];
-
-    // Convert Excel character width to pixels
-    // Excel character width (wch) is based on the default font
-    // Approximate conversion: 1 character ≈ 7.5 pixels (can vary by font)
-    const charToPixels = 7.5;
-
-    cols.forEach((colInfo, index) => {
-      if (colInfo && colInfo.wch) {
-        // Convert character width to pixels, with min/max bounds
-        const pixels = Math.max(64, Math.min(400, colInfo.wch * charToPixels));
-        widths[index] = Math.round(pixels);
-      }
-    });
-
-    return widths;
+  const sheetCache = React.useMemo(() => {
+    return warmExcelSheetView(worksheet);
   }, [worksheet]);
 
-  const [columnWidths, setColumnWidths] = React.useState(initialColumnWidths); // Track custom column widths
+  const [columnWidths, setColumnWidths] = React.useState(
+    sheetCache?.initialColumnWidths || {}
+  ); // Track custom column widths
 
   // Reset column widths when sheet changes
   React.useEffect(() => {
-    setColumnWidths(initialColumnWidths);
-  }, [sheetName, initialColumnWidths]);
+    setColumnWidths(sheetCache?.initialColumnWidths || {});
+  }, [sheetName, sheetCache]);
 
-  // Get the FULL range of cells in the sheet
+  // Pre-compute cell styles only for the currently visible range.
+  // Computing the entire worksheet upfront blocks the main thread and makes
+  // the sheet look "loaded" before it is actually interactive.
   const range = XLSX.utils.decode_range(worksheet['!ref'] || 'A1');
 
   // Determine which rows to display (with buffer)
@@ -67,13 +128,46 @@ export default function ExcelGrid({
   const displayColEnd = Math.min(visibleColEnd, range.e.c);
   const cols = [];
   for (let C = range.s.c; C <= displayColEnd; C++) {
-    cols.push(C);
+    cols.push({ index: C, label: XLSX.utils.encode_col(C) });
   }
 
   const hasMoreRows = displayRowEnd < range.e.r;
   const hasMoreCols = displayColEnd < range.e.c;
   const rowBatchSize = 20;
   const colBatchSize = 5;
+
+  const cellStyleCache = React.useMemo(() => {
+    const cacheKey = getSheetWindowCacheKey(displayRowEnd, displayColEnd);
+    const existingWindowCache = sheetCache?.windowCaches?.get(cacheKey);
+    if (existingWindowCache) {
+      return existingWindowCache;
+    }
+
+    const computed = computeCellStyleCache(worksheet, displayRowEnd, displayColEnd);
+    if (sheetCache?.windowCaches) {
+      sheetCache.windowCaches.set(cacheKey, computed);
+    }
+    return computed;
+  }, [worksheet, displayRowEnd, displayColEnd, sheetCache]);
+
+  React.useEffect(() => {
+    if (!onReady || didSignalReadyRef.current) return;
+
+    let frame1 = null;
+    let frame2 = null;
+
+    frame1 = requestAnimationFrame(() => {
+      frame2 = requestAnimationFrame(() => {
+        didSignalReadyRef.current = true;
+        onReady();
+      });
+    });
+
+    return () => {
+      if (frame1 !== null) cancelAnimationFrame(frame1);
+      if (frame2 !== null) cancelAnimationFrame(frame2);
+    };
+  }, [onReady, sheetName, rows.length, cols.length]);
 
   function handleLoadMoreRows() {
     setVisibleRowEnd(prev => Math.min(prev + rowBatchSize, range.e.r));
@@ -98,7 +192,7 @@ export default function ExcelGrid({
   // Get column width (custom, from Excel, or default)
   function getColumnWidth(col) {
     // Priority: 1) User-resized width, 2) Excel file width, 3) Default 128px
-    return columnWidths[col] || initialColumnWidths[col] || 128;
+    return columnWidths[col] || sheetCache?.initialColumnWidths?.[col] || 128;
   }
 
   // Column resize handlers
@@ -153,14 +247,14 @@ export default function ExcelGrid({
               <th className="border border-border bg-muted/70 p-2 text-xs font-medium text-muted-foreground sticky top-0 left-0 z-20 w-12">
                 {/* Empty corner */}
               </th>
-              {cols.map(C => (
+              {cols.map(({ index: C, label: colLabel }) => (
                 <th
                   key={C}
                   className="border border-border bg-muted/70 p-2 text-xs font-medium text-muted-foreground sticky top-0 z-10 relative"
                   style={{ width: `${getColumnWidth(C)}px`, minWidth: `${getColumnWidth(C)}px`, maxWidth: `${getColumnWidth(C)}px` }}
                 >
                   <div className="flex items-center justify-center">
-                    {XLSX.utils.encode_col(C)}
+                    {colLabel}
                   </div>
                   {/* Resize Handle */}
                   <div
@@ -180,7 +274,7 @@ export default function ExcelGrid({
                 <td className="border border-border bg-muted/50 p-2 text-xs font-medium text-muted-foreground text-center sticky left-0 z-10">
                   {R + 1}
                 </td>
-                {cols.map(C => {
+                {cols.map(({ index: C }) => {
                   const cellAddress = XLSX.utils.encode_cell({ r: R, c: C });
                   const cell = worksheet[cellAddress];
                   const mapping = getCellMapping(sheetName, cellAddress);
@@ -195,19 +289,24 @@ export default function ExcelGrid({
 
                   // Get display value
                   let displayValue = '';
+                  let isTemplateDefault = false;
                   if (hasFormula) {
                     displayValue = `=${cell.f}`;
                   } else if (mappedValue) {
                     displayValue = mappedValue;
                   } else if (cell) {
-                    displayValue = cell.w || cell.v || '';
+                    const rawValue = cell.w || cell.v || '';
+                    if (rawValue) {
+                      displayValue = rawValue;
+                      isTemplateDefault = true;
+                    }
                   }
 
                   // Check if value is long enough to need expansion
                   const needsExpansion = displayValue && displayValue.length > 30;
 
-                  // Get Excel cell styling (colors, bold, italic)
-                  const excelStyle = getExcelCellStyle(cell);
+                  // Get Excel cell styling (colors, bold, italic) — pre-computed above
+                  const excelStyle = cellStyleCache[cellAddress] || {};
 
                   // Base cell classes
                   let cellClasses = 'border border-border p-2 text-xs transition-all relative';
@@ -237,13 +336,22 @@ export default function ExcelGrid({
                     }
                   } else if (mapping) {
                     const confidence = mapping.confidence || 0;
-                    // Use box-shadow for overlay effect (doesn't override background)
+                    // Use box-shadow for border overlay + subtle background tint
                     if (confidence >= 0.8) {
                       overlayColor = 'inset 0 0 0 2px hsl(var(--success))';
+                      if (!excelStyle.backgroundColor) {
+                        inlineStyles.backgroundColor = 'hsl(var(--success) / 0.06)';
+                      }
                     } else if (confidence >= 0.5) {
                       overlayColor = 'inset 0 0 0 2px hsl(var(--warning))';
+                      if (!excelStyle.backgroundColor) {
+                        inlineStyles.backgroundColor = 'hsl(var(--warning) / 0.06)';
+                      }
                     } else {
                       overlayColor = 'inset 0 0 0 2px hsl(var(--destructive))';
+                      if (!excelStyle.backgroundColor) {
+                        inlineStyles.backgroundColor = 'hsl(var(--destructive) / 0.06)';
+                      }
                     }
                   } else if (isYamlUnmapped) {
                     overlayColor = 'inset 0 0 0 2px hsl(var(--warning))';
@@ -274,6 +382,8 @@ export default function ExcelGrid({
                           ? `${mapping.excel_label || ''} (${Math.round((mapping.confidence || 0) * 100)}% confidence)`
                           : isYamlUnmapped
                           ? `Target cell not mapped yet (${cellAddress})`
+                          : isTemplateDefault
+                          ? `Template default value (${cellAddress})`
                           : cellAddress
                       }
                     >
@@ -289,26 +399,32 @@ export default function ExcelGrid({
                           <>
                             <div className={isExpanded ? "whitespace-pre-wrap" : "truncate"} style={{
                               fontWeight: excelStyle.fontWeight,
-                              fontStyle: excelStyle.fontStyle,
-                              color: excelStyle.color
+                              fontStyle: isTemplateDefault ? 'italic' : excelStyle.fontStyle,
+                              color: isTemplateDefault ? 'hsl(var(--muted-foreground))' : excelStyle.color,
+                              opacity: isTemplateDefault ? 0.6 : undefined,
                             }}>
                               {displayValue || <span className="text-muted-foreground/40">—</span>}
                             </div>
                             <div className="flex items-center gap-1 justify-between">
-                              {mapping && (
-                                <div className="flex items-center gap-1">
-                                  {mapping.confidence >= 0.8 ? (
-                                    <CheckCircle2 className="h-3 w-3 text-success" />
-                                  ) : mapping.confidence >= 0.5 ? (
-                                    <AlertTriangle className="h-3 w-3 text-warning" />
-                                  ) : (
-                                    <AlertCircle className="h-3 w-3 text-destructive" />
-                                  )}
-                                  <span className="text-xs text-muted-foreground">
-                                    {Math.round((mapping.confidence || 0) * 100)}%
-                                  </span>
-                                </div>
-                              )}
+                              {mapping && (() => {
+                                const conf = Math.round((mapping.confidence || 0) * 100);
+                                const isHigh = mapping.confidence >= 0.8;
+                                const isMid = mapping.confidence >= 0.5;
+                                return (
+                                  <div className={`inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[10px] font-semibold ${
+                                    isHigh ? 'bg-success/10 text-success' :
+                                    isMid  ? 'bg-warning/10 text-warning' :
+                                             'bg-destructive/10 text-destructive'
+                                  }`}>
+                                    {isHigh ? (
+                                      <CheckCircle2 className="h-2.5 w-2.5" />
+                                    ) : (
+                                      <AlertTriangle className="h-2.5 w-2.5" />
+                                    )}
+                                    {conf}%
+                                  </div>
+                                );
+                              })()}
                               {!mapping && isYamlUnmapped && (
                                 <div className="flex items-center gap-1">
                                   <AlertTriangle className="h-3 w-3 text-warning" />
@@ -359,10 +475,6 @@ export default function ExcelGrid({
             <div className="w-2.5 h-2.5 rounded border-2 border-red-500" />
             <span>Low</span>
           </div>
-          <div className="flex items-center gap-1">
-            <span className="bg-muted px-1 rounded text-[10px]">Formula</span>
-            <span>Read-only</span>
-          </div>
         </div>
 
         <div className="flex items-center gap-2 flex-wrap">
@@ -371,11 +483,10 @@ export default function ExcelGrid({
               variant="outline"
               size="sm"
               onClick={handleLoadMoreRows}
-              className="text-xs"
+              className="text-xs h-7 px-2 gap-1"
             >
-              <Rows3 className="h-3.5 w-3.5 mr-1.5" />
-              <ChevronDown className="h-3 w-3 mr-1" />
-              Show {rowBatchSize} more rows
+              <ChevronDown className="h-3 w-3" />
+              +{rowBatchSize} rows
             </Button>
           )}
           {hasMoreCols && (
@@ -383,11 +494,10 @@ export default function ExcelGrid({
               variant="outline"
               size="sm"
               onClick={handleLoadMoreCols}
-              className="text-xs"
+              className="text-xs h-7 px-2 gap-1"
             >
-              <Columns3 className="h-3.5 w-3.5 mr-1.5" />
-              <ChevronRight className="h-3 w-3 mr-1" />
-              Show more columns
+              <ChevronRight className="h-3 w-3" />
+              More cols
             </Button>
           )}
           {!hasMoreRows && !hasMoreCols && (

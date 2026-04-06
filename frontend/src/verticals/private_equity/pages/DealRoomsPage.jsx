@@ -60,7 +60,7 @@ export default function DealRoomsPage() {
         )}
 
         {!loading && rooms.length === 0 && (
-          <div className="pe-card-muted p-16 text-center">
+          <div className="glass-card rounded-2xl p-16 text-center">
             <Briefcase className="w-10 h-10 text-muted-foreground/30 mx-auto mb-4" />
             <p className="text-sm font-semibold">No deal rooms yet</p>
             <p className="text-xs text-muted-foreground mt-1">
@@ -75,7 +75,7 @@ export default function DealRoomsPage() {
               <div
                 key={room.id}
                 onClick={() => navigate(`/app/pe/rooms/${room.id}/dashboard`)}
-                className="pe-card p-5 hover:border-primary/40 hover:shadow-md transition-all cursor-pointer group"
+                className="pe-card hover-lift p-5 hover:border-primary/40 cursor-pointer group"
               >
                 {/* Card top */}
                 <div className="flex items-start justify-between gap-2 mb-4">

@@ -18,6 +18,7 @@ export default function FieldsList({
   fillRunId,
   extractedData = {},
   fieldMapping = {},
+  citationContext = null,
   selectedText,
   onCitationClick,
 }) {
@@ -45,6 +46,7 @@ export default function FieldsList({
         field_name: f.name,
         field_type: f.type,
         citations: f.citations || extractedData[f.id]?.citations,
+        bbox: f.bbox || extractedData[f.id]?.bbox,
       }])
     : Object.entries(extractedData).map(([id, data]) => [id, data]);
 
@@ -338,6 +340,7 @@ export default function FieldsList({
                     citations={fieldData.citations}
                     onCitationClick={onCitationClick}
                     extractedData={fieldData}
+                    citationContext={citationContext}
                     className="mt-0 pt-2"
                   />
                 )}

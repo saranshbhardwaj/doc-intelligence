@@ -11,12 +11,14 @@ Task Flow:
 
 import asyncio
 import json
+import re
 import time
 from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from celery import chain, shared_task
+from celery.exceptions import SoftTimeLimitExceeded
 from sqlalchemy.orm import Session
 
 from app.config import settings
@@ -26,13 +28,13 @@ from app.repositories.job_repository import JobRepository
 from app.repositories.template_repository import TemplateRepository
 from app.services.artifacts import persist_artifact
 from app.services.beta_limits import commit_shadow_credits, reverse_shadow_credits
+from app.services.citations import normalize_citations
 from app.services.job_tracker import JobProgressTracker
 from app.core.storage.storage_factory import get_storage_backend
 from app.utils.costs import compute_llm_cost
 from app.utils.logging import logger
 from app.utils.metrics_recorder import record_template_fill_completed, record_template_fill_failed
 from app.utils.metrics import TEMPLATE_FILL_LATENCY_SECONDS
-from app.core.rag.hybrid_retriever import HybridRetriever
 from app.verticals.real_estate.template_filling.excel_handler import ExcelHandler
 from app.verticals.real_estate.template_filling.llm_service import TemplateFillLLMService
 from app.verticals.real_estate.template_filling.excel.mapping_coordinator import coordinator as mapping_coordinator
@@ -50,6 +52,35 @@ def _reverse_template_fill_shadow(fill_run_id: str, reason: str, stage: str) -> 
         reason=reason,
         metadata={"stage": stage},
     )
+
+
+def _build_citation_context(detected_fields: list, document_filename: str) -> dict:
+    """
+    Build S{n}→{bbox, page, filename} lookup from detected fields.
+
+    Parallel to rag_service._build_citation_context() for RAG chunks.
+    Built once at detect_fields_task time and persisted to DB so the frontend
+    can resolve [S{n}:p{N}] citation tokens → exact bbox without any array searching.
+
+    Only includes non-targeted fields (targeted_schema entries are appended later
+    in auto_map_fields_task after their bboxes are resolved).
+    """
+    citations = []
+    for field in detected_fields:
+        if field.get("source") == "targeted_schema":
+            continue
+        m = re.search(r'_(\d+)$', field.get("id", ""))
+        if not m:
+            continue
+        bbox = field.get("bbox")
+        citations.append({
+            "source_index": int(m.group(1)),
+            "field_id": field["id"],
+            "page": (bbox or {}).get("page"),
+            "filename": document_filename,
+            "bbox": bbox,
+        })
+    return {"citations": citations}
 
 
 def _extract_schema_table_row_labels(schema_obj: Any, workbook: Any) -> Dict[str, Any]:
@@ -89,46 +120,6 @@ def _extract_schema_table_row_labels(schema_obj: Any, workbook: Any) -> Dict[str
 
     return labels_by_table
 
-
-def _build_table_query(table_def: Dict[str, Any], row_labels: List[str]) -> str:
-    parts = [table_def.get("sheet", "")]
-    for col in table_def.get("columns", []) or []:
-        if col.get("header"):
-            parts.append(col.get("header"))
-        parts.extend(col.get("pdf_aliases", []) or [])
-    parts.extend(row_labels[:10])
-    return " ".join([p for p in parts if p])
-
-
-def _retrieve_table_rag_chunks(
-    db: Session,
-    document_id: str,
-    query: str,
-    top_k: int = 5
-) -> List[Dict[str, Any]]:
-    if not document_id:
-        return []
-    retriever = HybridRetriever(db)
-    results = retriever.retrieve(
-        query=query,
-        document_ids=[document_id],
-        top_k=top_k,
-    )
-    table_chunks = [
-        r for r in results
-        if r.get("section_type") == "table" or r.get("is_tabular")
-    ]
-    if len(table_chunks) >= top_k:
-        return table_chunks[:top_k]
-
-    kv_chunks = [
-        r for r in results
-        if r.get("section_type") in ("key_value_pairs", "key_value")
-    ]
-    merged = table_chunks + kv_chunks
-    if merged:
-        return merged[:top_k]
-    return results[:top_k]
 
 
 def _get_table_batch_key(table_def: Dict[str, Any]) -> str:
@@ -399,6 +390,15 @@ def detect_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         raise ValueError(f"Fill run not found: {fill_run_id}")
     org_id = fill_run.org_id
 
+    # Idempotency guard: skip if already past field detection (re-queued after worker restart)
+    _DETECT_DONE_STATUSES = {"fields_detected", "mapping", "awaiting_review", "filling", "completed", "failed"}
+    if fill_run.status in _DETECT_DONE_STATUSES:
+        logger.warning(
+            f"detect_fields_task skipped — fill_run={fill_run_id} already in status={fill_run.status!r}"
+        )
+        db.close()
+        return {**payload, "detection_result": {"fields": fill_run.field_mapping.get("pdf_fields", []) if fill_run.field_mapping else [], "total_fields": 0, "categories": []}}
+
     try:
         logger.info(f"Detecting fields for fill run: {fill_run_id}")
 
@@ -418,19 +418,20 @@ def detect_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         # Get template to count Excel schema cells (not PDF detected fields)
         template = repo.get_template(fill_run.template_id)
         schema_cell_count = 0
-        if template and template.schema_metadata:
+        if template and template.schema_metadata and template.schema_metadata.get("schema_summary"):
             # Count: KV fields + all table columns
-            fields = template.schema_metadata.get("fields", [])
-            tables = template.schema_metadata.get("tables", [])
-            schema_cell_count = len(fields) + sum(len(t.get("columns", [])) for t in tables)
+            sch_summary = template.schema_metadata.get("schema_summary")
+            fields = sch_summary.get("yaml_field_count", [])
+            tables = sch_summary.get("yaml_table_cells", [])
+            schema_cell_count = template.schema_metadata.get("total_yaml_fields")
+
+        start_time = time.time()
 
         # Get KV and table chunks from document
         chunks = document_repo.get_chunks_for_document(document_id)
 
         if not chunks:
             raise ValueError(f"No chunks found for document {document_id}. Document may not be fully processed.")
-
-        start_time = time.time()
         detected_fields = []
         field_id_counter = 1
 
@@ -482,7 +483,7 @@ def detect_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                 )
                 if isinstance(kv_page_number, str) and kv_page_number.isdigit():
                     kv_page_number = int(kv_page_number)
-                citation = f"[D1:p{kv_page_number}]"
+                citation = f"[S{field_id_counter}:p{kv_page_number}]"
 
                 if not key:
                     continue
@@ -560,7 +561,7 @@ def detect_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                 )
             if isinstance(table_page, str) and table_page.isdigit():
                 table_page = int(table_page)
-            citation = f"[D1:p{table_page}]"
+            citation = f"[S{field_id_counter}:p{table_page}]"
 
             # Extract table data for per-column fields (schema matching - Stage 1)
             table_data_rows = table_dict.get("table_data", [])
@@ -639,7 +640,7 @@ def detect_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
             narrative_page = metadata_dict.get("page_number") or chunk.page_number
             if isinstance(narrative_page, str) and narrative_page.isdigit():
                 narrative_page = int(narrative_page)
-            citation = f"[D1:p{narrative_page}]"
+            citation = f"[S{field_id_counter}:p{narrative_page}]"
 
             # Create one narrative_block field with full text for LLM context
             # Narrative provides market/economic/demographic context for better field matching
@@ -679,16 +680,21 @@ def detect_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
             "mappings": []  # Empty initially, will be filled by auto-mapping
         }
 
+        # Build citation context: S{n}→{bbox,page,filename} lookup for frontend PDF highlighting.
+        # Parallel to rag_service._build_citation_context(). targeted_schema entries appended later.
+        citation_context = _build_citation_context(detected_fields, document.filename)
+
         # Use schema cell count as total_fields_detected (Excel cells to fill, not PDF extracted fields)
         total_to_detect = schema_cell_count if schema_cell_count > 0 else len(detected_fields)
 
-        # Store metadata only (field_mapping, field_detection_completed)
-        # Progress updates via SSE (JobState)
         repo.update_fill_run(
             fill_run_id,
             field_mapping=field_mapping,
+            citation_context=citation_context,
             total_fields_detected=total_to_detect,
             field_detection_completed=True,
+            status="fields_detected",
+            current_stage="field_detection",
         )
 
         db.close()
@@ -710,6 +716,16 @@ def detect_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         payload["detection_result"] = detection_result
         payload["processing_time_ms"] = elapsed_ms
         return {"status": "completed", **payload}
+
+    except SoftTimeLimitExceeded:
+        logger.warning(f"detect_fields_task soft time limit exceeded for fill_run={fill_run_id}")
+        repo.update_fill_run(fill_run_id, status="failed", error_stage="field_detection",
+                             error_message="Task timed out (soft limit)")
+        tracker.mark_error(error_stage="field_detection", error_message="Field detection timed out",
+                           error_type="timeout", is_retryable=False)
+        _reverse_template_fill_shadow(fill_run_id, "field_detection_timeout", "field_detection")
+        db.close()
+        return {"status": "failed", "error": "timeout", **payload}
 
     except Exception as e:
         logger.error(f"Field detection failed: {e}", exc_info=True)
@@ -765,7 +781,6 @@ def auto_map_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
     template_id = payload["template_id"]
     detection_result = payload["detection_result"]
     job_id = payload["job_id"]
-    document_id = payload.get("document_id")
 
     # Config flags (read from settings if not in payload)
     # skip_generic_mapping controls Stage 2 (generic Excel mapping) - Default: True (skip generic, run only targeted)
@@ -778,7 +793,18 @@ def auto_map_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
     repo = TemplateRepository(db)
     tracker = JobProgressTracker(db, job_id)
 
+    # Idempotency guard: skip if already past auto-mapping (re-queued after worker restart)
+    _fill_run_check = repo.get_fill_run(fill_run_id)
+    _AUTO_MAP_DONE_STATUSES = {"awaiting_review", "filling", "completed", "failed"}
+    if _fill_run_check and _fill_run_check.status in _AUTO_MAP_DONE_STATUSES:
+        logger.warning(
+            f"auto_map_fields_task skipped — fill_run={fill_run_id} already in status={_fill_run_check.status!r}"
+        )
+        db.close()
+        return {**payload, "mapping_result": _fill_run_check.field_mapping or {}}
+
     try:
+        task_start_time = time.time()
         logger.info(f"Auto-mapping fields for fill run: {fill_run_id}")
 
         tracker.update_progress(
@@ -799,6 +825,17 @@ def auto_map_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
 
         # Mutable copy — Stage 2 injects virtual pdf_fields for targeted values
         pdf_fields = list(detection_result.get("fields", []))
+
+        # Load citation_context built by detect_fields_task; we'll append targeted entries to it.
+        # Reuse _fill_run_check already fetched above (avoids a second DB round-trip).
+        fill_run_for_ctx = _fill_run_check
+        citation_context = (fill_run_for_ctx.citation_context or {"citations": []}) if fill_run_for_ctx else {"citations": []}
+        # Fast lookup: source_index → bbox (for targeted_schema bbox resolution)
+        _source_field_bbox: Dict[int, Dict] = {
+            e["source_index"]: e["bbox"]
+            for e in citation_context.get("citations", [])
+            if e.get("bbox")
+        }
         schema_mappings = []
         generic_mappings = []
         schema_id = None  # Track for Stage 2
@@ -891,6 +928,7 @@ def auto_map_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         # Ask LLM specifically: "find values for these 63 named fields in the Azure DI data"
         # Much cheaper and more accurate than the generic 6-batch sheet mapper for schema fields.
         # Always runs when schema is available (independent of skip_generic_mapping)
+        llm_service_targeted = None
         if schema_id:
             try:
                 from app.verticals.real_estate.template_filling.excel.schema_based import SchemaMapper
@@ -908,7 +946,11 @@ def auto_map_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                     schema_tables = schema_obj.tables or []
 
                     if unmapped_fields or schema_tables:
-                        llm_service_targeted = TemplateFillLLMService()
+                        llm_service_targeted = TemplateFillLLMService(
+                            prompt_version=settings.re_template_prompt_version,
+                            capture_io_log=settings.capture_llm_io_log,
+                            fill_run_id=fill_run_id,
+                        )
 
                     if unmapped_fields:
                         logger.info(
@@ -938,16 +980,31 @@ def auto_map_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                             fid = field_def["id"]
                             if fid in targeted_values:
                                 result = targeted_values[fid]
-                                pdf_fields.append({
+                                normalized_cits = normalize_citations(result.get("citations", []))
+
+                                # Resolve exact bbox via citation_context lookup (S{n} → source field bbox).
+                                # This is a direct index lookup, not a page-scan heuristic.
+                                field_bbox = None
+                                for cit in normalized_cits:
+                                    cm = re.search(r'\[(?:S|D)(\d+):', cit)
+                                    if cm:
+                                        field_bbox = _source_field_bbox.get(int(cm.group(1)))
+                                        if field_bbox:
+                                            break
+
+                                virtual_field = {
                                     "id": f"targeted_{fid}",
                                     "name": fid,
                                     "type": field_def.get("data_type", "text"),
                                     "extracted_value": result["value"],
                                     "confidence": result["confidence"],
-                                    "citations": result.get("citations", []),
+                                    "citations": normalized_cits,
                                     "reasoning": result.get("reasoning"),
                                     "source": "targeted_schema",
-                                })
+                                }
+                                if field_bbox:
+                                    virtual_field["bbox"] = field_bbox
+                                pdf_fields.append(virtual_field)
 
                         # Merge targeted mappings into schema_mappings so they're
                         # excluded from the Stage 3 generic pass automatically
@@ -989,9 +1046,18 @@ def auto_map_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                             batch_key = _get_table_batch_key(table_def)
                             table_batches.setdefault(batch_key, []).append(table_def)
 
+                        # Build context JSON once — identical for every batch (enables Anthropic cache hits)
+                        table_context_json: Optional[str] = None
+                        if pdf_fields:
+                            context_payload = llm_service_targeted._build_table_context_from_pdf_fields(pdf_fields)
+                            table_context_json = json.dumps(context_payload, separators=(",", ":"), ensure_ascii=False)
+                            logger.info(f"Table context built once: {len(pdf_fields)} fields → {len(table_context_json)} chars")
+
                         for batch_key, batch_tables in table_batches.items():
-                            batch_chunks: List[Dict[str, Any]] = []
-                            seen_chunk_ids = set()
+                            if not table_context_json:
+                                logger.info(f"No pdf_fields available for table batch {batch_key}")
+                                continue
+
                             row_labels_by_table: Dict[str, List[str]] = {}
 
                             for table_def in batch_tables:
@@ -1006,41 +1072,16 @@ def auto_map_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                                     row_labels = []
                                 row_labels_by_table[table_id] = row_labels
 
-                                query = _build_table_query(table_def, row_labels)
-                                rag_chunks = _retrieve_table_rag_chunks(db, document_id, query)
-                                if not rag_chunks:
-                                    logger.info(f"No RAG chunks found for schema table {table_id}")
-                                    continue
-                                logger.info(
-                                    f"RAG table retrieval: table_id={table_id} chunks={len(rag_chunks)}"
-                                )
-
-                                for chunk in rag_chunks:
-                                    chunk_id = chunk.get("id")
-                                    if not chunk_id or chunk_id in seen_chunk_ids:
-                                        continue
-                                    seen_chunk_ids.add(chunk_id)
-                                    batch_chunks.append(chunk)
-
-                            if not batch_chunks:
-                                logger.info(f"No RAG chunks found for table batch {batch_key}")
-                                continue
-
                             logger.info(
-                                f"RAG batch extraction: batch={batch_key} tables={len(batch_tables)} "
-                                f"chunks={len(batch_chunks)}"
-                            )
-
-                            logger.info(
-                                f"LLM table batch call: batch={batch_key} "
-                                f"table_ids={[t.get('id') for t in batch_tables if t.get('id')]}"
+                                f"Table batch extraction: batch={batch_key} tables={len(batch_tables)}"
                             )
 
                             batch_result = asyncio.run(
                                 llm_service_targeted.extract_schema_table_values_rag_batch(
                                     batch_tables,
-                                    batch_chunks,
+                                    pdf_fields,
                                     row_labels_by_table=row_labels_by_table,
+                                    prebuilt_context_json=table_context_json,
                                 )
                             )
                             if batch_result:
@@ -1060,7 +1101,7 @@ def auto_map_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                                 "type": mapping.get("data_type", "text"),
                                 "extracted_value": extracted_value,
                                 "confidence": mapping.get("confidence", 0.7),
-                                "citations": mapping.get("citations", []),
+                                "citations": normalize_citations(mapping.get("citations", [])),
                                 "reasoning": mapping.get("reasoning"),
                                 "source": "targeted_schema",
                             })
@@ -1089,6 +1130,7 @@ def auto_map_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                 logger.warning(f"Stage 2 targeted mapping failed (continuing to Stage 3): {e}")
 
         # === STEP 2: Generic + LLM mapping for remaining cells (unless skip_generic_mapping) ===
+        llm_service = None
         if not skip_generic_mapping:
             # Get cells already mapped by schema (Stage 1 + Stage 2)
             schema_mapped_cells = mapping_coordinator.get_schema_mapped_cells(schema_mappings)
@@ -1102,7 +1144,11 @@ def auto_map_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
             # Only run LLM if there are unmapped cells
             if filtered_excel_schema:
                 # Initialize LLM service
-                llm_service = TemplateFillLLMService()
+                llm_service = TemplateFillLLMService(
+                    prompt_version=settings.re_template_prompt_version,
+                    capture_io_log=settings.capture_llm_io_log,
+                    fill_run_id=fill_run_id,
+                )
 
                 # Progress callback for batch processing
                 def on_batch_complete(batch_num, total_batches, batch_mappings):
@@ -1123,7 +1169,6 @@ def auto_map_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                     logger.info(f"Batch {batch_num}/{total_batches} mapped: {len(batch_mappings)} fields")
 
                 # Auto-map fields (LLM call) with batching and progress tracking
-                start_time = time.time()
                 mapping_result = asyncio.run(
                     llm_service.auto_map_fields(
                         pdf_fields=pdf_fields,
@@ -1131,8 +1176,6 @@ def auto_map_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                         on_batch_complete=on_batch_complete
                     )
                 )
-                elapsed_ms = int((time.time() - start_time) * 1000)
-
                 generic_mappings = mapping_result.get("mappings") or []
 
                 # Extract token usage for observability
@@ -1158,10 +1201,8 @@ def auto_map_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                 )
             else:
                 logger.info("All cells mapped by schema - skipping generic mapping")
-                elapsed_ms = 0
         else:
             logger.info("Schema-only mode - skipping generic mapping")
-            elapsed_ms = 0
 
         # === STEP 3: Merge mappings (schema takes priority) ===
         raw_mappings = mapping_coordinator.merge_mappings(schema_mappings, generic_mappings)
@@ -1267,6 +1308,12 @@ def auto_map_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                 "cost_usd": llm_cost,
             })
 
+        metadata_params["status"] = "awaiting_review"
+        metadata_params["current_stage"] = "auto_mapping"
+        # Persist accumulated compute time (detect + full map task) so fill_excel_task can add to it.
+        # task_start_time captures the entire auto_map_fields_task wall-clock including targeted LLM calls.
+        map_elapsed_ms = int((time.time() - task_start_time) * 1000)
+        metadata_params["processing_time_ms"] = payload.get("processing_time_ms", 0) + map_elapsed_ms
         repo.update_fill_run(fill_run_id, **metadata_params)
 
         db.close()
@@ -1300,8 +1347,18 @@ def auto_map_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         )
 
         payload["mapping_result"] = mapping_result
-        payload["processing_time_ms"] = payload.get("processing_time_ms", 0) + elapsed_ms
+        payload["processing_time_ms"] = payload.get("processing_time_ms", 0) + map_elapsed_ms
         return {"status": "completed", **payload}
+
+    except SoftTimeLimitExceeded:
+        logger.warning(f"auto_map_fields_task soft time limit exceeded for fill_run={fill_run_id}")
+        repo.update_fill_run(fill_run_id, status="failed", error_stage="auto_mapping",
+                             error_message="Task timed out (soft limit)")
+        tracker.mark_error(error_stage="auto_mapping", error_message="Auto-mapping timed out",
+                           error_type="timeout", is_retryable=False)
+        _reverse_template_fill_shadow(fill_run_id, "auto_mapping_timeout", "auto_mapping")
+        db.close()
+        return {"status": "failed", "error": "timeout", **payload}
 
     except Exception as e:
         logger.error(f"Auto-mapping failed: {e}", exc_info=True)
@@ -1353,6 +1410,15 @@ def fill_excel_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
     db = _get_db_session()
     repo = TemplateRepository(db)
     tracker = JobProgressTracker(db, job_id)
+
+    # Idempotency guard: skip if already completed (re-queued after worker restart)
+    _fill_run_check = repo.get_fill_run(fill_run_id)
+    if _fill_run_check and _fill_run_check.status in ("completed", "failed"):
+        logger.warning(
+            f"fill_excel_task skipped — fill_run={fill_run_id} already in status={_fill_run_check.status!r}"
+        )
+        db.close()
+        return {**payload, "status": _fill_run_check.status}
 
     # Start latency timer
     start_time = time.monotonic()
@@ -1481,7 +1547,7 @@ def fill_excel_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
             "backend": settings.storage_backend,
             "key": storage_key,
             "size": Path(output_local_path).stat().st_size,
-            "filename": f"{fill_run_id}_{safe_template_name}_filled{file_ext}"
+            "filename": f"{safe_template_name}_filled{file_ext}"
         }
 
         # Update fill run
@@ -1491,7 +1557,8 @@ def fill_excel_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
             status="completed",
             filling_completed=True,
             completed_at=datetime.utcnow(),
-            processing_time_ms=payload.get("processing_time_ms", 0)
+            total_fields_filled=fill_summary.get("total_cells_filled", 0),
+            processing_time_ms=(fill_run.processing_time_ms or 0) + int((time.monotonic() - start_time) * 1000)
         )
 
         # Record metrics
@@ -1519,6 +1586,16 @@ def fill_excel_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         payload["artifact"] = artifact
         payload["fill_summary"] = fill_summary
         return {"status": "completed", **payload}
+
+    except SoftTimeLimitExceeded:
+        logger.warning(f"fill_excel_task soft time limit exceeded for fill_run={fill_run_id}")
+        repo.update_fill_run(fill_run_id, status="failed", error_stage="excel_filling",
+                             error_message="Task timed out (soft limit)")
+        tracker.mark_error(error_stage="excel_filling", error_message="Excel filling timed out",
+                           error_type="timeout", is_retryable=False)
+        _reverse_template_fill_shadow(fill_run_id, "excel_filling_timeout", "excel_filling")
+        db.close()
+        return {"status": "failed", "error": "timeout", **payload}
 
     except Exception as e:
         logger.error(f"Excel filling failed: {e}", exc_info=True)
@@ -1560,6 +1637,7 @@ def start_fill_run_chain(
     template_id: str,
     document_id: str,
     user_id: str,
+    fill_run_name: str | None = None,
 ) -> str:
     """
     Orchestrate the full template filling pipeline.
@@ -1605,6 +1683,7 @@ def start_fill_run_chain(
             org_id=template.org_id,
             user_id=user_id,
             template_snapshot=template_snapshot,
+            name=fill_run_name,
         )
 
         fill_run_id = fill_run.id

@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.database import SessionLocal
-from app.db_models_chat import ChatSession, ChatMessage
+from app.db_models_chat import ChatSession, ChatMessage, SessionDocument
 from app.utils.logging import logger
 
 
@@ -344,3 +344,64 @@ class ChatRepository:
                     extra={"session_id": session_id, "error": str(e)}
                 )
                 return {}
+
+    def get_or_build_document_index(self, session_id: str) -> dict:
+        """
+        Return the stable D-number → document_id mapping for a session, building
+        it on first call and persisting it to the DB.
+
+        Ordering: session_documents.added_at ASC — first document added = D1, etc.
+        Once built the index is frozen; new documents appended to the session get
+        the next available D-number on the next call.
+
+        Returns: {"D1": "doc-uuid-A", "D2": "doc-uuid-B", ...}
+        """
+        with self._get_session() as db:
+            session = db.query(ChatSession).filter(ChatSession.id == session_id).first()
+            if not session:
+                return {}
+
+            existing = session.document_index or {}
+
+            # Fetch all documents currently in the session, ordered by addition time
+            session_docs = (
+                db.query(SessionDocument)
+                .filter(SessionDocument.session_id == session_id)
+                .order_by(SessionDocument.added_at.asc())
+                .all()
+            )
+
+            if not session_docs:
+                return existing
+
+            # Build reverse map: doc_id → D-label (from existing index)
+            doc_id_to_label = {v: k for k, v in existing.items()}
+
+            # All documents already indexed — nothing to do
+            if len(doc_id_to_label) == len(session_docs):
+                return existing
+
+            updated = dict(existing)
+            changed = False
+            next_num = len(existing) + 1
+
+            for sd in session_docs:
+                if sd.document_id not in doc_id_to_label:
+                    label = f"D{next_num}"
+                    updated[label] = sd.document_id
+                    doc_id_to_label[sd.document_id] = label
+                    next_num += 1
+                    changed = True
+
+            if changed:
+                try:
+                    session.document_index = updated
+                    db.commit()
+                    logger.info(
+                        f"Built document_index for session {session_id}: {list(updated.keys())}"
+                    )
+                except SQLAlchemyError as e:
+                    logger.warning(f"Failed to persist document_index for session {session_id}: {e}")
+                    db.rollback()
+
+            return updated

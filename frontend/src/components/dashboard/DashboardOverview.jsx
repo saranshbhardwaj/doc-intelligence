@@ -78,8 +78,8 @@ export default function DashboardOverview() {
       {/* Header */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
         <div className="min-w-0">
-          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">Overview</h1>
-          <p className="text-muted-foreground mt-1">Your organization's activity overview</p>
+          <h1 className="page-title text-2xl sm:text-3xl">Overview</h1>
+          <p className="page-subtitle mt-1">Your organization's activity overview</p>
           {!anyLoading && overview && (overview.documents.pages_analyzed > 0 || overview.template_fills.total_fields_populated > 0) && (
             <p className="text-sm text-primary font-medium mt-1">
               {overview.documents.pages_analyzed > 0 && `${overview.documents.pages_analyzed} pages analyzed`}
@@ -172,7 +172,7 @@ export default function DashboardOverview() {
 
         {/* Workflows & Active Users Sidebar (1 col) */}
         <div className="space-y-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-1">
-          <Card className="rounded-2xl">
+          <Card className="rounded-2xl glass-card border-0">
             <CardHeader className="pb-2">
               <CardTitle className="flex items-center gap-2 text-base">
                 <Play className="h-4 w-4 text-muted-foreground" />
@@ -207,7 +207,7 @@ export default function DashboardOverview() {
             </CardContent>
           </Card>
 
-          <Card className="rounded-2xl">
+          <Card className="rounded-2xl glass-card border-0">
             <CardHeader className="pb-2">
               <div className="flex items-center justify-between">
                 <CardTitle className="flex items-center gap-2 text-base">

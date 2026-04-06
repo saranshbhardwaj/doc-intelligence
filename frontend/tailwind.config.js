@@ -72,6 +72,19 @@ export default {
           mid: "hsl(var(--similarity-mid))",
           low: "hsl(var(--similarity-low))",
         },
+        tertiary: {
+          DEFAULT: "hsl(var(--tertiary))",
+          foreground: "hsl(var(--tertiary-foreground))",
+        },
+        surface: {
+          DEFAULT: "hsl(var(--surface))",
+          soft: "hsl(var(--surface-soft))",
+          strong: "hsl(var(--surface-strong))",
+        },
+        shell: {
+          border: "hsl(var(--shell-border))",
+        },
+        glow: "hsl(var(--glow))",
         // Document type badge tokens — bg-dt-X / text-dt-X-foreground
         dt: {
           spa:          { DEFAULT: "hsl(var(--dt-spa))",          foreground: "hsl(var(--dt-spa-fg))" },
@@ -90,6 +103,10 @@ export default {
         },
       },
       keyframes: {
+        "page-enter": {
+          from: { opacity: "0", transform: "translateY(8px)" },
+          to: { opacity: "1", transform: "translateY(0)" },
+        },
         "accordion-down": {
           from: { height: "0" },
           to: { height: "var(--radix-accordion-content-height)" },
@@ -150,8 +167,17 @@ export default {
           "0%, 100%": { transform: "translateY(0px)" },
           "50%": { transform: "translateY(-8px)" },
         },
+        "ambient-drift": {
+          "0%, 100%": { transform: "translate3d(0, 0, 0) scale(1)" },
+          "50%": { transform: "translate3d(-2%, 3%, 0) scale(1.04)" },
+        },
+        "sheen-pass": {
+          "0%": { transform: "translateX(-120%)" },
+          "100%": { transform: "translateX(120%)" },
+        },
       },
       animation: {
+        "page-enter": "page-enter 0.3s ease-out both",
         "accordion-down": "accordion-down 0.2s ease-out",
         "accordion-up": "accordion-up 0.2s ease-out",
         // Library animations
@@ -169,10 +195,18 @@ export default {
         // Landing page
         "float": "float 6s ease-in-out infinite",
         "float-slow": "float-slow 8s ease-in-out infinite",
+        "ambient-drift": "ambient-drift 14s ease-in-out infinite",
+        "sheen-pass": "sheen-pass 4.8s linear infinite",
       },
       boxShadow: {
         panel:
           "0 1px 0 0 hsl(var(--border)), 0 12px 32px -24px hsl(var(--foreground) / 0.35)",
+        shell:
+          "inset 0 1px 0 hsl(var(--border) / 0.22), 0 18px 40px -26px hsl(var(--foreground) / 0.35)",
+        hero:
+          "0 24px 54px -38px hsl(var(--foreground) / 0.35)",
+        glow:
+          "0 0 0 1px hsl(var(--glow) / 0.16), 0 10px 30px -18px hsl(var(--glow) / 0.2)",
       },
     },
   },

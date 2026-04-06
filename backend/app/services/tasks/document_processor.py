@@ -31,6 +31,21 @@ from app.utils.logging import logger
 from app.utils.pdf_utils import detect_pdf_type
 from app.utils.file_utils import save_raw_text, save_chunks
 from app.core.storage.storage_factory import get_storage_backend
+from app.utils.id_generator import generate_id
+
+
+def _remap_id_field(metadata: dict, field: str, id_map: dict) -> None:
+    """Rewrite a single chunker logical ID field to its DB UUID."""
+    val = metadata.get(field)
+    if val and val in id_map:
+        metadata[field] = id_map[val]
+
+
+def _remap_list_field(metadata: dict, field: str, id_map: dict) -> None:
+    """Rewrite a list of chunker logical IDs to their DB UUIDs (drop unmapped entries)."""
+    vals = metadata.get(field)
+    if vals and isinstance(vals, list):
+        metadata[field] = [id_map[v] for v in vals if v in id_map]
 
 
 def _get_db_session():
@@ -266,7 +281,7 @@ def chunk_document_for_indexing_task(self, payload: Dict[str, Any]) -> Dict[str,
 
         # Save chunks for debugging
         try:
-            save_chunks(document_id, chunks_list, payload.get("filename", "unknown"))
+            save_chunks(document_id, {"chunks": chunks_list}, payload.get("filename", "unknown"))
         except Exception as save_err:
             logger.warning(f"Failed to save chunks: {save_err}")
 
@@ -475,10 +490,26 @@ def store_vectors_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         document = db.query(Document).filter(Document.id == document_id).first()
         document_filename = document.filename if document else "Unknown"
 
-        # Create DocumentChunk records with embeddings
+        # Create DocumentChunk records with embeddings.
+        # Pre-assign UUIDs so we can build a chunker_id → db_uuid mapping and rewrite
+        # cross-chunk link fields (linked_narrative_id, linked_table_ids, sibling_chunk_ids,
+        # parent_chunk_id) before insert. Without this, context_expander queries by DB UUID
+        # but the metadata contains chunker logical IDs like "sec_4_para_4" → 0 rows returned.
         embedding_model = payload.get("embedding_model")
+
+        # Step 1: Pre-assign UUIDs and build chunker_id → db_uuid mapping
+        id_map: dict = {}
+        assigned_ids: list = []
+        for chunk in chunks:
+            db_uuid = generate_id()
+            assigned_ids.append(db_uuid)
+            chunker_id = chunk.get("metadata", {}).get("chunk_id")
+            if chunker_id:
+                id_map[chunker_id] = db_uuid
+
+        # Step 2: Build DocumentChunk objects with rewritten link fields
         db_chunks = []
-        for i, (chunk, embedding) in enumerate(zip(chunks, embeddings)):
+        for i, (chunk, embedding, db_uuid) in enumerate(zip(chunks, embeddings, assigned_ids)):
             metadata = chunk.get("metadata", {})
 
             # Inject citation metadata if not already present
@@ -495,42 +526,33 @@ def store_vectors_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                     # Limit to 200 chars
                     metadata["first_sentence"] = first_sentence[:200]
 
-            # Extract smart chunking metadata fields
-            # These fields go into the chunk_metadata JSONB column
-            smart_metadata_fields = [
-                "section_id", "parent_chunk_id", "sibling_chunk_ids",
-                "linked_narrative_id", "linked_table_ids",
-                "is_continuation", "chunk_sequence", "total_chunks_in_section",
-                "heading_hierarchy", "paragraph_roles", "page_range",
-                "table_caption", "table_context", "table_row_count", "table_column_count",
-                "figure_id", "figure_caption", "has_figures", "content_type",
-                # Citation metadata fields
-                "document_filename", "document_title", "page_label",
-                "first_sentence", "content_summary", "bbox", "source_url",
-                # Key-value pairs and table data for template filling
-                "key_value_pairs", "total_kv_pairs",  # Azure DI KV pairs
-                "column_headers", "table_data", "table_name",  # Table metadata
-                "chunk_type", "source_parser"  # Additional metadata
-            ]
+            # Store all metadata fields produced by the chunker.
+            # ChunkMetadataBuilder controls what goes in — no allowlist needed here.
+            chunk_metadata = dict(metadata)
 
-            # Build chunk_metadata dict (only include fields that exist)
-            chunk_metadata = {
-                key: metadata[key]
-                for key in smart_metadata_fields
-                if key in metadata
-            }
+            # Rewrite cross-chunk link fields from chunker logical IDs → DB UUIDs.
+            # The chunker uses generate_chunk_id() to produce strings like "sec_4_para_4";
+            # context_expander queries DocumentChunk.id (UUID) so these must match.
+            _remap_id_field(chunk_metadata, "linked_narrative_id", id_map)
+            _remap_id_field(chunk_metadata, "parent_chunk_id", id_map)
+            _remap_list_field(chunk_metadata, "linked_table_ids", id_map)
+            _remap_list_field(chunk_metadata, "sibling_chunk_ids", id_map)
 
             # Serialize JSONB fields for bulk_save_objects compatibility
             # bulk_save_objects() bypasses ORM type conversion, so we must manually serialize dicts/lists to JSON
             tables_data = chunk.get("tables", [])
             tables_json = json.dumps(tables_data) if tables_data else None
 
-            chunk_metadata_json = json.dumps(chunk_metadata) if chunk_metadata else None
+            # Pass dict directly — bulk_save_objects with psycopg2 serializes dicts to JSONB objects.
+            # Do NOT use json.dumps() here: that produces a JSONB string value, not a JSONB object,
+            # which breaks all dict-access operators (->, ->>, #>>) on the column.
+            chunk_metadata_json = chunk_metadata if chunk_metadata else None
 
             # Note: text_search_vector is NOT set here.
             # It is auto-populated by the PostgreSQL trigger `tsvector_update` (migration c4d5e6f7a8b9)
             # which fires BEFORE INSERT on document_chunks.
             db_chunk = DocumentChunk(
+                id=db_uuid,  # Pre-assigned UUID — must match id_map entries used in link fields above
                 document_id=document_id,
                 text=chunk["text"],
                 narrative_text=chunk.get("narrative_text", ""),

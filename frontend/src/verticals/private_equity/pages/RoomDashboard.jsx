@@ -60,7 +60,7 @@ function KpiItem({ icon: Icon, iconBg, iconColor, label, value, sub, danger }) {
       </div>
       <div className="mt-1">
         <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground">{label}</p>
-        <p className={`text-2xl font-black mt-0.5 ${danger ? "text-red-500" : "text-foreground"}`}>{value}</p>
+        <p className={`font-display text-2xl font-black mt-0.5 ${danger ? "text-red-500" : "text-foreground"}`} style={{letterSpacing: '-0.02em'}}>{value}</p>
         {sub && <p className="text-xs text-muted-foreground mt-0.5">{sub}</p>}
       </div>
     </div>
@@ -267,7 +267,7 @@ export default function RoomDashboard() {
                 {/* Document type breakdown */}
                 <div className="pe-card p-4">
                   <div className="flex items-center justify-between mb-4">
-                    <h2 className="text-sm font-bold">Document Types</h2>
+                    <h2 className="font-display text-sm font-bold">Document Types</h2>
                     <Link
                       to={`/app/pe/rooms/${roomId}/documents`}
                       className="text-xs text-primary hover:underline"
@@ -367,7 +367,7 @@ export default function RoomDashboard() {
                 {recentInvestigations.length > 0 && (
                   <div className="pe-card p-4">
                     <div className="flex items-center justify-between mb-3">
-                      <h2 className="text-sm font-bold">Recent Investigations</h2>
+                      <h2 className="font-display text-sm font-bold">Recent Investigations</h2>
                       <Link
                         to={`/app/pe/rooms/${roomId}/investigations`}
                         className="text-xs text-primary hover:underline"

@@ -8,13 +8,15 @@ Provides Excel template upload, management, and filling functionality.
 import os
 import shutil
 from datetime import datetime
+
+import openpyxl
 from io import BytesIO
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile, Request
 from fastapi.responses import StreamingResponse
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
 from app.auth import get_current_user, get_current_org_role, is_admin_role
@@ -29,10 +31,11 @@ from app.utils.logging import logger
 from app.utils.id_generator import generate_id
 from app.verticals.real_estate.template_filling.excel_handler import ExcelHandler
 from app.verticals.real_estate.template_filling.tasks import (
-    analyze_template_task,
+    _compute_schema_counts,
     continue_fill_run_chain,
     start_fill_run_chain,
 )
+from app.verticals.real_estate.template_filling.excel.mapping_coordinator import MappingCoordinator
 
 router = APIRouter(prefix="/templates", tags=["re_templates"])
 
@@ -49,6 +52,9 @@ class TemplateUploadResponse(BaseModel):
     file_path: str
     file_size_bytes: int
     schema_metadata: Optional[Dict[str, Any]]
+    total_sheets: int = 0
+    total_fields: int = 0
+    usage_count: int = 0
     created_at: datetime
     job_id: Optional[str] = None  # For progress tracking
 
@@ -86,6 +92,15 @@ class StartFillRequest(BaseModel):
     """Request to start a fill run."""
 
     document_id: str = Field(..., description="PDF document ID to extract data from")
+    name: Optional[str] = Field(None, min_length=1, max_length=255, description="Optional user-defined fill run name")
+
+    @field_validator("name")
+    @classmethod
+    def normalize_name(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return None
+        trimmed = value.strip()
+        return trimmed or None
 
 
 class StartFillResponse(BaseModel):
@@ -100,6 +115,7 @@ class FillRunStatus(BaseModel):
     """Fill run status information."""
 
     id: str
+    name: Optional[str] = None
     template_id: Optional[str]  # Can be null if template deleted
     document_id: Optional[str]  # Can be null if document deleted
     status: str
@@ -116,12 +132,14 @@ class FillRunStatus(BaseModel):
     created_at: datetime
     completed_at: Optional[datetime]
     document_metadata: Optional[Dict[str, Any]]  # PDF metadata for viewer
+    citation_context: Optional[Dict[str, Any]] = None  # S{n}→{bbox,page,filename} lookup for PDF highlighting
 
 
 class FillRunListItem(BaseModel):
     """Fill run list item (simplified)."""
 
     id: str
+    name: Optional[str] = None
     template_id: Optional[str]  # Can be null if template deleted
     template_snapshot: Optional[Dict[str, Any]]  # Template metadata snapshot
     document_id: Optional[str]  # Can be null if document deleted
@@ -148,6 +166,18 @@ class ContinueFillRequest(BaseModel):
     """Request to continue fill run after user review."""
 
     pass  # No additional data needed
+
+
+class UpdateTemplateRequest(BaseModel):
+    """Request to rename a template."""
+
+    name: str = Field(..., min_length=1, max_length=255)
+
+
+class UpdateFillRunRequest(BaseModel):
+    """Request to rename a fill run."""
+
+    name: str = Field(..., min_length=1, max_length=255)
 
 
 # ==================== Template Management Endpoints ====================
@@ -196,6 +226,36 @@ async def upload_template(
         content_hash = handler.compute_file_hash(temp_path)
         file_size = handler.get_file_size(temp_path)
 
+        # Validate fingerprint — only the known RE Investment Model is supported for beta.
+        # This is synchronous but fast (reads only 3 cells).
+        coordinator = MappingCoordinator()
+        try:
+            wb = openpyxl.load_workbook(temp_path, read_only=True, data_only=True)
+            schema_id = coordinator.identify_template(wb)
+            wb.close()
+        except Exception as fp_err:
+            logger.warning(f"Fingerprint check failed: {fp_err}")
+            schema_id = None
+
+        if not schema_id:
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    "This file doesn't match the supported RE Investment Model template. "
+                    "Please upload the correct master template file. "
+                    "Contact your admin if you need a different template type."
+                ),
+            )
+
+        # Build schema_metadata from YAML counts — no heavy analyzer needed.
+        schema_obj = coordinator.schema_loader.load_schema(schema_id)
+        schema_summary = _compute_schema_counts(schema_obj) if schema_obj else {}
+        schema_metadata = {
+            "schema_summary": schema_summary,
+            "total_yaml_fields": schema_summary.get("total_yaml_fields", 0),
+            "total_sheets": getattr(schema_obj, "total_sheets", 0),
+        }
+
         # Create template record FIRST to get the real ID
         template = repo.create_template(
             org_id=user.org_id,
@@ -220,14 +280,8 @@ async def upload_template(
         )
         storage.upload(temp_path, storage_key)
 
-        # Update template with correct file path
-        template = repo.update_template(template.id, file_path=storage_key)
-
-        # Trigger async analysis (no JobState needed - template analysis is fast)
-        analyze_template_task.delay({
-            "template_id": template.id,
-            "file_path": storage_key,
-        })
+        # Update template with file path and pre-built schema_metadata (no async analysis needed)
+        template = repo.update_template(template.id, file_path=storage_key, schema_metadata=schema_metadata)
 
         logger.info(f"Template uploaded successfully: {template.id}")
 
@@ -238,9 +292,13 @@ async def upload_template(
             file_path=template.file_path,
             file_size_bytes=template.file_size_bytes,
             schema_metadata=template.schema_metadata,
+            total_sheets=schema_metadata.get("total_sheets", 0),
+            total_fields=schema_metadata.get("total_yaml_fields", 0),
             created_at=template.created_at,
         )
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Template upload failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=f"Template upload failed: {str(e)}")
@@ -294,7 +352,10 @@ async def list_templates(
                         )
                     )
                 ) if t.schema_metadata else 0,
-                total_sheets=len(t.schema_metadata.get("sheets", [])) if t.schema_metadata else 0,
+                total_sheets=(
+                    t.schema_metadata.get("total_sheets") or
+                    len(t.schema_metadata.get("sheets", []))
+                ) if t.schema_metadata else 0,
                 created_at=t.created_at,
                 last_used_at=t.last_used_at,
             )
@@ -351,6 +412,7 @@ async def list_fills(
 
             result.append(FillRunListItem(
                 id=fill_run.id,
+                name=fill_run.name,
                 template_id=fill_run.template_id,
                 template_snapshot=template_snapshot,
                 document_id=fill_run.document_id,
@@ -419,6 +481,22 @@ async def get_template(
         raise HTTPException(status_code=500, detail="Failed to get template")
 
 
+@router.patch("/{template_id}")
+async def rename_template(
+    template_id: str,
+    request: UpdateTemplateRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Rename a template."""
+    repo = TemplateRepository(db)
+    template = repo.get_template(template_id, user.org_id)
+    if not template or template.user_id != user.id:
+        raise HTTPException(status_code=404, detail="Template not found")
+    updated = repo.update_template(template_id, name=request.name)
+    return {"id": updated.id, "name": updated.name}
+
+
 @router.get("/{template_id}/usage")
 async def get_template_usage(
     template_id: str,
@@ -480,10 +558,14 @@ async def delete_template(
         if not result["success"]:
             raise HTTPException(status_code=400, detail=result["error"])
 
-        return {
+        response = {
             "message": result["message"],
             "affected_fill_runs": result["affected_fill_runs"],
         }
+        if result.get("warnings"):
+            response["warnings"] = result["warnings"]
+
+        return response
 
     except HTTPException:
         raise
@@ -588,6 +670,7 @@ async def start_fill(
             template_id=template_id,
             document_id=request.document_id,
             user_id=user.id,
+            fill_run_name=request.name,
         ).get()  # Wait for initial setup to complete
 
         reserve_shadow_credits(
@@ -677,6 +760,7 @@ async def get_fill_status(
 
         return FillRunStatus(
             id=fill_run.id,
+            name=fill_run.name,
             template_id=fill_run.template_id,
             document_id=fill_run.document_id,
             status=fill_run.status,
@@ -693,6 +777,7 @@ async def get_fill_status(
             created_at=fill_run.created_at,
             completed_at=fill_run.completed_at,
             document_metadata=document_metadata,
+            citation_context=fill_run.citation_context,
         )
 
     except HTTPException:
@@ -700,6 +785,22 @@ async def get_fill_status(
     except Exception as e:
         logger.error(f"Failed to get fill status: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to get fill status")
+
+
+@router.patch("/fills/{fill_run_id}")
+async def rename_fill_run(
+    fill_run_id: str,
+    request: UpdateFillRunRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Rename a fill run."""
+    repo = TemplateRepository(db)
+    fill_run = repo.get_fill_run(fill_run_id, user.org_id)
+    if not fill_run or fill_run.user_id != user.id:
+        raise HTTPException(status_code=404, detail="Fill run not found")
+    updated = repo.update_fill_run(fill_run_id, name=request.name)
+    return {"id": updated.id, "name": updated.name}
 
 
 @router.put("/fills/{fill_run_id}/mappings")
@@ -823,7 +924,7 @@ async def update_extracted_data(
                     "value": "Manually edited value",
                     "confidence": 1.0,
                     "user_edited": true,
-                    "citations": ["[D1:p2]"]
+                    "citations": ["[S1:p2]"]
                 },
                 ...
             },

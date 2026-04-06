@@ -110,7 +110,7 @@ export const createChatMessageActions = (set, get) => ({
             },
           }));
         },
-        onComplete: () => {
+        onComplete: (doneData = {}) => {
           const streamingMessage = get().chat.streamingMessage;
           const comparisonState = get().chat.comparison;
           const citationContext = get().chat.citationContext;
@@ -118,6 +118,7 @@ export const createChatMessageActions = (set, get) => ({
             role: "assistant",
             content: streamingMessage,
             created_at: new Date().toISOString(),
+            ...(doneData.assistant_message_id ? { id: doneData.assistant_message_id } : {}),
             ...(comparisonState?.isActive && comparisonState?.context
               ? { comparison_metadata: comparisonState.context }
               : {}),
@@ -126,25 +127,21 @@ export const createChatMessageActions = (set, get) => ({
               : {}),
           };
 
-          set((state) => ({
-            chat: {
-              ...state.chat,
-              messages: [...state.chat.messages, assistantMessage],
-              isStreaming: false,
-              streamingMessage: "",
-            },
-          }));
-
-          // Refresh messages from API to get database IDs (needed for feedback buttons)
-          chatApi.getChatHistory(getToken, sessionId).then((data) => {
-            set((state) => ({
+          set((state) => {
+            const messages = [...state.chat.messages];
+            // Patch the user message (second-to-last) with its DB id if provided
+            if (doneData.user_message_id && messages.length > 0) {
+              const lastIdx = messages.length - 1;
+              messages[lastIdx] = { ...messages[lastIdx], id: doneData.user_message_id };
+            }
+            return {
               chat: {
                 ...state.chat,
-                messages: data.messages,
+                messages: [...messages, assistantMessage],
+                isStreaming: false,
+                streamingMessage: "",
               },
-            }));
-          }).catch((err) => {
-            console.error("Failed to refresh message IDs:", err);
+            };
           });
 
           get().fetchSessions(getToken);

@@ -27,7 +27,6 @@ import {
   TooltipTrigger,
   TooltipContent,
 } from "../ui/tooltip";
-import { useChatActions } from "../../store";
 
 const DOC_COLORS = {
   A: "border-doc-a/20 bg-doc-a/10 text-doc-a",
@@ -36,7 +35,6 @@ const DOC_COLORS = {
 };
 
 export default function ComparisonTable({ context }) {
-  const { highlightChunk } = useChatActions();
   const [sortBy, setSortBy] = useState("similarity"); // 'similarity' | 'topic'
   const [sortOrder, setSortOrder] = useState("desc"); // 'asc' | 'desc'
 
@@ -96,19 +94,6 @@ export default function ComparisonTable({ context }) {
     }
   };
 
-  const handleCitationClick = (chunk, docLabel) => {
-    const bbox = chunk.bbox || {
-      page: chunk.page,
-      x0: 0,
-      y0: 0,
-      x1: 1,
-      y1: 1,
-    };
-    highlightChunk({
-      ...bbox,
-      docId: docLabel,
-    });
-  };
 
   const getSimilarityColor = (sim) => {
     if (sim >= 0.8) return "text-similarity-high";
@@ -157,17 +142,21 @@ export default function ComparisonTable({ context }) {
                   <ArrowUpDown className="ml-2 h-3 w-3" />
                 </Button>
               </TableHead>
-              {documents.map((doc, idx) => (
+              {documents.map((doc, idx) => {
+                const name = (doc.filename?.split("/").pop() || doc.label || "").replace(/\.[^/.]+$/, "");
+                const displayName = name.length > 24 ? name.slice(0, 24) + "…" : name;
+                return (
                 <TableHead key={doc.id} className="min-w-[260px]">
                   <Badge
                     variant="outline"
                     className={`comparison-doc-pill ${DOC_COLORS[documentLabels[idx]]}`}
                   >
                     <FileText className="w-3 h-3" />
-                    {doc.label}
+                    {displayName}
                   </Badge>
                 </TableHead>
-              ))}
+                );
+              })}
               <TableHead className="w-[140px]">
                 <Button
                   variant="ghost"
@@ -205,20 +194,10 @@ export default function ComparisonTable({ context }) {
                       {chunk.chunk_a.page && (
                         <Tooltip>
                           <TooltipTrigger asChild>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="comparison-cite"
-                              onClick={() =>
-                                handleCitationClick(
-                                  chunk.chunk_a,
-                                  documentLabels[0]
-                                )
-                              }
-                            >
+                            <span className="comparison-cite cursor-default inline-flex items-center gap-1">
                               <FileText className="h-3 w-3" />
                               <span>p.{chunk.chunk_a.page}</span>
-                            </Button>
+                            </span>
                           </TooltipTrigger>
                           <TooltipContent
                             side="top"
@@ -249,20 +228,10 @@ export default function ComparisonTable({ context }) {
                       {chunk.chunk_b.page && (
                         <Tooltip>
                           <TooltipTrigger asChild>
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              className="comparison-cite"
-                              onClick={() =>
-                                handleCitationClick(
-                                  chunk.chunk_b,
-                                  documentLabels[1]
-                                )
-                              }
-                            >
+                            <span className="comparison-cite cursor-default inline-flex items-center gap-1">
                               <FileText className="h-3 w-3" />
                               <span>p.{chunk.chunk_b.page}</span>
-                            </Button>
+                            </span>
                           </TooltipTrigger>
                           <TooltipContent
                             side="top"
@@ -289,7 +258,7 @@ export default function ComparisonTable({ context }) {
                   </>
                 ) : (
                   // 3-document comparison (clustered chunks)
-                  Object.entries(chunk.chunks).map(([docId, chunkData], docIdx) => {
+                  Object.entries(chunk.chunks).map(([docId, chunkData]) => {
                     const doc = documentsById.get(docId);
                     return (
                       <TableCell key={docId} className="text-xs align-top">
@@ -299,20 +268,10 @@ export default function ComparisonTable({ context }) {
                         {chunkData.page && (
                           <Tooltip>
                             <TooltipTrigger asChild>
-                              <Button
-                                variant="ghost"
-                                size="sm"
-                                className="comparison-cite"
-                                onClick={() =>
-                                  handleCitationClick(
-                                    chunkData,
-                                    documentLabels[docIdx]
-                                  )
-                                }
-                              >
+                              <span className="comparison-cite cursor-default inline-flex items-center gap-1">
                                 <FileText className="h-3 w-3" />
                                 <span>p.{chunkData.page}</span>
-                              </Button>
+                              </span>
                             </TooltipTrigger>
                             <TooltipContent
                               side="top"

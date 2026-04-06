@@ -98,6 +98,9 @@ class TemplateFillRun(Base):
     org_id = Column(String(64), nullable=False, index=True)  # Clerk org ID (tenant)
     user_id = Column(String(100), nullable=False, index=True)
 
+    # User-defined name (optional; falls back to template+document label in UI)
+    name = Column(String(255), nullable=True)
+
     # Template snapshot (preserve context if template is deleted)
     # Stores: {name, description, schema_metadata}
     template_snapshot = Column(JSONB)
@@ -141,6 +144,11 @@ class TemplateFillRun(Base):
     # }
     extracted_data = Column(JSONB, default={})
 
+    # Pre-built citation lookup: {citations: [{source_index, field_id, page, filename, bbox}, ...]}
+    # Parallel to rag_service._build_citation_context() — built at detect_fields_task time.
+    # Frontend resolves [S{n}:p{N}] tokens → bbox for PDF highlighting without array searching.
+    citation_context = Column(JSONB, nullable=True)
+
     # Output artifact (filled Excel file)
     # Same pattern as WorkflowRun:
     # {"backend": "r2", "key": "fills/abc123.xlsx", "size": 45120}
@@ -148,7 +156,7 @@ class TemplateFillRun(Base):
     artifact = Column(JSONB)
 
     # Processing status
-    # States: queued → detecting_fields → mapping → extracting → filling → completed/failed
+    # States: queued → detecting_fields → fields_detected → mapping → awaiting_review → filling → completed/failed
     status = Column(String(20), default="queued", index=True, nullable=False)
     current_stage = Column(String(50))
 

@@ -285,6 +285,22 @@ class DocumentRepository:
                 )
                 return 0
 
+    def get_vdr_reference_count(self, document_id: str) -> int:
+        """Get the number of PE VDR room links for a document."""
+        from app.db_models_pe_diligence import PEDiligenceRoomDocument
+        with self._get_session() as db:
+            try:
+                count = db.query(func.count(PEDiligenceRoomDocument.id)).filter(
+                    PEDiligenceRoomDocument.document_id == document_id
+                ).scalar()
+                return int(count or 0)
+            except SQLAlchemyError as e:
+                logger.error(
+                    "Failed to get VDR reference count",
+                    extra={"document_id": document_id, "error": str(e)}
+                )
+                return 0
+
     def is_linked_to_collection(
         self,
         document_id: str,

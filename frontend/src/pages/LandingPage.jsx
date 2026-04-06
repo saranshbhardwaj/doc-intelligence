@@ -171,7 +171,7 @@ export default function LandingPage() {
           <div className="absolute top-0 right-0 w-96 h-96 bg-white/10 rounded-full -mr-20 -mt-20 blur-3xl pointer-events-none" />
           <div className="absolute bottom-0 left-0 w-96 h-96 bg-black/10 rounded-full -ml-20 -mb-20 blur-3xl pointer-events-none" />
           <div className="max-w-4xl mx-auto text-center px-4 relative z-10">
-            <h2 className="text-4xl sm:text-5xl font-bold text-primary-foreground mb-6">
+            <h2 className="font-display text-4xl sm:text-5xl font-bold text-primary-foreground mb-6">
               Ready to 10x Your Deal Analysis?
             </h2>
             <p className="text-xl text-primary-foreground/80 mb-10">
@@ -212,7 +212,7 @@ export default function LandingPage() {
             </div>
 
             <div>
-              <h3 className="text-foreground font-semibold mb-4">Product</h3>
+              <h3 className="font-display text-foreground font-semibold mb-4">Product</h3>
               <ul className="space-y-2 text-sm">
                 <li><a href="#features" className="hover:text-foreground transition-colors">Features</a></li>
                 <li><a href="#" className="hover:text-foreground transition-colors">Changelog</a></li>
@@ -221,7 +221,7 @@ export default function LandingPage() {
             </div>
 
             <div>
-              <h3 className="text-foreground font-semibold mb-4">Company</h3>
+              <h3 className="font-display text-foreground font-semibold mb-4">Company</h3>
               <ul className="space-y-2 text-sm">
                 <li><a href="#" className="hover:text-foreground transition-colors">About</a></li>
                 <li><a href="#" className="hover:text-foreground transition-colors">Blog</a></li>
@@ -231,7 +231,7 @@ export default function LandingPage() {
             </div>
 
             <div>
-              <h3 className="text-foreground font-semibold mb-4">Legal</h3>
+              <h3 className="font-display text-foreground font-semibold mb-4">Legal</h3>
               <ul className="space-y-2 text-sm">
                 <li><a href="#" className="hover:text-foreground transition-colors">Privacy Policy</a></li>
                 <li><a href="#" className="hover:text-foreground transition-colors">Terms of Service</a></li>

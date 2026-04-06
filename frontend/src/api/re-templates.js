@@ -106,10 +106,12 @@ export async function waitForTemplateAnalysis(getToken, templateId, maxWaitMs = 
 /**
  * Fill Excel template with data from document (alias for startTemplateFill)
  */
-export async function fillRETemplate(getToken, templateId, documentId) {
+export async function fillRETemplate(getToken, templateId, documentId, options = {}) {
   const api = createAuthenticatedApi(getToken);
+  const { name } = options;
   const response = await api.post(`/api/v1/re/templates/${templateId}/fill`, {
     document_id: documentId,
+    ...(name ? { name } : {}),
   });
   return response.data;
 }
@@ -117,8 +119,8 @@ export async function fillRETemplate(getToken, templateId, documentId) {
 /**
  * Start a template fill run (same as fillRETemplate)
  */
-export async function startTemplateFill(getToken, templateId, documentId) {
-  return fillRETemplate(getToken, templateId, documentId);
+export async function startTemplateFill(getToken, templateId, documentId, options = {}) {
+  return fillRETemplate(getToken, templateId, documentId, options);
 }
 
 /**
@@ -136,6 +138,24 @@ export async function getTemplateUsage(getToken, templateId) {
 export async function deleteRETemplate(getToken, templateId) {
   const api = createAuthenticatedApi(getToken);
   const response = await api.delete(`/api/v1/re/templates/${templateId}`);
+  return response.data;
+}
+
+/**
+ * Rename an Excel template
+ */
+export async function renameRETemplate(getToken, templateId, name) {
+  const api = createAuthenticatedApi(getToken);
+  const response = await api.patch(`/api/v1/re/templates/${templateId}`, { name });
+  return response.data;
+}
+
+/**
+ * Rename a template fill run
+ */
+export async function renameFillRun(getToken, fillRunId, name) {
+  const api = createAuthenticatedApi(getToken);
+  const response = await api.patch(`/api/v1/re/templates/fills/${fillRunId}`, { name });
   return response.data;
 }
 

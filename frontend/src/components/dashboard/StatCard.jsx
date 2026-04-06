@@ -11,7 +11,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 export default function StatCard({ icon: Icon, title, value, subtitle, loading, iconBg, iconColor }) {
   if (loading) {
     return (
-      <Card className="rounded-2xl">
+      <Card className="rounded-2xl glass-card border-0">
         <CardContent className="p-5">
           <div className="space-y-3">
             <Skeleton className="h-10 w-10 rounded-xl" />
@@ -25,7 +25,7 @@ export default function StatCard({ icon: Icon, title, value, subtitle, loading, 
   }
 
   return (
-    <Card className="rounded-2xl hover:shadow-md transition-shadow">
+    <Card className="rounded-2xl glass-card border-0 hover-lift">
       <CardContent className="p-5">
         <div className="flex flex-col justify-between h-full gap-4">
           {Icon && (
@@ -35,7 +35,7 @@ export default function StatCard({ icon: Icon, title, value, subtitle, loading, 
           )}
           <div>
             <p className="text-sm font-medium text-muted-foreground">{title}</p>
-            <h3 className="text-3xl font-bold text-foreground mt-1">{value}</h3>
+            <h3 className="font-display text-3xl font-bold text-foreground mt-1">{value}</h3>
             {subtitle && (
               <p className="text-xs text-muted-foreground mt-1">{subtitle}</p>
             )}

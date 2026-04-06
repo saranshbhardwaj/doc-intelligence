@@ -2,15 +2,18 @@
 import time
 from collections import defaultdict
 from typing import Callable
-from fastapi import Request, HTTPException, status
+from fastapi import Request, status
 from starlette.middleware.base import BaseHTTPMiddleware
-from starlette.responses import Response
+from starlette.responses import Response, JSONResponse
 
 from app.utils.logging import logger
 from app.utils.metrics import (
     HTTP_REQUESTS_RATE_LIMITED,
     HTTP_SUSPICIOUS_REQUESTS
 )
+
+# Internal Docker/private network prefixes — never rate-limit these
+_TRUSTED_PREFIXES = ("172.", "10.", "127.", "::1", "192.168.")
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
@@ -59,46 +62,43 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         client_ip = self._get_client_ip(request)
+
+        # Trust internal Docker/private network IPs — never rate-limit them
+        if client_ip.startswith(_TRUSTED_PREFIXES):
+            return await call_next(request)
+
         current_time = time.time()
 
         # Check if IP is blocked
         if client_ip in self.blocked_ips:
             if current_time < self.blocked_ips[client_ip]:
                 logger.warning(
-                    f"Blocked request from rate-limited IP",
+                    "Blocked request from rate-limited IP",
                     extra={"client_ip": client_ip, "path": request.url.path}
                 )
-                HTTP_REQUESTS_RATE_LIMITED.labels(
-                    path=request.url.path
-                ).inc()
-                raise HTTPException(
+                HTTP_REQUESTS_RATE_LIMITED.labels(path=request.url.path).inc()
+                return JSONResponse(
                     status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                    detail="Too many requests. Please try again later."
+                    content={"detail": "Too many requests. Please try again later."}
                 )
             else:
-                # Unblock IP after duration expires
                 del self.blocked_ips[client_ip]
 
         # Check for suspicious patterns
         if self._is_suspicious(request):
             logger.warning(
-                f"Suspicious request detected",
+                "Suspicious request detected",
                 extra={
                     "client_ip": client_ip,
                     "path": request.url.path,
                     "user_agent": request.headers.get("user-agent", "unknown")
                 }
             )
-            HTTP_SUSPICIOUS_REQUESTS.labels(
-                pattern="xss_or_scan"
-            ).inc()
-
-            # Auto-block IPs sending suspicious requests
+            HTTP_SUSPICIOUS_REQUESTS.labels(pattern="xss_or_scan").inc()
             self.blocked_ips[client_ip] = current_time + self.block_duration
-
-            raise HTTPException(
+            return JSONResponse(
                 status_code=status.HTTP_403_FORBIDDEN,
-                detail="Forbidden"
+                content={"detail": "Forbidden"}
             )
 
         # Rate limiting check
@@ -111,19 +111,14 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         # Check burst limit
         if len(request_times) >= self.burst_limit:
             logger.warning(
-                f"Rate limit exceeded (burst)",
+                "Rate limit exceeded (burst)",
                 extra={"client_ip": client_ip, "request_count": len(request_times)}
             )
-            HTTP_REQUESTS_RATE_LIMITED.labels(
-                path=request.url.path
-            ).inc()
-
-            # Block IP temporarily
+            HTTP_REQUESTS_RATE_LIMITED.labels(path=request.url.path).inc()
             self.blocked_ips[client_ip] = current_time + self.block_duration
-
-            raise HTTPException(
+            return JSONResponse(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
-                detail=f"Rate limit exceeded: {self.burst_limit} requests/minute"
+                content={"detail": f"Rate limit exceeded: {self.burst_limit} requests/minute"}
             )
 
         # Check per-minute limit

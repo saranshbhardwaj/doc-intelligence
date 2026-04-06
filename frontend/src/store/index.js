@@ -286,6 +286,7 @@ export const useTemplateFillActions = () =>
       cacheExcelWorkbook: state.cacheExcelWorkbook,
       getCachedExcelWorkbook: state.getCachedExcelWorkbook,
       clearCachedExcelWorkbook: state.clearCachedExcelWorkbook,
+      renameFillRun: state.renameFillRun,
     }))
   );
 

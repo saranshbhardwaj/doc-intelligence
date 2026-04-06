@@ -11,6 +11,7 @@ from fastapi import APIRouter, Form, HTTPException, Depends, Body
 from fastapi.responses import StreamingResponse
 from sqlalchemy.orm import Session
 
+from app.config import settings
 from app.auth import get_current_user
 from app.db_models_users import User
 from app.database import get_db
@@ -125,7 +126,7 @@ async def chat_with_session(
     )
 
     # Initialize RAG service (still needs db session for vector search)
-    rag_service = RAGService(db)
+    rag_service = RAGService(db, capture_io_log=settings.capture_llm_io_log)
 
     log_shadow_credits(
         user=user,
@@ -203,7 +204,8 @@ async def chat_with_session(
                 chunk_count += 1
                 yield f"event: chunk\ndata: {json.dumps({'chunk': chunk_data})}\n\n"
 
-            yield f"event: done\ndata: {json.dumps({'status': 'completed'})}\n\n"
+            user_msg_id, assistant_msg_id = rag_service.last_saved_message_ids
+            yield f"event: done\ndata: {json.dumps({'status': 'completed', 'user_message_id': user_msg_id, 'assistant_message_id': assistant_msg_id})}\n\n"
 
         except Exception as e:
             logger.error(
@@ -330,7 +332,7 @@ async def confirm_comparison_selection(
     enforce_chat_message_limit(user)
 
     # Initialize RAG service
-    rag_service = RAGService(db)
+    rag_service = RAGService(db, capture_io_log=settings.capture_llm_io_log)
 
     log_shadow_credits(
         user=user,
@@ -355,6 +357,7 @@ async def confirm_comparison_selection(
         try:
             chunk_count = 0
             comparison_context_sent = False
+            citation_context_sent = False
 
             async for event in rag_service.chat(
                 session_id=session_id,
@@ -383,10 +386,16 @@ async def confirm_comparison_selection(
                     yield f"event: comparison_context\ndata: {json.dumps(rag_service.last_comparison_context)}\n\n"
                     comparison_context_sent = True
 
+                # Send citation context before first content chunk (enables [Sn:pN] resolution)
+                if not citation_context_sent and rag_service.last_citation_context:
+                    yield f"event: citation_context\ndata: {json.dumps(rag_service.last_citation_context)}\n\n"
+                    citation_context_sent = True
+
                 chunk_count += 1
                 yield f"event: chunk\ndata: {json.dumps({'chunk': chunk_data})}\n\n"
 
-            yield f"event: done\ndata: {json.dumps({'status': 'completed'})}\n\n"
+            user_msg_id, assistant_msg_id = rag_service.last_saved_message_ids
+            yield f"event: done\ndata: {json.dumps({'status': 'completed', 'user_message_id': user_msg_id, 'assistant_message_id': assistant_msg_id})}\n\n"
 
         except Exception as e:
             logger.error(

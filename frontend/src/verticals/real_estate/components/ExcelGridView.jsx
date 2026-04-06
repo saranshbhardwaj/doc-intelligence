@@ -10,7 +10,7 @@ import { Badge } from '../../../components/ui/badge';
 import { Sheet, SheetContent, SheetTitle, SheetDescription } from '../../../components/ui/sheet';
 
 import { useExcelWorkbook } from '../hooks/useExcelWorkbook';
-import ExcelGrid from './ExcelGrid';
+import ExcelGrid, { warmExcelSheetView } from './ExcelGrid';
 import MappingDetailsDialog from './MappingDetailsDialog';
 
 export default function ExcelGridView({
@@ -18,6 +18,7 @@ export default function ExcelGridView({
   extractedData = {},
   fieldMapping = {},
   templateId,
+  citationContext = null,
   onCitationClick,
 }) {
   // Load Excel workbook using custom hook
@@ -25,6 +26,7 @@ export default function ExcelGridView({
 
   const [activeSheet, setActiveSheet] = useState(null);
   const [selectedCell, setSelectedCell] = useState(null);
+  const [gridReady, setGridReady] = useState(false);
 
   const mappings = useMemo(() => fieldMapping?.mappings || [], [fieldMapping?.mappings]);
   const pdfFields = useMemo(() => fieldMapping?.pdf_fields || [], [fieldMapping?.pdf_fields]);
@@ -76,6 +78,45 @@ export default function ExcelGridView({
       setActiveSheet(workbook.SheetNames[0]);
     }
   }, [workbook, activeSheet]);
+
+  useEffect(() => {
+    if (!workbook || !activeSheet) {
+      setGridReady(false);
+      return;
+    }
+
+    setGridReady(false);
+  }, [workbook, activeSheet]);
+
+  useEffect(() => {
+    if (!workbook || !gridReady) return;
+
+    let cancelled = false;
+    const scheduleWarm =
+      typeof window !== 'undefined' && 'requestIdleCallback' in window
+        ? window.requestIdleCallback.bind(window)
+        : (cb) => window.setTimeout(() => cb({ didTimeout: false, timeRemaining: () => 0 }), 0);
+    const cancelWarm =
+      typeof window !== 'undefined' && 'cancelIdleCallback' in window
+        ? window.cancelIdleCallback.bind(window)
+        : window.clearTimeout.bind(window);
+
+    const otherSheets = workbook.SheetNames.filter((sheetName) => sheetName !== activeSheet);
+    const handles = [];
+
+    otherSheets.forEach((sheetName, index) => {
+      const handle = scheduleWarm(() => {
+        if (cancelled) return;
+        warmExcelSheetView(workbook.Sheets[sheetName]);
+      }, { timeout: 500 + index * 100 });
+      handles.push(handle);
+    });
+
+    return () => {
+      cancelled = true;
+      handles.forEach((handle) => cancelWarm(handle));
+    };
+  }, [workbook, activeSheet, gridReady]);
 
   // Helper functions for cell operations
   const getCellMapping = useCallback((sheetName, cellAddress) => {
@@ -204,7 +245,16 @@ export default function ExcelGridView({
   }
 
   return (
-    <div className="flex flex-col h-full min-h-0 overflow-hidden">
+    <div className="relative flex flex-col h-full min-h-0 overflow-hidden">
+      {!gridReady && activeSheet && (
+        <div className="absolute inset-0 z-20 flex items-center justify-center bg-background/88 backdrop-blur-sm">
+          <div className="flex flex-col items-center gap-3">
+            <Loader2 className="h-8 w-8 animate-spin text-primary" />
+            <span className="text-sm text-muted-foreground">Preparing sheet...</span>
+          </div>
+        </div>
+      )}
+
       {/* Sheet Navigation Tabs */}
       <Tabs value={activeSheet} onValueChange={setActiveSheet} className="flex-1 min-h-0 flex flex-col overflow-hidden">
         <TabsList className="w-full justify-start overflow-x-auto [&::-webkit-scrollbar]:h-1 [&::-webkit-scrollbar]:w-1 [&::-webkit-scrollbar-track]:bg-transparent [&::-webkit-scrollbar-thumb]:bg-border [&::-webkit-scrollbar-thumb]:rounded-full hover:[&::-webkit-scrollbar-thumb]:bg-muted-foreground/50">
@@ -234,6 +284,7 @@ export default function ExcelGridView({
               isYamlUnmappedCell={isYamlUnmappedCell}
               onCellClick={handleCellClick}
               selectedCell={selectedCell?.sheetName === activeSheet ? selectedCell : null}
+              onReady={() => setGridReady(true)}
             />
           </TabsContent>
         )}
@@ -252,6 +303,7 @@ export default function ExcelGridView({
               fillRunId={fillRunId}
               fieldMapping={fieldMapping}
               extractedData={extractedData}
+              citationContext={citationContext}
               onClose={() => setSelectedCell(null)}
               onCitationClick={onCitationClick}
             />

@@ -19,15 +19,15 @@ Add to Celery Beat schedule:
 from datetime import datetime, timedelta
 from typing import Dict, Any
 import logging
-import json
 
 from celery import shared_task
 from sqlalchemy.orm import Session
 
 from app.database import get_db
+from app.db_models import JobState
 from app.db_models_workflows import WorkflowRun
 from app.db_models_templates import TemplateFillRun
-from app.core.redis_client import get_redis_client
+from app.services.pubsub import publish_event
 
 logger = logging.getLogger(__name__)
 
@@ -90,16 +90,27 @@ def _cleanup_stuck_workflow_runs(db: Session, threshold: datetime) -> int:
         WorkflowRun.created_at < threshold
     ).all()
 
-    redis_client = get_redis_client()
+    if not stuck_runs:
+        return 0
+
+    # Batch-fetch JobState records for all stuck runs (avoids N+1 queries)
+    run_ids = [run.id for run in stuck_runs]
+    jobs_by_run_id = {
+        job.workflow_run_id: job
+        for job in db.query(JobState).filter(
+            JobState.workflow_run_id.in_(run_ids)
+        ).all()
+        if job.workflow_run_id
+    }
 
     for run in stuck_runs:
+        original_status = run.status
         logger.warning(
             f"Failing stuck workflow run {run.id} "
-            f"(status={run.status}, created_at={run.created_at}, "
+            f"(status={original_status}, created_at={run.created_at}, "
             f"workflow_id={run.workflow_id})"
         )
 
-        original_status = run.status
         run.status = "failed"
         run.error_message = (
             f"Task timeout - exceeded {STUCK_THRESHOLD_MINUTES} minute threshold. "
@@ -107,31 +118,17 @@ def _cleanup_stuck_workflow_runs(db: Session, threshold: datetime) -> int:
         )
         run.completed_at = datetime.utcnow()
 
-        # Notify SSE stream so UI gets updated
-        try:
-            # Find the job_id for this workflow run (query JobState table)
-            from app.db_models import JobState
-            job = db.query(JobState).filter(
-                JobState.workflow_run_id == run.id
-            ).first()
-
-            if job:
-                # Publish error event to SSE stream
-                error_payload = json.dumps({
-                    "message": run.error_message,
-                    "stage": "monitoring",
-                    "type": "timeout",
-                    "isRetryable": False,
-                })
-                redis_client.publish(f"job:progress:{job.job_id}", f"event: error\ndata: {error_payload}\n\n")
-
-                # Publish end event to close the stream
-                end_payload = json.dumps({"reason": "timeout", "job_id": job.job_id})
-                redis_client.publish(f"job:progress:{job.job_id}", f"event: end\ndata: {end_payload}\n\n")
-
-                logger.info(f"Published SSE events for stuck workflow {run.id} (job_id={job.job_id})")
-        except Exception as e:
-            logger.warning(f"Failed to publish SSE events for stuck workflow {run.id}: {e}")
+        job = jobs_by_run_id.get(run.id)
+        if job:
+            # publish_event sends {"event": ..., "payload": ...} — the format api/jobs.py expects.
+            # SSE endpoint auto-sends "end" after "error", so one publish is enough.
+            publish_event(job.job_id, "error", {
+                "message": run.error_message,
+                "stage": "monitoring",
+                "type": "timeout",
+                "isRetryable": False,
+            })
+            logger.info(f"Published SSE timeout event for stuck workflow {run.id} (job_id={job.job_id})")
 
     return len(stuck_runs)
 
@@ -143,16 +140,40 @@ def _cleanup_stuck_template_fills(db: Session, threshold: datetime) -> int:
         TemplateFillRun.created_at < threshold
     ).all()
 
+    if not stuck_runs:
+        return 0
+
+    # Batch-fetch JobState records for all stuck runs (avoids N+1 queries)
+    run_ids = [run.id for run in stuck_runs]
+    jobs_by_run_id = {
+        job.entity_id: job
+        for job in db.query(JobState).filter(
+            JobState.entity_type == "template_fill_run",
+            JobState.entity_id.in_(run_ids),
+        ).all()
+    }
+
     for run in stuck_runs:
+        original_status = run.status
         logger.warning(
             f"Failing stuck template fill run {run.id} "
-            f"(status={run.status}, created_at={run.created_at})"
+            f"(status={original_status}, created_at={run.created_at})"
         )
         run.status = "failed"
         run.error_message = (
             f"Task timeout - exceeded {STUCK_THRESHOLD_MINUTES} minute threshold. "
-            f"Original status: {run.status}"
+            f"Original status: {original_status}"
         )
         run.completed_at = datetime.utcnow()
+
+        job = jobs_by_run_id.get(run.id)
+        if job:
+            publish_event(job.job_id, "error", {
+                "message": run.error_message,
+                "stage": "monitoring",
+                "type": "timeout",
+                "isRetryable": False,
+            })
+            logger.info(f"Published SSE timeout event for stuck template fill {run.id} (job_id={job.job_id})")
 
     return len(stuck_runs)

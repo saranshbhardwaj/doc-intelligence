@@ -54,6 +54,13 @@ class AzureSmartChunker(DocumentChunker):
     - link_tables_to_narrative: Link table chunks to narrative (default: True)
     """
 
+    _BOILERPLATE_HEADINGS = {
+        "table of contents",
+        "contents",
+        "confidential",
+        "disclaimer",
+    }
+
     def __init__(
         self,
         max_tokens: int = 500,
@@ -125,7 +132,7 @@ class AzureSmartChunker(DocumentChunker):
         logger.info(f"Created {len(narrative_chunks)} narrative chunks")
 
         # Step 3: Create table chunks (separate from narrative)
-        table_chunks = self._create_table_chunks(enhanced_pages, narrative_chunks)
+        table_chunks = self._create_table_chunks(section_groups, narrative_chunks)
         logger.info(f"Created {len(table_chunks)} table chunks")
 
         # Step 3.5: Create key-value chunks from Azure DI
@@ -219,8 +226,11 @@ class AzureSmartChunker(DocumentChunker):
                 current_tables = []
                 current_page_range = [page_num, page_num]
 
-            # Add content paragraphs to current section
+            # Add content paragraphs to current section, tagging each with its page number
+            # so _find_preceding_paragraph can locate the closest paragraph before any table.
             content_paragraphs = paragraphs_by_role.get("content", [])
+            for para in content_paragraphs:
+                para["_page_number"] = page_num
             current_paragraphs.extend(content_paragraphs)
 
             # Add title if present (and not already added)
@@ -287,8 +297,8 @@ class AzureSmartChunker(DocumentChunker):
         Returns:
             Chunk object with rich metadata
         """
-        # Build chunk text
-        chunk_text = self._build_chunk_text(section, sequence, total)
+        # Build chunk text with per-paragraph page tracking
+        chunk_text, paragraph_pages = self._build_chunk_text_with_pages(section)
 
         # Generate chunk ID
         chunk_id = generate_chunk_id(section.section_id, sequence, "para")
@@ -306,16 +316,33 @@ class AzureSmartChunker(DocumentChunker):
 
         builder.set_page_range(section.page_range[0], section.page_range[1])
 
-        # Calculate and set bbox from paragraph bounding regions for PDF highlighting
-        para_bbox = self._calculate_paragraph_bbox(section.paragraphs)
-        if para_bbox:
+        # Store per-paragraph page info for accurate citations and PDF highlighting.
+        # Each entry: {"page": N, "char_offset": M, "bbox": {x0, y0, x1, y1}}
+        if paragraph_pages:
+            builder.set_custom("paragraph_pages", paragraph_pages)
+
+        # Chunk-level bbox: use the first page's merged bbox (for backward-compat highlighting)
+        first_page_entry = paragraph_pages[0] if paragraph_pages else None
+        if first_page_entry and first_page_entry.get("bbox"):
+            fb = first_page_entry["bbox"]
             builder.set_bbox(
-                page=para_bbox["page"],
-                x0=para_bbox["x0"],
-                y0=para_bbox["y0"],
-                x1=para_bbox["x1"],
-                y1=para_bbox["y1"]
+                page=first_page_entry["page"],
+                x0=fb["x0"],
+                y0=fb["y0"],
+                x1=fb["x1"],
+                y1=fb["y1"]
             )
+        else:
+            # Fallback to existing merged bbox calculation
+            para_bbox = self._calculate_paragraph_bbox(section.paragraphs)
+            if para_bbox:
+                builder.set_bbox(
+                    page=para_bbox["page"],
+                    x0=para_bbox["x0"],
+                    y0=para_bbox["y0"],
+                    x1=para_bbox["x1"],
+                    y1=para_bbox["y1"]
+                )
 
         chunk_metadata = builder.build()
 
@@ -560,42 +587,91 @@ class AzureSmartChunker(DocumentChunker):
 
     def _create_table_chunks(
         self,
-        enhanced_pages: List[Dict],
+        section_groups: List[SectionGroup],
         narrative_chunks: List[Chunk]
     ) -> List[Chunk]:
         """
-        Create separate chunks for tables.
+        Create separate chunks for tables, enriched with section context.
 
-        Args:
-            enhanced_pages: Enhanced page data
-            narrative_chunks: Narrative chunks (for linking)
+        Each table chunk is prefixed for self-contained semantic retrievability:
 
-        Returns:
-            List of table chunks
+          ALL parts  — section heading (5-10 tokens), so any retrieved chunk knows
+                       which section it came from without an expander fetch.
+          Part 1 only — preceding paragraph snippet (≤150 chars), giving the LLM
+                        narrative context. Omitted when a linked narrative chunk
+                        exists (context expander handles that at query time).
+
+        Column headers are already repeated by _split_table_by_rows in every split
+        group, so data in parts 2+ is interpretable without fetching the parent.
+
+        Token budget is reserved using the full_prefix (part 1, largest) so the
+        total chunk size never exceeds max_tokens. Continuation parts link back to
+        part 1 via parent_chunk_id (star topology).
         """
         table_chunks = []
         table_counter = 0
 
-        for page in enhanced_pages:
-            page_num = page["page_number"]
-            tables = page.get("tables", [])
+        # Tracks the last non-null heading across sections.
+        # Pure-table pages (no heading of their own) inherit the nearest preceding heading.
+        last_seen_heading: Optional[str] = None
+        # Paragraphs from the previous section — fallback context when a table's own
+        # section has no text (e.g. a standalone financial summary page).
+        prev_section_paragraphs: List[Dict] = []
 
-            for table_data in tables:
+        for section in section_groups:
+            clean_section_heading = self._clean_heading(section.section_heading)
+            if clean_section_heading:
+                last_seen_heading = clean_section_heading
+
+            # Effective heading: own section first, then nearest ancestor heading.
+            effective_heading = clean_section_heading or last_seen_heading
+
+            for table_data in section.tables:
                 table_counter += 1
+                page_num = table_data.get("page_number")
 
-                # Find preceding narrative chunk (for context)
+                # Preceding narrative chunk — used for bidirectional linking and to
+                # decide whether to include paragraph text in the prefix.
                 preceding_narrative = self._find_preceding_narrative(
                     page_num, narrative_chunks
                 )
 
-                # Extract table context (preceding paragraph if available)
-                table_context = self._extract_table_context(page, table_data)
+                # Closest preceding paragraph: same section first, then previous section.
+                # Omitted from the prefix when there is a linked narrative (the context
+                # expander will fetch the full narrative at retrieval time).
+                preceding_para = self._find_preceding_paragraph(
+                    section.paragraphs, page_num
+                )
+                if not preceding_para:
+                    preceding_para = self._find_preceding_paragraph(
+                        prev_section_paragraphs, page_num + 9999  # any page in prev section
+                    )
 
-                # Extract table bounding box for PDF highlighting
+                # Build two prefix variants:
+                #   section_prefix  — heading only; added to EVERY split part so any
+                #                     retrieved chunk knows which section it belongs to.
+                #   full_prefix     — heading + preceding paragraph; added to part 1 only
+                #                     to give the LLM narrative context without bloating
+                #                     every continuation chunk.
+                # Column headers are already repeated by _split_table_by_rows so data
+                # in parts 2+ is independently interpretable without fetching the parent.
+                section_prefix = effective_heading or ""
+                full_prefix_lines: List[str] = ([section_prefix] if section_prefix else [])
+                if preceding_para and not preceding_narrative:
+                    # Paragraph snippet capped at 150 chars to leave room for table content.
+                    full_prefix_lines.append(preceding_para[:150])
+                full_prefix = "\n".join(full_prefix_lines)
+
+                # Reserve the larger (full_prefix) token budget so that part 1 — which
+                # carries the most context — never exceeds max_tokens.
+                prefix_tokens = count_tokens(full_prefix) if full_prefix else 0
+                content_max_tokens = max(self.max_tokens - prefix_tokens, 100)
+
+                # Extract table bounding box for PDF highlighting.
                 table_bbox = self._extract_table_bbox(table_data)
 
-                # Split large tables into row-group sub-chunks; small tables stay as one chunk
-                row_groups = self._split_table_by_rows(table_data, self.max_tokens)
+                # Split large tables into row-group sub-chunks.
+                row_groups = self._split_table_by_rows(table_data, content_max_tokens)
                 total_parts = len(row_groups)
 
                 first_chunk_id = None
@@ -603,15 +679,24 @@ class AzureSmartChunker(DocumentChunker):
 
                 for group_idx, group_text in enumerate(row_groups):
                     if total_parts > 1:
-                        chunk_text = f"[Table {table_counter}, part {group_idx + 1}/{total_parts}]\n{group_text}"
+                        label = f"[Table {table_counter}, part {group_idx + 1}/{total_parts}]"
                     else:
-                        chunk_text = f"[Table {table_counter}]\n{group_text}"
+                        label = f"[Table {table_counter}]"
+
+                    # Part 1: full prefix (heading + paragraph snippet).
+                    # Parts 2+: section heading only so any retrieved chunk is section-aware.
+                    if group_idx == 0 and full_prefix:
+                        chunk_text = f"{full_prefix}\n{label}\n{group_text}"
+                    elif group_idx > 0 and section_prefix:
+                        chunk_text = f"{section_prefix}\n{label}\n{group_text}"
+                    else:
+                        chunk_text = f"{label}\n{group_text}"
 
                     # Build metadata
                     builder = ChunkMetadataBuilder()
                     builder.set_section_id(f"table_{table_counter}")
                     builder.set_table_metadata(
-                        context=table_context,
+                        context=preceding_para,
                         row_count=table_data.get("row_count"),
                         column_count=table_data.get("column_count")
                     )
@@ -634,6 +719,7 @@ class AzureSmartChunker(DocumentChunker):
                     base_metadata = {
                         "page_number": page_num,
                         "section_type": "table",
+                        "section_heading": effective_heading,
                         "is_tabular": True,
                         "char_count": len(chunk_text),
                         "token_count": count_tokens(chunk_text),
@@ -647,7 +733,9 @@ class AzureSmartChunker(DocumentChunker):
                     }
                     base_metadata.update(chunk_metadata)
 
-                    # Continuation metadata for split tables (same pattern as narrative chunks)
+                    # Continuation metadata for split tables — star topology:
+                    # all parts link back to part 1 (not a chain) so any part can
+                    # reconstruct the table header by fetching parent_chunk_id.
                     if total_parts > 1:
                         base_metadata["is_continuation"] = group_idx > 0
                         base_metadata["parent_chunk_id"] = first_chunk_id if group_idx > 0 else None
@@ -665,32 +753,97 @@ class AzureSmartChunker(DocumentChunker):
 
                     if group_idx == 0:
                         first_chunk_id = chunk_id
-                        # DEBUG: Log first table chunk's bbox
-                        if table_counter == 1:
-                            logger.info(f"[CHUNKER] First table chunk on page {page_num}, "
-                                      f"has bbox: {'bbox' in base_metadata}, bbox={base_metadata.get('bbox')}, "
-                                      f"parts={total_parts}")
+                        logger.debug(
+                            "[CHUNKER] Table chunk created",
+                            extra={
+                                "table_counter": table_counter,
+                                "page": page_num,
+                                "has_bbox": "bbox" in base_metadata,
+                                "parts": total_parts,
+                                "has_heading": bool(effective_heading),
+                                "has_preceding_para": bool(preceding_para),
+                            }
+                        )
 
                     created_chunks.append(chunk)
 
                 table_chunks.extend(created_chunks)
 
-                # Link narrative chunk to first table sub-chunk (bidirectional)
+                # Bidirectional link: narrative chunk → first table sub-chunk.
                 if preceding_narrative and self.link_tables_to_narrative and created_chunks:
                     linked_tables = preceding_narrative.metadata.get("linked_table_ids", [])
                     linked_tables.append(created_chunks[0].chunk_id)
                     preceding_narrative.metadata["linked_table_ids"] = linked_tables
 
+            # Advance the cross-section paragraph fallback after processing each section.
+            if section.paragraphs:
+                prev_section_paragraphs = section.paragraphs
+
         return table_chunks
+
+    def _clean_heading(self, heading: Optional[str]) -> Optional[str]:
+        """Return a heading suitable for chunk prefixing, or None if boilerplate."""
+        if not heading:
+            return None
+        normalized = heading.strip()
+        if not normalized:
+            return None
+        lowered = normalized.lower()
+        if lowered in self._BOILERPLATE_HEADINGS:
+            return None
+        if lowered.startswith("table of contents"):
+            return None
+        return normalized
+
+    def _find_preceding_paragraph(
+        self,
+        paragraphs: List[Dict],
+        table_page: int,
+    ) -> str:
+        """Return the text of the paragraph closest to and before table_page.
+
+        Paragraphs must have been tagged with '_page_number' by _group_by_sections.
+        Returns the last paragraph whose page is <= table_page, capped at 200 chars.
+        """
+        best: Optional[str] = None
+        for para in paragraphs:
+            if para.get("_page_number", 0) <= table_page:
+                best = para.get("content", "")
+        if not best:
+            return ""
+
+        cleaned = best.strip()
+        # Ignore fragmentary text (single chars, bullets, etc.) as table context.
+        if len(cleaned) < 12:
+            return ""
+        return cleaned[:200]
+
+    def _table_header_lines(self, table_data: dict) -> List[str]:
+        """Build stable table title/header lines from structured table metadata."""
+        lines: List[str] = []
+
+        table_name = (table_data.get("table_name") or "").strip()
+        if table_name:
+            lines.append(table_name)
+
+        header_cells = [str(c or "").strip() for c in table_data.get("column_headers", [])]
+        non_empty_headers = [c for c in header_cells if c]
+        # Include explicit header rows only when they contain multiple non-empty labels.
+        if len(non_empty_headers) > 1:
+            lines.append("\t".join(header_cells))
+
+        return lines
 
     def _split_table_by_rows(self, table_data: dict, max_tokens: int) -> List[str]:
         """Split table text into row-group segments of ~max_tokens each.
 
-        Each segment repeats the header row so it is self-contained for embedding.
+        Each segment repeats title/header lines so it is self-contained for embedding.
         Falls back to char-truncation when no structured row data is available.
         """
         rows = table_data.get("table_data", [])  # List[List[str]] from Azure DI parser
         full_text = table_data.get("text", "")
+        header_lines = self._table_header_lines(table_data)
+        header_tokens = sum(count_tokens(line) for line in header_lines)
 
         if not rows or not full_text:
             # No structured rows — truncate full text as a single group
@@ -698,20 +851,17 @@ class AzureSmartChunker(DocumentChunker):
                 return [full_text]
             return [full_text[:max_tokens * 4]]
 
-        header = rows[0]
-        header_text = "\t".join(str(c) for c in header)
-        header_tokens = count_tokens(header_text)
-
         groups: List[str] = []
-        current_lines: List[str] = [header_text]
+        current_lines: List[str] = list(header_lines)
         current_tokens = header_tokens
 
-        for row in rows[1:]:
+        for row in rows:
             row_text = "\t".join(str(c) for c in row)
             row_tokens = count_tokens(row_text)
-            if current_tokens + row_tokens > max_tokens and len(current_lines) > 1:
+            if current_tokens + row_tokens > max_tokens and current_lines:
                 groups.append("\n".join(current_lines))
-                current_lines = [header_text, row_text]
+                current_lines = list(header_lines)
+                current_lines.append(row_text)
                 current_tokens = header_tokens + row_tokens
             else:
                 current_lines.append(row_text)
@@ -744,76 +894,139 @@ class AzureSmartChunker(DocumentChunker):
             return []
 
         kv_chunks = []
-        MAX_KV_PAIRS_PER_CHUNK = 100
+        max_kv_pairs_per_chunk = 40
+        max_kv_chunk_tokens = max(200, self.max_tokens)
 
-        # Group KV pairs by page ranges
-        for i in range(0, len(kv_pairs), MAX_KV_PAIRS_PER_CHUNK):
-            chunk_kv_pairs = kv_pairs[i:i + MAX_KV_PAIRS_PER_CHUNK]
+        # Group by page first so citation anchors remain page-accurate.
+        kv_by_page: Dict[int, List[Dict]] = {}
+        for kv in kv_pairs:
+            page_num = kv.get("page_number")
+            if not page_num:
+                continue
+            kv_by_page.setdefault(page_num, []).append(kv)
 
-            # Calculate individual bbox for each KV pair and add to KV data
-            enriched_kv_pairs = []
-            for kv in chunk_kv_pairs:
-                # Calculate bbox from bounding_regions
-                kv_bbox = self._calculate_single_kv_bbox(kv)
-
-                # Create enriched KV pair with bbox
-                enriched_kv = dict(kv)  # Copy all original fields
-                if kv_bbox:
-                    enriched_kv["bbox"] = kv_bbox  # Add individual bbox for this KV pair
-
-                enriched_kv_pairs.append(enriched_kv)
-
-            # Build searchable text (concatenated KV pairs for RAG)
-            text_lines = []
-            for kv in enriched_kv_pairs:
-                key = kv.get("key", "")
-                value = kv.get("value", "")
-                if key and value:
-                    text_lines.append(f"{key}: {value}")
-                elif key:
-                    text_lines.append(f"{key}:")
-
-            chunk_text = "\n".join(text_lines)
-
-            # Determine page range
-            pages = [kv.get("page_number") for kv in enriched_kv_pairs if kv.get("page_number")]
-            page_range = [min(pages), max(pages)] if pages else [1, 1]
-
-            # Build metadata
-            chunk_metadata = {
-                "page_number": page_range[0],
-                "section_type": "key_value_pairs",
-                "is_tabular": False,
-                "char_count": len(chunk_text),
-                "token_count": count_tokens(chunk_text),
-                "chunk_type": "key_value",
-                "page_range": page_range,
-                "key_value_pairs": enriched_kv_pairs,  # NOW includes individual bbox for each KV
-                "total_kv_pairs": len(enriched_kv_pairs),
-                "source_parser": "azure_document_intelligence",
-            }
-
-            # DEBUG: Log first KV pair's bbox in chunk
-            if i == 0 and enriched_kv_pairs:
-                first_kv = enriched_kv_pairs[0]
-                logger.info(f"[CHUNKER] First KV pair in chunk: '{first_kv.get('key')}', "
-                          f"has bbox: {'bbox' in first_kv}, bbox={first_kv.get('bbox')}")
-
-            # NOTE: We no longer store a single merged chunk-level bbox
-            # Each KV pair now has its own individual bbox
-
-            # Create chunk
-            chunk = Chunk(
-                chunk_id=generate_chunk_id(f"kv_chunk", start_index + len(kv_chunks), "kv"),
-                text=chunk_text,  # Searchable text for RAG
-                narrative_text="",
-                tables=[],
-                metadata=chunk_metadata
+        for page_num in sorted(kv_by_page.keys()):
+            page_pairs = kv_by_page[page_num]
+            page_batches = self._split_kv_pairs_by_size(
+                page_pairs,
+                max_pairs=max_kv_pairs_per_chunk,
+                max_tokens=max_kv_chunk_tokens,
             )
 
-            kv_chunks.append(chunk)
+            for batch in page_batches:
+                # Calculate individual bbox for each KV pair and add to KV data.
+                enriched_kv_pairs = []
+                for kv in batch:
+                    kv_bbox = self._calculate_single_kv_bbox(kv)
+
+                    enriched_kv = dict(kv)
+                    if kv_bbox:
+                        enriched_kv["bbox"] = kv_bbox
+
+                    enriched_kv_pairs.append(enriched_kv)
+
+                # Build searchable text and include explicit page marker for citation clarity.
+                text_lines = [f"[Page {page_num}]"]
+                for kv in enriched_kv_pairs:
+                    key = kv.get("key", "")
+                    value = kv.get("value", "")
+                    if key and value:
+                        text_lines.append(f"{key}: {value}")
+                    elif key:
+                        text_lines.append(f"{key}:")
+
+                chunk_text = "\n".join(text_lines)
+                page_bbox = self._merge_enriched_kv_bboxes(enriched_kv_pairs, page_num)
+
+                chunk_metadata = {
+                    "section_id": f"kv_page_{page_num}",
+                    "page_number": page_num,
+                    "section_type": "key_value_pairs",
+                    "is_tabular": False,
+                    "char_count": len(chunk_text),
+                    "token_count": count_tokens(chunk_text),
+                    "chunk_type": "key_value",
+                    "page_range": [page_num, page_num],
+                    "key_value_pairs": enriched_kv_pairs,
+                    "total_kv_pairs": len(enriched_kv_pairs),
+                    "source_parser": "azure_document_intelligence",
+                    # Mirror narrative paragraph_pages format for citation resolver compatibility.
+                    "kv_pages": [{"page": page_num, "char_offset": 0, "bbox": page_bbox}],
+                    "bbox": page_bbox,
+                }
+
+                chunk = Chunk(
+                    chunk_id=generate_chunk_id("kv_chunk", start_index + len(kv_chunks), "kv"),
+                    text=chunk_text,
+                    narrative_text="",
+                    tables=[],
+                    metadata=chunk_metadata,
+                )
+
+                kv_chunks.append(chunk)
+
+        if kv_chunks:
+            first_chunk_pairs = kv_chunks[0].metadata.get("key_value_pairs", [])
+            first_kv = first_chunk_pairs[0] if first_chunk_pairs else None
+            if first_kv:
+                logger.info(
+                    f"[CHUNKER] First KV pair in chunk: '{first_kv.get('key')}', "
+                    f"has bbox: {'bbox' in first_kv}, bbox={first_kv.get('bbox')}"
+                )
 
         return kv_chunks
+
+    def _split_kv_pairs_by_size(
+        self,
+        kv_pairs: List[Dict],
+        max_pairs: int,
+        max_tokens: int,
+    ) -> List[List[Dict]]:
+        """Split same-page KV pairs into size-bounded batches."""
+        batches: List[List[Dict]] = []
+        current_batch: List[Dict] = []
+        current_tokens = 0
+
+        for kv in kv_pairs:
+            key = kv.get("key", "")
+            value = kv.get("value", "")
+            line = f"{key}: {value}" if key and value else f"{key}:"
+            line_tokens = max(1, count_tokens(line))
+
+            reached_pair_limit = len(current_batch) >= max_pairs
+            reached_token_limit = (current_tokens + line_tokens) > max_tokens
+
+            if current_batch and (reached_pair_limit or reached_token_limit):
+                batches.append(current_batch)
+                current_batch = []
+                current_tokens = 0
+
+            current_batch.append(kv)
+            current_tokens += line_tokens
+
+        if current_batch:
+            batches.append(current_batch)
+
+        return batches
+
+    def _merge_enriched_kv_bboxes(self, kv_pairs: List[Dict], page_num: int) -> Optional[Dict]:
+        """Merge per-KV bboxes on a page into one representative bbox."""
+        bboxes = []
+        for kv in kv_pairs:
+            bbox = kv.get("bbox")
+            if isinstance(bbox, dict) and bbox.get("page") == page_num:
+                bboxes.append(bbox)
+
+        if not bboxes:
+            return None
+
+        return {
+            "page": page_num,
+            "x0": min(b["x0"] for b in bboxes),
+            "y0": min(b["y0"] for b in bboxes),
+            "x1": max(b["x1"] for b in bboxes),
+            "y1": max(b["y1"] for b in bboxes),
+        }
 
     def _update_sibling_relationships(self, chunks: List[Chunk]) -> None:
         """
@@ -850,26 +1063,6 @@ class AzureSmartChunker(DocumentChunker):
                 return chunk
         return None
 
-    def _extract_table_context(self, page: Dict, table_data: Dict) -> str:
-        """
-        Extract context for a table (preceding paragraph).
-
-        Args:
-            page: Enhanced page data
-            table_data: Table data
-
-        Returns:
-            Context string (preceding paragraph or empty)
-        """
-        # Get content paragraphs
-        paragraphs_by_role = page.get("paragraphs_by_role", {})
-        content_paras = paragraphs_by_role.get("content", [])
-
-        # Return first content paragraph as context (simple heuristic)
-        if content_paras:
-            return content_paras[0].get("content", "")[:200]  # First 200 chars
-
-        return ""
 
     def _build_chunk_text(
         self,
@@ -877,33 +1070,93 @@ class AzureSmartChunker(DocumentChunker):
         sequence: int,
         total: int
     ) -> str:
+        """Build chunk text. Returns text only (use _build_chunk_text_with_pages for metadata)."""
+        text, _ = self._build_chunk_text_with_pages(section)
+        return text
+
+    def _build_chunk_text_with_pages(
+        self,
+        section: SectionGroup,
+    ) -> Tuple[str, List[Dict]]:
         """
-        Build text for a chunk.
-
-        Always includes section heading (for context in continuations).
-
-        Args:
-            section: SectionGroup
-            sequence: Chunk sequence
-            total: Total chunks in section
+        Build chunk text with [Page N] markers at page transitions, and collect
+        paragraph_pages metadata for accurate citation and PDF highlighting.
 
         Returns:
-            Chunk text string
+            (text, paragraph_pages) where paragraph_pages is a list of:
+              {"page": N, "char_offset": M, "bbox": {x0, y0, x1, y1}}
+            one entry per page boundary within the chunk.
+            For single-page chunks, returns a single entry with char_offset=0.
         """
         lines = []
+        current_page: Optional[int] = None
 
-        # Always include section heading (if present)
+        # paragraph_pages accumulates one entry per page seen.
+        # {page -> {"char_offset": int, "bboxes": [...]}} — merged after building.
+        page_info: Dict[int, Dict] = {}
+
         if section.section_heading:
             lines.append(section.section_heading)
-            lines.append("")  # Blank line
+            lines.append("")
 
-        # Add paragraph content
         for para in section.paragraphs:
             content = para.get("content", "")
-            if content:
-                lines.append(content)
+            if not content:
+                continue
 
-        return "\n".join(lines)
+            para_page = self._get_paragraph_page(para)
+
+            if para_page is not None and para_page != current_page:
+                # Record the char offset where this page's content starts
+                char_offset = len("\n".join(lines)) + (1 if lines else 0)
+                if para_page not in page_info:
+                    page_info[para_page] = {"char_offset": char_offset, "bboxes": []}
+                # Insert [Page N] marker on transitions (not on the very first page)
+                if current_page is not None:
+                    lines.append(f"[Page {para_page}]")
+                    # Recompute char_offset after inserting the marker line
+                    page_info[para_page]["char_offset"] = len("\n".join(lines)) + 1
+                current_page = para_page
+
+            # Collect per-paragraph bbox for this page
+            if para_page and para_page in page_info:
+                for br in para.get("bounding_regions", []):
+                    if br.get("page_number") == para_page:
+                        polygon = br.get("polygon", [])
+                        if len(polygon) == 8:
+                            page_info[para_page]["bboxes"].append(
+                                self._polygon_to_bbox(polygon)
+                            )
+
+            lines.append(content)
+
+        text = "\n".join(lines)
+
+        # Build final paragraph_pages list sorted by char_offset
+        paragraph_pages = []
+        for page, info in sorted(page_info.items(), key=lambda x: x[1]["char_offset"]):
+            bboxes = info["bboxes"]
+            merged_bbox = {
+                "x0": min(b["x0"] for b in bboxes),
+                "y0": min(b["y0"] for b in bboxes),
+                "x1": max(b["x1"] for b in bboxes),
+                "y1": max(b["y1"] for b in bboxes),
+            } if bboxes else None
+            paragraph_pages.append({
+                "page": page,
+                "char_offset": info["char_offset"],
+                "bbox": merged_bbox,
+            })
+
+        return text, paragraph_pages
+
+    def _get_paragraph_page(self, para: Dict) -> Optional[int]:
+        """Return the page number of a paragraph from its first bounding region."""
+        for br in para.get("bounding_regions", []):
+            page_num = br.get("page_number")
+            if page_num:
+                return page_num
+        return para.get("page_number")
 
     def _estimate_section_tokens(self, paragraphs: List[Dict]) -> int:
         """Estimate total tokens in a section."""

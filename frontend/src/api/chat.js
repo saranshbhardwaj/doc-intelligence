@@ -32,11 +32,11 @@ export async function createCollection(getToken, { name, description }) {
 
 export async function listCollections(
   getToken,
-  { limit = 50, offset = 0 } = {}
+  { limit = 50, offset = 0, includeDocuments = false } = {}
 ) {
   const api = createAuthenticatedApi(getToken);
   const response = await api.get("/api/chat/collections", {
-    params: { limit, offset },
+    params: { limit, offset, include_documents: includeDocuments || undefined },
   });
   return response.data;
 }
@@ -140,9 +140,9 @@ export async function connectToIndexingProgress(
 
 /**
  * Get job status for document indexing
- * Used by SSE utility for initial state fetching
+ * Used by SSE utility for initial state fetching and reconnection.
  */
-async function getJobStatus(jobId, getToken) {
+export async function getJobStatus(jobId, getToken) {
   const api = createAuthenticatedApi(getToken);
   const response = await api.get(`/api/jobs/${jobId}/status`);
   return response.data;
@@ -245,7 +245,8 @@ export function sendChatMessage(
               const data = JSON.parse(eventData);
               onChunk?.(data.chunk);
             } else if (eventType === "done") {
-              onComplete?.();
+              const doneData = eventData ? JSON.parse(eventData) : {};
+              onComplete?.(doneData);
             } else if (eventType === "error" && eventData) {
               const data = JSON.parse(eventData);
               onError?.(new Error(data.error));
@@ -427,6 +428,7 @@ export function confirmComparison(
     onComplete,
     onError,
     onComparisonContext,
+    onCitationContext,
     onThinking,
   } = callbacks;
 
@@ -494,11 +496,15 @@ export function confirmComparison(
             } else if (eventType === "comparison_context" && eventData) {
               const data = JSON.parse(eventData);
               onComparisonContext?.(data);
+            } else if (eventType === "citation_context" && eventData) {
+              const data = JSON.parse(eventData);
+              onCitationContext?.(data);
             } else if (eventType === "chunk" && eventData) {
               const data = JSON.parse(eventData);
               onChunk?.(data.chunk);
             } else if (eventType === "done") {
-              onComplete?.();
+              const doneData = eventData ? JSON.parse(eventData) : {};
+              onComplete?.(doneData);
             } else if (eventType === "error" && eventData) {
               const data = JSON.parse(eventData);
               onError?.(new Error(data.error));

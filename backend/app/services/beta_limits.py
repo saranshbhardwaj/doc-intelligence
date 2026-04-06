@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import uuid
 from contextlib import contextmanager
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any, Dict, Generator, Optional
 
 from fastapi import HTTPException
@@ -61,12 +61,17 @@ def _count_user_extractions(db: Session, user: User) -> int:
 
 
 def _count_user_template_fills(db: Session, user: User) -> int:
-    return (
+    """Count non-failed fill runs created this calendar month (UTC)."""
+    month_start = datetime.now(timezone.utc).replace(
+        day=1, hour=0, minute=0, second=0, microsecond=0
+    )
+    return int(
         db.query(func.count(TemplateFillRun.id))
         .filter(
             TemplateFillRun.user_id == user.id,
             TemplateFillRun.org_id == user.org_id,
             TemplateFillRun.status != "failed",
+            TemplateFillRun.created_at >= month_start,
         )
         .scalar()
         or 0
@@ -74,13 +79,18 @@ def _count_user_template_fills(db: Session, user: User) -> int:
 
 
 def _count_user_chat_messages(db: Session, user: User) -> int:
-    return (
+    """Count user-role chat messages sent today (UTC midnight reset)."""
+    day_start = datetime.now(timezone.utc).replace(
+        hour=0, minute=0, second=0, microsecond=0
+    )
+    return int(
         db.query(func.count(ChatMessage.id))
         .join(ChatSession, ChatSession.id == ChatMessage.session_id)
         .filter(
             ChatSession.user_id == user.id,
             ChatSession.org_id == user.org_id,
             ChatMessage.role == "user",
+            ChatMessage.created_at >= day_start,
         )
         .scalar()
         or 0
@@ -106,8 +116,8 @@ def get_usage_snapshot(user: User) -> Dict[str, Any]:
         },
         "workflow_runs": {"used": workflow_runs_used, "limit": user.workflow_runs_limit},
         "extractions": {"used": extractions_used, "limit": user.extractions_limit},
-        "template_fill_runs": {"used": template_fill_runs_used, "limit": user.template_fill_runs_limit},
-        "chat_messages": {"used": chat_messages_used, "limit": user.chat_messages_limit},
+        "template_fill_runs": {"used": template_fill_runs_used, "limit": user.template_fill_runs_limit, "window": "monthly"},
+        "chat_messages": {"used": chat_messages_used, "limit": user.chat_messages_limit, "window": "daily"},
     }
 
 
@@ -118,9 +128,10 @@ def _raise_limit_error(error_code: str, message: str, used: int, limit: int, **e
 
 
 def _enforce_counter_limit(limit: Optional[int], used: int, error_code: str, message: str) -> None:
-    # All operation counters (workflows, extractions, template fills, chat messages) are LIFETIME
-    # totals — there is no time-window reset. A user who hits their limit is locked out until an
-    # admin manually increases their limit via PATCH /admin/users/{id}/limits (0 = unlimited).
+    # template_fill_runs: monthly window (resets 1st of each month UTC)
+    # chat_messages: daily window (resets midnight UTC)
+    # workflows/extractions: lifetime totals
+    # 0 or None = unlimited; admin tier bypasses enforcement upstream.
     if limit is None or int(limit) <= 0:
         return
     if used >= int(limit):

@@ -11,6 +11,7 @@ from sqlalchemy import select, func
 from app.db_models_chat import DocumentChunk, CollectionDocument
 from app.core.embeddings import get_embedding_provider
 from app.core.rag.query_analyzer import QueryAnalyzer
+from app.core.rag.query_understanding import is_narrow_explicit_fact_lookup
 from app.core.rag.metadata_booster import MetadataBooster
 from app.config import settings
 from app.utils.logging import logger
@@ -162,7 +163,13 @@ class HybridRetriever:
             List of chunks with semantic_score (0-1, normalized)
         """
         # Generate query embedding, optionally enhanced with HyDE
-        if query_understanding and query_understanding.hypothetical_response:
+        use_hyde = (
+            query_understanding
+            and query_understanding.hypothetical_response
+            and not is_narrow_explicit_fact_lookup(query_understanding)
+        )
+
+        if use_hyde:
             # HyDE: Average query embedding with hypothetical response embedding
             query_emb = self.embedder.embed_text(query)
             hyde_emb = self.embedder.embed_text(query_understanding.hypothetical_response)
@@ -179,6 +186,15 @@ class HybridRetriever:
                 extra={"query": query[:50]}
             )
         else:
+            if (
+                query_understanding
+                and query_understanding.hypothetical_response
+                and is_narrow_explicit_fact_lookup(query_understanding)
+            ):
+                logger.info(
+                    "HyDE disabled for narrow explicit fact lookup",
+                    extra={"query": query[:50]}
+                )
             query_embedding = self.embedder.embed_text(query)
 
         # Build query with cosine distance

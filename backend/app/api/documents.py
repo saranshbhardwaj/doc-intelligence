@@ -531,7 +531,8 @@ async def delete_document(
             )
 
         link_count = doc_repo.get_collection_link_count(document_id, user.org_id)
-        if link_count > 1:
+        vdr_ref_count = doc_repo.get_vdr_reference_count(document_id)
+        if link_count > 1 or vdr_ref_count > 0:
             success = collection_repo.remove_document_from_collection(collection_id, document_id)
             if not success:
                 raise HTTPException(status_code=500, detail="Failed to unlink document from collection")

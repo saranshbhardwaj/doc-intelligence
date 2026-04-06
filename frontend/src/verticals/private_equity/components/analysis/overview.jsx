@@ -95,30 +95,30 @@ export function ExecutiveSummary({ checklist, findings, summary, analysisStatus,
         />
       </div>
 
-      <div className="bg-card border rounded-xl p-4 shadow-sm">
+      <div className="glass-card rounded-xl p-4">
         <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
           <div className="text-center">
-            <p className="text-2xl font-black text-primary">{completionPct}%</p>
+            <p className="text-2xl font-black font-display text-primary">{completionPct}%</p>
             <div className="w-full bg-muted rounded-full h-1.5 mt-1.5 mx-auto max-w-[60px]">
               <div className="bg-primary h-1.5 rounded-full transition-all" style={{ width: `${completionPct}%` }} />
             </div>
             <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mt-1">Checklist</p>
           </div>
           <div className="text-center">
-            <p className="text-2xl font-black text-green-600">{covered}</p>
+            <p className="text-2xl font-black font-display text-green-600">{covered}</p>
             <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mt-0.5">Covered</p>
           </div>
           <div className="text-center">
-            <p className="text-2xl font-black text-yellow-600">{partial}</p>
+            <p className="text-2xl font-black font-display text-yellow-600">{partial}</p>
             <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mt-0.5">Partial</p>
           </div>
           <div className="text-center">
-            <p className="text-2xl font-black text-red-500">{missing}</p>
+            <p className="text-2xl font-black font-display text-red-500">{missing}</p>
             <p className="text-[10px] font-bold uppercase tracking-widest text-muted-foreground mt-0.5">Missing</p>
           </div>
           <div className="text-center">
             <div className="flex items-center justify-center gap-1.5">
-              <p className={`text-2xl font-black ${highFindings > 0 ? "text-red-500" : openFindings > 0 ? "text-yellow-600" : "text-green-600"}`}>
+              <p className={`text-2xl font-black font-display ${highFindings > 0 ? "text-red-500" : openFindings > 0 ? "text-yellow-600" : "text-green-600"}`}>
                 {openFindings}
               </p>
             </div>
@@ -142,25 +142,25 @@ export function ExecutiveSummary({ checklist, findings, summary, analysisStatus,
               <span className="text-[11px] text-muted-foreground">Open items that still need human routing</span>
             </div>
             <div className="grid grid-cols-2 lg:grid-cols-5 gap-2">
-              <div className="rounded-lg border border-border/60 bg-muted/20 px-3 py-2">
-                <p className="text-lg font-bold text-foreground">{reviewSignals.needsReview}</p>
+              <div className="glass-card rounded-lg px-3 py-2">
+                <p className="text-lg font-bold font-display text-foreground">{reviewSignals.needsReview}</p>
                 <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Needs review</p>
               </div>
-              <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 dark:border-red-800 dark:bg-red-900/20">
-                <p className="text-lg font-bold text-red-700 dark:text-red-400">{reviewSignals.highPriority}</p>
-                <p className="text-[10px] uppercase tracking-widest text-red-700/80 dark:text-red-400/80">High priority</p>
+              <div className="rounded-lg border border-destructive/20 bg-destructive/5 px-3 py-2">
+                <p className="text-lg font-bold font-display text-destructive">{reviewSignals.highPriority}</p>
+                <p className="text-[10px] uppercase tracking-widest text-destructive/70">High priority</p>
               </div>
-              <div className="rounded-lg border border-purple-200 bg-purple-50 px-3 py-2 dark:border-purple-800 dark:bg-purple-900/20">
-                <p className="text-lg font-bold text-purple-700 dark:text-purple-400">{reviewSignals.specialist}</p>
-                <p className="text-[10px] uppercase tracking-widest text-purple-700/80 dark:text-purple-400/80">Specialist</p>
+              <div className="rounded-lg border border-purple-500/20 bg-purple-500/5 px-3 py-2">
+                <p className="text-lg font-bold font-display text-purple-600 dark:text-purple-400">{reviewSignals.specialist}</p>
+                <p className="text-[10px] uppercase tracking-widest text-purple-600/70 dark:text-purple-400/70">Specialist</p>
               </div>
-              <div className="rounded-lg border border-blue-200 bg-blue-50 px-3 py-2 dark:border-blue-800 dark:bg-blue-900/20">
-                <p className="text-lg font-bold text-blue-700 dark:text-blue-400">{reviewSignals.underwriting}</p>
-                <p className="text-[10px] uppercase tracking-widest text-blue-700/80 dark:text-blue-400/80">Underwriting</p>
+              <div className="rounded-lg border border-primary/20 bg-primary/5 px-3 py-2">
+                <p className="text-lg font-bold font-display text-primary">{reviewSignals.underwriting}</p>
+                <p className="text-[10px] uppercase tracking-widest text-primary/70">Underwriting</p>
               </div>
-              <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 dark:border-amber-800 dark:bg-amber-900/20">
-                <p className="text-lg font-bold text-amber-700 dark:text-amber-400">{reviewSignals.evidenceGap}</p>
-                <p className="text-[10px] uppercase tracking-widest text-amber-700/80 dark:text-amber-400/80">Thin sourcing</p>
+              <div className="rounded-lg border border-warning/20 bg-warning/5 px-3 py-2">
+                <p className="text-lg font-bold font-display text-warning">{reviewSignals.evidenceGap}</p>
+                <p className="text-[10px] uppercase tracking-widest text-warning/70">Thin sourcing</p>
               </div>
             </div>
           </div>
