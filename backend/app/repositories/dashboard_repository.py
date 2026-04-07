@@ -10,7 +10,7 @@ from typing import Dict, List, Any
 from contextlib import contextmanager
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy import func, and_, case, extract
+from sqlalchemy import func, and_
 
 from app.database import SessionLocal
 from app.db_models_chat import ChatMessage, ChatSession
@@ -18,7 +18,6 @@ from app.db_models_documents import Document
 from app.db_models_templates import TemplateFillRun, ExcelTemplate
 from app.db_models import Extraction
 from app.db_models_workflows import WorkflowRun
-from app.db_models_users import User
 from app.utils.logging import logger
 
 
@@ -336,7 +335,8 @@ class DashboardRepository:
                 ).group_by(func.date(WorkflowRun.created_at)).all()
 
                 # Merge into daily breakdown
-                empty_day = lambda d: {"date": d, "chat_messages": 0, "template_fills": 0, "extractions": 0, "workflow_runs": 0}
+                def empty_day(d):
+                    return {"date": d, "chat_messages": 0, "template_fills": 0, "extractions": 0, "workflow_runs": 0}
                 daily_map: Dict[str, Dict[str, int]] = {}
 
                 for date_obj, count in chat_by_date:

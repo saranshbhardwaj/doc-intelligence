@@ -20,7 +20,7 @@ from app.core.rag.metadata_booster import MetadataBooster
 from app.utils.token_utils import count_tokens, truncate_to_token_limit
 
 if TYPE_CHECKING:
-    from app.core.rag.query_understanding import QueryUnderstanding, QueryType
+    from app.core.rag.query_understanding import QueryUnderstanding
 
 logger = logging.getLogger(__name__)
 

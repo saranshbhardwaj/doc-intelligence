@@ -55,13 +55,14 @@ def _load_file_bytes(path: str) -> bytes:
         return f.read()
 
 
-_DEF_LLMC = lambda: LLMClient(
-    api_key=settings.anthropic_api_key,
-    model=settings.synthesis_llm_model,
-    max_tokens=settings.synthesis_llm_max_tokens,
-    max_input_chars=settings.llm_max_input_chars,
-    timeout_seconds=settings.synthesis_llm_timeout_seconds,
-)
+def _DEF_LLMC():
+    return LLMClient(
+        api_key=settings.anthropic_api_key,
+        model=settings.synthesis_llm_model,
+        max_tokens=settings.synthesis_llm_max_tokens,
+        max_input_chars=settings.llm_max_input_chars,
+        timeout_seconds=settings.synthesis_llm_timeout_seconds,
+    )
 
 
 def _reverse_extraction_shadow(extraction_id: str, reason: str, stage: str) -> None:
@@ -101,8 +102,6 @@ def parse_document_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
     extraction_id = payload["extraction_id"]
     file_path = payload["file_path"]
     filename = payload["filename"]
-    user_id = payload["user_id"]
-    context = payload.get("context")
 
     db = _get_db_session()
     tracker = JobProgressTracker(db, job_id)
@@ -430,7 +429,7 @@ def summarize_context_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
             batch_summaries = asyncio.run(extraction_service.summarize_chunks_batch(batch_data))
             summaries.extend(batch_summaries)
 
-        summaries_path = save_summaries(
+        save_summaries(
             extraction_id,
             {
                 "model": settings.cheap_llm_model,
@@ -811,8 +810,6 @@ def start_extraction_from_chunks_task(self, payload: Dict[str, Any]) -> Dict[str
     job_id = payload["job_id"]
     extraction_id = payload["extraction_id"]
     document_id = payload["document_id"]
-    user_id = payload.get("user_id")
-    context = payload.get("context")
     filename = payload.get("filename", "document")
 
     db = _get_db_session()

@@ -7,7 +7,7 @@ Falls back gracefully to the template summary on any LLM error.
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Dict, List, Optional
 
 from pydantic import BaseModel, Field
 

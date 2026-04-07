@@ -57,9 +57,6 @@ def reconcile_amendment_claims(
     # Set of base_doc_ids that have at least one amendment.
     bases_with_amendments: set[str] = set(contract_families.keys())
 
-    # Set of amendment_doc_ids present in any contract family.
-    all_amendment_ids: set[str] = set(amendment_to_base.keys())
-
     # Index claims by their source document for the overlap check.
     # docs_with_claims: {doc_id: [claim_key]}
     docs_with_claims: Dict[str, List[str]] = {}

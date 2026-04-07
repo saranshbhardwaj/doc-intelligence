@@ -47,6 +47,7 @@ function computeCellStyleCache(worksheet, displayRowEnd, displayColEnd) {
   return cache;
 }
 
+// eslint-disable-next-line react-refresh/only-export-components
 export function warmExcelSheetView(worksheet) {
   if (!worksheet) return null;
 

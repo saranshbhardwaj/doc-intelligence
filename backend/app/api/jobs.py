@@ -2,7 +2,7 @@
 """Real-time job progress tracking with Server-Sent Events (SSE)"""
 import asyncio
 import json
-from typing import AsyncGenerator, Optional
+from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query, Depends
 from sse_starlette.sse import EventSourceResponse, ServerSentEvent
@@ -13,7 +13,6 @@ from app.auth import get_current_user, _verify_token, _claim
 from app.repositories.job_repository import JobRepository
 
 # Import job progress tracker (separate module to avoid circular imports)
-from app.services.job_tracker import JobProgressTracker
 from app.services.pubsub import safe_subscribe
 from app.core.entity_types import build_entity_complete_event, resolve_entity_owner
 
@@ -378,8 +377,6 @@ async def retry_job(job_id: str, user: User = Depends(get_current_user)):
         )
 
     resume_stage = "extracting"
-    resume_data_path = job.combined_context_path
-
     # Reset job state for retry using repository
     # Note: We need to add a method to handle complex updates like this
     # For now, we'll use update_job but we need to handle error_* fields

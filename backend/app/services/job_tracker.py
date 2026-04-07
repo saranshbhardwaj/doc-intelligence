@@ -9,7 +9,6 @@ from sqlalchemy.orm import Session
 from fastapi import HTTPException
 
 from app.db_models import JobState
-from app.repositories.job_repository import JobRepository
 from app.utils.logging import logger
 from app.services.pubsub import publish_event  # lightweight fire-and-forget
 from app.core.entity_types import build_entity_complete_event

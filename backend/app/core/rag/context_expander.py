@@ -110,7 +110,7 @@ class ContextExpander:
                         )
 
         logger.info(
-            f"Context expansion complete",
+            "Context expansion complete",
             extra={
                 "original_count": len(chunks),
                 "expanded_count": len(expanded),

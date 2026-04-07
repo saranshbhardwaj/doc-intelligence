@@ -1041,7 +1041,7 @@ For each requested schema table:
             header = f"--- {chunk_type} Chunk {i+1} (Page {page_num}"
             if section:
                 header += f", Section: {section}"
-            header += f") ---"
+            header += ") ---"
 
             formatted_text = f"{citation} {text}"
             formatted_parts.append(f"{header}\n{formatted_text}\n")

@@ -2,20 +2,20 @@
 
 from app.config import settings
 
-from .base import PromptPair, PromptSet
+from .base import PromptPair as PromptPair, PromptSet
 from .v1 import (
     V1PromptSet,
-    # Pydantic response models
-    AutoMappingResult,
-    DetectedField,
-    ExtractedFieldValue,
-    FieldDetectionResult,
-    FieldMapping,
-    SchemaFieldExtractionResult,
-    SchemaFieldResult,
-    SchemaTableExtractionResult,
-    SchemaTableResult,
-    SchemaTableRowResult,
+    # Pydantic response models — explicit re-exports for downstream imports
+    AutoMappingResult as AutoMappingResult,
+    DetectedField as DetectedField,
+    ExtractedFieldValue as ExtractedFieldValue,
+    FieldDetectionResult as FieldDetectionResult,
+    FieldMapping as FieldMapping,
+    SchemaFieldExtractionResult as SchemaFieldExtractionResult,
+    SchemaFieldResult as SchemaFieldResult,
+    SchemaTableExtractionResult as SchemaTableExtractionResult,
+    SchemaTableResult as SchemaTableResult,
+    SchemaTableRowResult as SchemaTableRowResult,
 )
 
 _REGISTRY: dict[str, type[PromptSet]] = {

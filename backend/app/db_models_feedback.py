@@ -1,6 +1,6 @@
 # backend/app/db_models_feedback.py
 """SQLAlchemy database model for unified feedback system."""
-from sqlalchemy import Column, String, Integer, Float, Boolean, Text, DateTime, ForeignKey, Index, CheckConstraint
+from sqlalchemy import Column, String, Integer, Boolean, Text, DateTime, ForeignKey, Index, CheckConstraint
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from sqlalchemy.dialects.postgresql import JSONB

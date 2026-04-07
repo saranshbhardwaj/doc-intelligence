@@ -146,13 +146,6 @@ class WorkflowRetriever:
                 # Combine queries for re-ranking intent
                 combined_query = " ".join(queries[:3])  # Use first 3 queries
 
-                # Create query analysis hint based on prefer_tables
-                query_analysis = {
-                    "query_type": "data_query" if prefer_tables else "narrative_query",
-                    "prefer_tables": prefer_tables,
-                    "prefer_narrative": not prefer_tables
-                }
-
                 # Re-rank (Reranker handles compression/truncation internally)
                 reranked = self.reranker.rerank(
                     query=combined_query,

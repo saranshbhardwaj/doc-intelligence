@@ -1,7 +1,7 @@
 """Admin-only observability endpoints for aggregated stats and metrics."""
 from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
-from sqlalchemy import func, desc, case
+from sqlalchemy import func, desc
 from datetime import datetime, timedelta
 from typing import Optional
 from pydantic import BaseModel, Field
@@ -238,7 +238,7 @@ def get_observability_summary(
         TemplateFillRun.processing_time_ms.isnot(None)
     ).all()
 
-    all_latencies = [l[0] for l in workflow_latencies if l[0]] + [l[0] for l in template_latencies if l[0]]
+    all_latencies = [row[0] for row in workflow_latencies if row[0]] + [row[0] for row in template_latencies if row[0]]
 
     return ObservabilitySummary(
         time_window_hours=hours,
@@ -301,32 +301,8 @@ def get_costs_by_org(
     """
     time_filter = _get_time_filter(hours)
 
-    # Query workflow costs by org
-    workflow_costs = db.query(
-        WorkflowRun.org_id,
-        func.coalesce(func.sum(WorkflowRun.cost_usd), 0).label("workflow_cost"),
-        func.count(WorkflowRun.id).label("workflow_count")
-    ).filter(
-        WorkflowRun.created_at >= time_filter
-    ).group_by(WorkflowRun.org_id).subquery()
-
-    # Query template fill costs by org
-    template_costs = db.query(
-        TemplateFillRun.org_id,
-        func.coalesce(func.sum(TemplateFillRun.cost_usd), 0).label("template_cost"),
-        func.count(TemplateFillRun.id).label("template_count")
-    ).filter(
-        TemplateFillRun.created_at >= time_filter
-    ).group_by(TemplateFillRun.org_id).subquery()
-
-    # Query extraction costs by org
-    extraction_costs = db.query(
-        Extraction.org_id,
-        func.coalesce(func.sum(Extraction.llm_cost_usd), 0).label("extraction_cost"),
-        func.count(Extraction.id).label("extraction_count")
-    ).filter(
-        Extraction.created_at >= time_filter
-    ).group_by(Extraction.org_id).subquery()
+    # Note: per-org cost subqueries (workflow_costs, template_costs, extraction_costs)
+    # are intentionally not joined here — org aggregation uses direct queries below.
 
     # Union all org_ids and aggregate (chat doesn't have org_id in current schema, so skipping)
     # Note: If chat had org_id, we'd add it here

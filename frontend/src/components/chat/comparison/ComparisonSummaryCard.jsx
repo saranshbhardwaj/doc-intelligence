@@ -26,9 +26,8 @@ export default function ComparisonSummaryCard({ context, onOpenPanel }) {
   // Extract key topics and similarity scores for summary
   const topTopics = chunks
     ?.slice(0, 3)
-    .map((chunk, idx) => ({
-      idx,
-      topic: chunk.topic || `Section ${idx + 1}`,
+    .map((chunk, _idx) => ({
+      topic: chunk.topic || `Section ${_idx + 1}`,
       similarity: chunk.similarity || chunk.avg_similarity || 0,
     }));
 

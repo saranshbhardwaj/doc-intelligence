@@ -355,7 +355,7 @@ class LLMClient:
             raise ValueError(f"System prompt must be a string, got {type(system_prompt)}")
         
         logger.info(
-            f"Calling Claude API with structured outputs (schema-enforced JSON)",
+            "Calling Claude API with structured outputs (schema-enforced JSON)",
             extra={
                 "prompt_length": len(text),
                 "system_prompt_length": len(system_prompt),

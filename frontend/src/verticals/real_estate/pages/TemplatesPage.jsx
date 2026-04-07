@@ -78,7 +78,7 @@ export default function TemplatesPage() {
   // Document selector state
   const [showDocumentSelector, setShowDocumentSelector] = useState(false);
   const [selectedTemplate, setSelectedTemplate] = useState(null);
-  const [startingFill, setStartingFill] = useState(false);
+  const [_startingFill, setStartingFill] = useState(false);
 
   // Excel viewer state
   const [showExcelViewer, setShowExcelViewer] = useState(false);

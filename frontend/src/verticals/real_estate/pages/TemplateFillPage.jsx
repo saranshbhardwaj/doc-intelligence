@@ -42,17 +42,6 @@ function formatStatus(status) {
   return statusMap[status] || { label: status, variant: 'secondary' };
 }
 
-// Helper function to format stage for display
-function formatStage(stage) {
-  const stageMap = {
-    'auto_mapping': 'AI Mapping',
-    'manual_review': 'Manual Review',
-    'filling': 'Filling',
-    'completed': 'Completed',
-  };
-  return stageMap[stage] || stage;
-}
-
 // Pipeline stage definitions for AI processing visualization
 const PIPELINE_STAGES = [
   { key: 'detect', icon: Search, label: 'Scanning PDF', sub: 'Reading document structure and extracting fields', progress: [0, 35] },
@@ -60,9 +49,9 @@ const PIPELINE_STAGES = [
   { key: 'fill', icon: FileSpreadsheet, label: 'Filling Template', sub: 'Writing values into Excel cells', progress: [75, 100] },
 ];
 
-function AIPipelineView({ progress, message, fillRun }) {
-  const currentStageIndex = PIPELINE_STAGES.findIndex(
-    (s, i) => progress < PIPELINE_STAGES[i + 1]?.progress[0] ?? 100
+function AIPipelineView({ progress, message, fillRun: _fillRun }) {
+  const _currentStageIndex = PIPELINE_STAGES.findIndex(
+    (s, i) => progress < (PIPELINE_STAGES[i + 1]?.progress[0] ?? 100)
   );
   const activeIndex = PIPELINE_STAGES.findIndex((s, i) => {
     const next = PIPELINE_STAGES[i + 1];
@@ -142,7 +131,7 @@ export default function TemplateFillPage() {
   const [currentPage, setCurrentPage] = useState(1);
   const [activeTab, setActiveTab] = useState('excel');
   const [highlightBbox, setHighlightBbox] = useState(null); // For PDF highlighting
-  const [showFeedbackModal, setShowFeedbackModal] = useState(false);
+  const [_showFeedbackModal, setShowFeedbackModal] = useState(false);
 
   // Progress tracking state
   const [jobProgress, setJobProgress] = useState(0);
@@ -170,7 +159,7 @@ export default function TemplateFillPage() {
     registerPdfPopout,
     registerExcelPopout,
     navigatePdfToPage,
-    cleanupPopouts,
+    cleanupPopouts: _cleanupPopouts,
   } = useTemplateFillActions();
   const userLimits = useUser()?.info?.limits;
   const progressStateToken = `${fillRun?.status || ''}|${fillRun?.artifact?.key || ''}|${fillRun?.artifact?.filename || ''}`;
@@ -301,7 +290,7 @@ export default function TemplateFillPage() {
           setJobStatus('failed');
         }
       },
-      onComplete: async (data) => {
+      onComplete: async (_data) => {
         setJobProgress(100);
         setJobMessage('Complete');
         // Wait for backend to finish updating database, then reload
@@ -320,7 +309,7 @@ export default function TemplateFillPage() {
         // Reload fill run silently to get error details
         loadFillRun(fillRunId, getToken, { silent: true, skipPdf: true });
       },
-      onEnd: (data) => {
+      onEnd: (_data) => {
       },
     }).then((cleanupFn) => {
       cleanup = cleanupFn;

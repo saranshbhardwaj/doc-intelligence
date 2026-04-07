@@ -58,10 +58,8 @@ def _normalize_llm_output(raw: Dict[str, Any]) -> Dict[str, Any]:
     syn_map_td = {
         "seller_motivation": "seller_motivation",
         "seller_post_sale_involvement": "post_sale_involvement",
-        "seller_post_sale_involvement": "post_sale_involvement",
         "seller_post_sale_involvement_notes": "post_sale_involvement",
         "seller_post_sale_involvement_details": "post_sale_involvement",
-        "seller_post_sale_involvement": "post_sale_involvement",
         "seller_post_sale": "post_sale_involvement",
         "auction_deadline": "auction_deadline",
         "auction_process": "auction_process",
@@ -454,7 +452,7 @@ def _coerce_to_int(value: Any) -> Optional[int]:
         cleaned = cleaned.replace(",", "")
         try:
             return int(float(cleaned))
-        except:
+        except Exception:
             pass
 
     return None
@@ -513,7 +511,7 @@ def _coerce_to_float(value: Any) -> Optional[float]:
 
         try:
             return float(cleaned) * multiplier
-        except:
+        except Exception:
             pass
 
     return None
@@ -558,7 +556,7 @@ def _coerce_to_percentage_decimal(value: Any) -> Optional[float]:
             if val > 1:
                 return val / 100.0
             return val
-        except:
+        except Exception:
             pass
 
     return None

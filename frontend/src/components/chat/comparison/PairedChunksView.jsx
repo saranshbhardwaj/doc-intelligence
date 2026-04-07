@@ -7,7 +7,7 @@
  * - Sorted by similarity (highest first)
  */
 
-import { useState, useMemo } from "react";
+import { useMemo } from "react";
 import { useComparison, useChatActions } from "../../../store";
 import ChunkPairCard from "./ChunkPairCard";
 import ChunkClusterCard from "./ChunkClusterCard";

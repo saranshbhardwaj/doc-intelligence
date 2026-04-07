@@ -1,5 +1,5 @@
 """Database models for workflow templates and workflow executions."""
-from sqlalchemy import Column, String, Integer, DateTime, Text, Float, Boolean, ForeignKey, JSON, Index
+from sqlalchemy import Column, String, Integer, DateTime, Text, Float, Boolean, ForeignKey, Index
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from sqlalchemy.dialects.postgresql import JSONB

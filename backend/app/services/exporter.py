@@ -9,7 +9,6 @@ import io
 import json
 from typing import Dict, Any, Tuple
 
-import markdown
 from docx import Document
 import pandas as pd
 from datetime import datetime
@@ -27,7 +26,6 @@ def json_to_markdown(parsed: Dict[str, Any]) -> str:
     Simple heuristic: top-level keys become headings; lists become bullet lists; dicts are nested.
     """
     def render_value(v, indent=0):
-        pad = ""  # no indentation for markdown block
         if isinstance(v, dict):
             parts = []
             for k, val in v.items():
@@ -38,7 +36,7 @@ def json_to_markdown(parsed: Dict[str, Any]) -> str:
             return "\n".join(parts)
         return str(v)
 
-    parts = [f"# Generated Memo\n"]
+    parts = ["# Generated Memo\n"]
     for k, v in parsed.items():
         parts.append(f"## {k}\n")
         parts.append(render_value(v))

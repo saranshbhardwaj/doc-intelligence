@@ -49,7 +49,7 @@ PE Diligence Investigations:
     - pe_investigation_claim_overrides_total (labels: investigation_type, new_status)
     - pe_investigation_coverage_score (labels: investigation_type, coverage_status)
 """
-from prometheus_client import Counter, Histogram, Gauge
+from prometheus_client import Counter, Histogram
 
 # Counters
 WORKFLOW_RUNS_COMPLETED = Counter(

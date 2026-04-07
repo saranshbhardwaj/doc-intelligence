@@ -1,6 +1,6 @@
 """Table detection using Excel native, border, and heuristic methods."""
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 from openpyxl.utils import get_column_letter
 from openpyxl.utils.cell import range_boundaries
 from openpyxl.worksheet.worksheet import Worksheet

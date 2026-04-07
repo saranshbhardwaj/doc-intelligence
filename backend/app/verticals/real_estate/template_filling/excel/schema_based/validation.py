@@ -6,12 +6,10 @@ Provides:
 - Fill result tracking with confidence breakdown
 """
 
-import re
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 from datetime import datetime
 from dataclasses import dataclass, field
 
-from app.utils.logging import logger
 
 
 # Confidence thresholds for fill decisions

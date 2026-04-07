@@ -12,7 +12,7 @@ import { Badge } from '../../../components/ui/badge';
 import { cn } from '@/lib/utils';
 
 export default function ExcelPreview({
-  fillRunId,
+  fillRunId: _fillRunId,
   extractedData = {},
   fieldMapping = {},
   templateId,
@@ -196,7 +196,7 @@ export default function ExcelPreview({
   );
 }
 
-function SheetPreview({ sheet, extractedData, mappings, getCellValue, getCellClasses }) {
+function SheetPreview({ sheet, extractedData: _extractedData, mappings: _mappings, getCellValue, getCellClasses }) {
   // Combine key_value_fields and all table fillable_cells into one array
   const allCells = [
     ...(sheet.key_value_fields || []),

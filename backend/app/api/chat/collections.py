@@ -59,7 +59,7 @@ async def create_collection(
         raise HTTPException(status_code=500, detail="Failed to create collection")
 
     logger.info(
-        f"Created collection",
+        "Created collection",
         extra={"user_id": user.id, "collection_id": collection.id, "collection_name": name}
     )
 
@@ -272,7 +272,7 @@ async def delete_collection(
         raise HTTPException(status_code=500, detail="Failed to delete collection")
 
     logger.info(
-        f"Deleted collection",
+        "Deleted collection",
         extra={
             "user_id": user.id,
             "collection_id": collection_id,
@@ -330,7 +330,7 @@ async def remove_document_from_collection(
         )
 
     logger.info(
-        f"Removed document from collection",
+        "Removed document from collection",
         extra={
             "user_id": user.id,
             "collection_id": collection_id,

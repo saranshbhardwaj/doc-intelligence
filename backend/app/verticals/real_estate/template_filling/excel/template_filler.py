@@ -12,12 +12,9 @@ from openpyxl.worksheet.worksheet import Worksheet
 
 from app.utils.logging import logger
 from app.verticals.real_estate.template_filling.excel.schema_based.validation import (
-    CONFIDENCE_THRESHOLDS,
     FieldValidator,
-    FillConfidenceReport,
     categorize_confidence,
     should_fill_cell,
-    create_confidence_report,
 )
 
 try:

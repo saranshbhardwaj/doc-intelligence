@@ -38,7 +38,7 @@ class BudgetEnforcer:
                         import json
                         parsed = json.loads(metadata)
                         filename = parsed.get('document_filename', c.get('document_id', 'Unknown'))
-                    except:
+                    except Exception:
                         filename = c.get('document_id', 'Unknown')
             else:
                 filename = c.get('document_id', 'Unknown')

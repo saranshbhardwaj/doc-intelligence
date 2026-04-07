@@ -6,7 +6,6 @@ Investment Memo gets special treatment matching the UI.
 
 from typing import Dict, Any, Tuple
 from datetime import datetime
-from io import BytesIO
 
 from .base_exporter import BaseExporter
 
@@ -98,7 +97,7 @@ class WorkflowExporter(BaseExporter):
         if run_metadata.get('created_at'):
             try:
                 date_str = run_metadata['created_at'].strftime('%B %d, %Y') if hasattr(run_metadata['created_at'], 'strftime') else date_str
-            except:
+            except Exception:
                 pass
 
         self.add_paragraph(f"Generated: {date_str}", bold=True)

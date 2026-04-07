@@ -151,7 +151,7 @@ class R2StorageBackend(StorageBackend):
             logger.info(f"Uploaded file to R2: {storage_key}")
             return storage_key
 
-        except Exception as e:
+        except Exception:
             logger.error(f"Failed to upload to R2: {storage_key}", exc_info=True)
             raise
 
@@ -173,7 +173,7 @@ class R2StorageBackend(StorageBackend):
         except FileNotFoundError:
             logger.error(f"File not found in R2: {storage_key}")
             raise
-        except Exception as e:
+        except Exception:
             logger.error(f"Failed to download from R2: {storage_key}", exc_info=True)
             raise
 
@@ -189,7 +189,7 @@ class R2StorageBackend(StorageBackend):
 
         except FileNotFoundError:
             raise
-        except Exception as e:
+        except Exception:
             logger.error(f"Failed to generate presigned URL: {storage_key}", exc_info=True)
             raise
 
@@ -243,7 +243,7 @@ class LocalFilesystemBackend(StorageBackend):
             logger.info(f"Uploaded file to local storage: {storage_key}")
             return storage_key
 
-        except Exception as e:
+        except Exception:
             logger.error(f"Failed to upload to local storage: {storage_key}", exc_info=True)
             raise
 
@@ -263,7 +263,7 @@ class LocalFilesystemBackend(StorageBackend):
 
             logger.info(f"Downloaded file from local storage: {storage_key} -> {local_path}")
 
-        except Exception as e:
+        except Exception:
             logger.error(f"Failed to download from local storage: {storage_key}", exc_info=True)
             raise
 
@@ -298,7 +298,7 @@ class LocalFilesystemBackend(StorageBackend):
             else:
                 logger.warning(f"Attempted to delete non-existent file: {storage_key}")
 
-        except Exception as e:
+        except Exception:
             logger.error(f"Failed to delete from local storage: {storage_key}", exc_info=True)
             raise
 

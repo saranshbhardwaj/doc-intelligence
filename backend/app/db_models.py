@@ -1,6 +1,6 @@
 # backend/app/db_models.py
 """SQLAlchemy database models for Extract mode and job tracking"""
-from sqlalchemy import Column, String, Integer, Float, DateTime, Boolean, Text, ForeignKey, JSON, CheckConstraint, Index
+from sqlalchemy import Column, String, Integer, Float, DateTime, Boolean, Text, ForeignKey, Index
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from sqlalchemy.dialects.postgresql import JSONB

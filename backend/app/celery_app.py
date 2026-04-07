@@ -31,11 +31,11 @@ if _is_debug_enabled():
 from app.core.metrics_setup import setup_prometheus_multiproc_dir
 setup_prometheus_multiproc_dir(clear_on_startup=True)  # Safe: only cleans our PID range
 
-from celery import Celery
-from celery.signals import worker_ready
-from app.config import settings
-from app.services.service_locator import get_reranker
-from app.utils.logging import logger
+from celery import Celery  # noqa: E402
+from celery.signals import worker_ready  # noqa: E402
+from app.config import settings  # noqa: E402
+from app.services.service_locator import get_reranker  # noqa: E402
+from app.utils.logging import logger  # noqa: E402
 
 celery_app = Celery(
     "doc_intelligence",
@@ -81,7 +81,7 @@ celery_app.conf.task_routes = {
 
 # Celery Beat schedule for periodic tasks
 # Run `celery -A app.celery_app.celery_app beat` to start the scheduler
-from celery.schedules import crontab
+from celery.schedules import crontab  # noqa: E402
 celery_app.conf.beat_schedule = {
     "cleanup-stuck-tasks": {
         "task": "app.services.tasks.stuck_task_monitor.cleanup_stuck_tasks",

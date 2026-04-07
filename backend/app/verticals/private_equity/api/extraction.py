@@ -4,10 +4,8 @@ Routes: /api/v1/pe/extraction/*
 
 Provides extraction functionality for PE vertical.
 """
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Body, Request
-from fastapi.responses import JSONResponse, Response
+from fastapi import APIRouter, Depends, UploadFile, File, Form, Body, Request
 from typing import Optional
-from pydantic import BaseModel
 
 from app.auth import get_current_user
 from app.db_models_users import User

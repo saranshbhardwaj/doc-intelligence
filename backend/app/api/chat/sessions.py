@@ -9,14 +9,12 @@ Session-centric architecture:
 
 from typing import Optional, List
 from datetime import datetime
-from fastapi import APIRouter, HTTPException, Depends, Query, Body, Request
+from fastapi import APIRouter, HTTPException, Depends, Query, Request
 
 from app.auth import get_current_user, get_current_org_role, is_admin_role
 from app.db_models_users import User
 from app.repositories.session_repository import SessionRepository
 from app.repositories.chat_repository import ChatRepository
-from app.database import SessionLocal
-from app.db_models_documents import Document
 from app.utils.logging import logger
 from app.models import CreateSessionRequest, UpdateSessionRequest, AddDocumentsRequest, SessionResponse, SessionDocumentInfo
 

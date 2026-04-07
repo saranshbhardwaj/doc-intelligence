@@ -5,11 +5,11 @@ Handles CRUD operations for chat sessions and their document associations.
 from typing import Optional, List, Tuple, Generator
 from contextlib import contextmanager
 from sqlalchemy.orm import Session, joinedload
-from sqlalchemy.exc import SQLAlchemyError, IntegrityError
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy import func
 
 from app.database import SessionLocal
-from app.db_models_chat import ChatSession, SessionDocument, ChatMessage
+from app.db_models_chat import ChatSession, SessionDocument
 from app.db_models_documents import Document
 from app.utils.logging import logger
 
@@ -344,7 +344,7 @@ class SessionRepository:
                     ).first()
                     if not doc:
                         logger.warning(
-                            f"Document not found, skipping",
+                            "Document not found, skipping",
                             extra={"user_id": user_id, "org_id": org_id, "document_id": doc_id}
                         )
                         continue

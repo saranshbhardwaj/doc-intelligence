@@ -352,13 +352,13 @@ def get_investment_memo_prompt(variables: dict, custom_prompt: str = None) -> di
 
     # Build user message
     user_message_parts = [
-        f"ANALYSIS REQUEST:",
+        "ANALYSIS REQUEST:",
         f"{configuration}",
     ]
 
     # Add custom objective if provided
     if custom_prompt:
-        user_message_parts.append(f"\nUSER OBJECTIVE:")
+        user_message_parts.append("\nUSER OBJECTIVE:")
         user_message_parts.append(custom_prompt)
         user_message_parts.append("\nFollow this objective while adhering to all formatting and structure requirements.")
 

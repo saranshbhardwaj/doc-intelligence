@@ -1,6 +1,5 @@
 """Schema loader for YAML-defined Excel templates."""
 
-import os
 import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional

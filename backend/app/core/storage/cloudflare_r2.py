@@ -36,7 +36,7 @@ class CloudflareR2Storage:
             )
             logger.info("Stored export in R2", extra={"bucket": self.bucket, "key": key})
             return url
-        except Exception as e:
+        except Exception:
             logger.exception("Failed to store bytes in R2", extra={"bucket": self.bucket, "key": key})
             raise
 
@@ -53,7 +53,7 @@ class CloudflareR2Storage:
                 raise FileNotFoundError(f"Object not found in R2: {key}") from e
             logger.exception("Failed to retrieve object from R2", extra={"bucket": self.bucket, "key": key})
             raise
-        except Exception as e:
+        except Exception:
             logger.exception("Failed to retrieve object from R2", extra={"bucket": self.bucket, "key": key})
             raise
 
@@ -67,7 +67,7 @@ class CloudflareR2Storage:
             )
             logger.info("Generated presigned URL for R2 object", extra={"bucket": self.bucket, "key": key})
             return url
-        except Exception as e:
+        except Exception:
             logger.exception("Failed to generate presigned URL", extra={"bucket": self.bucket, "key": key})
             raise
 
@@ -83,7 +83,7 @@ class CloudflareR2Storage:
             else:
                 logger.exception("Failed to delete object from R2", extra={"bucket": self.bucket, "key": key})
                 raise
-        except Exception as e:
+        except Exception:
             logger.exception("Failed to delete object from R2", extra={"bucket": self.bucket, "key": key})
             raise
 
@@ -97,7 +97,7 @@ class CloudflareR2Storage:
                 return False
             logger.exception("Failed to check if object exists in R2", extra={"bucket": self.bucket, "key": key})
             raise
-        except Exception as e:
+        except Exception:
             logger.exception("Failed to check if object exists in R2", extra={"bucket": self.bucket, "key": key})
             raise
 

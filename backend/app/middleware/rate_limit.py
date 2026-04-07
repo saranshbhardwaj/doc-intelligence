@@ -124,7 +124,7 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
         # Check per-minute limit
         if len(request_times) >= self.requests_per_minute:
             logger.info(
-                f"Rate limit warning",
+                "Rate limit warning",
                 extra={"client_ip": client_ip, "request_count": len(request_times)}
             )
 

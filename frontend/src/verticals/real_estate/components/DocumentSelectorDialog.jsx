@@ -55,7 +55,7 @@ export default function DocumentSelectorDialog({ open, onOpenChange, onSelect, t
 
       const res = await listCollections(getToken, { includeDocuments: true });
       const cols = res?.collections || [];
-      setCollections(cols.map(({ documents: _, ...c }) => c));
+      setCollections(cols.map(({ documents: _documents, ...c }) => c));
 
       const allDocs = cols.flatMap((col) =>
         (col.documents || []).map((doc) => ({

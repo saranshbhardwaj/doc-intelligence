@@ -100,7 +100,6 @@ async def _summarize_section(
     narrative_summary = None
     narrative_key_metrics = []
     narrative_citations = []
-    table_key_metrics = []
     table_citations = []
 
     # Process narrative chunks if present
@@ -139,7 +138,7 @@ async def _summarize_section(
             summary_result = response.get("data", {})
 
             # Validate citations preserved
-            validation = validate_citations_preserved(
+            validate_citations_preserved(
                 input_chunks=narrative_chunks,
                 summary_result=summary_result,
                 section_key=section_key,
@@ -386,7 +385,7 @@ async def _execute_map_reduce(
     tracker.update_progress(progress_percent=95, message="Finalizing artifact")
 
     logger.info(
-        f"Map-reduce synthesis complete",
+        "Map-reduce synthesis complete",
         extra={
             "run_id": run_id,
             "output_length": len(synthesis_result.get('raw_text', ''))
