@@ -151,6 +151,26 @@ except Exception as e:
 
 
 @worker_ready.connect
+def start_metrics_server(**_kwargs):
+    """Start Prometheus metrics HTTP server so Railway can scrape worker metrics.
+
+    Each Railway service has an isolated filesystem, so the API cannot read
+    worker .db files. This exposes a /metrics endpoint on METRICS_PORT (default 9091).
+    No-op when METRICS_PORT is not set (e.g. local dev without explicit env var).
+    """
+    if "beat" in sys.argv:
+        return
+    try:
+        from app.core.metrics_setup import start_worker_metrics_server
+        start_worker_metrics_server()
+    except Exception as exc:
+        logger.warning(
+            "Worker metrics server failed to start",
+            extra={"error": str(exc)[:200], "component": "celery_worker_startup"},
+        )
+
+
+@worker_ready.connect
 def preload_reranker_for_critical_worker(**_kwargs):
     if not _should_preload_reranker(sys.argv):
         logger.info(

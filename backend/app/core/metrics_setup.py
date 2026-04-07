@@ -281,3 +281,47 @@ def setup_prometheus_multiproc_dir(clear_on_startup: bool = True):
         logger.warning(f"METRICS_DEBUG: failed to list .db files: {e}")
 
     return metrics_dir
+
+
+def start_worker_metrics_server(port: int = 9091) -> None:
+    """Expose worker Prometheus metrics over HTTP (background daemon thread).
+
+    Workers have no FastAPI app. This starts a minimal HTTP server that
+    serves MultiProcessCollector output from the local PROMETHEUS_MULTIPROC_DIR.
+
+    On Railway, each worker service has an isolated filesystem, so the API
+    cannot read worker .db files directly. This endpoint lets the Railway
+    Prometheus service scrape each worker independently.
+
+    Call once per worker process, after setup_prometheus_multiproc_dir().
+    """
+    import threading
+    from http.server import BaseHTTPRequestHandler, HTTPServer
+    from prometheus_client import CollectorRegistry, generate_latest, CONTENT_TYPE_LATEST
+    from prometheus_client.multiprocess import MultiProcessCollector
+
+    metrics_port = int(os.environ.get("METRICS_PORT", str(port)))
+    metrics_dir = os.environ.get("PROMETHEUS_MULTIPROC_DIR", "")
+
+    if not metrics_port or not metrics_dir:
+        logger.info("Worker metrics server disabled (METRICS_PORT or PROMETHEUS_MULTIPROC_DIR not set)")
+        return
+
+    class _Handler(BaseHTTPRequestHandler):
+        def do_GET(self):
+            registry = CollectorRegistry()
+            MultiProcessCollector(registry, path=metrics_dir)
+            output = generate_latest(registry)
+            self.send_response(200)
+            self.send_header("Content-Type", CONTENT_TYPE_LATEST)
+            self.end_headers()
+            self.wfile.write(output)
+
+        def log_message(self, *args):
+            pass  # Suppress per-request access log noise
+
+    def _serve():
+        HTTPServer(("", metrics_port), _Handler).serve_forever()
+
+    threading.Thread(target=_serve, daemon=True, name="prometheus-metrics").start()
+    logger.info(f"Worker Prometheus metrics server started on :{metrics_port}")

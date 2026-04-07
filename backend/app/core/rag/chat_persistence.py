@@ -114,16 +114,16 @@ class ChatPersistence:
                 # Record Prometheus metrics for token usage
                 try:
                     if input_tokens:
-                        LLM_TOKEN_USAGE.labels(model=model_used, token_type="input").inc(input_tokens)
+                        LLM_TOKEN_USAGE.labels(model=model_used, token_type="input", operation_type="chat").inc(input_tokens)
                     if output_tokens:
-                        LLM_TOKEN_USAGE.labels(model=model_used, token_type="output").inc(output_tokens)
+                        LLM_TOKEN_USAGE.labels(model=model_used, token_type="output", operation_type="chat").inc(output_tokens)
                     if cache_read_tokens:
-                        LLM_TOKEN_USAGE.labels(model=model_used, token_type="cache_read").inc(cache_read_tokens)
-                        LLM_CACHE_HITS.inc()
+                        LLM_TOKEN_USAGE.labels(model=model_used, token_type="cache_read", operation_type="chat").inc(cache_read_tokens)
+                        LLM_CACHE_HITS.labels(operation_type="chat").inc()
                     else:
-                        LLM_CACHE_MISSES.inc()
+                        LLM_CACHE_MISSES.labels(operation_type="chat").inc()
                     if cache_creation_tokens:
-                        LLM_TOKEN_USAGE.labels(model=model_used, token_type="cache_write").inc(cache_creation_tokens)
+                        LLM_TOKEN_USAGE.labels(model=model_used, token_type="cache_write", operation_type="chat").inc(cache_creation_tokens)
                 except Exception as e:
                     logger.warning(f"Failed to record LLM token metrics: {e}", exc_info=True)
 

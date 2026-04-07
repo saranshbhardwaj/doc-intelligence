@@ -1,13 +1,11 @@
-name: Staging Checks
+name: CI
 
 on:
-  push:
-    branches: [staging]
   pull_request:
-    branches: [staging]
+    branches: [main]
 
 jobs:
-  frontend-lint:
+  frontend:
     name: Frontend Lint & Build
     runs-on: ubuntu-latest
     steps:
@@ -20,3 +18,14 @@ jobs:
       - run: cd frontend && npm ci
       - run: cd frontend && npm run lint
       - run: cd frontend && npm run build
+
+  backend-lint:
+    name: Backend Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: pip install ruff
+      - run: ruff check backend/app

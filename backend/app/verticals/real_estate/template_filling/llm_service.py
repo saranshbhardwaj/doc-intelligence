@@ -18,6 +18,8 @@ from app.config import settings
 from app.core.redis_client import get_redis_client_for_cache
 from app.utils.logging import logger
 from app.utils.token_utils import count_tokens
+from app.utils.metrics import LLM_TOKEN_USAGE, LLM_CACHE_HITS, LLM_CACHE_MISSES, LLM_REQUESTS_TOTAL, LLM_COST_USD
+from app.utils.costs import compute_llm_cost
 from app.verticals.real_estate.template_filling.prompts import (
     get_prompt_set,
     SchemaTableExtractionResult,
@@ -149,6 +151,34 @@ class TemplateFillLLMService:
         else:
             self._io_log_repo = None
 
+    def _record_llm_metrics(
+        self,
+        input_tokens: int | None,
+        output_tokens: int | None,
+        cache_read_tokens: int | None,
+        cache_write_tokens: int | None,
+    ) -> None:
+        """Record LLM metrics for template fill extraction."""
+        try:
+            LLM_REQUESTS_TOTAL.labels(model=self.model, operation_type="extraction").inc()
+            if input_tokens:
+                LLM_TOKEN_USAGE.labels(model=self.model, token_type="input", operation_type="extraction").inc(input_tokens)
+            if output_tokens:
+                LLM_TOKEN_USAGE.labels(model=self.model, token_type="output", operation_type="extraction").inc(output_tokens)
+            if cache_read_tokens:
+                LLM_TOKEN_USAGE.labels(model=self.model, token_type="cache_read", operation_type="extraction").inc(cache_read_tokens)
+                LLM_CACHE_HITS.labels(operation_type="extraction").inc()
+            else:
+                LLM_CACHE_MISSES.labels(operation_type="extraction").inc()
+            if cache_write_tokens:
+                LLM_TOKEN_USAGE.labels(model=self.model, token_type="cache_write", operation_type="extraction").inc(cache_write_tokens)
+            if input_tokens and output_tokens:
+                cost = compute_llm_cost(self.model, input_tokens, output_tokens)
+                if cost:
+                    LLM_COST_USD.labels(model=self.model, operation_type="extraction").inc(cost)
+        except Exception as e:
+            logger.warning(f"Failed to record template fill LLM metrics: {e}")
+
     async def detect_pdf_fields(
         self,
         chunks_with_metadata: List[Dict[str, Any]],
@@ -199,6 +229,9 @@ class TemplateFillLLMService:
             output_tokens = usage.output_tokens or 0
             cache_creation = getattr(usage, "cache_creation_input_tokens", 0) or 0
             cache_read = getattr(usage, "cache_read_input_tokens", 0) or 0
+
+            # Record metrics
+            self._record_llm_metrics(input_tokens, output_tokens, cache_read, cache_creation)
 
             if self.capture_io_log and self._io_log_repo:
                 self._io_log_repo.save_io_log(
@@ -303,6 +336,9 @@ class TemplateFillLLMService:
                 f"🎯 Stage 2 tokens: input={input_tokens:,}, output={output_tokens:,}, "
                 f"cache_creation={cache_creation:,}, cache_read={cache_read:,}"
             )
+
+        # Record metrics
+        self._record_llm_metrics(input_tokens, output_tokens, cache_read, cache_creation)
 
         # Build {field_id: {value, confidence, citations}} — only for found fields
         parsed = message.parsed_output
@@ -828,6 +864,9 @@ For each requested schema table:
         cache_creation = getattr(usage, "cache_creation_input_tokens", 0) or 0
         cache_read = getattr(usage, "cache_read_input_tokens", 0) or 0
 
+        # Record metrics
+        self._record_llm_metrics(input_tokens, output_tokens, cache_read, cache_creation)
+
         if self.capture_io_log and self._io_log_repo:
             self._io_log_repo.save_io_log(
                 source_type="template_fill",
@@ -1200,6 +1239,9 @@ For each requested schema table:
                     cache_read = getattr(usage, "cache_read_input_tokens", None) or 0
                     input_tokens = getattr(usage, "input_tokens", None) or 0
                     output_tokens = getattr(usage, "output_tokens", None) or 0
+
+                    # Record metrics for this batch
+                    self._record_llm_metrics(input_tokens, output_tokens, cache_read, cache_creation)
 
                     # Accumulate token totals across all batches
                     total_input_tokens += input_tokens

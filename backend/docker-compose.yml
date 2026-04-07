@@ -20,6 +20,7 @@ x-worker-common: &worker-common
     PROMETHEUS_MULTIPROC_GC_MAX_SIZE_MB: ${PROMETHEUS_MULTIPROC_GC_MAX_SIZE_MB:-512}
     PROMETHEUS_MULTIPROC_GC_MIN_AGE_SECONDS: ${PROMETHEUS_MULTIPROC_GC_MIN_AGE_SECONDS:-3600}
     CONTAINER_TYPE: worker
+    METRICS_PORT: "9091"
     DEBUG: ${DEBUG:-true}
     PYDEVD_DISABLE_FILE_VALIDATION: "1"
   depends_on:
@@ -181,6 +182,8 @@ services:
   prometheus:
     image: prom/prometheus:latest
     container_name: docint-prometheus
+    env_file:
+      - .env
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml
       - ./prometheus_alerts.yml:/etc/prometheus/prometheus_alerts.yml

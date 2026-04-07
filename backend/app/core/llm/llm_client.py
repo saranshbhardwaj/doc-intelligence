@@ -229,25 +229,8 @@ class LLMClient:
             cache_read_tokens = getattr(usage, "cache_read_input_tokens", None) if usage else None
             cache_write_tokens = getattr(usage, "cache_creation_input_tokens", None) if usage else None
 
-            # Record Prometheus metrics
-            LLM_REQUESTS_TOTAL.labels(model=model_name).inc()
-            if input_tokens:
-                LLM_TOKEN_USAGE.labels(model=model_name, token_type="input").inc(input_tokens)
-            if output_tokens:
-                LLM_TOKEN_USAGE.labels(model=model_name, token_type="output").inc(output_tokens)
-            if cache_read_tokens:
-                LLM_TOKEN_USAGE.labels(model=model_name, token_type="cache_read").inc(cache_read_tokens)
-                LLM_CACHE_HITS.inc()
-            else:
-                LLM_CACHE_MISSES.inc()
-            if cache_write_tokens:
-                LLM_TOKEN_USAGE.labels(model=model_name, token_type="cache_write").inc(cache_write_tokens)
-
-            # Calculate and record cost
-            if input_tokens and output_tokens:
-                cost = compute_llm_cost(model_name, input_tokens, output_tokens)
-                if cost:
-                    LLM_COST_USD.labels(model=model_name).inc(cost)
+            self._record_llm_metrics(model_name, input_tokens, output_tokens,
+                                     cache_read_tokens, cache_write_tokens, "extraction")
 
             # Prepend the prefilled "{" to complete the JSON
             response_text = "{" + response_text
@@ -451,25 +434,8 @@ class LLMClient:
             cache_write_tokens = getattr(usage, "cache_creation_input_tokens", None) if usage else None
             model_name = getattr(message, "model", self.model)
 
-            # Record Prometheus metrics
-            LLM_REQUESTS_TOTAL.labels(model=model_name).inc()
-            if input_tokens:
-                LLM_TOKEN_USAGE.labels(model=model_name, token_type="input").inc(input_tokens)
-            if output_tokens:
-                LLM_TOKEN_USAGE.labels(model=model_name, token_type="output").inc(output_tokens)
-            if cache_read_tokens:
-                LLM_TOKEN_USAGE.labels(model=model_name, token_type="cache_read").inc(cache_read_tokens)
-                LLM_CACHE_HITS.inc()
-            else:
-                LLM_CACHE_MISSES.inc()
-            if cache_write_tokens:
-                LLM_TOKEN_USAGE.labels(model=model_name, token_type="cache_write").inc(cache_write_tokens)
-
-            # Calculate and record cost
-            if input_tokens and output_tokens:
-                cost = compute_llm_cost(model_name, input_tokens, output_tokens)
-                if cost:
-                    LLM_COST_USD.labels(model=model_name).inc(cost)
+            self._record_llm_metrics(model_name, input_tokens, output_tokens,
+                                     cache_read_tokens, cache_write_tokens, "structured")
 
             # Log cache usage if available
             if cache_write_tokens or cache_read_tokens:
@@ -616,6 +582,32 @@ class LLMClient:
 
         return text
     
+    def _record_llm_metrics(
+        self,
+        model: str,
+        input_tokens: int | None,
+        output_tokens: int | None,
+        cache_read_tokens: int | None,
+        cache_write_tokens: int | None,
+        operation_type: str,
+    ) -> None:
+        LLM_REQUESTS_TOTAL.labels(model=model, operation_type=operation_type).inc()
+        if input_tokens:
+            LLM_TOKEN_USAGE.labels(model=model, token_type="input", operation_type=operation_type).inc(input_tokens)
+        if output_tokens:
+            LLM_TOKEN_USAGE.labels(model=model, token_type="output", operation_type=operation_type).inc(output_tokens)
+        if cache_read_tokens:
+            LLM_TOKEN_USAGE.labels(model=model, token_type="cache_read", operation_type=operation_type).inc(cache_read_tokens)
+            LLM_CACHE_HITS.labels(operation_type=operation_type).inc()
+        else:
+            LLM_CACHE_MISSES.labels(operation_type=operation_type).inc()
+        if cache_write_tokens:
+            LLM_TOKEN_USAGE.labels(model=model, token_type="cache_write", operation_type=operation_type).inc(cache_write_tokens)
+        if input_tokens and output_tokens:
+            cost = compute_llm_cost(model, input_tokens, output_tokens)
+            if cost:
+                LLM_COST_USD.labels(model=model, operation_type=operation_type).inc(cost)
+
     def _create_prompt(self, text: str, context: str = None) -> str:
         """Create extraction prompt using the new comprehensive format"""
         return create_extraction_prompt(text, context)
@@ -681,6 +673,14 @@ class LLMClient:
                         }
                     )
 
+                    self._record_llm_metrics(
+                        usage_data["model"],
+                        usage_data["input_tokens"],
+                        usage_data["output_tokens"],
+                        usage_data.get("cache_read_input_tokens"),
+                        usage_data.get("cache_creation_input_tokens"),
+                        "chat"
+                    )
                     yield {"type": "usage", "data": usage_data}
 
         except Exception as e:

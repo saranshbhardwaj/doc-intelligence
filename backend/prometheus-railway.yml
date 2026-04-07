@@ -1,0 +1,35 @@
+global:
+  scrape_interval: 30s          # Relaxed vs 15s default — halves CPU on all scrape targets
+  evaluation_interval: 30s
+  external_labels:
+    env: production
+
+remote_write:
+  - url: ${GRAFANA_CLOUD_REMOTE_WRITE_URL}
+    basic_auth:
+      username: ${GRAFANA_CLOUD_METRICS_USER_ID}
+      password: ${GRAFANA_CLOUD_API_KEY}
+    queue_config:
+      max_samples_per_send: 1000
+      batch_send_deadline: 5s
+    write_relabel_configs:
+      # Drop Go runtime and process metrics — not useful for this app
+      - source_labels: [__name__]
+        regex: 'go_.*|process_.*'
+        action: drop
+
+scrape_configs:
+  - job_name: api
+    static_configs:
+      - targets:
+          - 'api-1.railway.internal:8000'
+          - 'api-2.railway.internal:8000'
+    metrics_path: /metrics
+
+  - job_name: workers
+    static_configs:
+      - targets:
+          - 'worker-critical-1.railway.internal:9091'
+          - 'worker-critical-2.railway.internal:9091'
+          - 'worker-default.railway.internal:9091'
+    metrics_path: /metrics
