@@ -5,8 +5,6 @@ import {
   FONTS,
   applyHeaderStyle,
   applySectionHeaderStyle,
-  applyLabelStyle,
-  applyValueStyle,
 } from "./styles.js";
 
 export function addRedFlags(workbook, data) {
@@ -101,9 +99,7 @@ export function addRedFlags(workbook, data) {
     row++;
 
     // Render each flag
-    flags.forEach((flag, index) => {
-      const startRow = row;
-
+    flags.forEach((flag, _index) => {
       // Severity cell with color coding
       const severityCell = sheet.getCell(`A${row}`);
       severityCell.value = flag.severity || "Unknown";

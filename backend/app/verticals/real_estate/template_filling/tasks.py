@@ -418,8 +418,6 @@ def detect_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         template = repo.get_template(fill_run.template_id)
         schema_cell_count = 0
         if template and template.schema_metadata and template.schema_metadata.get("schema_summary"):
-            # Count: KV fields + all table columns
-            sch_summary = template.schema_metadata.get("schema_summary")
             schema_cell_count = template.schema_metadata.get("total_yaml_fields")
 
         start_time = time.time()
@@ -1419,7 +1417,6 @@ def fill_excel_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
 
     # Start latency timer
     start_time = time.monotonic()
-    org_id = None
 
     try:
         logger.info(f"Filling Excel for fill run: {fill_run_id}")

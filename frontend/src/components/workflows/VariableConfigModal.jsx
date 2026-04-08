@@ -65,7 +65,7 @@ export default function VariableConfigModal({
   };
 
   const renderVariableInput = (varDef) => {
-    const { name, type, required, choices, min, max, description } = varDef;
+    const { name, type, required: _required, choices, min, max, description } = varDef;
     // Use default value if not set
     const value =
       variables[name] !== undefined &&

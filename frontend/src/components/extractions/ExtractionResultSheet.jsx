@@ -20,8 +20,6 @@ import { Card } from "../ui/card";
 import Spinner from "../common/Spinner";
 import ResultViews from "../results/ResultViews";
 import { fetchExtractionResult, deleteExtraction } from "../../api/extraction";
-import { exportToExcel } from "../../utils/excelExport";
-import { saveAs } from "file-saver";
 import { useExtraction, useExtractionActions } from "../../store";
 import FeedbackButton from "../feedback/FeedbackButton";
 import CompletionFeedbackModal from "../feedback/CompletionFeedbackModal";
@@ -35,12 +33,11 @@ export default function ExtractionResultSheet({
 }) {
   const { getToken } = useAppAuth();
   const extraction = useExtraction();
-  const { retryExtraction, resetExtraction } = useExtractionActions();
+  const { retryExtraction } = useExtractionActions();
 
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState(null);
   const [deleting, setDeleting] = useState(false);
-  const [exporting, setExporting] = useState(false);
   const [showFeedbackModal, setShowFeedbackModal] = useState(false);
   const feedbackPromptedForRef = useRef(null);
 
@@ -80,34 +77,6 @@ export default function ExtractionResultSheet({
     );
   }, [open, effectiveExtractionId, loading, data]);
 
-  const handleExportJSON = () => {
-    if (!data) return;
-    setExporting(true);
-    try {
-      const filename =
-        data?.metadata?.filename ||
-        `${effectiveExtractionId || "extraction"}.json`;
-      const blob = new Blob([JSON.stringify(data, null, 2)], {
-        type: "application/json",
-      });
-      saveAs(blob, filename);
-    } finally {
-      setExporting(false);
-    }
-  };
-
-  const handleExportExcel = async () => {
-    if (!data) return;
-    setExporting(true);
-    try {
-      await exportToExcel(data.data || data, data.metadata);
-    } catch (err) {
-      console.error("Excel export failed", err);
-      alert("Excel export failed: " + (err.message || "Unknown error"));
-    } finally {
-      setExporting(false);
-    }
-  };
 
   const handleDelete = async () => {
     if (!effectiveExtractionId) return;

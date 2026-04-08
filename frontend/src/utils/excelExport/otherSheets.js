@@ -640,8 +640,6 @@ export function addInvestmentMemo(workbook, data) {
   });
 
   const tx = data.transaction_details || {};
-  const growth = data.growth_analysis || {};
-  const derived = data.derived_metrics || {};
   let row = 1;
 
   const titleCell = sheet.getCell(`A${row}`);

@@ -28,7 +28,7 @@ if _is_debug_enabled():
 
 # Initialize Prometheus multiprocess mode for worker metrics
 # This MUST happen before any metrics are imported/created
-from app.core.metrics_setup import setup_prometheus_multiproc_dir
+from app.core.metrics_setup import setup_prometheus_multiproc_dir  # noqa: E402
 setup_prometheus_multiproc_dir(clear_on_startup=True)  # Safe: only cleans our PID range
 
 from celery import Celery  # noqa: E402

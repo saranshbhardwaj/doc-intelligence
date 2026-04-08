@@ -706,7 +706,6 @@ class ComparisonRetriever:
             for other_doc_id in doc_ids[1:]:
                 best_match = None
                 best_sim = 0.0
-                best_idx = -1
 
                 other_chunks = doc_chunks[other_doc_id]
                 similarity_matrix = similarity_cache[other_doc_id]

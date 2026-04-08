@@ -52,6 +52,7 @@ function CircularGauge({ pct, label }) {
 
 // ─── KPI item ─────────────────────────────────────────────────────────────────
 
+// eslint-disable-next-line no-unused-vars
 function KpiItem({ icon: Icon, iconBg, iconColor, label, value, sub, danger }) {
   return (
     <div className="pe-kpi-item">

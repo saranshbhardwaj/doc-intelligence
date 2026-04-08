@@ -102,6 +102,7 @@ def parse_document_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
     extraction_id = payload["extraction_id"]
     file_path = payload["file_path"]
     filename = payload["filename"]
+    user_id = payload["user_id"]
 
     db = _get_db_session()
     tracker = JobProgressTracker(db, job_id)

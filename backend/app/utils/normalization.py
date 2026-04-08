@@ -445,7 +445,7 @@ def _coerce_to_int(value: Any) -> Optional[int]:
                 low = int(parts[0].strip().replace(",", ""))
                 high = int(parts[1].strip().replace(",", ""))
                 return (low + high) // 2
-            except:
+            except Exception:
                 pass
 
         # Remove commas and try parsing
@@ -484,7 +484,7 @@ def _coerce_to_float(value: Any) -> Optional[float]:
             cleaned = cleaned.replace("%", "").strip()
             try:
                 return float(cleaned)
-            except:
+            except Exception:
                 pass
 
         # Handle multipliers: "1.5x" -> 1.5
@@ -492,7 +492,7 @@ def _coerce_to_float(value: Any) -> Optional[float]:
             cleaned = cleaned[:-1].strip()
             try:
                 return float(cleaned)
-            except:
+            except Exception:
                 pass
 
         # Handle units: "15.2M", "150K", "1.5B"
@@ -546,7 +546,7 @@ def _coerce_to_percentage_decimal(value: Any) -> Optional[float]:
             cleaned = cleaned.replace("%", "").strip()
             try:
                 return float(cleaned) / 100.0
-            except:
+            except Exception:
                 pass
 
         # Try parsing as float

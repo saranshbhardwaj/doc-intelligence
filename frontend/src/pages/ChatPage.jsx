@@ -83,7 +83,7 @@ export default function ChatPage() {
     setMobileSessionsOpen(false);
     try {
       localStorage.setItem("lastActiveChatSessionId", sessionId);
-    } catch {}
+    } catch { /* ignore localStorage errors */ }
   };
 
   const handleDeleteSession = async (sessionId) => {
@@ -98,7 +98,7 @@ export default function ChatPage() {
           if (saved === String(sessionId)) {
             localStorage.removeItem("lastActiveChatSessionId");
           }
-        } catch {}
+        } catch { /* ignore localStorage errors */ }
       }
     } catch (error) {
       console.error("Failed to delete session:", error);
@@ -117,7 +117,7 @@ export default function ChatPage() {
       if (session?.id) {
         try {
           localStorage.setItem("lastActiveChatSessionId", session.id);
-        } catch {}
+        } catch { /* ignore localStorage errors */ }
       }
     } catch (error) {
       console.error("Failed to create session:", error);
@@ -175,7 +175,7 @@ export default function ChatPage() {
       const newValue = !prev;
       try {
         localStorage.setItem("chatSidebarCollapsed", String(newValue));
-      } catch {}
+      } catch { /* ignore localStorage errors */ }
       return newValue;
     });
   };

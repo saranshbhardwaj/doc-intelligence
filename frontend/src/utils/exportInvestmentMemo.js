@@ -149,7 +149,7 @@ export async function exportInvestmentMemoAsWord(artifact, run) {
       })
     );
 
-    data.risks.forEach((risk, idx) => {
+    data.risks.forEach((risk, _idx) => {
       const riskText =
         typeof risk === "string"
           ? risk

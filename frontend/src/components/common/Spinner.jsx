@@ -6,7 +6,7 @@ export default function Spinner({ size = 10, text = "Processing…" }) {
   return (
     <div className="flex flex-col items-center justify-center">
       <svg
-        className="animate-spin h-10 w-10 text-blue-600 mb-4"
+        className={`animate-spin ${sizeClass} text-blue-600 mb-4`}
         xmlns="http://www.w3.org/2000/svg"
         fill="none"
         viewBox="0 0 24 24"

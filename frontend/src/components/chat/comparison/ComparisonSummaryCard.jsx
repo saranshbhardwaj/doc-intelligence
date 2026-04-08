@@ -53,7 +53,7 @@ export default function ComparisonSummaryCard({ context, onOpenPanel }) {
             Document Comparison
           </h3>
           <div className="flex flex-wrap gap-2">
-            {documents.map((doc, idx) => (
+            {documents.map((doc, _idx) => (
               <Badge
                 key={doc.id}
                 variant="outline"

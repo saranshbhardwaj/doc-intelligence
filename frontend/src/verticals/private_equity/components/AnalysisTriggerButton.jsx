@@ -16,7 +16,7 @@ import {
  * @param {Object} status - From useAnalysisStatus: { has_completed_run, has_delta, added_doc_count, removed_doc_count }
  * @param {boolean} loading - Status loading state
  */
-export function AnalysisTriggerButton({ roomId, isRunning, onStart, status, loading }) {
+export function AnalysisTriggerButton({ roomId: _roomId, isRunning, onStart, status, loading }) {
   if (loading) {
     return (
       <button disabled className="pe-action-primary opacity-50 cursor-not-allowed">

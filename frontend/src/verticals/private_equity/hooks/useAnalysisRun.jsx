@@ -3,6 +3,7 @@ import { AlertTriangle, Loader2, AlertCircle } from "lucide-react";
 import { createAuthenticatedApi } from "@/api/client";
 import { streamJobProgress } from "@/api/sse-utils";
 
+// eslint-disable-next-line react-refresh/only-export-components
 export const STAGE_LABELS = {
   initialization: "Initializing analysis",
   load_documents: "Loading documents",
@@ -31,6 +32,7 @@ async function getJobStatus(jobId, getToken) {
  * @param {object} options - { getToken, onComplete, onError }
  * @returns {object} { run, isRunning }
  */
+// eslint-disable-next-line react-refresh/only-export-components
 export function useAnalysisRun(jobId, { getToken, onComplete, onError } = {}) {
   const [run, setRun] = useState(null);
   const [warnings, setWarnings] = useState([]);

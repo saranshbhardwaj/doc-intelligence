@@ -193,7 +193,7 @@ export default function RoomDocuments() {
     if (stored) {
       try {
         setLocalFolders(JSON.parse(stored));
-      } catch {}
+      } catch { /* ignore */ }
     }
     if (!peDiligence.analysisStatus) {
       actions.peRefreshAnalysisStatus(roomId, getToken);
@@ -208,7 +208,7 @@ export default function RoomDocuments() {
   // Cleanup all SSE connections on unmount
   useEffect(() => {
     return () => {
-      Object.values(sseCleanups.current).forEach((fn) => { try { fn(); } catch {} });
+      Object.values(sseCleanups.current).forEach((fn) => { try { fn(); } catch { /* ignore */ } });
     };
   }, []);
 
@@ -340,7 +340,7 @@ export default function RoomDocuments() {
       if (!activeIds.has(documentId)) {
         try {
           cleanup();
-        } catch {}
+        } catch { /* ignore */ }
         delete sseCleanups.current[documentId];
       }
     });

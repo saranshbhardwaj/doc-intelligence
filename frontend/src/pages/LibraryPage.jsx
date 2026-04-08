@@ -330,7 +330,7 @@ export default function LibraryPage() {
                 )
               );
             },
-            (completeData) => {
+            (_completeData) => {
 
               // Update store - mark specific document as complete
               completeIndexing(response.document_id);

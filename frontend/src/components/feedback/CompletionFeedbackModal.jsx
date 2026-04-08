@@ -34,7 +34,6 @@ import {
 } from "../ui/dialog";
 import { cn } from "@/lib/utils";
 import { submitFeedback } from "../../api/feedback";
-import { useUser } from "../../store";
 import { toast } from "sonner";
 import { useAppAuth } from "@/hooks/useAppAuth";
 
