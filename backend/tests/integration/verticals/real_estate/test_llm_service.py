@@ -9,8 +9,10 @@ from pathlib import Path
 from unittest.mock import Mock, patch, MagicMock
 from app.verticals.real_estate.template_filling.llm_service import (
     TemplateFillLLMService,
+)
+from app.verticals.real_estate.template_filling.prompts import (
     AutoMappingResult,
-    FieldMapping
+    FieldMapping,
 )
 
 
@@ -32,6 +34,7 @@ class MockResponse:
     def __init__(self, text, usage):
         self.content = [MockContent(text)]
         self.usage = usage
+        self.parsed_output = AutoMappingResult.model_validate_json(text)
 
 # Path to recorded API responses
 RESPONSES_DIR = Path(__file__).parent.parent.parent.parent / "fixtures" / "responses"
@@ -74,7 +77,7 @@ class TestTemplateFillLLMServiceAutoMapping:
 
         # Mock client
         mock_client = MagicMock()
-        mock_client.messages.create.return_value = mock_response
+        mock_client.messages.parse.return_value = mock_response
         mock_anthropic_class.return_value = mock_client
 
         # Initialize service
@@ -124,7 +127,7 @@ class TestTemplateFillLLMServiceAutoMapping:
         )
 
         mock_client = MagicMock()
-        mock_client.messages.create.return_value = mock_response
+        mock_client.messages.parse.return_value = mock_response
         mock_anthropic_class.return_value = mock_client
 
         service = TemplateFillLLMService()
@@ -168,7 +171,7 @@ class TestTemplateFillLLMServiceAutoMapping:
         )
 
         mock_client = MagicMock()
-        mock_client.messages.create.return_value = mock_response
+        mock_client.messages.parse.return_value = mock_response
         mock_anthropic_class.return_value = mock_client
 
         service = TemplateFillLLMService()
@@ -210,7 +213,7 @@ class TestTemplateFillLLMServiceAutoMapping:
         )
 
         mock_client = MagicMock()
-        mock_client.messages.create.return_value = mock_response
+        mock_client.messages.parse.return_value = mock_response
         mock_anthropic_class.return_value = mock_client
 
         service = TemplateFillLLMService()
@@ -249,22 +252,21 @@ class TestTemplateFillLLMServiceAutoMapping:
         )
 
         mock_client = MagicMock()
-        mock_client.messages.create.return_value = mock_response
+        mock_client.messages.parse.return_value = mock_response
         mock_anthropic_class.return_value = mock_client
 
         service = TemplateFillLLMService()
 
         # Call and capture token usage
-        result = service.auto_map_fields(
+        asyncio.run(service.auto_map_fields(
             pdf_fields=sample_pdf_fields,
-            excel_template_structure=sample_excel_schema,
-            fill_run_id="test-run-001"
-        )
+            excel_schema=sample_excel_schema,
+        ))
 
         # Token metrics should be returned (service tracks these internally)
         # Verify the mock was called with correct parameters
-        mock_client.messages.create.assert_called_once()
-        call_kwargs = mock_client.messages.create.call_args.kwargs
+        mock_client.messages.parse.assert_called_once()
+        call_kwargs = mock_client.messages.parse.call_args.kwargs
 
         assert "model" in call_kwargs
         assert "max_tokens" in call_kwargs
@@ -280,7 +282,7 @@ class TestTemplateFillLLMServiceErrorHandling:
         from anthropic import APITimeoutError
 
         mock_client = MagicMock()
-        mock_client.messages.create.side_effect = APITimeoutError("Request timeout")
+        mock_client.messages.parse.side_effect = APITimeoutError("Request timeout")
         mock_anthropic_class.return_value = mock_client
 
         service = TemplateFillLLMService()

@@ -18,8 +18,8 @@ class TestTemplateRepositoryCreation:
             user_id="test-user",
             name="Test Template",
             file_path="test/path/template.xlsx",
-            file_size=10000,
-            version=1
+            file_size_bytes=10000,
+            content_hash="abc123",
         )
 
         assert template is not None
@@ -27,7 +27,7 @@ class TestTemplateRepositoryCreation:
         assert template.name == "Test Template"
         assert template.org_id == "test-org"
         assert template.user_id == "test-user"
-        assert template.is_active is True
+        assert template.active is True
 
     @pytest.mark.integration
     def test_create_fill_run(self, template_repo, sample_template, sample_document):
@@ -36,7 +36,8 @@ class TestTemplateRepositoryCreation:
             template_id=sample_template.id,
             document_id=sample_document.id,
             org_id="test-org",
-            user_id="test-user"
+            user_id="test-user",
+            template_snapshot={},
         )
 
         assert fill_run is not None
@@ -44,8 +45,7 @@ class TestTemplateRepositoryCreation:
         assert fill_run.template_id == sample_template.id
         assert fill_run.document_id == sample_document.id
         assert fill_run.status == "queued"
-        assert fill_run.current_stage == "pending"
-        assert fill_run.field_mapping == {}
+        assert fill_run.field_mapping == {"pdf_fields": [], "mappings": []}
         assert fill_run.extracted_data == {}
 
 
@@ -225,13 +225,13 @@ class TestTemplateRepositoryUpdates:
             fill_run_id=sample_fill_run.id,
             status="failed",
             error_message="LLM API timeout",
-            error_details={"code": "timeout", "retry_count": 3}
+            error_stage="auto_mapping",
         )
 
         assert updated is not None
         assert updated.status == "failed"
         assert updated.error_message == "LLM API timeout"
-        assert updated.error_details["code"] == "timeout"
+        assert updated.error_stage == "auto_mapping"
 
 
 class TestTemplateRepositoryMetrics:
@@ -256,7 +256,8 @@ class TestTemplateRepositoryMetrics:
             template_id=sample_template.id,
             document_id=sample_fill_run.document_id,
             org_id="test-org",
-            user_id="test-user"
+            user_id="test-user",
+            template_snapshot={},
         )
 
         # Update one to completed
@@ -280,24 +281,22 @@ class TestTemplateRepositoryDeletion:
         """Should soft-delete a template (mark as inactive)."""
         result = template_repo.delete_template(
             template_id=sample_template.id,
-            org_id="test-org"
         )
 
-        assert result is True
+        assert result["success"] is True
 
-        # Verify template is marked inactive
+        # Verify template is deleted
         deleted = template_repo.get_template(
             template_id=sample_template.id,
             org_id="test-org"
         )
-        assert deleted is None or deleted.is_active is False
+        assert deleted is None
 
     @pytest.mark.integration
     def test_delete_fill_run(self, template_repo, sample_fill_run):
         """Should delete a fill run."""
         result = template_repo.delete_fill_run(
             fill_run_id=sample_fill_run.id,
-            org_id="test-org"
         )
 
         assert result is True

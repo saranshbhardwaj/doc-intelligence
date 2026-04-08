@@ -20,7 +20,7 @@ DOCUMENTS_FIXTURES = FIXTURES_DIR / "documents"
 def template_repo(override_db_session):
     """TemplateRepository with test database session."""
     from app.repositories.template_repository import TemplateRepository
-    return TemplateRepository()
+    return TemplateRepository(override_db_session)
 
 
 @pytest.fixture
@@ -46,9 +46,9 @@ def sample_template(db_session):
         user_id="test-user",
         name="Test Rent Roll Template",
         file_path="fixtures/excel/test_rent_roll.xlsx",
-        file_size=15000,
-        version=1,
-        is_active=True,
+        file_size_bytes=15000,
+        content_hash="test-content-hash-abc123",
+        active=True,
         created_at=datetime.utcnow()
     )
     db_session.add(template)
@@ -73,10 +73,10 @@ def sample_document(db_session):
         user_id="test-user",
         filename="test_property_info.pdf",
         file_path="fixtures/documents/test_property_info.pdf",
-        file_size=50000,
+        file_size_bytes=50000,
+        content_hash="test-document-hash-def456",
         status="completed",
-        num_pages=5,
-        chunks=[],  # Will be populated by sample_document_with_chunks
+        page_count=5,
         created_at=datetime.utcnow()
     )
     db_session.add(document)
