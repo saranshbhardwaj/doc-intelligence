@@ -4,7 +4,6 @@ from fastapi import Request
 from app.services.document_processor import DocumentProcessor
 from app.core.cache import create_cache
 from app.services.analytics import SimpleAnalytics
-from app.repositories import ExtractionRepository
 from app.config import settings
 
 # Initialize services

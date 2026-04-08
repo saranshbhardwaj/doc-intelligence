@@ -18,26 +18,18 @@ Task Flow:
 """
 from __future__ import annotations
 from celery import shared_task, chain
-from typing import Dict, Any, List, Tuple
+from typing import Dict, Any, List
 import asyncio
 import json
 import re
 import time
 
-from app.database import get_db
 from app.repositories.workflow_repository import WorkflowRepository
-from app.repositories.collection_repository import CollectionRepository
-from app.services.llm_client import LLMClient
-from jsonschema import Draft202012Validator
 from app.verticals.private_equity.workflows.schemas.investment_memo_schema import InvestmentMemo
-from app.verticals.private_equity.workflows.validator import validate_output
 from app.services.job_tracker import JobProgressTracker
 from app.utils.logging import logger
 from app.config import settings
-from app.db_models_workflows import WorkflowRun, Workflow
-from app.db_models_chat import DocumentChunk, CollectionDocument
-from sqlalchemy import text as sql_text, select
-from app.core.embeddings import get_embedding_provider
+from app.db_models_chat import DocumentChunk
 from app.core.rag.workflow_retriever import WorkflowRetriever
 from app.utils.costs import compute_llm_cost
 from app.services.artifacts import persist_artifact
@@ -48,7 +40,6 @@ from app.utils.metrics import (
     WORKFLOW_LATENCY_SECONDS,
 )
 from app.services.beta_limits import commit_shadow_credits, reverse_shadow_credits
-from app.utils.file_utils import save_raw_llm_response
 
 # Import from our new modules
 from .helpers import (
@@ -56,7 +47,6 @@ from .helpers import (
     normalize_llm_output,
     handle_llm_result,
     _get_db_session,
-    _llm,
     validate_investment_memo_constraints
 )
 from .map_reduce import (
@@ -506,7 +496,6 @@ def generate_artifact_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         used_citations: List[str] = []
         invalid_citations: List[str] = []
         validation_errors: List[dict] = []  # Initialize validation_errors before loop
-        last_parsed_candidate = None  # keep most recent parsed_candidate even if invalid
         usage_meta = {}  # Initialize to prevent UnboundLocalError when all LLM attempts fail
 
         citation_snippets = {}
@@ -634,7 +623,7 @@ def generate_artifact_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                 citation_count = len(used_citations)
 
                 logger.info(
-                    f"Direct generation complete",
+                    "Direct generation complete",
                     extra={
                         "run_id": run_id,
                         "citations": citation_count,
@@ -651,7 +640,7 @@ def generate_artifact_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                 return {"status": "failed", "error": "generation_error", **payload}
         # Safety check: If all attempts failed and we have no response, fail gracefully
         if raw_response is None:
-            logger.error(f"All LLM attempts failed, no valid response received", extra={"run_id": run_id, "last_error": last_invalid_reason})
+            logger.error("All LLM attempts failed, no valid response received", extra={"run_id": run_id, "last_error": last_invalid_reason})
             repo.update_run_status(run_id, status="failed", error_message=last_invalid_reason or "All LLM attempts failed")
             tracker.mark_error(error_stage="generating", error_message=last_invalid_reason or "All LLM attempts failed", error_type="llm_error", is_retryable=True)
             _reverse_workflow_shadow(run_id, "no_valid_response", "generate_artifact")

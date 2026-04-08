@@ -43,7 +43,7 @@ import {
   ArrowLeft,
 } from "lucide-react";
 import { useUser, useUserActions } from "../store";
-import { deleteExtraction, fetchExtractionResult } from "../api/extraction";
+import { fetchExtractionResult } from "../api/extraction";
 import { exportToExcel } from "../utils/excelExport";
 import { exportExtractionAsWord } from "../utils/exportExtraction";
 import { saveAs } from "file-saver";
@@ -81,7 +81,7 @@ export default function ExtractionHistoryPage() {
     }
   };
 
-  const handleDelete = async (docId) => {
+  const handleDelete = async (_docId) => {
     // Refresh list after deletion
     await loadInitial();
   };

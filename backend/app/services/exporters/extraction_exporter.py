@@ -5,8 +5,6 @@ Handles extraction results with proper ExtractedData model support.
 
 from typing import Dict, Any, Tuple
 from datetime import datetime
-from io import BytesIO
-import pandas as pd
 
 from .base_exporter import BaseExporter
 from app.models import ExtractedData

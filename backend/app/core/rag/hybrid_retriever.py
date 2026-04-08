@@ -292,7 +292,7 @@ class HybridRetriever:
                 import json
                 try:
                     metadata = json.loads(metadata)
-                except:
+                except Exception:
                     metadata = {}
 
             chunks.append({
@@ -414,7 +414,7 @@ class HybridRetriever:
                 import json
                 try:
                     metadata = json.loads(metadata)
-                except:
+                except Exception:
                     metadata = {}
 
             chunks.append({

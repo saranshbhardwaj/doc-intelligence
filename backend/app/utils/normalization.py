@@ -58,10 +58,8 @@ def _normalize_llm_output(raw: Dict[str, Any]) -> Dict[str, Any]:
     syn_map_td = {
         "seller_motivation": "seller_motivation",
         "seller_post_sale_involvement": "post_sale_involvement",
-        "seller_post_sale_involvement": "post_sale_involvement",
         "seller_post_sale_involvement_notes": "post_sale_involvement",
         "seller_post_sale_involvement_details": "post_sale_involvement",
-        "seller_post_sale_involvement": "post_sale_involvement",
         "seller_post_sale": "post_sale_involvement",
         "auction_deadline": "auction_deadline",
         "auction_process": "auction_process",
@@ -447,14 +445,14 @@ def _coerce_to_int(value: Any) -> Optional[int]:
                 low = int(parts[0].strip().replace(",", ""))
                 high = int(parts[1].strip().replace(",", ""))
                 return (low + high) // 2
-            except:
+            except Exception:
                 pass
 
         # Remove commas and try parsing
         cleaned = cleaned.replace(",", "")
         try:
             return int(float(cleaned))
-        except:
+        except Exception:
             pass
 
     return None
@@ -486,7 +484,7 @@ def _coerce_to_float(value: Any) -> Optional[float]:
             cleaned = cleaned.replace("%", "").strip()
             try:
                 return float(cleaned)
-            except:
+            except Exception:
                 pass
 
         # Handle multipliers: "1.5x" -> 1.5
@@ -494,7 +492,7 @@ def _coerce_to_float(value: Any) -> Optional[float]:
             cleaned = cleaned[:-1].strip()
             try:
                 return float(cleaned)
-            except:
+            except Exception:
                 pass
 
         # Handle units: "15.2M", "150K", "1.5B"
@@ -513,7 +511,7 @@ def _coerce_to_float(value: Any) -> Optional[float]:
 
         try:
             return float(cleaned) * multiplier
-        except:
+        except Exception:
             pass
 
     return None
@@ -548,7 +546,7 @@ def _coerce_to_percentage_decimal(value: Any) -> Optional[float]:
             cleaned = cleaned.replace("%", "").strip()
             try:
                 return float(cleaned) / 100.0
-            except:
+            except Exception:
                 pass
 
         # Try parsing as float
@@ -558,7 +556,7 @@ def _coerce_to_percentage_decimal(value: Any) -> Optional[float]:
             if val > 1:
                 return val / 100.0
             return val
-        except:
+        except Exception:
             pass
 
     return None

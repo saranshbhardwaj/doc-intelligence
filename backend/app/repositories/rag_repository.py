@@ -10,8 +10,7 @@ Pattern:
 """
 from typing import List, Dict, Optional
 from sqlalchemy.orm import Session
-from sqlalchemy import select, func, or_, and_
-from pgvector.sqlalchemy import Vector
+from sqlalchemy import select, func, and_
 
 from app.db_models_chat import DocumentChunk, CollectionDocument
 from app.utils.logging import logger

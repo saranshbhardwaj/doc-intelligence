@@ -339,7 +339,7 @@ function RoomSidebar({ roomId, location, onCollapse }) {
 
       {/* Nav links */}
       <nav className="flex-1 space-y-1 overflow-y-auto scrollbar-thin pr-1">
-        {ROOM_NAV.map(({ label, path, Icon }) => {
+        {ROOM_NAV.map(({ label, path, Icon: _Icon }) => {
           const href   = `/app/pe/rooms/${roomId}/${path}`;
           const active = location.pathname === href
             || location.pathname.startsWith(href + "/")

@@ -139,7 +139,7 @@ export default function ExtractionDocumentSelectorModal({
             collection_id: colId,
           })
         );
-      } catch {}
+      } catch { /* ignore indexing errors */ }
       onSelect?.(doc);
       onOpenChange(false);
     }

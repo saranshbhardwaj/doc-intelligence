@@ -164,7 +164,7 @@ function ExcelGridDisplay({ workbook, activeSheet, onSheetChange }) {
   }, [activeSheet]);
 
   // Count fillable cells (cells with labels)
-  const fillableCells = Object.keys(worksheet).filter(key => {
+  const _fillableCells = Object.keys(worksheet).filter(key => {
     if (key.startsWith('!')) return false;
     const cell = worksheet[key];
     return cell && cell.v && typeof cell.v === 'string' && cell.v.trim().length > 0;
@@ -181,7 +181,7 @@ function ExcelGridDisplay({ workbook, activeSheet, onSheetChange }) {
         <TabsList className="w-full justify-start bg-transparent rounded-none p-0 h-auto border-b-0 overflow-x-auto flex-nowrap">
           {workbook.SheetNames.map((sheetName) => {
             const sheet = workbook.Sheets[sheetName];
-            const sheetRange = XLSX.utils.decode_range(sheet['!ref'] || 'A1');
+            const _sheetRange = XLSX.utils.decode_range(sheet['!ref'] || 'A1');
 
             // Count only filled cells
             const filledCells = Object.keys(sheet).filter(key => {

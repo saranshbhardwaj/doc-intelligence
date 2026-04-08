@@ -508,7 +508,7 @@ class AzureDocumentIntelligenceParser(DocumentParser):
         }
 
         # Extract paragraphs with roles
-        logger.debug(f"Extracting paragraphs from Azure result")
+        logger.debug("Extracting paragraphs from Azure result")
         for para in getattr(result, "paragraphs", []) or []:
             if para is None:
                 continue
@@ -547,7 +547,7 @@ class AzureDocumentIntelligenceParser(DocumentParser):
         logger.info(f"Extracted {len(structured_data['paragraphs'])} paragraphs")
 
         # Extract sections (hierarchical grouping)
-        logger.debug(f"Extracting sections from Azure result")
+        logger.debug("Extracting sections from Azure result")
         for section in getattr(result, "sections", []) or []:
             if section is None:
                 continue
@@ -575,7 +575,7 @@ class AzureDocumentIntelligenceParser(DocumentParser):
         logger.info(f"Extracted {len(structured_data['sections'])} sections")
 
         # Extract figures with captions
-        logger.debug(f"Extracting figures from Azure result")
+        logger.debug("Extracting figures from Azure result")
         for figure in getattr(result, "figures", []) or []:
             if figure is None:
                 continue

@@ -12,7 +12,7 @@ from typing import Optional, List, Tuple, Dict, Any
 from contextlib import contextmanager
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy import func, select, and_, desc
+from sqlalchemy import func, and_, desc
 
 from app.database import SessionLocal
 from app.db_models_feedback import Feedback
@@ -529,7 +529,7 @@ class FeedbackRepository:
                     db.query(func.count())
                     .filter(and_(
                         Feedback.created_at >= time_filter,
-                        Feedback.requires_response == True
+                        Feedback.requires_response.is_(True)
                     ))
                     .scalar() or 0
                 )
@@ -538,7 +538,7 @@ class FeedbackRepository:
                     db.query(func.count())
                     .filter(and_(
                         Feedback.created_at >= time_filter,
-                        Feedback.requires_response == True,
+                        Feedback.requires_response.is_(True),
                         Feedback.response_status == "responded"
                     ))
                     .scalar() or 0

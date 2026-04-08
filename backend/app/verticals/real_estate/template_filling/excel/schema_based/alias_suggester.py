@@ -13,9 +13,8 @@ import argparse
 from collections import defaultdict
 from dataclasses import dataclass, field
 from difflib import SequenceMatcher
-from typing import Any, Dict, List, Optional, Set, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 
-from app.utils.logging import logger
 
 
 @dataclass

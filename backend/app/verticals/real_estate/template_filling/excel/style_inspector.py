@@ -4,7 +4,6 @@ from typing import Optional
 from openpyxl.cell import Cell
 from openpyxl.worksheet.worksheet import Worksheet
 
-from app.utils.logging import logger
 
 
 class StyleInspector:

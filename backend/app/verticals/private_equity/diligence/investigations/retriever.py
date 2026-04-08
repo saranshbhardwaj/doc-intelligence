@@ -1,7 +1,7 @@
 """Evidence retrieval utilities for diligence investigations."""
 from __future__ import annotations
 
-from typing import Dict, List, Optional, Sequence
+from typing import Dict, List, Sequence
 
 from sqlalchemy.orm import Session
 

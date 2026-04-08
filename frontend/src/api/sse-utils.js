@@ -88,7 +88,7 @@ export async function streamJobProgress(
     return () => {
       try {
         existing.eventSource.close();
-      } catch (_) {}
+      } catch { /* ignore close errors */ }
       _activeStreams.delete(jobId);
     };
   }

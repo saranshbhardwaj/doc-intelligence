@@ -192,8 +192,6 @@ class AzureSmartChunker(DocumentChunker):
         current_tables = []
         current_page_range = []
 
-        all_paragraphs = structured_data.get("paragraphs", [])
-
         for page in enhanced_pages:
             page_num = page["page_number"]
             paragraphs_by_role = page.get("paragraphs_by_role", {})

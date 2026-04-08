@@ -6,7 +6,6 @@ import json
 
 from app.database import get_db
 from app.repositories.workflow_repository import WorkflowRepository
-from app.db_models_workflows import Workflow, WorkflowRun
 from app.repositories.document_repository import DocumentRepository
 from app.auth import get_current_user, get_current_org_role, is_admin_role
 from app.db_models_users import User
@@ -18,7 +17,6 @@ from app.schemas.workflows import (
     WorkflowTemplateDetail,
     WorkflowVariableSchema,
     WorkflowRunListItem,
-    WorkflowRunDetail,
     DocumentSummary,
 )
 
@@ -26,7 +24,7 @@ router = APIRouter(prefix="/api/workflows", tags=["workflows"])
 
 
 # -------------------- Pydantic Schemas --------------------
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field  # noqa: E402
 
 
 class WorkflowTemplateOut(BaseModel):
@@ -544,7 +542,7 @@ def export_workflow_run(
         Data: Workflow artifact (Dict[str, Any])
         Output: bytes (Word/Excel/PDF) or URL
     """
-    from fastapi import Query, Response
+    from fastapi import Response
     from app.services.artifacts import load_artifact
     from app.utils.metrics import (
         EXPORT_GENERATION_SECONDS,

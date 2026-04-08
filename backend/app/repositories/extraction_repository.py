@@ -679,7 +679,7 @@ class ExtractionRepository:
                         else_=0
                     )).label("failed"),
                     func.sum(case(
-                        (Extraction.from_cache == True, 1),
+                        (Extraction.from_cache.is_(True), 1),
                         else_=0
                     )).label("from_cache")
                 ).filter(

@@ -1,5 +1,4 @@
 # backend/app/cache_utils.py
-from pathlib import Path
 from app.core.cache import DocumentCache
 import json
 from app.utils.logging import logger

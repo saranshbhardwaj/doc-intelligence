@@ -7,7 +7,7 @@
  * - Job status and retry
  */
 
-import { api, createAuthenticatedApi } from "./client";
+import { createAuthenticatedApi } from "./client";
 import { streamJobProgress } from "./sse-utils";
 
 /**

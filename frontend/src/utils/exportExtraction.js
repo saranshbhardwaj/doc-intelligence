@@ -288,7 +288,7 @@ function addArrayContent(children, arr, key) {
 /**
  * Add object content (like company info, financial data)
  */
-function addObjectContent(children, obj, key) {
+function addObjectContent(children, obj, _key) {
   if (!obj || typeof obj !== 'object') return;
 
   // Get all key-value pairs

@@ -139,11 +139,11 @@ class AnthropicUsageService:
                     )
                     raise
 
-                except httpx.TimeoutException as e:
+                except httpx.TimeoutException:
                     logger.error("Anthropic usage API timeout", exc_info=True)
                     raise
 
-                except Exception as e:
+                except Exception:
                     logger.error("Anthropic usage API unexpected error", exc_info=True)
                     raise
 
@@ -251,11 +251,11 @@ class AnthropicUsageService:
                     )
                     raise
 
-                except httpx.TimeoutException as e:
+                except httpx.TimeoutException:
                     logger.error("Anthropic cost API timeout", exc_info=True)
                     raise
 
-                except Exception as e:
+                except Exception:
                     logger.error("Anthropic cost API unexpected error", exc_info=True)
                     raise
 

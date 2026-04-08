@@ -24,7 +24,7 @@ const DOC_COLORS = {
   C: "border-orange-200 bg-orange-50 dark:bg-orange-950/30",
 };
 
-export default function ChunkClusterCard({ cluster, docIndex = 0, documents = [] }) {
+export default function ChunkClusterCard({ cluster, docIndex: _docIndex = 0, documents = [] }) {
   const { highlightChunk } = useChatActions();
   const { chunks, avg_similarity, topic } = cluster;
 
@@ -45,7 +45,7 @@ export default function ChunkClusterCard({ cluster, docIndex = 0, documents = []
   };
 
   const documentLabels = ["A", "B", "C"];
-  const chunkArray = Object.entries(chunks).map(([docId, chunk]) => ({
+  const _chunkArray = Object.entries(chunks).map(([docId, chunk]) => ({
     docId,
     docLabel: documentLabels[documentLabels.length - Object.keys(chunks).length],
     chunk,

@@ -3,6 +3,7 @@
 global:
   scrape_interval: 15s  # Scrape targets every 15 seconds
   evaluation_interval: 15s  # Evaluate rules every 15 seconds
+        
   external_labels:
     monitor: 'doc-intelligence'
     environment: 'development'

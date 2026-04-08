@@ -260,7 +260,7 @@ class JobRepository:
                 db.commit()
 
                 logger.debug(
-                    f"Updated job state",
+                    "Updated job state",
                     extra={"job_id": job_id, "status": status}
                 )
 
@@ -418,7 +418,7 @@ class JobRepository:
                 db.commit()
 
                 logger.info(
-                    f"Deleted job state",
+                    "Deleted job state",
                     extra={"job_id": job_id}
                 )
 

@@ -45,8 +45,8 @@ export default function ExtractPage() {
   // Local UI state
   const [mode, setMode] = useState("upload"); // 'upload' | 'library'
   const [selectedFile, setSelectedFile] = useState(null);
-  const [saveToLibrary, setSaveToLibrary] = useState(true);
-  const [collections, setCollections] = useState([]);
+  const [saveToLibrary] = useState(true);
+  const [, setCollections] = useState([]);
   const [selectedCollection, setSelectedCollection] = useState(null);
   const [selectedDocId, setSelectedDocId] = useState(null);
   const [selectedDocMeta, setSelectedDocMeta] = useState(null);
@@ -64,11 +64,7 @@ export default function ExtractPage() {
   const historyItems = extractionHistory?.items || [];
   const historyTotal = extractionHistory?.total || 0;
   const historyLoading = extractionHistory?.isLoading || false;
-  const historyError = extractionHistory?.error || null;
-
   const {
-    uploadDocument,
-    extractTempDocument: extractTemp,
     extractLibraryDocument,
     cancelExtraction,
     resetExtraction,
@@ -178,7 +174,7 @@ export default function ExtractPage() {
     navigate("/app/extractions");
   };
 
-  const handleDeleteExtraction = (extractionId) => {
+  const handleDeleteExtraction = (_extractionId) => {
     fetchExtractionHistory(getToken);
   };
 

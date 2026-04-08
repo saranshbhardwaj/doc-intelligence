@@ -6,7 +6,7 @@
  * Sends page navigation commands to PDF pop-out window.
  */
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { useParams } from 'react-router-dom';
 import { useAppAuth } from "@/hooks/useAppAuth";
 import ExcelGridView from '../components/ExcelGridView';

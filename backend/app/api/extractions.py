@@ -8,8 +8,6 @@ This endpoint intelligently handles both cache hits and misses:
 from datetime import datetime
 import time
 import uuid
-import json
-import asyncio
 import hashlib
 import os
 
@@ -51,7 +49,6 @@ from app.verticals.private_equity.extraction.tasks import (
 )
 from app.services.artifacts import load_extraction_artifact, delete_artifact
 from app.utils.id_generator import generate_id
-from app.db_models_chat import DocumentChunk
 from app.models import ExtractionListItem, PaginatedExtractionResponse
 import tempfile
 
@@ -513,7 +510,7 @@ async def get_extraction_result(extraction_id: str):
 
     # Load from artifact column (R2 pointer or inline data)
     result_data = load_extraction_artifact(extraction.id, extraction.artifact)
-    logger.info(f"Retrieved extraction result from artifact", extra={
+    logger.info("Retrieved extraction result from artifact", extra={
         "extraction_id": extraction_id,
         "artifact_backend": extraction.artifact.get("backend", "inline") if isinstance(extraction.artifact, dict) else "inline"
     })

@@ -42,7 +42,7 @@ function StatusBadge({ status }) {
 
 // ─── Investigation card ───────────────────────────────────────────────────────
 
-function InvestigationCard({ inv, roomId, onClick }) {
+function InvestigationCard({ inv, roomId: _roomId, onClick }) {
   const coverageColor = COVERAGE_COLORS[inv.coverage_status] || "text-muted-foreground";
   const typeLabel = INVESTIGATION_TYPES.find((t) => t.value === inv.investigation_type)?.label
     || inv.investigation_type?.replace(/_/g, " ") || "Investigation";

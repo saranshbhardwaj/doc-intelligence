@@ -449,9 +449,9 @@ def build_narrative_summary_prompt(
         f"SECTION: {section_title}",
         f"SECTION KEY: {section_key}",
         f"FOCUS AREAS: {queries_text}",
-        f"",
-        f"NARRATIVE CHUNKS TO SUMMARIZE:",
-        f""
+        "",
+        "NARRATIVE CHUNKS TO SUMMARIZE:",
+        ""
     ]
 
     # Add chunks with citation prefixes (same as direct execution)
@@ -510,9 +510,9 @@ def build_table_extraction_prompt(
         f"SECTION: {section_title}",
         f"SECTION KEY: {section_key}",
         f"FOCUS AREAS: {queries_text}",
-        f"",
-        f"TABLE CHUNKS TO EXTRACT KEY METRICS FROM:",
-        f""
+        "",
+        "TABLE CHUNKS TO EXTRACT KEY METRICS FROM:",
+        ""
     ]
 
     # Add table chunks with citation prefixes

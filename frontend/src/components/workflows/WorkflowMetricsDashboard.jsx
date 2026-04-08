@@ -9,7 +9,7 @@ import { DollarSign, TrendingUp, BarChart3, Target, Building2, Users, AlertTrian
 import { Card } from "../ui/card";
 import { formatCurrency } from "../../utils/formatters";
 
-function MetricCard({ label, value, format = "text", currency = "USD", icon: Icon, color = "blue", trend }) {
+function MetricCard({ label, value, format = "text", currency = "USD", icon: _Icon, color = "blue", trend }) {
   const formatValue = () => {
     if (value === null || value === undefined) return "—";
 

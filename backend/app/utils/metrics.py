@@ -16,15 +16,12 @@ Export operations:
     - export_requests_total (label format)
     - export_bytes_total (counter of bytes delivered/stored)
 LLM observability:
-    - llm_cache_hits_total
-    - llm_cache_misses_total
-    - llm_requests_total (label: model)
-    - llm_token_usage_total (labels: model, token_type)
-    - llm_cost_usd_total (label: model)
-Anthropic Admin API (ground truth):
-    - anthropic_reported_tokens (gauge: latest Anthropic-reported token usage)
-    - anthropic_reported_cost_usd (gauge: latest Anthropic-reported cost)
-    - anthropic_usage_last_sync_timestamp (gauge: unix timestamp of last sync)
+    - llm_cache_hits_total (label: operation_type)
+    - llm_cache_misses_total (label: operation_type)
+    - llm_requests_total (labels: model, operation_type)
+    - llm_token_usage_total (labels: model, token_type, operation_type)
+    - llm_cost_usd_total (labels: model, operation_type)
+    operation_type values: chat, extraction, structured, summarization
 Template fills:
     - template_fills_completed_total
     - template_fills_failed_total
@@ -52,7 +49,7 @@ PE Diligence Investigations:
     - pe_investigation_claim_overrides_total (labels: investigation_type, new_status)
     - pe_investigation_coverage_score (labels: investigation_type, coverage_status)
 """
-from prometheus_client import Counter, Histogram, Gauge
+from prometheus_client import Counter, Histogram
 
 # Counters
 WORKFLOW_RUNS_COMPLETED = Counter(
@@ -158,32 +155,35 @@ EXPORT_BYTES_TOTAL = Counter(
 )
 
 # LLM observability metrics
+# operation_type: chat, extraction, structured, summarization
 LLM_CACHE_HITS = Counter(
     "llm_cache_hits_total",
-    "Total number of LLM cache hits (prompt caching)"
+    "Total number of LLM cache hits (prompt caching)",
+    ["operation_type"]
 )
 
 LLM_CACHE_MISSES = Counter(
     "llm_cache_misses_total",
-    "Total number of LLM cache misses"
+    "Total number of LLM cache misses",
+    ["operation_type"]
 )
 
 LLM_REQUESTS_TOTAL = Counter(
     "llm_requests_total",
     "Total number of LLM API requests",
-    ["model"]
+    ["model", "operation_type"]
 )
 
 LLM_TOKEN_USAGE = Counter(
     "llm_token_usage_total",
     "Total LLM tokens used by model and type",
-    ["model", "token_type"]  # token_type: input, output, cache_read, cache_write
+    ["model", "token_type", "operation_type"]  # token_type: input, output, cache_read, cache_write
 )
 
 LLM_COST_USD = Counter(
     "llm_cost_usd_total",
     "Total LLM cost in USD",
-    ["model"]
+    ["model", "operation_type"]
 )
 
 # Document cache metrics
@@ -293,27 +293,6 @@ HTTP_SUSPICIOUS_REQUESTS = Counter(
     ["pattern"]
 )
 
-# Anthropic Admin API metrics (ground truth data from billing system)
-ANTHROPIC_REPORTED_TOKENS = Gauge(
-    "anthropic_reported_tokens",
-    "Token usage as reported by Anthropic Admin API (latest snapshot)",
-    ["model", "token_type"],  # token_type: input, output, cache_read, cache_write
-    multiprocess_mode='max'
-)
-
-ANTHROPIC_REPORTED_COST_USD = Gauge(
-    "anthropic_reported_cost_usd",
-    "Cost in USD as reported by Anthropic Admin API (latest snapshot)",
-    ["model"],
-    multiprocess_mode='max'
-)
-
-ANTHROPIC_USAGE_LAST_SYNC = Gauge(
-    "anthropic_usage_last_sync_timestamp",
-    "Unix timestamp of last successful Anthropic usage sync",
-    multiprocess_mode='max'
-)
-
 # --- PE Diligence Investigation metrics ---
 INVESTIGATION_RUNS_TOTAL = Counter(
     "pe_investigation_runs_total",
@@ -355,9 +334,12 @@ def init_labeled_metrics():
     WORKFLOW_RUNS_FAILED.labels(workflow_name="unknown")
     CHAT_MESSAGES_TOTAL.labels(role="user")
     CHAT_MESSAGES_TOTAL.labels(role="assistant")
-    LLM_REQUESTS_TOTAL.labels(model="unknown")
-    LLM_TOKEN_USAGE.labels(model="unknown", token_type="input")
-    LLM_COST_USD.labels(model="unknown")
+    for op in ("chat", "extraction", "structured", "summarization"):
+        LLM_REQUESTS_TOTAL.labels(model="unknown", operation_type=op)
+        LLM_TOKEN_USAGE.labels(model="unknown", token_type="input", operation_type=op)
+        LLM_COST_USD.labels(model="unknown", operation_type=op)
+        LLM_CACHE_HITS.labels(operation_type=op)
+        LLM_CACHE_MISSES.labels(operation_type=op)
     EXPORT_REQUESTS.labels(format="unknown", delivery="unknown")
     DOC_CACHE_HITS.labels(cache_type="redis")
     DOC_CACHE_MISSES.labels(cache_type="redis")
@@ -425,9 +407,6 @@ __all__ = [
     "AZURE_DI_LATENCY_SECONDS",
     "AZURE_DI_PAGES_PROCESSED",
     "AZURE_DI_COST_USD",
-    "ANTHROPIC_REPORTED_TOKENS",
-    "ANTHROPIC_REPORTED_COST_USD",
-    "ANTHROPIC_USAGE_LAST_SYNC",
     "INVESTIGATION_RUNS_TOTAL",
     "INVESTIGATION_CLAIMS_TOTAL",
     "INVESTIGATION_CLAIM_OVERRIDES_TOTAL",

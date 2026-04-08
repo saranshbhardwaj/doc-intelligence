@@ -1,7 +1,6 @@
 # backend/app/api/users.py
 """User profile and extraction history endpoints"""
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from sqlalchemy.orm import Session
 from workos import WorkOSClient
 from app.auth import get_current_user, get_current_org_role, is_admin_role, _verify_token, _claim
 from app.db_models_users import User
@@ -262,7 +261,7 @@ def delete_extraction(
     if not success:
         raise HTTPException(status_code=500, detail="Failed to delete extraction from database")
 
-    logger.info(f"Extraction deleted successfully", extra={
+    logger.info("Extraction deleted successfully", extra={
         "extraction_id": extraction_id,
         "user_id": user.id,
         "extraction_filename": filename

@@ -26,7 +26,6 @@ from app.database import SessionLocal
 from app.repositories.document_repository import DocumentRepository
 from app.repositories.job_repository import JobRepository
 from app.repositories.template_repository import TemplateRepository
-from app.services.artifacts import persist_artifact
 from app.services.beta_limits import commit_shadow_credits, reverse_shadow_credits
 from app.services.citations import normalize_citations
 from app.services.job_tracker import JobProgressTracker
@@ -419,10 +418,6 @@ def detect_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         template = repo.get_template(fill_run.template_id)
         schema_cell_count = 0
         if template and template.schema_metadata and template.schema_metadata.get("schema_summary"):
-            # Count: KV fields + all table columns
-            sch_summary = template.schema_metadata.get("schema_summary")
-            fields = sch_summary.get("yaml_field_count", [])
-            tables = sch_summary.get("yaml_table_cells", [])
             schema_cell_count = template.schema_metadata.get("total_yaml_fields")
 
         start_time = time.time()
@@ -1422,7 +1417,6 @@ def fill_excel_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
 
     # Start latency timer
     start_time = time.monotonic()
-    org_id = None
 
     try:
         logger.info(f"Filling Excel for fill run: {fill_run_id}")
@@ -1438,8 +1432,6 @@ def fill_excel_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         fill_run = repo.get_fill_run(fill_run_id)
         if not fill_run:
             raise ValueError(f"Fill run not found: {fill_run_id}")
-
-        org_id = fill_run.org_id
 
         field_mapping = fill_run.field_mapping
 

@@ -7,9 +7,7 @@ from fastapi import APIRouter, Depends, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import func, desc
 from datetime import datetime, timedelta, date, timezone
-from typing import Optional
 from pydantic import BaseModel, Field
-import asyncio
 
 from app.database import get_db
 from app.auth import require_admin
@@ -381,7 +379,7 @@ async def trigger_sync(_: None = Depends(require_admin)):
                 "models": synced_models,
             }
 
-        except Exception as e:
+        except Exception:
             db.rollback()
             logger.error("Manual sync failed during database persist", exc_info=True)
             raise

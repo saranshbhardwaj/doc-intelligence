@@ -15,7 +15,6 @@ from typing import List, Dict, Any, Optional, AsyncIterator, Set, Tuple
 from sqlalchemy.orm import Session
 from sqlalchemy import select
 from app.db_models_chat import DocumentChunk, CollectionDocument
-from app.db_models_documents import Document
 from app.repositories.document_repository import DocumentRepository
 from app.core.embeddings import get_embedding_provider
 from app.core.llm.llm_client import LLMClient
@@ -61,12 +60,12 @@ _RETRIEVAL_SIZING = {
 _DOC_SCOPE_MATCH_THRESHOLD = 0.70
 _DATA_EXTRACTION_SCOPE_CONFIDENCE_THRESHOLD = 0.65
 _SCOPE_GUARDRAIL_MIN_CONFIDENCE = 0.55
-import asyncio
-import functools
-import json
-import re
-import time
-from app.services.service_locator import get_reranker
+import asyncio  # noqa: E402
+import functools  # noqa: E402
+import json  # noqa: E402
+import re  # noqa: E402
+import time  # noqa: E402
+from app.services.service_locator import get_reranker  # noqa: E402
 
 
 class RAGService:
@@ -336,13 +335,11 @@ class RAGService:
         )
 
         if should_compare and document_ids and len(document_ids) >= 2 and getattr(settings, 'comparison_enabled', True) and force_comparison is not False:
-            max_docs = getattr(settings, 'comparison_max_documents', 3)
-
             # ≤3 docs in session: proceed automatically
             if len(document_ids) <= 3:
                 final_doc_ids = document_ids
                 logger.debug(
-                    f"Auto-proceeding with comparison (≤3 documents)",
+                    "Auto-proceeding with comparison (≤3 documents)",
                     extra={
                         "session_id": session_id,
                         "num_docs": len(document_ids)
@@ -357,7 +354,7 @@ class RAGService:
                 if matched_ids and len(matched_ids) >= 2 and len(matched_ids) <= 3:
                     final_doc_ids = matched_ids
                     logger.debug(
-                        f"Auto-proceeding with user-mentioned documents (2-3 docs)",
+                        "Auto-proceeding with user-mentioned documents (2-3 docs)",
                         extra={
                             "session_id": session_id,
                             "num_docs": len(matched_ids)
@@ -554,7 +551,7 @@ class RAGService:
         yield ("thinking", "Finding relevant context...")
 
         logger.info(
-            f"Starting hybrid retrieval for user query",
+            "Starting hybrid retrieval for user query",
             extra={"user_id": user_id, "session_id": session_id}
         )
         retrieval_start = time.monotonic()

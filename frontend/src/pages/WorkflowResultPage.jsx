@@ -73,9 +73,6 @@ export default function WorkflowResultPage() {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
-  // NEW: mark orphan/legacy run (no workflow_id)
-  const [isLegacy, setIsLegacy] = useState(false);
-  const [registering, setRegistering] = useState(false);
   const [showFeedbackModal, setShowFeedbackModal] = useState(false);
 
   // PDF side panel state for citation navigation
@@ -104,10 +101,6 @@ export default function WorkflowResultPage() {
     try {
       const runData = await getRun(getToken, runId);
       const artifactData = await getRunArtifact(getToken, runId);
-
-      // mark legacy runs (no workflow_id)
-      const legacy = !runData?.workflow_id;
-      setIsLegacy(Boolean(legacy));
 
       // store run and artifact (explicitly set null if not present)
       setRun(runData || null);

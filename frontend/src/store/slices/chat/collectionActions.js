@@ -4,7 +4,7 @@
 import * as chatApi from "../../../api/chat";
 import { getErrorMessage } from "./utils";
 
-export const createChatCollectionActions = (set, get) => ({
+export const createChatCollectionActions = (set, _get) => ({
   fetchCollections: async (getToken) => {
     set((state) => ({
       chat: {

@@ -200,7 +200,6 @@ class PromptBuilder:
         Returns:
             Formatted comparison prompt
         """
-        from app.core.rag.comparison_retriever import ComparisonContext
 
         if not comparison_context.documents or len(comparison_context.documents) < 2:
             # Fallback to standard prompt if comparison context invalid
@@ -285,7 +284,7 @@ class PromptBuilder:
             prompt_parts.append(f"1. A markdown comparison table (3-8 rows) with {num_docs} columns\n")
             prompt_parts.append(f"2. 2-3 paragraphs analyzing patterns and outliers across {num_docs} documents\n")
             prompt_parts.append("3. Clear recommendation highlighting best/worst options\n\n")
-            prompt_parts.append(f"Every claim must have a citation [Sn:pN] where n is the source number shown above.\n\n")
+            prompt_parts.append("Every claim must have a citation [Sn:pN] where n is the source number shown above.\n\n")
 
         prompt_parts.append("ANSWER:\n")
 
@@ -380,7 +379,7 @@ class PromptBuilder:
             prompt_parts.append(f"1. A markdown comparison table with {num_docs} document columns\n")
             prompt_parts.append(f"2. 2-3 paragraphs analyzing patterns and outliers across {num_docs} documents\n")
             prompt_parts.append("3. Clear recommendation highlighting best/worst options\n\n")
-            prompt_parts.append(f"Every claim must have a citation [Sn:pN] where n is the source number shown above.\n\n")
+            prompt_parts.append("Every claim must have a citation [Sn:pN] where n is the source number shown above.\n\n")
 
         prompt_parts.append("ANSWER:\n")
 

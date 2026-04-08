@@ -141,7 +141,7 @@ def load_artifact(pointer_or_inline: Dict[str, Any]) -> Dict[str, Any]:
         try:
             data = storage.get_bytes(key)
             return json.loads(data.decode("utf-8"))
-        except Exception as e:
+        except Exception:
             logger.exception("Failed to load artifact from R2", extra={"key": key})
             raise
     # inline

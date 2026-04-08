@@ -28,14 +28,14 @@ if _is_debug_enabled():
 
 # Initialize Prometheus multiprocess mode for worker metrics
 # This MUST happen before any metrics are imported/created
-from app.core.metrics_setup import setup_prometheus_multiproc_dir
+from app.core.metrics_setup import setup_prometheus_multiproc_dir  # noqa: E402
 setup_prometheus_multiproc_dir(clear_on_startup=True)  # Safe: only cleans our PID range
 
-from celery import Celery
-from celery.signals import worker_ready
-from app.config import settings
-from app.services.service_locator import get_reranker
-from app.utils.logging import logger
+from celery import Celery  # noqa: E402
+from celery.signals import worker_ready  # noqa: E402
+from app.config import settings  # noqa: E402
+from app.services.service_locator import get_reranker  # noqa: E402
+from app.utils.logging import logger  # noqa: E402
 
 celery_app = Celery(
     "doc_intelligence",
@@ -81,7 +81,7 @@ celery_app.conf.task_routes = {
 
 # Celery Beat schedule for periodic tasks
 # Run `celery -A app.celery_app.celery_app beat` to start the scheduler
-from celery.schedules import crontab
+from celery.schedules import crontab  # noqa: E402
 celery_app.conf.beat_schedule = {
     "cleanup-stuck-tasks": {
         "task": "app.services.tasks.stuck_task_monitor.cleanup_stuck_tasks",
@@ -148,6 +148,26 @@ except Exception as e:
     print(f"WARNING: Failed to import task modules: {e}", file=sys.stderr)
     import traceback
     traceback.print_exc(file=sys.stderr)
+
+
+@worker_ready.connect
+def start_metrics_server(**_kwargs):
+    """Start Prometheus metrics HTTP server so Railway can scrape worker metrics.
+
+    Each Railway service has an isolated filesystem, so the API cannot read
+    worker .db files. This exposes a /metrics endpoint on METRICS_PORT (default 9091).
+    No-op when METRICS_PORT is not set (e.g. local dev without explicit env var).
+    """
+    if "beat" in sys.argv:
+        return
+    try:
+        from app.core.metrics_setup import start_worker_metrics_server
+        start_worker_metrics_server()
+    except Exception as exc:
+        logger.warning(
+            "Worker metrics server failed to start",
+            extra={"error": str(exc)[:200], "component": "celery_worker_startup"},
+        )
 
 
 @worker_ready.connect

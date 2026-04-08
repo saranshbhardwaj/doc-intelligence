@@ -14,7 +14,6 @@ import os
 from pathlib import Path
 
 from celery import shared_task, chain
-from sqlalchemy.sql import func
 
 from app.database import get_db
 from app.services.job_tracker import JobProgressTracker
@@ -99,7 +98,7 @@ def parse_document_for_indexing_task(self, payload: Dict[str, Any]) -> Dict[str,
             local_file_path = f"/tmp/doc_{document_id}_{filename}"
 
             logger.info(
-                f"Downloading document from storage",
+                "Downloading document from storage",
                 extra={"storage_key": file_path, "local_path": local_file_path}
             )
 
@@ -191,7 +190,7 @@ def parse_document_for_indexing_task(self, payload: Dict[str, Any]) -> Dict[str,
             try:
                 os.remove(local_file_path)
                 logger.info(
-                    f"Cleaned up temporary file",
+                    "Cleaned up temporary file",
                     extra={"local_path": local_file_path}
                 )
             except Exception as cleanup_error:

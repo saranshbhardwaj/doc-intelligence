@@ -13,7 +13,7 @@ export default function FinancialPerformance({ data }) {
   const yearGridClasses =
     "grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-3";
 
-  const renderYearMetrics = (metrics, highlightPrefix, accent = "primary") =>
+  const renderYearMetrics = (metrics, highlightPrefix, _accent = "primary") =>
     sortYearKeysDesc(Object.keys(metrics)).map((yearKey) => {
       const isProjected = yearKey.startsWith(highlightPrefix);
       const label = isProjected

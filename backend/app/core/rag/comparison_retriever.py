@@ -8,7 +8,7 @@ Pairing/Clustering uses cross-encoder model for accurate semantic similarity sco
 ensuring high-quality matches between related content across documents.
 """
 
-from typing import List, Dict, Optional, Tuple, TYPE_CHECKING
+from typing import List, Dict, Optional, TYPE_CHECKING
 from dataclasses import dataclass
 import asyncio
 import functools
@@ -706,7 +706,6 @@ class ComparisonRetriever:
             for other_doc_id in doc_ids[1:]:
                 best_match = None
                 best_sim = 0.0
-                best_idx = -1
 
                 other_chunks = doc_chunks[other_doc_id]
                 similarity_matrix = similarity_cache[other_doc_id]
@@ -720,7 +719,6 @@ class ComparisonRetriever:
                     if sim > best_sim and sim >= similarity_threshold:
                         best_sim = sim
                         best_match = other_chunk
-                        best_idx = other_idx
 
                 if best_match:
                     cluster_chunks[other_doc_id] = best_match

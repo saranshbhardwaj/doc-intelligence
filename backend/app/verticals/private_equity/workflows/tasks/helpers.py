@@ -6,7 +6,7 @@ Utility functions for:
 - LLM result handling
 - Database and LLM client initialization
 """
-from typing import Dict, Any, List
+from typing import Dict, Any
 import json
 import re
 
@@ -287,7 +287,7 @@ def handle_llm_result(run_id: str, combined_context: str, llm_result: Dict[str, 
     # Persist raw for auditing
     try:
         save_raw_llm_response(run_id, {"raw": raw_text, "usage": usage_meta}, "workflow_llm_response")
-    except Exception as e:
+    except Exception:
         logger.exception("Failed to persist raw llm response", extra={"run_id": run_id})
     
     # Extract and validate citations

@@ -22,7 +22,6 @@ from typing import Any, Dict
 
 import redis  # Provided transitively via celery[redis]
 
-from app.config import settings
 from app.utils.logging import logger
 
 

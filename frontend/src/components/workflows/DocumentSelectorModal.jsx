@@ -53,7 +53,7 @@ export default function DocumentSelectorModal({ open, onOpenChange }) {
 
   // Zustand store for workflow draft
   const { selectedDocuments } = useWorkflowDraft();
-  const { addDocumentsToDraft, setSelectedDocuments } =
+  const { setSelectedDocuments } =
     useWorkflowDraftActions();
 
   // State

@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import Dict, List, Optional
 
-from sqlalchemy import and_, desc, or_, func, case
+from sqlalchemy import desc, func
 from sqlalchemy.orm import Session, joinedload
 
 from app.database import SessionLocal
@@ -85,7 +85,7 @@ class TemplateRepository:
         )
 
         if active_only:
-            query = query.filter(ExcelTemplate.active == True)
+            query = query.filter(ExcelTemplate.active.is_(True))
 
         if category:
             query = query.filter(ExcelTemplate.category == category)
@@ -415,7 +415,6 @@ class TemplateRepository:
         offset: int = 0,
     ) -> List[TemplateFillRun]:
         """List user's fill runs with eager loading of related data."""
-        from sqlalchemy.orm import joinedload
 
         query = self.db.query(TemplateFillRun).filter(
             TemplateFillRun.user_id == user_id,

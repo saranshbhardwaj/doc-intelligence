@@ -294,7 +294,7 @@ class CollectionRepository:
                 db.commit()
 
                 logger.debug(
-                    f"Updated collection stats",
+                    "Updated collection stats",
                     extra={"collection_id": collection_id}
                 )
 
@@ -374,7 +374,7 @@ class CollectionRepository:
                 db.commit()
 
                 logger.info(
-                    f"Recomputed collection stats",
+                    "Recomputed collection stats",
                     extra={
                         "collection_id": collection_id,
                         "document_count": document_count,
@@ -600,7 +600,7 @@ class CollectionRepository:
 
                 if not link:
                     logger.warning(
-                        f"Document not found in collection",
+                        "Document not found in collection",
                         extra={"collection_id": collection_id, "document_id": document_id}
                     )
                     return False

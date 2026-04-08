@@ -13,7 +13,7 @@ export default function HighlightOverlay({
   bbox,          // { page, x0, y0, x1, y1 } in inches
   pageWidth,     // PDF page width in points (72 points = 1 inch)
   pageHeight,    // PDF page height in points
-  scale = 1,     // Current zoom scale
+  scale: _scale = 1,     // Current zoom scale
   onClick
 }) {
   if (!bbox || !pageWidth || !pageHeight) {

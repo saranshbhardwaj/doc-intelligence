@@ -51,7 +51,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import ComparisonPanel from "../comparison/ComparisonPanel";
 import CitationLink from "../common/CitationLink";
-import { splitTextWithCitations, remarkCitations } from "../../utils/citations";
+import { remarkCitations } from "../../utils/citations";
 import ChatMessageFeedback from "./ChatMessageFeedback";
 import {
   ResizablePanelGroup,
@@ -69,12 +69,12 @@ export default function ActiveChat({
   thinkingMessage = "",
   streamingMessage = "",
   chatError = null,
-  collections = [],
+  collections: _collections = [],
   getToken,
   onSendMessage,
-  onAddDocuments,
-  onRemoveDocument,
-  onUpdateSessionTitle,
+  onAddDocuments: _onAddDocuments,
+  onRemoveDocument: _onRemoveDocument,
+  onUpdateSessionTitle: _onUpdateSessionTitle,
   onExportSession,
 }) {
   const chatLimits = useUser()?.info?.limits?.chat_messages;

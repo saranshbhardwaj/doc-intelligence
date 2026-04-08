@@ -859,7 +859,7 @@ async def update_mappings(
         }
 
         if fill_run.status == "completed":
-            logger.info(f"Fill run is completed. Resetting to awaiting_review for regeneration.")
+            logger.info("Fill run is completed. Resetting to awaiting_review for regeneration.")
 
             # Delete old filled Excel from storage
             if fill_run.artifact and fill_run.artifact.get("key"):
@@ -999,7 +999,7 @@ async def update_extracted_data(
         # If fill run is already completed, reset to awaiting_review
         # This allows user to regenerate Excel with updated field values
         if fill_run.status == "completed":
-            logger.info(f"Fill run is completed. Resetting to awaiting_review for regeneration.")
+            logger.info("Fill run is completed. Resetting to awaiting_review for regeneration.")
 
             # Delete old filled Excel from storage
             if fill_run.artifact and fill_run.artifact.get("key"):

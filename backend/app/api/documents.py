@@ -164,7 +164,7 @@ async def upload_document(
         if reuse_mode and existing_doc:
             # REUSE MODE: Document already processed
             logger.info(
-                f"Reusing existing document",
+                "Reusing existing document",
                 extra={
                     "content_hash": content_hash,
                     "existing_document_id": existing_doc.id,
@@ -305,7 +305,7 @@ async def upload_document(
             )
 
             logger.info(
-                f"Started document indexing",
+                "Started document indexing",
                 extra={
                     "user_id": user.id,
                     "document_id": document.id,
@@ -330,7 +330,7 @@ async def upload_document(
     except Exception as e:
         # Cleanup on any failure (including HTTPException)
         logger.error(
-            f"Upload failed, cleaning up",
+            "Upload failed, cleaning up",
             extra={
                 "collection_id": collection_id,
                 "file_name": safe_filename,
@@ -350,7 +350,7 @@ async def upload_document(
         if document and not reuse_mode:
             try:
                 doc_repo.delete_document(document.id)
-                logger.info(f"Cleaned up orphaned document during error handling", extra={"document_id": document.id})
+                logger.info("Cleaned up orphaned document during error handling", extra={"document_id": document.id})
             except Exception as del_err:
                 logger.error(f"Failed to delete document during cleanup: {del_err}")
 
@@ -582,7 +582,7 @@ async def delete_document(
                 # Legacy local file - delete directly
                 if os.path.exists(file_path):
                     os.remove(file_path)
-                    logger.info(f"Deleted legacy local file", extra={"document_id": document_id, "file_path": file_path})
+                    logger.info("Deleted legacy local file", extra={"document_id": document_id, "file_path": file_path})
             else:
                 # New storage key (R2 or structured local) - use storage backend
                 storage.delete(file_path)
@@ -592,7 +592,7 @@ async def delete_document(
             logger.warning(f"Failed to delete physical file: {e}", extra={"file_path": file_path})
 
     logger.info(
-        f"Document deleted",
+        "Document deleted",
         extra={
             "document_id": document_id,
             "file_name": filename,

@@ -8,7 +8,6 @@ Pattern:
 - Repositories handle session management and error handling
 - Makes testing easier with repository mocking
 """
-from datetime import datetime
 from typing import Optional, List
 from contextlib import contextmanager
 from sqlalchemy import func, case
@@ -283,7 +282,7 @@ class ChatRepository:
                 db.commit()
 
                 logger.debug(
-                    f"Deleted chat message",
+                    "Deleted chat message",
                     extra={"message_id": message_id}
                 )
 

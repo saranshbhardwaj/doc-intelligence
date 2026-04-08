@@ -12,7 +12,6 @@ import Spinner from "../components/common/Spinner";
 import ResultViews from "../components/results/ResultViews";
 import { fetchExtractionResult, deleteExtraction } from "../api/extraction";
 import { exportToExcel } from "../utils/excelExport";
-import { useExtractionActions } from "../store";
 import { saveAs } from "file-saver";
 import {
   ArrowLeft,
@@ -27,13 +26,10 @@ export default function ExtractionDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
   const { getToken } = useAppAuth();
-  const { retryExtraction } = useExtractionActions();
-
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
   const [deleting, setDeleting] = useState(false);
-  const [retrying, setRetrying] = useState(false);
   const [exporting, setExporting] = useState(false);
 
   const loadData = useCallback(async () => {
@@ -94,20 +90,6 @@ export default function ExtractionDetailPage() {
           (err.response?.data?.detail || err.message)
       );
       setDeleting(false);
-    }
-  };
-
-  const handleRetry = async () => {
-    setRetrying(true);
-    try {
-      const token = await getToken();
-      await retryExtraction(id, token);
-      navigate("/app/extract?retry=" + id);
-    } catch (err) {
-      console.error("Retry failed", err);
-      alert("Retry failed: " + (err.response?.data?.detail || err.message));
-    } finally {
-      setRetrying(false);
     }
   };
 

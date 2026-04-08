@@ -3,7 +3,7 @@
 Automated red flag detection based on quantitative rules.
 Supplements LLM-extracted risks with systematic pattern detection.
 """
-from typing import List, Dict, Optional, Any
+from typing import List, Dict, Any
 from app.models import ExtractedData
 from app.utils.logging import logger
 
