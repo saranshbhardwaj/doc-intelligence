@@ -1139,6 +1139,9 @@ For each requested schema table:
             f"{len(excel_schema.get('sheets', []))} sheets (sheet batching strategy)"
         )
 
+        if not pdf_fields or not excel_schema.get("sheets"):
+            return {"mappings": [], "total_mapped": 0, "total_unmapped": 0, "high_confidence_count": 0}
+
         # Batch sheets (not PDF fields) to stay under token limits
         SHEETS_PER_BATCH = 4
 

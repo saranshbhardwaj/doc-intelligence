@@ -495,7 +495,7 @@ def normalize_summary_payload(payload: Any, *, fallback: Optional[Dict[str, Any]
     return {
         "markdown": markdown,
         "citations": citations,
-        "confidence": _coerce_confidence(payload.get("confidence"), default=_coerce_confidence(fallback.get("confidence"), default=0.0)),
+        "confidence": _coerce_confidence(payload.get("confidence"), default=0.0),
         "evidence_list": evidence_list,
         "metadata": metadata,
     }
