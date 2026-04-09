@@ -252,7 +252,7 @@ class Settings(BaseSettings):
     # Workflow: enabled — background Celery task, blocking is fine, quality matters for report generation.
     rag_use_reranker_comparison: bool = False
     rag_use_reranker_chat: bool = True
-    rag_use_reranker_workflow: bool = True
+    rag_use_reranker_workflow: bool = False
 
     # ===== CONTEXT EXPANSION SETTINGS =====
     # Expand retrieved chunks with related context (tables, narratives, parents)
