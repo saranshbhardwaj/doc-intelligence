@@ -32,6 +32,7 @@ export default function RequireAuth() {
   const { isLoaded, userId, orgId, getToken, signOut } = useAppAuth();
   const { signIn } = useAuth();
   const navigate = useNavigate();
+  const [sessionVerified, setSessionVerified] = useState(false);
   const [statusChecked, setStatusChecked] = useState(false);
   const controllerRef = useRef(null);
 
@@ -47,6 +48,20 @@ export default function RequireAuth() {
   // ✅ DEV: Bypass auth for local testing with VITE_DEV_BYPASS_AUTH=true
   const devBypassAuth = import.meta.env.VITE_DEV_BYPASS_AUTH === "true";
   const effectiveOrgId = orgId || tokenOrgId;
+
+  // Verify session is fully restored before allowing any redirect.
+  // WorkOS sets isLoading:false before hydrating userId from the cookie — calling
+  // getToken() is the authoritative check for whether a live session exists.
+  useEffect(() => {
+    if (!isLoaded) return;
+    if (devBypassAuth) {
+      setSessionVerified(true);
+      return;
+    }
+    getToken()
+      .then(() => setSessionVerified(true))
+      .catch(() => setSessionVerified(true));
+  }, [isLoaded]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Auto-provision org when user has no org yet
   useEffect(() => {
@@ -215,6 +230,16 @@ export default function RequireAuth() {
   if (!isLoaded) return null;
 
   if (devBypassAuth) return <Outlet />;
+
+  if (!sessionVerified) {
+    return (
+      <div className="min-h-screen w-full flex items-center justify-center bg-background">
+        <div className="flex flex-col items-center gap-3 text-muted-foreground">
+          <Loader2 className="w-8 h-8 animate-spin" />
+        </div>
+      </div>
+    );
+  }
 
   if (!userId) return <Navigate to="/" replace />;
 
