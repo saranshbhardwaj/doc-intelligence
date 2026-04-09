@@ -84,24 +84,21 @@ class UserRepository:
     ) -> Optional[User]:
         """Create a new user.
 
-        Checks the allowlist to determine initial status:
-        - Email in allowed_emails → status="active"
-        - Email not in allowed_emails → status="pending_approval"
+        All new users are granted immediate active status with RE vertical access.
+        Admin is notified by email on each new sign-up.
 
         Returns:
             User object if successful, None on error (including duplicate)
         """
         with self._get_session() as db:
             try:
-                # Check allowlist to set initial status
-                status = "active" if self._is_email_allowed(db, email) else "pending_approval"
-
                 user = User(
                     id=user_id,
                     org_id=org_id,
                     email=email,
                     tier=tier,
-                    status=status,
+                    status="active",
+                    allowed_verticals=["real_estate"],
                     pages_limit=pages_limit,
                     total_pages_processed=total_pages_processed,
                     pages_this_month=pages_this_month
@@ -112,12 +109,11 @@ class UserRepository:
 
                 logger.info(
                     f"Created user: {user_id}",
-                    extra={"user_id": user_id, "org_id": org_id, "email": email, "tier": tier, "status": status}
+                    extra={"user_id": user_id, "org_id": org_id, "email": email, "tier": tier, "status": "active"}
                 )
 
-                if status == "pending_approval":
-                    from app.utils.notifications import send_pending_user_notification
-                    send_pending_user_notification(email=email, user_id=user_id)
+                from app.utils.notifications import send_new_signup_notification
+                send_new_signup_notification(email=email, user_id=user_id)
 
                 return user
 

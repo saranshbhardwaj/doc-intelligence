@@ -22,6 +22,20 @@ import RequireAuth from "./components/common/RequireAuth";
 
 // Import vertical routes
 import { peRoutes, reRoutes } from "./routes/verticalRoutes";
+import { useUser } from "./store";
+
+/**
+ * Gates access to a vertical based on user's allowed_verticals.
+ * Falls back to allow access while user info is loading (avoids flash redirect).
+ */
+function RequireVertical({ vertical, redirectTo, children }) {
+  const userState = useUser();
+  const allowedVerticals = userState?.info?.allowed_verticals;
+  // If user info not yet loaded, don't redirect — wait for it
+  if (!allowedVerticals) return children;
+  if (!allowedVerticals.includes(vertical)) return <Navigate to={redirectTo} replace />;
+  return children;
+}
 
 const queryClient = new QueryClient();
 
@@ -68,9 +82,17 @@ export default function App() {
             <Route path="/app/dashboard" element={<DashboardPage />} />
 
             {/* Vertical-specific routes */}
-            {/* Private Equity routes */}
+            {/* Private Equity routes — gated by allowed_verticals */}
             {peRoutes.map((route, index) => (
-              <Route key={`pe-${index}`} path={`/app${route.path}`} element={route.element} />
+              <Route
+                key={`pe-${index}`}
+                path={`/app${route.path}`}
+                element={
+                  <RequireVertical vertical="private_equity" redirectTo="/app/library">
+                    {route.element}
+                  </RequireVertical>
+                }
+              />
             ))}
 
             {/* Real Estate routes */}

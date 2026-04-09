@@ -30,7 +30,7 @@ const chartConfig = {
   },
 };
 
-export default function ActivityChart({ data, loading }) {
+export default function ActivityChart({ data, loading, hasPE = true, hasRE = true }) {
   if (loading) {
     return (
       <Card>
@@ -73,7 +73,15 @@ export default function ActivityChart({ data, loading }) {
     <Card>
       <CardHeader>
         <CardTitle>Activity Over Time</CardTitle>
-        <CardDescription>Daily chat messages, template fills, extractions, and workflows</CardDescription>
+        <CardDescription>
+          Daily activity —{" "}
+          {[
+            "chat messages",
+            hasRE && "template fills",
+            hasPE && "extractions",
+            hasPE && "workflows",
+          ].filter(Boolean).join(", ")}
+        </CardDescription>
       </CardHeader>
       <CardContent>
         <ChartContainer config={chartConfig} className="h-[240px] sm:h-[300px]">
@@ -115,27 +123,33 @@ export default function ActivityChart({ data, loading }) {
               fill="url(#fillChat)"
               strokeWidth={2.5}
             />
-            <Area
-              type="monotone"
-              dataKey="template_fills"
-              stroke="hsl(var(--chart-2))"
-              fill="url(#fillFills)"
-              strokeWidth={2.5}
-            />
-            <Area
-              type="monotone"
-              dataKey="extractions"
-              stroke="hsl(var(--chart-1))"
-              fill="url(#fillExtractions)"
-              strokeWidth={2.5}
-            />
-            <Area
-              type="monotone"
-              dataKey="workflow_runs"
-              stroke="hsl(var(--chart-3))"
-              fill="url(#fillWorkflows)"
-              strokeWidth={2.5}
-            />
+            {hasRE && (
+              <Area
+                type="monotone"
+                dataKey="template_fills"
+                stroke="hsl(var(--chart-2))"
+                fill="url(#fillFills)"
+                strokeWidth={2.5}
+              />
+            )}
+            {hasPE && (
+              <Area
+                type="monotone"
+                dataKey="extractions"
+                stroke="hsl(var(--chart-1))"
+                fill="url(#fillExtractions)"
+                strokeWidth={2.5}
+              />
+            )}
+            {hasPE && (
+              <Area
+                type="monotone"
+                dataKey="workflow_runs"
+                stroke="hsl(var(--chart-3))"
+                fill="url(#fillWorkflows)"
+                strokeWidth={2.5}
+              />
+            )}
           </AreaChart>
         </ChartContainer>
       </CardContent>

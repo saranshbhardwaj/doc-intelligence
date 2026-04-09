@@ -154,50 +154,48 @@ async def _send_slack_notification(feedback_data: dict):
         logger.warning(f"Failed to send feedback notification: {e}")
 
 
-def send_pending_user_notification(email: str, user_id: str) -> None:
-    """Send admin email when a new user registers and is awaiting approval.
+def send_new_signup_notification(email: str, user_id: str) -> None:
+    """Send admin email when a new user signs up for the beta.
 
     Synchronous — safe to call from non-async repository code.
     Silently skips if NOTIFICATION_EMAIL / GMAIL_APP_PASSWORD are not configured.
     Never raises — notification failure must not break user creation.
     """
     if not settings.notification_email or not settings.gmail_app_password:
-        logger.info("Pending user notification skipped - no email configured")
+        logger.info("New signup notification skipped - no email configured")
         return
 
     try:
         msg = MIMEMultipart('alternative')
-        msg['Subject'] = f"New user awaiting approval: {email}"
+        msg['Subject'] = f"New beta sign-up: {email}"
         msg['From'] = settings.notification_email
         msg['To'] = settings.notification_email
 
         html = f"""
         <html>
           <body style="font-family: Arial, sans-serif; line-height: 1.6; color: #333;">
-            <h2 style="color: #2563eb;">New User Awaiting Approval</h2>
+            <h2 style="color: #2d5016;">New Real Estate Beta Sign-Up</h2>
             <div style="background: #f3f4f6; padding: 15px; border-radius: 8px; margin: 20px 0;">
               <p><strong>Email:</strong> {email}</p>
               <p><strong>User ID:</strong> <code>{user_id}</code></p>
+              <p><strong>Access:</strong> Real Estate vertical (active immediately)</p>
             </div>
-            <p>
-              Activate via the admin panel or run:<br>
-              <code>POST /api/admin/activate-user</code> with <code>{{"user_id": "{user_id}"}}</code>
-            </p>
             <p style="font-size: 12px; color: #666;">
-              To add their email to the allowlist so future signups auto-activate:<br>
-              <code>POST /api/admin/allowed-emails</code> with <code>{{"emails": ["{email}"]}}</code>
+              To grant PE access or adjust limits:<br>
+              <code>PATCH /api/admin/users/{user_id}/limits</code>
             </p>
           </body>
         </html>
         """
 
-        text = f"""New User Awaiting Approval
+        text = f"""New Real Estate Beta Sign-Up
 
 Email: {email}
 User ID: {user_id}
+Access: Real Estate vertical (active immediately)
 
-Activate via: POST /api/admin/activate-user {{"user_id": "{user_id}"}}
-Or add to allowlist: POST /api/admin/allowed-emails {{"emails": ["{email}"]}}
+To grant PE access or adjust limits:
+PATCH /api/admin/users/{user_id}/limits
 """
 
         msg.attach(MIMEText(text, 'plain'))
@@ -207,7 +205,7 @@ Or add to allowlist: POST /api/admin/allowed-emails {{"emails": ["{email}"]}}
             server.login(settings.notification_email, settings.gmail_app_password)
             server.send_message(msg)
 
-        logger.info("Pending user notification sent", extra={"email": email, "user_id": user_id})
+        logger.info("New signup notification sent", extra={"email": email, "user_id": user_id})
 
     except Exception as e:
-        logger.warning(f"Failed to send pending user notification: {e}")
+        logger.warning(f"Failed to send new signup notification: {e}")

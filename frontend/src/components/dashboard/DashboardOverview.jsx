@@ -9,7 +9,7 @@ import { useState } from "react";
 import { useAppAuth } from "@/hooks/useAppAuth";
 import { useQuery } from "@tanstack/react-query";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "@/components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { FileText, MessageSquare, FileSpreadsheet, Database, Play, Users, AlertCircle } from "lucide-react";
@@ -73,6 +73,10 @@ export default function DashboardOverview() {
   const anyError = overviewError || activityError || templateStatsError;
   const anyLoading = overviewLoading || activityLoading || templateStatsLoading;
 
+  const allowedVerticals = userInfo?.allowed_verticals || ['real_estate'];
+  const hasPE = allowedVerticals.includes('private_equity');
+  const hasRE = allowedVerticals.includes('real_estate');
+
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4 sm:py-8 space-y-5 sm:space-y-8">
       {/* Header */}
@@ -121,6 +125,7 @@ export default function DashboardOverview() {
 
       {/* Stat Cards Row */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        {/* Shared: Documents */}
         <StatCard
           icon={FileText}
           title="Documents"
@@ -132,6 +137,7 @@ export default function DashboardOverview() {
           iconBg="bg-primary/10"
           iconColor="text-primary"
         />
+        {/* Shared: Chat Messages */}
         <StatCard
           icon={MessageSquare}
           title="Chat Messages"
@@ -141,71 +147,80 @@ export default function DashboardOverview() {
           iconBg="bg-blue-50 dark:bg-blue-900/20"
           iconColor="text-blue-500"
         />
-        <StatCard
-          icon={FileSpreadsheet}
-          title="Template Fills"
-          value={overview?.template_fills?.total || 0}
-          subtitle={overview?.template_fills?.total_fields_populated > 0
-            ? `${overview.template_fills.total_fields_populated} fields auto-filled`
-            : `${overview?.template_fills?.completed || 0}/${overview?.template_fills?.total || 0} completed`}
-          loading={anyLoading}
-          iconBg="bg-purple-50 dark:bg-purple-900/20"
-          iconColor="text-purple-500"
-        />
-        <StatCard
-          icon={Database}
-          title="Extractions"
-          value={overview?.extractions?.total || 0}
-          subtitle={`${overview?.extractions?.completed || 0} completed`}
-          loading={anyLoading}
-          iconBg="bg-orange-50 dark:bg-orange-900/20"
-          iconColor="text-orange-500"
-        />
+        {/* RE: Template Fills */}
+        {hasRE && (
+          <StatCard
+            icon={FileSpreadsheet}
+            title="Template Fills"
+            value={overview?.template_fills?.total || 0}
+            subtitle={overview?.template_fills?.total_fields_populated > 0
+              ? `${overview.template_fills.total_fields_populated} fields auto-filled`
+              : `${overview?.template_fills?.completed || 0}/${overview?.template_fills?.total || 0} completed`}
+            loading={anyLoading}
+            iconBg="bg-purple-50 dark:bg-purple-900/20"
+            iconColor="text-purple-500"
+          />
+        )}
+        {/* PE: Extractions */}
+        {hasPE && (
+          <StatCard
+            icon={Database}
+            title="Extractions"
+            value={overview?.extractions?.total || 0}
+            subtitle={`${overview?.extractions?.completed || 0} completed`}
+            loading={anyLoading}
+            iconBg="bg-orange-50 dark:bg-orange-900/20"
+            iconColor="text-orange-500"
+          />
+        )}
       </div>
 
       {/* Activity Chart + Workflow/Users Sidebar */}
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
         {/* Activity Chart (3 cols) */}
         <div className="lg:col-span-3">
-          <ActivityChart data={activity?.daily} loading={activityLoading} />
+          <ActivityChart data={activity?.daily} loading={activityLoading} hasPE={hasPE} hasRE={hasRE} />
         </div>
 
         {/* Workflows & Active Users Sidebar (1 col) */}
         <div className="space-y-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-1">
-          <Card className="rounded-2xl glass-card border-0">
-            <CardHeader className="pb-2">
-              <CardTitle className="flex items-center gap-2 text-base">
-                <Play className="h-4 w-4 text-muted-foreground" />
-                Workflows
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              {anyLoading ? (
-                <div className="text-sm text-muted-foreground">Loading...</div>
-              ) : (
-                <>
-                  <div className="flex items-end gap-1">
-                    <span className="text-3xl font-bold">{overview?.workflows?.total || 0}</span>
-                    <span className="text-sm text-muted-foreground mb-1">total</span>
-                  </div>
-                  <div className="flex items-center justify-between text-sm">
-                    <span className="text-muted-foreground">Completed</span>
-                    <span className="font-medium text-green-600 dark:text-green-400">
-                      {overview?.workflows?.completed || 0}
-                    </span>
-                  </div>
-                  {(overview?.workflows?.failed || 0) > 0 && (
+          {/* PE only: Workflows */}
+          {hasPE && (
+            <Card className="rounded-2xl glass-card border-0">
+              <CardHeader className="pb-2">
+                <CardTitle className="flex items-center gap-2 text-base">
+                  <Play className="h-4 w-4 text-muted-foreground" />
+                  Workflows
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                {anyLoading ? (
+                  <div className="text-sm text-muted-foreground">Loading...</div>
+                ) : (
+                  <>
+                    <div className="flex items-end gap-1">
+                      <span className="text-3xl font-bold">{overview?.workflows?.total || 0}</span>
+                      <span className="text-sm text-muted-foreground mb-1">total</span>
+                    </div>
                     <div className="flex items-center justify-between text-sm">
-                      <span className="text-muted-foreground">Failed</span>
-                      <span className="font-medium text-destructive">
-                        {overview?.workflows?.failed}
+                      <span className="text-muted-foreground">Completed</span>
+                      <span className="font-medium text-green-600 dark:text-green-400">
+                        {overview?.workflows?.completed || 0}
                       </span>
                     </div>
-                  )}
-                </>
-              )}
-            </CardContent>
-          </Card>
+                    {(overview?.workflows?.failed || 0) > 0 && (
+                      <div className="flex items-center justify-between text-sm">
+                        <span className="text-muted-foreground">Failed</span>
+                        <span className="font-medium text-destructive">
+                          {overview?.workflows?.failed}
+                        </span>
+                      </div>
+                    )}
+                  </>
+                )}
+              </CardContent>
+            </Card>
+          )}
 
           <Card className="rounded-2xl glass-card border-0">
             <CardHeader className="pb-2">

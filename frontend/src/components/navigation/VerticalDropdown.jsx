@@ -9,7 +9,10 @@ import { Link } from 'react-router-dom';
 import { ChevronDown, Building2, Briefcase } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-export default function VerticalDropdown({ currentVertical, className }) {
+// Maps URL slug to backend vertical slug
+const SLUG_TO_VERTICAL = { re: 'real_estate', pe: 'private_equity' };
+
+export default function VerticalDropdown({ currentVertical, allowedVerticals, className }) {
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef(null);
 
@@ -24,7 +27,7 @@ export default function VerticalDropdown({ currentVertical, className }) {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const verticals = [
+  const allVerticals = [
     {
       name: 'Real Estate',
       slug: 're',
@@ -40,6 +43,9 @@ export default function VerticalDropdown({ currentVertical, className }) {
       description: 'Investment analysis',
     },
   ];
+
+  const allowed = allowedVerticals || ['real_estate'];
+  const verticals = allVerticals.filter(v => allowed.includes(SLUG_TO_VERTICAL[v.slug]));
 
   const getCurrentLabel = () => {
     if (!currentVertical) return 'Verticals';

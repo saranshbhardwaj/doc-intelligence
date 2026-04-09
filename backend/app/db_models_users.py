@@ -10,15 +10,16 @@ from app.database import Base
 
 
 class User(Base):
-    """User accounts synced from Clerk."""
+    """User accounts managed via WorkOS AuthKit."""
     __tablename__ = "users"
 
-    id = Column(String(36), primary_key=True)  # Clerk user ID
-    org_id = Column(String(64), nullable=False, index=True)  # Clerk org ID (tenant)
+    id = Column(String(36), primary_key=True)  # WorkOS user ID
+    org_id = Column(String(64), nullable=False, index=True)  # WorkOS org ID (tenant)
     email = Column(String(255), unique=True, nullable=False, index=True)
     tier = Column(String(20), default="free")  # free, standard, pro, admin
-    status = Column(String(20), default="pending_approval", nullable=False)  # active, pending_approval
-    vertical = Column(String(50), default="private_equity", nullable=False, index=True)  # Vertical/domain
+    status = Column(String(20), default="active", nullable=False)  # active, pending_approval
+    vertical = Column(String(50), default="real_estate", nullable=False, index=True)  # Deprecated — use allowed_verticals
+    allowed_verticals = Column(JSONB, default=lambda: ["real_estate"], server_default='["real_estate"]', nullable=False)
 
     # Usage tracking
     total_pages_processed = Column(Integer, default=0)
@@ -26,8 +27,8 @@ class User(Base):
     pages_limit = Column(Integer, default=100)  # Based on tier
     workflow_runs_limit = Column(Integer, default=2)  # Closed beta cap (0 = unlimited)
     extractions_limit = Column(Integer, default=1)  # Closed beta cap (0 = unlimited)
-    template_fill_runs_limit = Column(Integer, default=2)  # Closed beta cap (0 = unlimited)
-    chat_messages_limit = Column(Integer, default=30)  # Closed beta cap (0 = unlimited)
+    template_fill_runs_limit = Column(Integer, default=100)  # Closed beta cap (0 = unlimited)
+    chat_messages_limit = Column(Integer, default=100)  # Closed beta cap (0 = unlimited)
 
     # Billing
     subscription_id = Column(String(255), nullable=True)
