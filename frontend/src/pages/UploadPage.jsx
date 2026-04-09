@@ -142,12 +142,12 @@ export default function UploadPage() {
                 <span className="relative h-8 w-8 shrink-0 overflow-hidden rounded-md">
                   <img
                     src="/Freara%20ai%20logo.png"
-                    alt="frearaAI"
+                    alt="Basilfy"
                     className="absolute inset-0 h-full w-full scale-[1.78] object-cover"
                   />
                 </span>
                 <span className="text-xl font-extrabold tracking-tight bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
-                  frearaAI
+                  Basilfy
                 </span>
               </button>
 
@@ -258,7 +258,7 @@ export default function UploadPage() {
                 analysis.
               </p>
               <p className="text-base text-muted-foreground dark:text-muted-foreground">
-                Explore the sample output below to see what frearaAI can
+                Explore the sample output below to see what Basilfy can
                 extract from your documents.
               </p>
             </div>

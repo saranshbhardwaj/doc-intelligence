@@ -148,12 +148,12 @@ export default function AppLayout({ children, lockViewport = false, headerLeft =
               <span className="relative h-7 w-7 shrink-0 overflow-hidden rounded-md">
                 <img
                   src="/Freara%20ai%20logo.png"
-                  alt="frearaAI"
+                  alt="Basilfy"
                   className="absolute inset-0 h-full w-full scale-[1.78] object-cover"
                 />
               </span>
               <span className="text-xl font-extrabold tracking-tight bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent" style={{letterSpacing: '-0.02em'}}>
-                frearaAI
+                Basilfy
               </span>
             </Link>
 

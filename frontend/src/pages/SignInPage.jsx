@@ -35,7 +35,7 @@ export default function SignInPage() {
               className="mb-8 inline-flex items-center gap-2 text-sm font-medium text-white/72 transition-colors hover:text-white"
             >
               <ArrowLeft className="h-4 w-4" />
-              Back to frearaAI
+              Back to Basilfy
             </button>
 
             <p className="text-[0.72rem] font-semibold uppercase tracking-[0.3em] text-white/64">
@@ -70,13 +70,13 @@ export default function SignInPage() {
               <span className="relative h-11 w-11 shrink-0 overflow-hidden rounded-xl bg-primary/10">
                 <img
                   src="/Freara%20ai%20logo.png"
-                  alt="frearaAI"
+                  alt="Basilfy"
                   className="absolute inset-0 h-full w-full scale-[1.78] object-cover"
                 />
               </span>
               <div>
                 <p className="font-display text-xl font-semibold text-foreground">
-                  frearaAI
+                  Basilfy
                 </p>
                 <p className="text-sm text-muted-foreground">
                   AI-powered document intelligence
