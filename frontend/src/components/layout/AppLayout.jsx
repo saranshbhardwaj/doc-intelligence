@@ -81,6 +81,7 @@ export default function AppLayout({ children, lockViewport = false, headerLeft =
   const { user, signOut, getToken } = useAppAuth();
   const userState = useUser();
   const userLimits = userState?.info?.limits;
+  const allowedVerticals = userState?.info?.allowed_verticals || ['real_estate'];
   const { fetchUserInfo } = useUserActions();
 
   useEffect(() => {
@@ -107,12 +108,16 @@ export default function AppLayout({ children, lockViewport = false, headerLeft =
     return location.pathname.startsWith(path);
   };
 
-  // Core navigation (when not in a vertical)
+  const hasPE = allowedVerticals.includes('private_equity');
+
+  // Core navigation (when not in a vertical) — PE-only items hidden for RE-only users
   const coreNavLinks = [
     { path: "/app/library", label: "Library", icon: Library },
     { path: "/app/chat", label: "Chat", icon: MessageSquare },
-    { path: "/app/workflows", label: "Workflows", icon: Play },
-    { path: "/app/extract", label: "Extract", icon: Zap },
+    ...(hasPE ? [
+      { path: "/app/workflows", label: "Workflows", icon: Play },
+      { path: "/app/extract", label: "Extract", icon: Zap },
+    ] : []),
     { path: "/app/dashboard", label: "Dashboard", icon: LayoutDashboard },
   ];
 
@@ -164,7 +169,7 @@ export default function AppLayout({ children, lockViewport = false, headerLeft =
             {!hideNav && (
               <nav className="hidden md:flex items-center gap-1">
                 {/* Vertical Dropdown - shown first */}
-                <VerticalDropdown currentVertical={currentVertical} />
+                <VerticalDropdown currentVertical={currentVertical} allowedVerticals={allowedVerticals} />
 
                 {/* Separator if in vertical */}
                 {currentVertical && (

@@ -35,15 +35,14 @@ export default function SignUpPage() {
             </button>
 
             <p className="text-[0.72rem] font-semibold uppercase tracking-[0.3em] text-white/64">
-              Workspace Setup
+              Real Estate Beta
             </p>
             <h1 className="mt-4 text-4xl font-semibold tracking-tight text-white sm:text-5xl">
-              Creating your entry point into faster document review.
+              Analyze real estate documents in minutes, not hours.
             </h1>
             <p className="mt-5 max-w-xl text-base leading-7 text-white/72 sm:text-lg">
-              Once authentication completes, you land inside the same polished
-              workspace used for library management, chat, extraction, and
-              workflows.
+              Upload rent rolls, appraisals, and offering memoranda — then let
+              AI extract key data and fill your Excel templates automatically.
             </p>
           </div>
 
@@ -81,7 +80,7 @@ export default function SignUpPage() {
 
               <div className="mt-4 inline-flex items-center gap-2 rounded-full border border-primary/15 bg-primary/6 px-3 py-1.5 text-xs font-medium text-primary">
                 <Sparkles className="h-4 w-4" />
-                One account for library, chat, extract, and workflows
+                Library, chat, and Excel template filling — early access
               </div>
             </div>
           </div>

@@ -9,7 +9,7 @@ Extract structured data, run AI workflows, and generate deal documents — in mi
 - **AI Chat** — Ask questions across your document library
 - **PE Workflows** — Investment memos, red flags, deal screening
 - **RE Workflows** — Underwriting, property analysis, template fill
-- **Invite-only access** — Controlled rollout with admin allowlist
+- **Closed beta** — Real Estate vertical open to invited users; PE access granted by admin
 
 ## Architecture
 
@@ -18,7 +18,7 @@ Extract structured data, run AI workflows, and generate deal documents — in mi
 | Frontend | React + Vite + shadcn/ui + Tailwind | Vercel |
 | Backend | FastAPI + Python 3.11 (Docker) | Railway |
 | Database | PostgreSQL + pgvector | Supabase |
-| Auth | Clerk | — |
+| Auth | WorkOS AuthKit | — |
 | AI | Anthropic Claude (claude-sonnet-4-6) | — |
 
 ## Local Development
@@ -44,9 +44,11 @@ npm run dev
 | Variable | Required | Description |
 |---|---|---|
 | `ANTHROPIC_API_KEY` | Yes | Anthropic API key |
-| `CLERK_SECRET_KEY` | Yes | Clerk backend secret |
+| `WORKOS_CLIENT_ID` | Yes | WorkOS client ID |
+| `WORKOS_API_KEY` | Yes | WorkOS API key |
 | `SUPABASE_DATABASE_URL` | Yes | Supabase Supavisor pooler URL (**not** `DATABASE_URL` — Railway reserves that name for its own managed DB) |
-| `ADMIN_API_KEY` | Yes | Secret for admin-only endpoints |
+| `NOTIFICATION_EMAIL` | No | Gmail address to receive new signup notifications |
+| `GMAIL_APP_PASSWORD` | No | Gmail app password for signup notifications |
 | `AZURE_DOC_INTEL_KEY` | No | Azure Document Intelligence OCR key |
 | `AZURE_DOC_INTEL_ENDPOINT` | No | Azure Document Intelligence endpoint URL |
 
@@ -54,28 +56,23 @@ npm run dev
 | Variable | Description |
 |---|---|
 | `VITE_API_URL` | Backend URL (Railway service URL) |
-| `VITE_CLERK_PUBLISHABLE_KEY` | Clerk publishable key |
+| `VITE_WORKOS_CLIENT_ID` | WorkOS client ID (for AuthKit) |
 
-## Access Control (Invite-Only)
+## Access Control
 
-New signups start with `status = "pending_approval"` and see an "Access Pending" page until approved.
-Only emails in the `allowed_emails` table are automatically activated on signup.
+New users who sign up immediately receive **active** status with **Real Estate** vertical access — no approval step required. The admin receives an email notification on each new sign-up.
 
-**Seed your email after running migrations:**
-```sql
-INSERT INTO allowed_emails (id, email)
-VALUES (gen_random_uuid()::text, 'you@example.com');
-```
+**Vertical access** is controlled per-user via the `allowed_verticals` JSONB column:
+- New sign-ups: `["real_estate"]`
+- To grant PE access: update via `PATCH /api/admin/users/{user_id}/limits` or directly in the DB
 
-**Admin API** (requires `X-Admin-Key` header):
+**Admin API** (requires admin tier):
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| `GET` | `/api/admin/allowed-emails` | List all allowed emails |
-| `POST` | `/api/admin/allowed-emails` | Add emails (also activates existing users) |
-| `DELETE` | `/api/admin/allowed-emails/{email}` | Remove an email |
-| `GET` | `/api/admin/pending-users` | List users awaiting approval |
+| `GET` | `/api/admin/pending-users` | List users with pending_approval status |
 | `POST` | `/api/admin/activate-user` | Manually activate a user by ID |
+| `PATCH` | `/api/admin/users/{user_id}/limits` | Update a user's limits and vertical access |
 
 ## Deployment
 
@@ -93,7 +90,7 @@ VALUES (gen_random_uuid()::text, 'you@example.com');
 1. Connect GitHub repo → set root directory to `/frontend`
 2. Set `VITE_API_URL` and `VITE_CLERK_PUBLISHABLE_KEY` env vars
 3. Add Vercel domain to:
-   - Clerk Dashboard → allowed origins
+   - WorkOS Dashboard → redirect URIs
    - Railway env var `CORS_ORIGINS`
 
 ## Status

@@ -112,6 +112,7 @@ def get_current_user_info(user: User = Depends(get_current_user)):
         "id": user.id,
         "email": user.email,
         "tier": user.tier,
+        "allowed_verticals": user.allowed_verticals or ["real_estate"],
         "usage": {
             "pages_used": pages_used,
             "pages_remaining": pages_remaining,

@@ -147,3 +147,22 @@ def require_admin(user: User = Depends(get_current_user)) -> User:
     if user.tier != "admin":
         raise HTTPException(status_code=403, detail="Admin access required")
     return user
+
+
+def require_vertical(vertical_slug: str):
+    """Dependency factory that gates access to a specific vertical.
+
+    Usage:
+        router = APIRouter(dependencies=[Depends(require_vertical("private_equity"))])
+    """
+    def _dep(user: User = Depends(get_current_user)) -> User:
+        allowed = user.allowed_verticals or []
+        if user.tier == "admin":
+            return user
+        if vertical_slug not in allowed:
+            raise HTTPException(
+                status_code=403,
+                detail=f"no_access_{vertical_slug}"
+            )
+        return user
+    return _dep

@@ -28,7 +28,7 @@ function getOrgIdFromJwt(token) {
   }
 }
 
-export default function RequireAuth({ redirectTo = "/sign-in" }) {
+export default function RequireAuth() {
   const { isLoaded, userId, orgId, getToken, signOut } = useAppAuth();
   const { signIn } = useAuth();
   const navigate = useNavigate();
@@ -176,7 +176,11 @@ export default function RequireAuth({ redirectTo = "/sign-in" }) {
 
         if (error.response?.status === 401) {
           // Most common after first-time provisioning: token not refreshed with org claim yet.
-          // Force the re-auth prompt instead of allowing access to protected routes.
+          // If we just provisioned an org, re-authenticate silently without showing a prompt.
+          if (provisionedOrgId) {
+            signIn({ organizationId: provisionedOrgId });
+            return;
+          }
           setTokenOrgId(null);
           setProvisionDone(true);
           setAuthCheckError("Please continue sign-in to refresh your workspace access.");
@@ -212,7 +216,7 @@ export default function RequireAuth({ redirectTo = "/sign-in" }) {
 
   if (devBypassAuth) return <Outlet />;
 
-  if (!userId) return <Navigate to={redirectTo} replace state={{ autoSignIn: true }} />;
+  if (!userId) return <Navigate to="/" replace />;
 
   if (!effectiveOrgId) {
     // Provisioning in progress
