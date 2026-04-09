@@ -247,7 +247,7 @@ export default function Features() {
               <Clock className="w-8 h-8 text-accent flex-shrink-0" />
               <div>
                 <div className="font-semibold text-foreground">10x Faster</div>
-                <div className="text-sm text-muted-foreground">What takes 3 hours manually takes 5 minutes with frearaAI</div>
+                <div className="text-sm text-muted-foreground">What takes 3 hours manually takes 5 minutes with Basilfy</div>
               </div>
             </div>
             <div className="flex items-center gap-4">

@@ -36,12 +36,12 @@ export default function LandingPage() {
             <span className="relative h-8 w-8 shrink-0 overflow-hidden rounded-md">
               <img
                 src="/Freara%20ai%20logo.png"
-                alt="frearaAI"
+                alt="Basilfy"
                 className="absolute inset-0 h-full w-full scale-[1.78] object-cover"
               />
             </span>
             <span className="text-xl font-extrabold tracking-tight bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
-              frearaAI
+              Basilfy
             </span>
           </div>
 
@@ -204,7 +204,7 @@ export default function LandingPage() {
           <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
             <div>
               <span className="text-2xl font-extrabold tracking-tight bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
-                frearaAI
+                Basilfy
               </span>
               <p className="text-sm mt-3">
                 AI-powered document intelligence for PE and real estate.
@@ -241,7 +241,7 @@ export default function LandingPage() {
           </div>
 
           <div className="border-t border-border mt-12 pt-8 flex flex-col md:flex-row items-center justify-between gap-4 text-sm">
-            <p>&copy; 2026 frearaAI. All rights reserved.</p>
+            <p>&copy; 2026 Basilfy. All rights reserved.</p>
             <p className="text-xs text-muted-foreground/60">Built for high-stakes deal intelligence.</p>
           </div>
         </div>
