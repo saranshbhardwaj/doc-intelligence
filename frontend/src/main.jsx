@@ -9,6 +9,7 @@ createRoot(document.getElementById('root')).render(
     <AuthKitProvider
       clientId={import.meta.env.VITE_WORKOS_CLIENT_ID}
       redirectUri={`${window.location.origin}/callback`}
+      devMode={true}
     >
       <App />
     </AuthKitProvider>
