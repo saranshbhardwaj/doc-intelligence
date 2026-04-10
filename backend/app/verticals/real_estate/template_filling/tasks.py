@@ -1613,7 +1613,8 @@ def fill_excel_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         # NOT just update_progress() which only sends "progress" event
         tracker.mark_error(
             error_stage="excel_filling",
-            error_message=str(e),
+            error_message="Failed to fill template — please try again.",
+            internal_error=str(e)[:1000],
             error_type="fill_error",
             is_retryable=False
         )

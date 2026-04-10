@@ -122,7 +122,7 @@ def parse_document_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
             storage.download(file_path, _local_file_path)
             file_path = _local_file_path
         except Exception as dl_err:
-            tracker.mark_error(error_stage="parsing", error_message=f"Failed to download file from storage: {dl_err}", error_type="storage_error", is_retryable=False)
+            tracker.mark_error(error_stage="parsing", error_message="Failed to retrieve document from storage — please try again.", internal_error=str(dl_err)[:1000], error_type="storage_error", is_retryable=False)
             repo.mark_failed(extraction_id, f"Storage download failed: {dl_err}")
             return {"status": "failed", "error": str(dl_err), "extraction_id": extraction_id}
 
@@ -151,7 +151,7 @@ def parse_document_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                 raise ValueError(f"Invalid page count: {pre_parse_page_count}")
 
         except Exception as pdf_err:
-            tracker.mark_error(error_stage="parsing", error_message=f"PDF page count error: {pdf_err}", error_type="pdf_error", is_retryable=False)
+            tracker.mark_error(error_stage="parsing", error_message="Could not read document — the file may be corrupted.", internal_error=str(pdf_err)[:1000], error_type="pdf_error", is_retryable=False)
             repo.mark_failed(extraction_id, f"PDF page count error: {pdf_err}")
             _reverse_extraction_shadow(extraction_id, "pdf_page_count_error", "parsing")
             return {"status": "failed", "error": f"PDF page count error: {pdf_err}", "extraction_id": extraction_id}
@@ -278,7 +278,7 @@ def parse_document_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
             },
         }
     except Exception as e:
-        tracker.mark_error(error_stage="parsing", error_message=str(e), error_type="parsing_error", is_retryable=False)
+        tracker.mark_error(error_stage="parsing", error_message="Failed to parse document — please try again.", internal_error=str(e)[:1000], error_type="parsing_error", is_retryable=False)
         repo.mark_failed(extraction_id, str(e)[:500])
         _reverse_extraction_shadow(extraction_id, f"parsing_exception:{type(e).__name__}", "parsing")
         raise
@@ -375,7 +375,7 @@ def chunk_document_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
             "chunks_path": chunks_path,
         }
     except Exception as e:
-        tracker.mark_error(error_stage="chunking", error_message=str(e), error_type="chunking_error", is_retryable=True)
+        tracker.mark_error(error_stage="chunking", error_message="Failed to process document — please try again.", internal_error=str(e)[:1000], error_type="chunking_error", is_retryable=True)
         try:
             repo.mark_failed(extraction_id, str(e)[:500])
         except Exception:
@@ -485,7 +485,7 @@ def summarize_context_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
 
         return {**payload, "combined_context_path": combined_path, "combined_context": combined_text}
     except Exception as e:
-        tracker.mark_error(error_stage="summarizing", error_message=str(e), error_type="summarizing_error", is_retryable=True)
+        tracker.mark_error(error_stage="summarizing", error_message="Failed to summarize document — please try again.", internal_error=str(e)[:1000], error_type="summarizing_error", is_retryable=True)
         try:
             repo.mark_failed(extraction_id, str(e)[:500])
         except Exception:
@@ -652,7 +652,7 @@ def extract_structured_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
             "normalized_result": normalized_payload,
         }
     except Exception as e:
-        tracker.mark_error(error_stage="extracting", error_message=str(e), error_type="llm_error", is_retryable=True)
+        tracker.mark_error(error_stage="extracting", error_message="Extraction failed — please try again.", internal_error=str(e)[:1000], error_type="llm_error", is_retryable=True)
         repo.mark_failed(extraction_id, str(e)[:500])
         _reverse_extraction_shadow(extraction_id, f"extracting_exception:{type(e).__name__}", "extracting")
         # Record metrics

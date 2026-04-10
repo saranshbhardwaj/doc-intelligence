@@ -16,6 +16,8 @@ def mock_user():
     class MockUser:
         id = "test-user"
         org_id = "test-org"
+        tier = "beta"
+        allowed_verticals = ["real_estate"]
 
     return MockUser()
 
