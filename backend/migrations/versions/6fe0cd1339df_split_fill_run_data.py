@@ -20,7 +20,7 @@ def upgrade() -> None:
     # 1. Create fill_run_data table
     op.create_table(
         "fill_run_data",
-        sa.Column("fill_run_id", sa.VARCHAR(), nullable=False),
+        sa.Column("fill_run_id", sa.String(36), nullable=False),
         sa.Column("field_mapping", JSONB(), nullable=True),
         sa.Column("extracted_data", JSONB(), nullable=True),
         sa.Column("citation_context", JSONB(), nullable=True),
