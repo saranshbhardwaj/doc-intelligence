@@ -296,9 +296,16 @@ def chunk_document_for_indexing_task(self, payload: Dict[str, Any]) -> Dict[str,
             extra={"document_id": document_id, "chunker": chunker.__class__.__name__}
         )
 
+        # Strip parser_output (large text blob) from the chain payload to avoid
+        # exceeding Redis result backend size limits (~1MB). Promote only the
+        # fields needed by store_vectors_task to top-level keys.
+        trimmed_payload = {k: v for k, v in payload.items() if k != "parser_output"}
         return {
-            **payload,
+            **trimmed_payload,
             "chunks": chunks_list,
+            "page_count": parser_output.get("page_count", 0),
+            "processing_time_ms": parser_output.get("processing_time_ms", 0),
+            "parser_name": parser_output.get("parser_name", "unknown"),
         }
 
     except Exception as e:
@@ -466,8 +473,10 @@ def store_vectors_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         if not chunks:
             raise ValueError("No chunks to store")
 
-        parser_info = payload.get("parser_output", {})
-        page_count = int(parser_info.get("page_count", 0) or 0)
+        # parser_output was stripped from payload in chunk_document_for_indexing_task
+        # to keep the Redis result payload small. The fields we need were promoted to top-level.
+        parser_info = payload.get("parser_output", {})  # may be absent — fallback to {}
+        page_count = int(payload.get("page_count") or parser_info.get("page_count", 0) or 0)
 
         # Final gate before persistence: block storage if this indexing would exceed page quota.
         user_repo = UserRepository()
@@ -587,8 +596,8 @@ def store_vectors_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
 
         # Update canonical Document status and stats
         doc_repo = DocumentRepository()
-        processing_time_ms = parser_info.get("processing_time_ms", 0)
-        parser_used = parser_info.get("parser_name", "unknown")
+        processing_time_ms = payload.get("processing_time_ms") or parser_info.get("processing_time_ms", 0)
+        parser_used = payload.get("parser_name") or parser_info.get("parser_name", "unknown")
 
         doc_updated = doc_repo.mark_completed(
             document_id=document_id,
