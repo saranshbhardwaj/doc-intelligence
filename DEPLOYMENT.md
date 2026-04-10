@@ -167,6 +167,12 @@ Admin tier bypasses all `require_vertical()` checks in the backend.
 - WorkOS login with the same email will fail with a unique constraint violation (silent 500)
 - Fix: delete the old row from Supabase, then log in again with WorkOS
 
+### WorkOS — session persistence on page refresh (`devMode={true}`)
+- Without a custom auth domain, WorkOS stores the refresh token **in memory only** in production. Memory is wiped on every page refresh → users get logged out.
+- Fix: `devMode={true}` on `AuthKitProvider` in [frontend/src/main.jsx](frontend/src/main.jsx) — this stores the refresh token in `localStorage` instead, surviving refreshes.
+- The proper long-term fix is a custom auth domain (`auth.basilfy.com`) so WorkOS can set an httpOnly cookie on `.basilfy.com`. WorkOS charges $99/month for custom domains — not worth it for early beta.
+- `devMode={true}` is explicitly documented by WorkOS as the recommended approach without a custom domain.
+
 ### Gmail SMTP
 - Uses Gmail app password — generate at Google Account → Security → App Passwords
 - This is separate from Google OAuth (which is for "Sign in with Google" in WorkOS)
