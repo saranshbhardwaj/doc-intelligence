@@ -1,85 +1,9 @@
-# Railway deployment configuration
-# https://docs.railway.com/reference/config-as-code
-#
-# Service names here MUST match the service names in your Railway dashboard exactly.
-# Rename services in Railway UI → Settings → Service Name to match these.
-
-# ─── API ────────────────────────────────────────────────────────────────────
-
-[services.api.build]
+[build]
 builder = "DOCKERFILE"
 dockerfilePath = "Dockerfile"
 
-[services.api.deploy]
-startCommand = "sh -c 'python -Xfrozen_modules=off -m uvicorn main:app --host 0.0.0.0 --port $PORT --workers 1 --log-config uvicorn_log_config.json'"
+[deploy]
 healthcheckPath = "/api/health"
 healthcheckTimeout = 300
 restartPolicyType = "ON_FAILURE"
 restartPolicyMaxRetries = 10
-
-[services.api-2.deploy]
-startCommand = "sh -c 'python -Xfrozen_modules=off -m uvicorn main:app --host 0.0.0.0 --port $PORT --workers 1 --log-config uvicorn_log_config.json'"
-healthcheckPath = "/api/health"
-healthcheckTimeout = 300
-restartPolicyType = "ON_FAILURE"
-restartPolicyMaxRetries = 10
-
-# ─── Celery worker — critical queue (document extractions, template fills) ──
-
-[services.worker-critical.build]
-builder = "DOCKERFILE"
-dockerfilePath = "Dockerfile.worker"
-
-[services.worker-critical.deploy]
-startCommand = "python -Xfrozen_modules=off -m celery -A app.celery_app.celery_app worker --loglevel=info --pool=solo -Q critical --logfile=/dev/stdout"
-restartPolicyType = "ON_FAILURE"
-restartPolicyMaxRetries = 10
-
-[services.worker-critical-2.deploy]
-startCommand = "python -Xfrozen_modules=off -m celery -A app.celery_app.celery_app worker --loglevel=info --pool=solo -Q critical --logfile=/dev/stdout"
-restartPolicyType = "ON_FAILURE"
-restartPolicyMaxRetries = 10
-
-# ─── Celery worker — default queue (document upload/indexing) ────────────────
-
-[services.worker-default.build]
-builder = "DOCKERFILE"
-dockerfilePath = "Dockerfile.worker"
-
-[services.worker-default.deploy]
-startCommand = "python -Xfrozen_modules=off -m celery -A app.celery_app.celery_app worker --loglevel=info --pool=solo -Q default --logfile=/dev/stdout"
-restartPolicyType = "ON_FAILURE"
-restartPolicyMaxRetries = 10
-
-# ─── Celery Beat — task scheduler ────────────────────────────────────────────
-# NEVER run more than 1 replica — duplicate schedules cause duplicate tasks.
-
-[services.beat.build]
-builder = "DOCKERFILE"
-dockerfilePath = "Dockerfile.worker"
-
-[services.beat.deploy]
-startCommand = "python -Xfrozen_modules=off -m celery -A app.celery_app.celery_app beat --loglevel=info --logfile=/dev/stdout"
-restartPolicyType = "ON_FAILURE"
-restartPolicyMaxRetries = 10
-
-# ─── Required environment variables (set at project level in Railway) ────────
-#
-#   DATABASE_URL             → postgresql://postgres:<pw>@db.<ref>.supabase.co:5432/postgres
-#   CELERY_BROKER_URL        → ${{Redis.REDIS_URL}}
-#   CELERY_RESULT_BACKEND    → ${{Redis.REDIS_URL}}
-#   USE_CELERY               → true
-#   ANTHROPIC_API_KEY        → from Anthropic console
-#   CLERK_SECRET_KEY         → from Clerk dashboard
-#   CLERK_PUBLISHABLE_KEY    → from Clerk dashboard
-#   WORKOS_CLIENT_ID         
-#   WORKOS_API_KEY
-#   ENVIRONMENT              → production
-#   ADMIN_API_KEY            → run: openssl rand -hex 32
-#   CORS_ORIGINS             → ["https://your-app.vercel.app"]
-#   PROMETHEUS_MULTIPROC_DIR → /tmp/prometheus_multiproc
-#   USE_R2_FOR_DOCUMENTS     → true
-#   R2_ACCESS_KEY_ID         → from R2 dashboard
-#   R2_SECRET_ACCESS_KEY     → from R2 dashboard
-#   R2_BUCKET                → your bucket name
-#   R2_ENDPOINT_URL          → https://<accountid>.r2.cloudflarestorage.com
