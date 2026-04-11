@@ -384,7 +384,7 @@ def detect_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
     repo = TemplateRepository(db)
     tracker = JobProgressTracker(db, job_id)
 
-    fill_run = repo.get_fill_run(fill_run_id)
+    fill_run = repo.get_fill_run_with_data(fill_run_id)
     if not fill_run:
         raise ValueError(f"Fill run not found: {fill_run_id}")
     org_id = fill_run.org_id
@@ -395,9 +395,8 @@ def detect_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         logger.warning(
             f"detect_fields_task skipped — fill_run={fill_run_id} already in status={fill_run.status!r}"
         )
+        _idempotent_field_mapping = fill_run.fill_run_data.field_mapping if fill_run.fill_run_data else None
         db.close()
-        fill_run_with_data = repo.get_fill_run_with_data(fill_run_id)
-        _idempotent_field_mapping = fill_run_with_data.fill_run_data.field_mapping if (fill_run_with_data and fill_run_with_data.fill_run_data) else None
         return {**payload, "detection_result": {"fields": _idempotent_field_mapping.get("pdf_fields", []) if _idempotent_field_mapping else [], "total_fields": 0, "categories": []}}
 
     try:
