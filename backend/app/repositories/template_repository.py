@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session, joinedload
 from app.database import SessionLocal
 
 from app.core.storage.storage_factory import get_storage_backend
-from app.db_models_templates import ExcelTemplate, TemplateFillRun
+from app.db_models_templates import ExcelTemplate, FillRunData, TemplateFillRun
 from app.utils.logging import logger
 
 
@@ -298,7 +298,7 @@ class TemplateRepository:
         template_snapshot: Dict,
         name: Optional[str] = None,
     ) -> TemplateFillRun:
-        """Create a new template fill run."""
+        """Create a new template fill run with an empty fill_run_data row."""
         fill_run = TemplateFillRun(
             id=str(uuid.uuid4()),
             template_id=template_id,
@@ -307,16 +307,22 @@ class TemplateRepository:
             user_id=user_id,
             name=name,
             template_snapshot=template_snapshot,
-            field_mapping={"pdf_fields": [], "mappings": []},
-            extracted_data={},
             status="queued",
         )
 
         self.db.add(fill_run)
+        self.db.flush()  # Assigns fill_run.id without committing yet
+
+        fill_run_data = FillRunData(
+            fill_run_id=fill_run.id,
+            field_mapping={"pdf_fields": [], "mappings": []},
+            extracted_data={},
+            citation_context=None,
+        )
+        self.db.add(fill_run_data)
         self.db.commit()
         self.db.refresh(fill_run)
 
-        # Increment template usage
         self.increment_usage(template_id)
 
         logger.info(
@@ -328,6 +334,23 @@ class TemplateRepository:
     def get_fill_run(self, fill_run_id: str, org_id: Optional[str] = None) -> Optional[TemplateFillRun]:
         """Get fill run by ID, optionally scoped to tenant."""
         query = self.db.query(TemplateFillRun).filter(TemplateFillRun.id == fill_run_id)
+        if org_id:
+            query = query.filter(TemplateFillRun.org_id == org_id)
+        return query.first()
+
+    def get_fill_run_with_data(
+        self, fill_run_id: str, org_id: Optional[str] = None
+    ) -> Optional[TemplateFillRun]:
+        """Fetch a fill run with its JSONB blobs joined in a single query.
+
+        Use for detail views and any code that reads field_mapping, extracted_data,
+        or citation_context. Do NOT use for list queries — use get_fill_run() instead.
+        """
+        query = (
+            self.db.query(TemplateFillRun)
+            .options(joinedload(TemplateFillRun.fill_run_data))
+            .filter(TemplateFillRun.id == fill_run_id)
+        )
         if org_id:
             query = query.filter(TemplateFillRun.org_id == org_id)
         return query.first()
@@ -356,8 +379,6 @@ class TemplateRepository:
             "name",
             "status",
             "current_stage",
-            "field_mapping",
-            "extracted_data",
             "artifact",
             "field_detection_completed",
             "auto_mapping_completed",
@@ -385,11 +406,10 @@ class TemplateRepository:
             "cache_hit_rate",
             "llm_io_log",
             "prompt_version",
-            "citation_context",
         ]
 
         # JSONB fields that need explicit dirty tracking
-        jsonb_fields = ["field_mapping", "extracted_data", "artifact", "llm_io_log", "citation_context"]
+        jsonb_fields = ["artifact", "llm_io_log"]
 
         for field, value in kwargs.items():
             if field not in allowed_fields:
@@ -405,6 +425,41 @@ class TemplateRepository:
 
         logger.debug(f"Updated fill run: {fill_run_id}")
         return fill_run
+
+    def update_fill_run_data(self, fill_run_id: str, **blob_kwargs) -> Optional[FillRunData]:
+        """Update blob columns on fill_run_data.
+
+        Accepts: field_mapping, extracted_data, citation_context.
+        Use instead of update_fill_run() for any blob field writes.
+        """
+        from sqlalchemy.orm.attributes import flag_modified
+
+        allowed = {"field_mapping", "extracted_data", "citation_context"}
+        unknown = set(blob_kwargs) - allowed
+        if unknown:
+            logger.warning(
+                f"update_fill_run_data: ignoring unknown fields {unknown} for fill_run {fill_run_id}"
+            )
+
+        data_row = self.db.query(FillRunData).filter(
+            FillRunData.fill_run_id == fill_run_id
+        ).first()
+
+        if not data_row:
+            logger.warning(
+                f"update_fill_run_data: fill_run_data row not found for {fill_run_id}, creating it"
+            )
+            data_row = FillRunData(fill_run_id=fill_run_id)
+            self.db.add(data_row)
+
+        for field, value in blob_kwargs.items():
+            if field in allowed:
+                setattr(data_row, field, value)
+                flag_modified(data_row, field)
+
+        self.db.commit()
+        self.db.refresh(data_row)
+        return data_row
 
     def list_user_fill_runs(
         self,
