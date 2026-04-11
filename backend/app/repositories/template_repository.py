@@ -519,22 +519,22 @@ class TemplateRepository:
 
     # ==================== Field Mapping Operations ====================
 
-    def update_field_mapping(self, fill_run_id: str, field_mapping: Dict) -> Optional[TemplateFillRun]:
+    def update_field_mapping(self, fill_run_id: str, field_mapping: Dict) -> Optional[FillRunData]:
         """Update field mapping for a fill run."""
-        return self.update_fill_run(fill_run_id, field_mapping=field_mapping)
+        return self.update_fill_run_data(fill_run_id, field_mapping=field_mapping)
 
     def get_field_mapping(self, fill_run_id: str) -> Optional[Dict]:
         """Get field mapping for a fill run."""
-        fill_run = self.get_fill_run(fill_run_id)
-        return fill_run.field_mapping if fill_run else None
+        fill_run = self.get_fill_run_with_data(fill_run_id)
+        return fill_run.fill_run_data.field_mapping if fill_run and fill_run.fill_run_data else None
 
     # ==================== Extracted Data Operations ====================
 
-    def update_extracted_data(self, fill_run_id: str, extracted_data: Dict) -> Optional[TemplateFillRun]:
+    def update_extracted_data(self, fill_run_id: str, extracted_data: Dict) -> Optional[FillRunData]:
         """Update extracted data for a fill run."""
-        return self.update_fill_run(fill_run_id, extracted_data=extracted_data)
+        return self.update_fill_run_data(fill_run_id, extracted_data=extracted_data)
 
     def get_extracted_data(self, fill_run_id: str) -> Optional[Dict]:
         """Get extracted data for a fill run."""
-        fill_run = self.get_fill_run(fill_run_id)
-        return fill_run.extracted_data if fill_run else None
+        fill_run = self.get_fill_run_with_data(fill_run_id)
+        return fill_run.fill_run_data.extracted_data if fill_run and fill_run.fill_run_data else None
