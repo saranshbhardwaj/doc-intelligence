@@ -123,12 +123,20 @@ class FactExtractor:
             chunk_context=chunk_context,
         )
 
+        # Dynamic content goes in the user message; system_prompt is static → cache hits.
+        user_text = (
+            f"DOCUMENT: {document_name}\n"
+            f"USER QUERY: {query}\n"
+            f"COMPARISON FOCUS: {aspects_str}\n\n"
+            f"Chunks to extract from:\n{chunk_context}"
+        )
+
         try:
             result = await self.llm_client.extract_structured_data_with_schema(
-                text=f"Query: {query}\nAspects: {aspects_str}",
+                text=user_text,
                 system_prompt=system_prompt,
                 pydantic_model=DocumentFacts,
-                use_cache=False  # Don't cache - context specific to this document
+                use_cache=True,  # system_prompt is now static → Anthropic prompt cache hits
             )
 
             # Augment extracted facts with source_chunk_index

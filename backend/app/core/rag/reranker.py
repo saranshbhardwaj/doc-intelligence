@@ -204,3 +204,54 @@ class Reranker:
                 reverse=True
             )
             return fallback_chunks[:top_k] if top_k else fallback_chunks
+
+    def filter_noise(
+        self,
+        query: str,
+        chunks: List[Dict],
+        threshold: float,
+    ) -> List[Dict]:
+        """
+        Score all chunks and drop those below threshold. No top-k cut.
+
+        Used by ambient mode to remove genuinely irrelevant chunks (TOC pages,
+        disclaimers, headers) while preserving all relevant chunks from all docs.
+
+        Args:
+            query: User query string
+            chunks: Candidate chunks from hybrid retrieval
+            threshold: Drop chunks with rerank_score below this value
+
+        Returns:
+            Chunks with rerank_score set, filtered to >= threshold, order preserved
+        """
+        if not chunks:
+            return []
+
+        pairs = []
+        for chunk in chunks:
+            text = chunk.get("text", "")
+            token_count = count_tokens(text)
+            if token_count > self.CROSS_ENCODER_TOKEN_LIMIT:
+                text = truncate_to_token_limit(text, self.CROSS_ENCODER_TOKEN_LIMIT)
+            pairs.append([query, text])
+
+        try:
+            scores = self.model.predict(
+                pairs,
+                batch_size=self.batch_size,
+                show_progress_bar=False,
+            )
+            for chunk, score in zip(chunks, scores):
+                chunk["rerank_score"] = float(score)
+
+            passing = [c for c in chunks if c["rerank_score"] >= threshold]
+            logger.info(
+                f"Ambient noise filter: {len(passing)}/{len(chunks)} chunks passed threshold={threshold}",
+            )
+            return passing
+
+        except Exception as e:
+            logger.error(f"filter_noise failed: {e}", exc_info=True)
+            # Fallback: return all chunks unfiltered
+            return chunks

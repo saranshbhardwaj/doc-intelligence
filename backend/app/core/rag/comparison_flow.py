@@ -375,6 +375,11 @@ class ComparisonChatHandler:
             logger.info("Streaming comparison response from LLM", extra={"session_id": session_id, "user_id": user_id})
             llm_start = time.monotonic()
 
+            if len(document_ids) > 3:
+                warning_text = f"⚠ Comparing {len(document_ids)} documents — this may take longer than usual.\n\n"
+                assistant_message += warning_text
+                yield ("chunk", warning_text)
+
             async for event in self.llm_client.stream_chat(prompt):
                 if event["type"] == "chunk":
                     chunk_text = event["text"]

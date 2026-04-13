@@ -82,7 +82,8 @@ export default function CitationLink({
   const { getToken } = useAppAuth();
   const { setActivePdfDocument, highlightChunk } = useChatActions();
 
-  const parsed = useMemo(() => parseCitation(token), [token]);
+  // parseCitation returns an array; CitationLink always receives a single normalized token
+  const parsed = useMemo(() => { const r = parseCitation(token); return r ? r[0] : null; }, [token]);
 
   // General chat resolution
   const citationLookup = useMemo(
