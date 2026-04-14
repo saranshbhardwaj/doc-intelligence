@@ -71,6 +71,12 @@ pool_config = {}
 if DATABASE_URL.startswith("sqlite"):
     connect_args = {"check_same_thread": False}
 else:
+    # prepare_threshold=0: disable server-side prepared statements.
+    # Required for Supabase PgBouncer (transaction mode, port 6543) — PgBouncer
+    # does not support prepared statements across pooled connections. Without this,
+    # concurrent workers collide on statement names (DuplicatePreparedStatement).
+    # See: https://www.psycopg.org/psycopg3/docs/advanced/prepare.html
+    connect_args = {"prepare_threshold": 0}
     # PostgreSQL connection pool configuration for production scalability
     pool_config = {
         "pool_size": 20,           # Base connections per container

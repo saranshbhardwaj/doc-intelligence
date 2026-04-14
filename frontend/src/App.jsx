@@ -16,6 +16,10 @@ import ExtractionDetailPage from "./pages/ExtractionDetailPage";
 import DashboardPage from "./pages/DashboardPage";
 import AccessPendingPage from "./pages/AccessPendingPage";
 import AuthCallbackPage from "./pages/AuthCallbackPage";
+import AdminTemplateFillAnalyticsPage from "./pages/AdminTemplateFillAnalyticsPage";
+import AboutPage from "./pages/AboutPage";
+import PrivacyPage from "./pages/PrivacyPage";
+import TermsPage from "./pages/TermsPage";
 import NotFound from "./pages/NotFound";
 import AppNotFound from "./components/layout/AppNotFound";
 import RequireAuth from "./components/common/RequireAuth";
@@ -51,6 +55,9 @@ export default function App() {
           <Route path="/sign-up/*" element={<SignUpPage />} />
           <Route path="/callback" element={<AuthCallbackPage />} />
           <Route path="/access-pending" element={<AccessPendingPage />} />
+          <Route path="/about" element={<AboutPage />} />
+          <Route path="/privacy" element={<PrivacyPage />} />
+          <Route path="/terms" element={<TermsPage />} />
 
           {/* Protected app area */}
           <Route element={<RequireAuth redirectTo="/sign-in" />}>
@@ -99,6 +106,8 @@ export default function App() {
             {reRoutes.map((route, index) => (
               <Route key={`re-${index}`} path={`/app${route.path}`} element={route.element} />
             ))}
+
+            <Route path="/app/admin/template-analytics" element={<AdminTemplateFillAnalyticsPage />} />
 
             {/* Catch-all for anything under /app that didn't match above */}
             <Route path="/app/*" element={<AppNotFound />} />

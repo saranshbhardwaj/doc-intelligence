@@ -14,6 +14,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { cn } from '@/lib/utils';
 import { CitationSection } from './CitationBadge';
 
+const EDIT_SOURCE_PDF_PASTE = 'pdf_paste';
+const EDIT_SOURCE_MANUAL_INPUT = 'manual_input';
+
 export default function FieldsList({
   fillRunId,
   extractedData = {},
@@ -54,6 +57,17 @@ export default function FieldsList({
 
   function getFieldMapping(fieldId) {
     return mappings.find((m) => m.pdf_field_id === fieldId);
+  }
+
+  function getOriginalValue(fieldId) {
+    const pdfField = pdfFields.find(f => f.id === fieldId);
+    return pdfField?.extracted_value ?? null;
+  }
+
+  function resolveOriginalValue(fieldId, currentField) {
+    return 'original_value' in currentField
+      ? currentField.original_value
+      : getOriginalValue(fieldId);
   }
 
   // Filter and search fields
@@ -117,6 +131,8 @@ export default function FieldsList({
         confidence: 1.0,
         user_edited: true,
         source_page: selectedText.page,
+        source: EDIT_SOURCE_PDF_PASTE,
+        original_value: resolveOriginalValue(fieldId, currentField),
       };
 
       const updatedData = {
@@ -144,6 +160,8 @@ export default function FieldsList({
         value: newValue,
         confidence: 1.0,
         user_edited: true,
+        source: EDIT_SOURCE_MANUAL_INPUT,
+        original_value: resolveOriginalValue(fieldId, currentField),
       };
 
       const updatedData = {

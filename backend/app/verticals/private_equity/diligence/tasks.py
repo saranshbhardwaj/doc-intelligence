@@ -648,7 +648,7 @@ def run_diligence_analysis_task(self, payload: Dict[str, Any]) -> Dict[str, Any]
             completed_at=datetime.utcnow(),
         )
         if tracker:
-            tracker.mark_error(error_message=str(exc)[:1000], error_stage=exc.stage, is_retryable=False)
+            tracker.mark_error(error_message="Analysis failed — please try again.", internal_error=str(exc)[:1000], error_stage=exc.stage, is_retryable=False)
         repo.mark_room_status(room_id=room_id, status="failed")
         repo.add_audit_event(
             room_id=room_id,
@@ -672,7 +672,7 @@ def run_diligence_analysis_task(self, payload: Dict[str, Any]) -> Dict[str, Any]
             completed_at=datetime.utcnow(),
         )
         if tracker:
-            tracker.mark_error(error_message=str(exc)[:1000], error_stage="analysis", is_retryable=False)
+            tracker.mark_error(error_message="Analysis failed — please try again.", internal_error=str(exc)[:1000], error_stage="analysis", is_retryable=False)
         repo.mark_room_status(room_id=room_id, status="failed")
         repo.add_audit_event(
             room_id=room_id,

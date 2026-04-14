@@ -75,7 +75,11 @@ class QueryUnderstanding(BaseModel):
     # Data extraction specific (populated if query_type == DATA_EXTRACTION)
     data_fields: List[str] = Field(
         default_factory=list,
-        description="Specific data fields requested (e.g., 'cap rate', 'NOI')",
+        description="Specific data fields requested (e.g., 'cap rate', 'NOI'). Keep tight — 1-3 items, one per distinct concept the user asked for.",
+    )
+    data_field_synonyms: List[str] = Field(
+        default_factory=list,
+        description="Flat list of all synonym/alternative phrasings for data_fields. Used for BM25 keyword recall. E.g. for 'asking price': ['asking price', 'offering price', 'listing price', 'purchase price', 'sale price'].",
     )
 
     # Incremental scope routing fields (added in small steps for stability testing)
@@ -272,9 +276,20 @@ INSTRUCTIONS:
 
 5. **comparison_aspects**: If comparison, list what to compare
 
-6. **data_fields**: If data extraction, list specific fields requested
+6. **data_fields**: If data extraction, list the specific fields the user asked for. Keep tight — one
+   entry per distinct concept requested, exactly as the user phrased it.
+   Example: "what is the asking price?" → ["asking price"]
+   Example: "what are the NOI and cap rate?" → ["NOI", "cap rate"]
 
-7. **scope_mode**: Routing scope based on what documents the query targets.
+7. **data_field_synonyms**: Expand each entry in data_fields with all common synonyms and alternative
+   phrasings used in financial documents. This improves keyword search recall when the document uses
+   different terminology than the user. Include the original terms plus variants.
+   Example: data_fields=["asking price"] → data_field_synonyms=["asking price", "offering price", "listing price", "purchase price", "sale price", "offered at"]
+   Example: data_fields=["NOI"] → data_field_synonyms=["NOI", "net operating income", "annual NOI"]
+   Example: data_fields=["cap rate"] → data_field_synonyms=["cap rate", "capitalization rate", "going-in cap rate", "exit cap rate"]
+   Always populate if data_fields is non-empty. More synonyms = better recall.
+
+8. **scope_mode**: Routing scope based on what documents the query targets.
    - `single_doc`: Query explicitly names ONE specific property/deal and asks only about it.
      Example: "What is the asking price for Tulsa Storage?" → single_doc
      Example: "Summarize Lane Prairie's financials" → single_doc

@@ -143,8 +143,9 @@ class ComparisonRetriever:
         """
         overall_start = time.monotonic()
 
-        # Limit number of documents
-        document_ids = document_ids[:max_documents]
+        # Limit number of documents to configured maximum
+        max_docs = settings.comparison_max_documents
+        document_ids = document_ids[:max_docs]
         num_docs = len(document_ids)
 
         logger.info(
@@ -630,7 +631,8 @@ class ComparisonRetriever:
     def _get_doc_metadata(self, document_ids: List[str]) -> List[DocumentInfo]:
         """Get document metadata for display"""
         docs = []
-        labels = ['Document A', 'Document B', 'Document C']
+        max_docs = settings.comparison_max_documents
+        labels = [f'Document {chr(65 + i)}' for i in range(max_docs)]
 
         for i, doc_id in enumerate(document_ids):
             doc = self.document_repo.get_by_id(doc_id)

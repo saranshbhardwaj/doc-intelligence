@@ -194,8 +194,10 @@ class Settings(BaseSettings):
     rag_final_top_k: int = 8
 
     # Tighter budgets for narrow single-document fact lookups.
-    rag_scoped_retrieval_candidates: int = 10
-    rag_scoped_final_top_k: int = 5
+    # 15/7: enough candidates that the target chunk survives reranking even when phrasing differs.
+    # Previous 10/5 was too aggressive — caused fact chunks to be cut by reranker on term mismatch.
+    rag_scoped_retrieval_candidates: int = 15
+    rag_scoped_final_top_k: int = 7
 
     # Scope-aware ranking and guardrails (single-doc / ambiguous multi-doc handling)
     rag_scope_match_reweight_enabled: bool = True
@@ -206,6 +208,9 @@ class Settings(BaseSettings):
 
     # Semantic similarity floors (raw cosine similarity) for filtering low-signal hits
     rag_chat_semantic_similarity_floor: float = 0.12
+    # Tighter floor used when the reranker is skipped (low QU confidence or ambient mode).
+    # The reranker normally cleans up weak candidates; this compensates when it doesn't run.
+    rag_chat_semantic_similarity_floor_no_reranker: float = 0.25
     rag_workflow_semantic_similarity_floor: float = 0.06
 
     # ===== DOCUMENT COMPARISON SETTINGS =====
@@ -215,6 +220,8 @@ class Settings(BaseSettings):
     comparison_chunks_per_doc: int = 8  # Chunks to retrieve per document (reduced from 10)
     comparison_max_pairs: int = 8  # Max pairs/clusters to include in prompt
     comparison_max_documents: int = 3  # Max number of documents to compare (2-3)
+    # Ambient mode: wider retrieval when query is AMBIGUOUS across multi-doc session
+    ambient_top_k: int = 10            # Retrieval candidates for AMBIGUOUS multi-doc queries (vs rag_final_top_k=8)
     # Early-exit pairing/clustering when retrieval signal is weak
     # Set to 0 to disable score-based early-exit
     comparison_pairing_min_top_score: float = 0.00
@@ -265,6 +272,15 @@ class Settings(BaseSettings):
     # (top scores of ~0.35 are still genuinely relevant). 0.2 lets expansion run for most
     # queries while still filtering very low-confidence chunks.
     rag_expansion_rerank_floor: float = 0.2
+
+    # Ambient mode noise filter: drop chunks scoring below this threshold (raw CrossEncoder logit).
+    # 0.05 removes only genuinely irrelevant chunks (TOC, disclaimers, unrelated sections).
+    rag_reranker_ambient_noise_threshold: float = 0.05
+
+    # Skip reranker when query understanding confidence is below this threshold.
+    # Low confidence means QU is uncertain (e.g. timeout) — reranking on a weak query signal is noisy.
+    # 0.4 preserves reranking for most real queries (confidence usually 0.7+) but skips timed-out/ambiguous cases.
+    rag_reranker_skip_confidence_threshold: float = 0.4
 
     # Score inheritance factors for expanded chunks (0.0-1.0)
     # Lower = expanded chunks rank below original chunks

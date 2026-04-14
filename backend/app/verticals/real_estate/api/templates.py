@@ -145,7 +145,6 @@ class FillRunListItem(BaseModel):
     document_id: Optional[str]  # Can be null if document deleted
     document_metadata: Optional[Dict[str, Any]]  # Document metadata
     status: str
-    current_stage: Optional[str]
     total_fields_detected: Optional[int]
     total_fields_mapped: Optional[int]
     total_fields_filled: Optional[int]
@@ -178,6 +177,43 @@ class UpdateFillRunRequest(BaseModel):
     """Request to rename a fill run."""
 
     name: str = Field(..., min_length=1, max_length=255)
+
+
+# ==================== Helper Functions ====================
+
+
+def _compute_correction_counts(extracted_data: dict) -> dict:
+    """
+    Compute user correction counts from a flat extracted_data dict.
+
+    Counts:
+    - user_corrected_count: user_edited=True, 'original_value' key present, value is not None
+    - user_filled_blank_count: user_edited=True, 'original_value' key present, value is None
+    - user_edited_count: all fields where user_edited=True (includes legacy edits without original_value)
+    """
+    user_corrected = 0
+    user_filled_blank = 0
+    user_edited_total = 0
+
+    for key, data in extracted_data.items():
+        if key == "manual_edits":
+            continue
+        if not isinstance(data, dict):
+            continue
+        if not data.get("user_edited"):
+            continue
+        user_edited_total += 1
+        if "original_value" in data:
+            if data["original_value"] is not None:
+                user_corrected += 1
+            else:
+                user_filled_blank += 1
+
+    return {
+        "user_corrected_count": user_corrected,
+        "user_filled_blank_count": user_filled_blank,
+        "user_edited_count": user_edited_total,
+    }
 
 
 # ==================== Template Management Endpoints ====================
@@ -418,7 +454,6 @@ async def list_fills(
                 document_id=fill_run.document_id,
                 document_metadata=document_metadata,
                 status=fill_run.status,
-                current_stage=fill_run.current_stage,
                 total_fields_detected=fill_run.total_fields_detected,
                 total_fields_mapped=fill_run.total_fields_mapped,
                 total_fields_filled=fill_run.total_fields_filled,
@@ -706,13 +741,18 @@ async def get_fill_status(
 
     try:
         repo = TemplateRepository(db)
-        fill_run = repo.get_fill_run(fill_run_id, user.org_id)
+        fill_run = repo.get_fill_run_with_data(fill_run_id, user.org_id)
 
         if not fill_run or fill_run.user_id != user.id:
             raise HTTPException(status_code=404, detail="Fill run not found")
 
+        blob = fill_run.fill_run_data
+        field_mapping = blob.field_mapping if blob else {}
+        extracted_data = blob.extracted_data if blob else {}
+        citation_context = blob.citation_context if blob else None
+
         # Debug: Log what we're returning
-        mappings_count = len(fill_run.field_mapping.get("mappings", [])) if fill_run.field_mapping else 0
+        mappings_count = len((field_mapping or {}).get("mappings", []))
         logger.info(f"Returning fill run {fill_run_id}: status={fill_run.status}, mappings={mappings_count}")
 
         # Fetch document metadata for PDF viewer
@@ -730,8 +770,8 @@ async def get_fill_status(
                 }
 
         schema_summary = None
-        if isinstance(fill_run.field_mapping, dict):
-            schema_summary = fill_run.field_mapping.get("schema_summary")
+        if isinstance(field_mapping, dict):
+            schema_summary = field_mapping.get("schema_summary")
 
         total_template_fields = None
         if isinstance(schema_summary, dict) and schema_summary.get("total_yaml_fields") is not None:
@@ -765,8 +805,8 @@ async def get_fill_status(
             document_id=fill_run.document_id,
             status=fill_run.status,
             current_stage=fill_run.current_stage,
-            field_mapping=fill_run.field_mapping or {},
-            extracted_data=fill_run.extracted_data or {},
+            field_mapping=field_mapping or {},
+            extracted_data=extracted_data or {},
             artifact=fill_run.artifact,
             total_fields_detected=fill_run.total_fields_detected,
             total_fields_mapped=fill_run.total_fields_mapped,
@@ -777,7 +817,7 @@ async def get_fill_status(
             created_at=fill_run.created_at,
             completed_at=fill_run.completed_at,
             document_metadata=document_metadata,
-            citation_context=fill_run.citation_context,
+            citation_context=citation_context,
         )
 
     except HTTPException:
@@ -822,7 +862,7 @@ async def update_mappings(
 
     try:
         repo = TemplateRepository(db)
-        fill_run = repo.get_fill_run(fill_run_id, user.org_id)
+        fill_run = repo.get_fill_run_with_data(fill_run_id, user.org_id)
 
         if not fill_run or fill_run.user_id != user.id:
             raise HTTPException(status_code=404, detail="Fill run not found")
@@ -841,7 +881,7 @@ async def update_mappings(
 
         deduped_mappings = list(deduped_by_cell.values())
 
-        field_mapping = fill_run.field_mapping or {}
+        field_mapping = (fill_run.fill_run_data.field_mapping if fill_run.fill_run_data else {}) or {}
         field_mapping["mappings"] = deduped_mappings
 
         # Count user edits (compare to auto_mapped_count)
@@ -850,10 +890,10 @@ async def update_mappings(
             if m.get("status") in ["user_edited", "manual"]
         ])
 
-        # If fill run is already completed, reset to awaiting_review
-        # This allows user to regenerate Excel with updated mappings
-        updates = {
-            "field_mapping": field_mapping,
+        # Write blob update separately from lean metadata
+        repo.update_fill_run_data(fill_run_id, field_mapping=field_mapping)
+
+        lean_updates = {
             "total_fields_mapped": len(deduped_mappings),
             "user_edited_count": user_edited_count,
         }
@@ -872,19 +912,19 @@ async def update_mappings(
                 except Exception as e:
                     logger.warning(f"Failed to delete old filled Excel: {e}")
 
-            # Reset to awaiting_review
-            updates.update({
+            lean_updates.update({
                 "status": "awaiting_review",
                 "artifact": None,
                 "filling_completed": False,
                 "completed_at": None,
             })
 
-        repo.update_fill_run(fill_run_id, **updates)
+        repo.update_fill_run(fill_run_id, **lean_updates)
 
         # Debug: Verify what was actually saved
-        saved_fill_run = repo.get_fill_run(fill_run_id, user.org_id)
-        saved_mappings_count = len(saved_fill_run.field_mapping.get("mappings", [])) if saved_fill_run else 0
+        saved_fill_run = repo.get_fill_run_with_data(fill_run_id, user.org_id)
+        saved_field_mapping = (saved_fill_run.fill_run_data.field_mapping if saved_fill_run and saved_fill_run.fill_run_data else {}) or {}
+        saved_mappings_count = len(saved_field_mapping.get("mappings", []))
         logger.info(
             f"Mappings updated: {len(deduped_mappings)} total, {user_edited_count} user-edited. "
             f"Verified in DB: {saved_mappings_count} mappings"
@@ -990,10 +1030,22 @@ async def update_extracted_data(
                     field_data["user_edited"] = True
             total_fields = len(extracted_data)
 
-        # Prepare updates
-        updates = {
-            "extracted_data": extracted_data,
+        # Write blob separately from lean metadata
+        repo.update_fill_run_data(fill_run_id, extracted_data=extracted_data)
+
+        # Compute correction counts for analytics
+        flat_fields = extracted_data.get("llm_extracted", extracted_data)
+        # manual_edits (raw cell overrides by sheet+cell address) are excluded intentionally —
+        # correction counts track LLM field-level extraction quality, not direct cell edits.
+        counts = _compute_correction_counts(flat_fields)
+
+        lean_updates = {
             "total_fields_filled": total_fields,
+            "user_edited_count": counts["user_edited_count"],
+            # user_corrected_count and user_filled_blank_count columns added in migration
+            # r5s6t7u8v9w0 — wired here after Task 3
+            "user_corrected_count": counts["user_corrected_count"],
+            "user_filled_blank_count": counts["user_filled_blank_count"],
         }
 
         # If fill run is already completed, reset to awaiting_review
@@ -1012,16 +1064,14 @@ async def update_extracted_data(
                 except Exception as e:
                     logger.warning(f"Failed to delete old filled Excel: {e}")
 
-            # Reset to awaiting_review
-            updates.update({
+            lean_updates.update({
                 "status": "awaiting_review",
                 "artifact": None,
                 "filling_completed": False,
                 "completed_at": None,
             })
 
-        # Update extracted data
-        repo.update_fill_run(fill_run_id, **updates)
+        repo.update_fill_run(fill_run_id, **lean_updates)
 
         logger.info(f"Extracted data updated: {len(extracted_data)} fields")
 

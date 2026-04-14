@@ -129,7 +129,7 @@ export default function DocumentsTable({
       );
     } else if (doc.status === "processing") {
       return (
-        <div className="min-w-[140px] space-y-1.5">
+        <div className="min-w-0 sm:min-w-[140px] space-y-1.5">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-1.5">
               <Clock className="w-3 h-3 text-primary" />
@@ -197,7 +197,7 @@ export default function DocumentsTable({
   }
 
   return (
-    <div className="relative flex h-full min-h-0 flex-col">
+    <div className="relative flex flex-col">
       {loading && documents.length > 0 && (
         <div className="absolute right-5 top-4 z-10 flex items-center gap-2 rounded-full border border-border/70 bg-background/90 px-3 py-1.5 shadow-sm backdrop-blur-sm">
           <Loader2 className="w-4 h-4 animate-spin text-primary" />
@@ -205,12 +205,12 @@ export default function DocumentsTable({
         </div>
       )}
 
-      <div className="library-table-shell flex min-h-0 flex-1 flex-col">
+      <div className="library-table-shell flex flex-col">
         <div className="library-toolbar">
           <div className="flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
           </div>
 
-          <div className="flex flex-col gap-2.5 lg:flex-row">
+          <div className="flex flex-col gap-2.5 sm:flex-row">
             <div className="relative flex-1">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input
@@ -277,7 +277,7 @@ export default function DocumentsTable({
           )}
         </div>
 
-        <div className="library-scrollbar min-h-0 flex-1 overflow-auto">
+        <div className="overflow-x-auto">
           <Table>
             <TableHeader className="sticky top-0 z-[1] bg-card/95 backdrop-blur">
               <TableRow className="border-b border-border/70 bg-transparent hover:bg-transparent">
@@ -294,7 +294,7 @@ export default function DocumentsTable({
                 Status
               </TableHead>
               <TableHead
-                className="cursor-pointer text-right text-xs font-bold uppercase tracking-[0.18em] text-muted-foreground transition-colors hover:bg-muted/50"
+                className="hidden sm:table-cell cursor-pointer text-right text-xs font-bold uppercase tracking-[0.18em] text-muted-foreground transition-colors hover:bg-muted/50"
                 onClick={() => toggleSort("pages")}
               >
                 <div className="flex items-center justify-end gap-2">
@@ -303,7 +303,7 @@ export default function DocumentsTable({
                 </div>
               </TableHead>
               <TableHead
-                className="cursor-pointer text-right text-xs font-bold uppercase tracking-[0.18em] text-muted-foreground transition-colors hover:bg-muted/50"
+                className="hidden sm:table-cell cursor-pointer text-right text-xs font-bold uppercase tracking-[0.18em] text-muted-foreground transition-colors hover:bg-muted/50"
                 onClick={() => toggleSort("chunks")}
               >
                 <div className="flex items-center justify-end gap-2">
@@ -311,10 +311,10 @@ export default function DocumentsTable({
                   {sortBy === "chunk_count" && <ArrowUpDown className="w-3.5 h-3.5" />}
                 </div>
               </TableHead>
-              <TableHead className="text-xs font-bold uppercase tracking-[0.18em] text-muted-foreground">
+              <TableHead className="hidden md:table-cell text-xs font-bold uppercase tracking-[0.18em] text-muted-foreground">
                 Date Added
               </TableHead>
-              <TableHead className="text-xs font-bold uppercase tracking-[0.18em] text-muted-foreground">
+              <TableHead className="hidden md:table-cell text-xs font-bold uppercase tracking-[0.18em] text-muted-foreground">
                 Usage
               </TableHead>
               <TableHead className="w-12" />
@@ -346,22 +346,22 @@ export default function DocumentsTable({
                           <div className={`flex h-8 w-8 flex-shrink-0 items-center justify-center rounded-xl ${bg}`}>
                             <Icon className={`h-4 w-4 ${color}`} />
                           </div>
-                          <span className="max-w-xs truncate text-sm font-medium">
+                          <span className="max-w-[160px] sm:max-w-xs truncate text-sm font-medium">
                             {doc.filename}
                           </span>
                         </div>
                       </TableCell>
                       <TableCell className="library-table-cell">{getStatusBadge(doc)}</TableCell>
-                      <TableCell className="library-table-cell text-right text-sm text-muted-foreground">
+                      <TableCell className="hidden sm:table-cell library-table-cell text-right text-sm text-muted-foreground">
                         {doc.page_count || 0}
                       </TableCell>
-                      <TableCell className="library-table-cell text-right text-sm text-muted-foreground">
+                      <TableCell className="hidden sm:table-cell library-table-cell text-right text-sm text-muted-foreground">
                         {doc.chunk_count || 0}
                       </TableCell>
-                      <TableCell className="library-table-cell whitespace-nowrap text-sm text-muted-foreground">
+                      <TableCell className="hidden md:table-cell library-table-cell whitespace-nowrap text-sm text-muted-foreground">
                         {formatDate(doc.created_at)}
                       </TableCell>
-                      <TableCell className="library-table-cell">
+                      <TableCell className="hidden md:table-cell library-table-cell">
                         {doc.status === "completed" && doc.has_embeddings && (
                           <DocumentUsageBadge
                             documentId={doc.id}
@@ -397,7 +397,7 @@ export default function DocumentsTable({
         </div>
 
         {totalDocs > 0 && (
-          <div className="flex items-center justify-between border-t border-border/70 px-5 py-4 sm:px-6">
+          <div className="flex flex-wrap items-center justify-between gap-2 border-t border-border/70 px-5 py-4 sm:px-6">
             <div className="text-sm text-muted-foreground">
               Showing {page * pageSize + 1}-
               {Math.min((page + 1) * pageSize, totalDocs)} of {totalDocs} documents

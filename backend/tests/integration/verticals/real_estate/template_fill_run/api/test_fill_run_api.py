@@ -120,7 +120,8 @@ def test_update_mappings_dedupes_cells_and_resets_completed_run(
     assert response.json()["message"] == "Mappings updated successfully"
 
     db_session.refresh(fill_run)
-    saved_mappings = fill_run.field_mapping.get("mappings", [])
+    db_session.refresh(fill_run.fill_run_data)
+    saved_mappings = fill_run.fill_run_data.field_mapping.get("mappings", [])
     assert len(saved_mappings) == 2
     assert {f"{m['excel_sheet']}!{m['excel_cell']}" for m in saved_mappings} == {
         "Summary!B2",

@@ -2,16 +2,16 @@
 import {
   Zap,
   FileSpreadsheet,
-  ShieldAlert,
   MessageSquare,
   Building2,
-  BarChart3,
   Target,
   Clock,
   CheckCircle2,
   UploadCloud,
   BrainCircuit,
   Download,
+  ClipboardCheck,
+  Shield,
 } from "lucide-react";
 
 export default function Features() {
@@ -23,12 +23,12 @@ export default function Features() {
           <h2 className="text-4xl sm:text-5xl font-bold text-foreground mb-4">
             Everything You Need for
             <span className="bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
-              {" "}Deal Intelligence
+              {" "}Real Estate Analysis
             </span>
           </h2>
           <p className="text-xl text-muted-foreground max-w-3xl mx-auto">
-            Built for PE and real estate analysts. Extract, analyze, and model
-            faster than ever before.
+            Built for real estate analysts. Extract key metrics from OMs and rent rolls,
+            fill Excel templates automatically, and chat with your documents.
           </p>
         </div>
 
@@ -42,20 +42,21 @@ export default function Features() {
               </div>
               <h3 className="text-2xl font-bold text-foreground">Smart Extraction</h3>
               <p className="text-muted-foreground leading-relaxed">
-                Upload PDFs or Excel. AI extracts structured data instantly, financials, metrics, and key terms with 95%+ accuracy.
+                Upload your offering memorandum. Basilfy reads every page and extracts cap rate, NOI,
+                asking price, occupancy, and debt service. It maps the values directly into your Excel template.
               </p>
               <ul className="space-y-1.5 text-sm text-muted-foreground">
                 <li className="flex items-center gap-2">
                   <CheckCircle2 className="w-4 h-4 text-primary flex-shrink-0" />
-                  Automated rent roll normalization
+                  Automatic Excel template fill
                 </li>
                 <li className="flex items-center gap-2">
                   <CheckCircle2 className="w-4 h-4 text-primary flex-shrink-0" />
-                  Multi-page PDF parsing
+                  Multi-page OM and rent roll parsing
                 </li>
                 <li className="flex items-center gap-2">
                   <CheckCircle2 className="w-4 h-4 text-primary flex-shrink-0" />
-                  Source-cited extraction
+                  Source-cited values with confidence scores
                 </li>
               </ul>
             </div>
@@ -81,7 +82,7 @@ export default function Features() {
               </div>
               <h3 className="text-xl font-bold text-foreground">Ask Anything</h3>
               <p className="text-muted-foreground">
-                "What is the total NOI across Q3 properties?" Get instant, cited answers from your deal docs.
+                "What is the asking price for this property?" Get instant, cited answers directly from your OM or rent roll.
               </p>
             </div>
             <div className="mt-8 pt-4 border-t border-border">
@@ -94,39 +95,38 @@ export default function Features() {
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6 mb-6">
-          {/* PE Workflows */}
           <div className="glass-card rounded-3xl p-8 group hover:-translate-y-0.5 transition-transform duration-300">
             <div className="space-y-4">
               <div className="w-12 h-12 rounded-2xl bg-primary/10 flex items-center justify-center">
-                <BarChart3 className="w-6 h-6 text-primary" />
+                <ClipboardCheck className="w-6 h-6 text-primary" />
               </div>
-              <h3 className="text-xl font-bold text-foreground">PE Workflows</h3>
+              <h3 className="text-xl font-bold text-foreground">Review & Correct</h3>
               <p className="text-muted-foreground">
-                Investment memos, red flag analysis, deal screening — automated from your uploaded documents.
+                See every extracted value with its source citation. Override anything with a single click before filling your template.
               </p>
             </div>
           </div>
 
-          {/* Red Flag Detection — dark card spanning 2 cols */}
           <div className="md:col-span-2 bg-foreground rounded-3xl p-8 relative overflow-hidden group hover:-translate-y-0.5 transition-transform duration-300">
             <div className="absolute inset-0 opacity-20 pointer-events-none">
               <div className="absolute top-0 right-0 w-64 h-64 bg-primary rounded-full -mr-32 -mt-32 blur-[80px]" />
             </div>
             <div className="relative z-10 flex flex-col md:flex-row items-start md:items-center gap-8">
               <div className="flex-1 space-y-4">
-                <div className="inline-flex items-center gap-2 bg-destructive/20 text-destructive px-3 py-1 rounded-full text-xs font-bold tracking-widest uppercase">
-                  <ShieldAlert className="w-3.5 h-3.5" />
-                  Risk Detection
+                <div className="inline-flex items-center gap-2 bg-primary/20 text-primary-foreground px-3 py-1 rounded-full text-xs font-bold tracking-widest uppercase">
+                  <Shield className="w-3.5 h-3.5" />
+                  Your Data is Safe
                 </div>
-                <h3 className="text-2xl font-bold text-background">Red Flag Detection</h3>
+                <h3 className="text-2xl font-bold text-background">Secure & Confidential</h3>
                 <p className="text-background/70 leading-relaxed">
-                  Automatic risk scoring highlights leverage issues, margin declines, and anomalies hidden in deal documents.
+                  Your documents are encrypted at rest and in transit. We never use them to train
+                  any AI model. Not ours, not anyone else&apos;s.
                 </p>
               </div>
               <div className="flex-shrink-0 flex justify-center">
                 <div className="relative">
                   <div className="w-20 h-20 rounded-3xl bg-primary shadow-[0_0_40px_hsl(var(--primary)/0.5)] flex items-center justify-center">
-                    <ShieldAlert className="w-10 h-10 text-primary-foreground" />
+                    <Shield className="w-10 h-10 text-primary-foreground" />
                   </div>
                 </div>
               </div>
@@ -141,9 +141,9 @@ export default function Features() {
               <div className="w-12 h-12 rounded-2xl bg-accent/10 flex items-center justify-center">
                 <Building2 className="w-6 h-6 text-accent" />
               </div>
-              <h3 className="text-xl font-bold text-foreground">RE Workflows</h3>
+              <h3 className="text-xl font-bold text-foreground">Supported Documents</h3>
               <p className="text-muted-foreground">
-                Underwriting models, property analysis, template fill — generated directly from your deal docs.
+                OMs, rent rolls, operating statements, appraisals. If it&apos;s a real estate doc, it most likely works.
               </p>
               <div className="grid grid-cols-4 gap-1 pt-2">
                 <div className="h-7 bg-muted rounded" />
@@ -176,8 +176,8 @@ export default function Features() {
             <div className="w-12 h-12 rounded-2xl bg-muted flex items-center justify-center">
               <Target className="w-6 h-6 text-muted-foreground" />
             </div>
-            <h3 className="text-xl font-bold text-foreground">PE & RE Focused</h3>
-            <p className="text-muted-foreground text-sm">Built for private equity and real estate professionals — not generic tools.</p>
+            <h3 className="text-xl font-bold text-foreground">Built for Real Estate</h3>
+            <p className="text-muted-foreground text-sm">Built for RE analysts. Not a generic tool that happens to work on real estate docs.</p>
           </div>
         </div>
 
@@ -196,24 +196,24 @@ export default function Features() {
                 {
                   num: "1",
                   Icon: UploadCloud,
-                  title: "Upload Your Documents",
-                  desc: "Drop PDFs or Excel files. Processing starts immediately.",
+                  title: "Upload Your OM or Rent Roll",
+                  desc: "Drop your PDF. OM, rent roll, or operating statement. Processing starts right away.",
                   color: "bg-primary/10 text-primary",
                   circleColor: "bg-primary text-primary-foreground",
                 },
                 {
                   num: "2",
                   Icon: BrainCircuit,
-                  title: "AI Extracts & Analyzes",
-                  desc: "Reads every page, extracting financials, risks, and metrics across PE and RE deals.",
+                  title: "Basilfy Extracts Key Metrics",
+                  desc: "Reads every page and pulls cap rate, NOI, occupancy, asking price, debt service, and more.",
                   color: "bg-accent/10 text-accent",
                   circleColor: "bg-accent text-accent-foreground",
                 },
                 {
                   num: "3",
                   Icon: Download,
-                  title: "Get Structured Output",
-                  desc: "Download Excel, run AI workflows, or ask questions — your data, your way.",
+                  title: "Fill Your Excel Template",
+                  desc: "Review extracted values, correct anything off, and download your filled Excel template.",
                   color: "bg-primary/10 text-primary",
                   circleColor: "bg-primary text-primary-foreground",
                 },
@@ -240,7 +240,7 @@ export default function Features() {
               <CheckCircle2 className="w-8 h-8 text-primary flex-shrink-0" />
               <div>
                 <div className="font-semibold text-foreground">Bank-Level Security</div>
-                <div className="text-sm text-muted-foreground">Your documents are encrypted and deleted after processing</div>
+                <div className="text-sm text-muted-foreground">Your documents are encrypted. Delete them anytime and they&apos;re gone immediately.</div>
               </div>
             </div>
             <div className="flex items-center gap-4">
@@ -253,8 +253,8 @@ export default function Features() {
             <div className="flex items-center gap-4">
               <Target className="w-8 h-8 text-primary flex-shrink-0" />
               <div>
-                <div className="font-semibold text-foreground">PE & RE Focused</div>
-                <div className="text-sm text-muted-foreground">Built for private equity and real estate professionals</div>
+                <div className="font-semibold text-foreground">No AI Training</div>
+                <div className="text-sm text-muted-foreground">Your documents are never used to train any AI model</div>
               </div>
             </div>
           </div>

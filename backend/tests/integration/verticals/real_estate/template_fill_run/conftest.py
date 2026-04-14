@@ -8,7 +8,7 @@ from app.auth import get_current_user
 from app.database import get_db
 from app.db_models import JobState
 from app.db_models_documents import Document
-from app.db_models_templates import ExcelTemplate, TemplateFillRun
+from app.db_models_templates import ExcelTemplate, FillRunData, TemplateFillRun
 
 
 @pytest.fixture
@@ -16,6 +16,8 @@ def mock_user():
     class MockUser:
         id = "test-user"
         org_id = "test-org"
+        tier = "beta"
+        allowed_verticals = ["real_estate"]
 
     return MockUser()
 
@@ -100,7 +102,11 @@ def document_factory(db_session, mock_user):
 @pytest.fixture
 def fill_run_factory(db_session, mock_user):
     def _create(template_id, document_id, **overrides):
-        fill_run_data = {
+        # Separate blob overrides from lean row overrides
+        blob_keys = {"field_mapping", "extracted_data", "citation_context"}
+        blob_overrides = {k: overrides.pop(k) for k in blob_keys if k in overrides}
+
+        lean_defaults = {
             "id": str(uuid.uuid4()),
             "org_id": mock_user.org_id,
             "user_id": mock_user.id,
@@ -108,15 +114,25 @@ def fill_run_factory(db_session, mock_user):
             "document_id": document_id,
             "status": "queued",
             "current_stage": "pending",
-            "field_mapping": {"pdf_fields": [], "mappings": []},
-            "extracted_data": {"llm_extracted": {}, "manual_edits": {}},
             "template_snapshot": {"name": "Template A", "schema_metadata": {}},
             "created_at": datetime.utcnow(),
         }
-        fill_run_data.update(overrides)
+        lean_defaults.update(overrides)
 
-        fill_run = TemplateFillRun(**fill_run_data)
+        fill_run = TemplateFillRun(**lean_defaults)
         db_session.add(fill_run)
+        db_session.flush()  # Assigns fill_run.id within the transaction
+
+        fill_run_data_defaults = {
+            "fill_run_id": fill_run.id,
+            "field_mapping": {"pdf_fields": [], "mappings": []},
+            "extracted_data": {"llm_extracted": {}, "manual_edits": {}},
+            "citation_context": None,
+        }
+        fill_run_data_defaults.update(blob_overrides)
+
+        fill_run_data = FillRunData(**fill_run_data_defaults)
+        db_session.add(fill_run_data)
         db_session.commit()
         db_session.refresh(fill_run)
         return fill_run

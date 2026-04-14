@@ -540,7 +540,7 @@ export default function ActiveChat({
             <textarea
               ref={textareaRef}
               value={message}
-              onChange={(e) => setMessage(e.target.value)}
+              onChange={(e) => setMessage(e.target.value.slice(0, 2000))}
               onInput={handleTextareaInput}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
@@ -557,6 +557,20 @@ export default function ActiveChat({
               rows={1}
               className="w-full bg-transparent border-none text-foreground placeholder:text-muted-foreground focus:ring-0 resize-none py-2 px-4 min-h-[32px] max-h-[72px] text-sm disabled:cursor-not-allowed outline-none"
             />
+            {message.length >= 1000 && (
+              <div className={`text-xs text-right mt-1 px-4 ${
+                message.length >= 2000 ? "text-destructive" :
+                message.length >= 1800 ? "text-amber-500" :
+                "text-muted-foreground"
+              }`}>
+                {message.length.toLocaleString()} / 2,000
+              </div>
+            )}
+            {message.length >= 2000 && (
+              <p className="text-xs text-muted-foreground mt-1 px-4">
+                For detailed multi-document analysis, consider using a Workflow instead.
+              </p>
+            )}
             <div className="flex justify-end items-center px-4 pb-1 gap-3">
               <span className="text-[11px] text-muted-foreground font-medium hidden md:inline-block">
                 Shift+Enter for new line
@@ -564,7 +578,7 @@ export default function ActiveChat({
               <button
                 type="button"
                 onClick={handleSendMessage}
-                disabled={!message.trim() || isStreaming || sessionDocIds.length === 0}
+                disabled={!message.trim() || isStreaming || sessionDocIds.length === 0 || message.length >= 2000}
                 className="bg-primary hover:bg-primary/90 text-primary-foreground h-9 w-9 rounded-xl flex items-center justify-center shadow-lg shadow-primary/20 disabled:opacity-50 disabled:cursor-not-allowed transition-all"
                 title="Send message"
               >

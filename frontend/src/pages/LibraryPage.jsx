@@ -509,7 +509,7 @@ export default function LibraryPage() {
 
   return (
     <AppLayout breadcrumbs={[{ label: "Library" }]} lockViewport>
-      <div className="flex h-full min-h-0 flex-col px-6 pb-6 pt-4">
+      <div className="flex h-full min-h-0 flex-col px-3 pb-6 pt-4 sm:px-6">
         <StatsHeader
           totalDocuments={stats.totalDocuments}
           totalCollections={stats.totalCollections}

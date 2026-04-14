@@ -45,8 +45,8 @@ class TestTemplateRepositoryCreation:
         assert fill_run.template_id == sample_template.id
         assert fill_run.document_id == sample_document.id
         assert fill_run.status == "queued"
-        assert fill_run.field_mapping == {"pdf_fields": [], "mappings": []}
-        assert fill_run.extracted_data == {}
+        assert fill_run.fill_run_data.field_mapping == {"pdf_fields": [], "mappings": []}
+        assert fill_run.fill_run_data.extracted_data == {}
 
 
 class TestTemplateRepositoryRetrieval:

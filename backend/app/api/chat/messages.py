@@ -166,6 +166,7 @@ async def chat_with_session(
             chunk_count = 0
             comparison_context_sent = False
             citation_context_sent = False
+            comparison_paused = False  # True when stream ended waiting for doc selection
 
             async for event in rag_service.chat(
                 session_id=session_id,
@@ -183,6 +184,7 @@ async def chat_with_session(
                         continue
                     elif tag == "comparison_selection":
                         yield f"event: comparison_selection\ndata: {json.dumps(data)}\n\n"
+                        comparison_paused = True
                         continue
                     else:
                         # tag == "chunk"
@@ -204,8 +206,12 @@ async def chat_with_session(
                 chunk_count += 1
                 yield f"event: chunk\ndata: {json.dumps({'chunk': chunk_data})}\n\n"
 
-            user_msg_id, assistant_msg_id = rag_service.last_saved_message_ids
-            yield f"event: done\ndata: {json.dumps({'status': 'completed', 'user_message_id': user_msg_id, 'assistant_message_id': assistant_msg_id})}\n\n"
+            # Skip done when stream paused for comparison document selection — no message
+            # was saved and no content was produced, so the frontend must not add an empty
+            # assistant turn.
+            if not comparison_paused:
+                user_msg_id, assistant_msg_id = rag_service.last_saved_message_ids
+                yield f"event: done\ndata: {json.dumps({'status': 'completed', 'user_message_id': user_msg_id, 'assistant_message_id': assistant_msg_id})}\n\n"
 
         except Exception as e:
             logger.error(

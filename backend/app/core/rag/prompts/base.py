@@ -21,6 +21,11 @@ class RagPromptSet(ABC):
 
     @property
     @abstractmethod
+    def ambient_system_instructions(self) -> str:
+        """System prompt for ambient mode: per-document answers in multi-document sessions."""
+
+    @property
+    @abstractmethod
     def system_instructions_no_chunks(self) -> str:
         """System prompt for regular chat when no relevant chunks were found."""
 

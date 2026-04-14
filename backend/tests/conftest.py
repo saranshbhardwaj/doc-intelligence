@@ -134,8 +134,8 @@ def sample_document_with_chunks(sample_document):
 
 @pytest.fixture
 def sample_fill_run(db_session, sample_template, sample_document):
-    """TemplateFillRun instance in 'queued' state."""
-    from app.db_models_templates import TemplateFillRun
+    """TemplateFillRun instance in 'queued' state, with companion FillRunData row."""
+    from app.db_models_templates import FillRunData, TemplateFillRun
     import uuid
 
     fill_run = TemplateFillRun(
@@ -146,11 +146,18 @@ def sample_fill_run(db_session, sample_template, sample_document):
         document_id=sample_document.id,
         status="queued",
         current_stage="pending",
-        field_mapping={},
-        extracted_data={},
         created_at=datetime.utcnow()
     )
     db_session.add(fill_run)
+    db_session.flush()
+
+    fill_run_data = FillRunData(
+        fill_run_id=fill_run.id,
+        field_mapping={"pdf_fields": [], "mappings": []},
+        extracted_data={},
+        citation_context=None,
+    )
+    db_session.add(fill_run_data)
     db_session.commit()
     db_session.refresh(fill_run)
     return fill_run

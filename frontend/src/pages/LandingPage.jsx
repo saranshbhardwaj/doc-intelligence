@@ -1,5 +1,5 @@
 // src/pages/LandingPage.jsx
-import { useNavigate } from "react-router-dom";
+import { useNavigate, Link } from "react-router-dom";
 import { useAppAuth } from "@/hooks/useAppAuth";
 import { useEffect, useState } from "react";
 import Hero from "../components/landing/Hero";
@@ -50,6 +50,7 @@ export default function LandingPage() {
             <a href="#features" className="hover:text-primary transition-colors">Features</a>
             <a href="#workflows" className="hover:text-primary transition-colors">Workflows</a>
             <a href="#faq" className="hover:text-primary transition-colors">FAQ</a>
+            <Link to="/about" className="hover:text-primary transition-colors">About</Link>
           </div>
 
           {/* Desktop Auth + dark mode */}
@@ -119,6 +120,13 @@ export default function LandingPage() {
             >
               FAQ
             </a>
+            <Link
+              to="/about"
+              className="text-sm text-muted-foreground hover:text-foreground py-2 transition-colors"
+              onClick={() => setMobileMenuOpen(false)}
+            >
+              About
+            </Link>
             <div className="border-t border-border pt-2 flex flex-col gap-2">
               {isLoaded && !isSignedIn && (
                 <>
@@ -175,7 +183,7 @@ export default function LandingPage() {
               Ready to 10x Your Deal Analysis?
             </h2>
             <p className="text-xl text-primary-foreground/80 mb-10">
-              Join PE and real estate analysts who are saving hours on every deal.
+              Join real estate analysts who are saving hours on every deal.
             </p>
             <div className="flex flex-col sm:flex-row items-center justify-center gap-4">
               {isSignedIn ? (
@@ -207,7 +215,7 @@ export default function LandingPage() {
                 Basilfy
               </span>
               <p className="text-sm mt-3">
-                AI-powered document intelligence for PE and real estate.
+                AI-powered document intelligence for real estate professionals.
               </p>
             </div>
 
@@ -215,34 +223,30 @@ export default function LandingPage() {
               <h3 className="font-display text-foreground font-semibold mb-4">Product</h3>
               <ul className="space-y-2 text-sm">
                 <li><a href="#features" className="hover:text-foreground transition-colors">Features</a></li>
-                <li><a href="#" className="hover:text-foreground transition-colors">Changelog</a></li>
-                <li><a href="#" className="hover:text-foreground transition-colors">Roadmap</a></li>
+                <li><a href="#faq" className="hover:text-foreground transition-colors">FAQ</a></li>
               </ul>
             </div>
 
             <div>
               <h3 className="font-display text-foreground font-semibold mb-4">Company</h3>
               <ul className="space-y-2 text-sm">
-                <li><a href="#" className="hover:text-foreground transition-colors">About</a></li>
-                <li><a href="#" className="hover:text-foreground transition-colors">Blog</a></li>
-                <li><a href="#" className="hover:text-foreground transition-colors">Careers</a></li>
-                <li><a href="#" className="hover:text-foreground transition-colors">Contact</a></li>
+                <li><Link to="/about" className="hover:text-foreground transition-colors">About</Link></li>
+                <li><a href="mailto:saranshbhardwaj@gmail.com" className="hover:text-foreground transition-colors">Contact</a></li>
               </ul>
             </div>
 
             <div>
               <h3 className="font-display text-foreground font-semibold mb-4">Legal</h3>
               <ul className="space-y-2 text-sm">
-                <li><a href="#" className="hover:text-foreground transition-colors">Privacy Policy</a></li>
-                <li><a href="#" className="hover:text-foreground transition-colors">Terms of Service</a></li>
-                <li><a href="#" className="hover:text-foreground transition-colors">Security</a></li>
+                <li><Link to="/privacy" className="hover:text-foreground transition-colors">Privacy Policy</Link></li>
+                <li><Link to="/terms" className="hover:text-foreground transition-colors">Terms of Service</Link></li>
               </ul>
             </div>
           </div>
 
           <div className="border-t border-border mt-12 pt-8 flex flex-col md:flex-row items-center justify-between gap-4 text-sm">
             <p>&copy; 2026 Basilfy. All rights reserved.</p>
-            <p className="text-xs text-muted-foreground/60">Built for high-stakes deal intelligence.</p>
+            <p className="text-xs text-muted-foreground/60">Built for real estate professionals.</p>
           </div>
         </div>
       </footer>

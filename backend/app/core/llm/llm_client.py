@@ -612,7 +612,7 @@ class LLMClient:
         """Create extraction prompt using the new comprehensive format"""
         return create_extraction_prompt(text, context)
 
-    async def stream_chat(self, prompt: str, system_prompt: str = None):
+    async def stream_chat(self, prompt: str, system_prompt: str = None, model_override: str = None):
         """
         Stream chat response from Claude (for real-time RAG chat).
 
@@ -621,20 +621,24 @@ class LLMClient:
             system_prompt: Optional stable system prompt. When provided, sent with
                            cache_control: ephemeral for Anthropic prompt caching.
                            Only pass this from rag_service; llm_service callers omit it.
+            model_override: Optional model ID to use instead of self.model. Used by
+                            cheap sub-tasks (e.g. query decomposition) that should
+                            run on a less expensive model such as claude-haiku.
 
         Yields:
             Dict with either:
             - {"type": "chunk", "text": str} for response chunks
             - {"type": "usage", "data": {...}} for final usage data
         """
+        effective_model = model_override if model_override else self.model
         logger.info(
             f"Streaming chat response (prompt: {len(prompt)} chars, system: {len(system_prompt) if system_prompt else 0} chars)",
-            extra={"prompt_length": len(prompt), "model": self.model, "has_system_prompt": bool(system_prompt)}
+            extra={"prompt_length": len(prompt), "model": effective_model, "has_system_prompt": bool(system_prompt)}
         )
 
         try:
             stream_kwargs = dict(
-                model=self.model,
+                model=effective_model,
                 max_tokens=self.max_tokens,
                 temperature=0.0,
                 messages=[{"role": "user", "content": prompt}]

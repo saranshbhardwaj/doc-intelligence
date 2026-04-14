@@ -105,17 +105,10 @@ export const createChatComparisonActions = (set, get) => ({
     // Clear selection state
     get().clearComparisonSelection();
 
-    // Add user message to chat
-    const userMessage = {
-      role: "user",
-      content: originalQuery,
-      created_at: new Date().toISOString(),
-    };
-
+    // The user message is already in the chat from the initial send — don't re-add it.
     set((state) => ({
       chat: {
         ...state.chat,
-        messages: [...state.chat.messages, userMessage],
         isStreaming: true,
         isThinking: true,
         thinkingMessage: "Thinking...",

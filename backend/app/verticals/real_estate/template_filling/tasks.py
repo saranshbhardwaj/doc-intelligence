@@ -384,7 +384,7 @@ def detect_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
     repo = TemplateRepository(db)
     tracker = JobProgressTracker(db, job_id)
 
-    fill_run = repo.get_fill_run(fill_run_id)
+    fill_run = repo.get_fill_run_with_data(fill_run_id)
     if not fill_run:
         raise ValueError(f"Fill run not found: {fill_run_id}")
     org_id = fill_run.org_id
@@ -395,8 +395,9 @@ def detect_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         logger.warning(
             f"detect_fields_task skipped — fill_run={fill_run_id} already in status={fill_run.status!r}"
         )
+        _idempotent_field_mapping = fill_run.fill_run_data.field_mapping if fill_run.fill_run_data else None
         db.close()
-        return {**payload, "detection_result": {"fields": fill_run.field_mapping.get("pdf_fields", []) if fill_run.field_mapping else [], "total_fields": 0, "categories": []}}
+        return {**payload, "detection_result": {"fields": _idempotent_field_mapping.get("pdf_fields", []) if _idempotent_field_mapping else [], "total_fields": 0, "categories": []}}
 
     try:
         logger.info(f"Detecting fields for fill run: {fill_run_id}")
@@ -682,10 +683,9 @@ def detect_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         # Use schema cell count as total_fields_detected (Excel cells to fill, not PDF extracted fields)
         total_to_detect = schema_cell_count if schema_cell_count > 0 else len(detected_fields)
 
+        repo.update_fill_run_data(fill_run_id, field_mapping=field_mapping, citation_context=citation_context)
         repo.update_fill_run(
             fill_run_id,
-            field_mapping=field_mapping,
-            citation_context=citation_context,
             total_fields_detected=total_to_detect,
             field_detection_completed=True,
             status="fields_detected",
@@ -789,14 +789,15 @@ def auto_map_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
     tracker = JobProgressTracker(db, job_id)
 
     # Idempotency guard: skip if already past auto-mapping (re-queued after worker restart)
-    _fill_run_check = repo.get_fill_run(fill_run_id)
+    _fill_run_check = repo.get_fill_run_with_data(fill_run_id)
     _AUTO_MAP_DONE_STATUSES = {"awaiting_review", "filling", "completed", "failed"}
     if _fill_run_check and _fill_run_check.status in _AUTO_MAP_DONE_STATUSES:
         logger.warning(
             f"auto_map_fields_task skipped — fill_run={fill_run_id} already in status={_fill_run_check.status!r}"
         )
         db.close()
-        return {**payload, "mapping_result": _fill_run_check.field_mapping or {}}
+        _idempotent_fm = _fill_run_check.fill_run_data.field_mapping if _fill_run_check.fill_run_data else None
+        return {**payload, "mapping_result": _idempotent_fm or {}}
 
     try:
         task_start_time = time.time()
@@ -824,7 +825,7 @@ def auto_map_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         # Load citation_context built by detect_fields_task; we'll append targeted entries to it.
         # Reuse _fill_run_check already fetched above (avoids a second DB round-trip).
         fill_run_for_ctx = _fill_run_check
-        citation_context = (fill_run_for_ctx.citation_context or {"citations": []}) if fill_run_for_ctx else {"citations": []}
+        citation_context = (fill_run_for_ctx.fill_run_data.citation_context or {"citations": []}) if (fill_run_for_ctx and fill_run_for_ctx.fill_run_data) else {"citations": []}
         # Fast lookup: source_index → bbox (for targeted_schema bbox resolution)
         _source_field_bbox: Dict[int, Dict] = {
             e["source_index"]: e["bbox"]
@@ -1309,6 +1310,9 @@ def auto_map_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         # task_start_time captures the entire auto_map_fields_task wall-clock including targeted LLM calls.
         map_elapsed_ms = int((time.time() - task_start_time) * 1000)
         metadata_params["processing_time_ms"] = payload.get("processing_time_ms", 0) + map_elapsed_ms
+        blob_params = {k: metadata_params.pop(k) for k in ["field_mapping", "citation_context", "extracted_data"] if k in metadata_params}
+        if blob_params:
+            repo.update_fill_run_data(fill_run_id, **blob_params)
         repo.update_fill_run(fill_run_id, **metadata_params)
 
         db.close()
@@ -1428,12 +1432,12 @@ def fill_excel_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
             message="Filling Excel template"
         )
 
-        # Get fill run with field mapping
-        fill_run = repo.get_fill_run(fill_run_id)
+        # Get fill run with field mapping and extracted data
+        fill_run = repo.get_fill_run_with_data(fill_run_id)
         if not fill_run:
             raise ValueError(f"Fill run not found: {fill_run_id}")
 
-        field_mapping = fill_run.field_mapping
+        field_mapping = fill_run.fill_run_data.field_mapping if fill_run.fill_run_data else {}
 
         # Get template
         template = repo.get_template(template_id)
@@ -1456,7 +1460,7 @@ def fill_excel_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         #   "llm_extracted": {field_id: {...}, ...},
         #   "manual_edits": {sheet_name: {cell_address: {...}, ...}, ...}
         # }
-        extracted_data = fill_run.extracted_data or {"llm_extracted": {}, "manual_edits": {}}
+        extracted_data = (fill_run.fill_run_data.extracted_data if fill_run.fill_run_data else {}) or {"llm_extracted": {}, "manual_edits": {}}
 
         llm_extracted = extracted_data.get("llm_extracted", {})
         manual_edits = extracted_data.get("manual_edits", {})
@@ -1613,7 +1617,8 @@ def fill_excel_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         # NOT just update_progress() which only sends "progress" event
         tracker.mark_error(
             error_stage="excel_filling",
-            error_message=str(e),
+            error_message="Failed to fill template — please try again.",
+            internal_error=str(e)[:1000],
             error_type="fill_error",
             is_retryable=False
         )

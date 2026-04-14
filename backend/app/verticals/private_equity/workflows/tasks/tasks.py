@@ -345,7 +345,7 @@ def prepare_context_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
             logger.exception("Failed to update run status after prepare_context failure", extra={"run_id": run_id})
         # Emit SSE error event so frontend stops waiting immediately
         try:
-            tracker.mark_error(error_stage="context", error_message=str(e), error_type="context_error", is_retryable=True)
+            tracker.mark_error(error_stage="context", error_message="Failed to retrieve context — please try again.", internal_error=str(e)[:1000], error_type="context_error", is_retryable=True)
         except Exception:
             logger.exception("Failed to mark job error after prepare_context failure", extra={"run_id": run_id})
         _reverse_workflow_shadow(run_id, f"context_error:{type(e).__name__}", "prepare_context")
@@ -570,7 +570,7 @@ def generate_artifact_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                     exc_info=True
                 )
                 repo.update_run_status(run_id, status="failed", error_message=f"Map-reduce error: {map_reduce_err}")
-                tracker.mark_error(error_stage="generating", error_message=str(map_reduce_err), error_type="map_reduce_error", is_retryable=True)
+                tracker.mark_error(error_stage="generating", error_message="Workflow generation failed — please try again.", internal_error=str(map_reduce_err), error_type="map_reduce_error", is_retryable=True)
                 _reverse_workflow_shadow(run_id, "map_reduce_failed", "generate_artifact")
                 return {"status": "failed", "error": "map_reduce_failed", **payload}
 
@@ -635,7 +635,7 @@ def generate_artifact_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
             except Exception as e:
                 logger.error(f"Direct generation failed: {e}", extra={"run_id": run_id})
                 repo.update_run_status(run_id, status="failed", error_message=str(e))
-                tracker.mark_error(error_stage="generating", error_message=str(e), error_type="llm_error", is_retryable=True)
+                tracker.mark_error(error_stage="generating", error_message="Workflow generation failed — please try again.", internal_error=str(e)[:1000], error_type="llm_error", is_retryable=True)
                 _reverse_workflow_shadow(run_id, "direct_generation_failed", "generate_artifact")
                 return {"status": "failed", "error": "generation_error", **payload}
         # Safety check: If all attempts failed and we have no response, fail gracefully
@@ -846,7 +846,7 @@ def generate_artifact_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         except Exception:
             logger.exception("Failed to update run status after generation failure", extra={"run_id": run_id})
         try:
-            tracker.mark_error(error_stage="generating", error_message=str(e), error_type="llm_error", is_retryable=True)
+            tracker.mark_error(error_stage="generating", error_message="Workflow generation failed — please try again.", internal_error=str(e)[:1000], error_type="llm_error", is_retryable=True)
         except Exception:
             logger.exception("Failed to mark job error after generation failure", extra={"run_id": run_id})
         _reverse_workflow_shadow(run_id, f"unhandled_exception:{type(e).__name__}", "generate_artifact")

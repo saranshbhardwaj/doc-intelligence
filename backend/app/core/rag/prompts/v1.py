@@ -18,6 +18,9 @@ class V1RagPromptSet(RagPromptSet):
             "- Some chunks span multiple pages. Their text contains embedded [Page N] markers at each "
             "page boundary. Always cite the nearest preceding [Page N] marker, not the chunk header page.\n"
             "  Example: if the header says (Page 1-7) [S1:p1] but the relevant sentence follows [Page 6], cite [S1:p6].\n"
+            "- Cite using [Sn:pN] tokens only — never write \"Source N\" or \"source N\" in your prose.\n"
+            "- Each [Sn:pN] token must reference ONE source and ONE page. Never combine multiple citations "
+            "in one bracket (e.g., never write [S5:p7, S26:p6]). Use separate tokens: [S5:p7] [S26:p6].\n"
             "- Do not cite page numbers you did not see in the source text.\n\n"
             "ANSWERING RULES:\n"
             "- Answer primarily from the document excerpts.\n"
@@ -33,6 +36,15 @@ class V1RagPromptSet(RagPromptSet):
             " comparison, or follow-up on that prior point.\n"
             "- Be concise. Use bullet points or tables when they aid clarity.\n"
             "- Do not repeat the user's question back to them.\n"
+        )
+
+    @property
+    def ambient_system_instructions(self) -> str:
+        return (
+            "When multiple documents contain relevant information, answer per document.\n"
+            "Format: **[Document name]**: [answer] [citation]\n"
+            "After per-document answers, add a one-sentence synthesis if useful.\n"
+            "Omit documents where retrieved content is not relevant — do not list every document."
         )
 
     @property
@@ -89,12 +101,11 @@ class V1RagPromptSet(RagPromptSet):
         aspects_str: str,
         chunk_context: str,
     ) -> str:
-        return f"""You are a financial analyst extracting structured facts from document chunks.
+        # NOTE: document_name, query, aspects_str, and chunk_context are intentionally
+        # NOT included here. They are passed in the user message (text parameter) instead,
+        # so this system prompt stays fully static across calls → Anthropic prompt cache hits.
+        return """You are a financial analyst extracting structured facts from document chunks.
 These facts will be used to compare this document against others — completeness and precision are critical.
-
-DOCUMENT: {document_name}
-USER QUERY: {query}
-COMPARISON FOCUS: {aspects_str}
 
 EXTRACTION RULES:
 1. Extract every fact relevant to the query and comparison focus — err on the side of more facts, not fewer.
@@ -119,15 +130,12 @@ CONFIDENCE SCORING:
 - Below 0.20: Do not include
 
 OUTPUT FORMAT (JSON only, no other text):
-{{
+{
   "document_id": "...",
-  "document_name": "{document_name}",
+  "document_name": "...",
   "facts": [
-    {{"fact": "Year-One Cap Rate is 8.11%", "source_chunk_id": "abc123", "source_page": 6, "confidence": 0.98}},
-    {{"fact": "Net Operating Income (NOI) is $450,000 annually", "source_chunk_id": "def456", "source_page": 8, "confidence": 0.95}},
-    {{"fact": "Loan-to-value ratio: not disclosed in document", "source_chunk_id": "ghi789", "source_page": 12, "confidence": 0.90}}
+    {"fact": "Year-One Cap Rate is 8.11%", "source_chunk_id": "abc123", "source_page": 6, "confidence": 0.98},
+    {"fact": "Net Operating Income (NOI) is $450,000 annually", "source_chunk_id": "def456", "source_page": 8, "confidence": 0.95},
+    {"fact": "Loan-to-value ratio: not disclosed in document", "source_chunk_id": "ghi789", "source_page": 12, "confidence": 0.90}
   ]
-}}
-
-Chunks to extract from:
-{chunk_context}"""
+}"""

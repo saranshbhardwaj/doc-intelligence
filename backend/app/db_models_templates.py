@@ -105,50 +105,6 @@ class TemplateFillRun(Base):
     # Stores: {name, description, schema_metadata}
     template_snapshot = Column(JSONB)
 
-    # Field mapping (user-editable)
-    # Structure:
-    # {
-    #   "pdf_fields": [
-    #     {
-    #       "id": "f1",
-    #       "name": "Property Name",
-    #       "type": "text",
-    #       "extracted_value": "Sunset Plaza",
-    #       "confidence": 0.95,
-    #       "source_page": 1
-    #     }
-    #   ],
-    #   "mappings": [
-    #     {
-    #       "pdf_field_id": "f1",
-    #       "excel_cell": "B2",
-    #       "excel_sheet": "Summary",
-    #       "excel_label": "Property Name",
-    #       "status": "auto_mapped",  # auto_mapped | user_edited | manual | unmapped
-    #       "confidence": 0.92
-    #     }
-    #   ]
-    # }
-    field_mapping = Column(JSONB, nullable=False, default={})
-
-    # Extracted data from PDF
-    # Structure:
-    # {
-    #   "f1": {
-    #     "value": "Sunset Plaza",
-    #     "confidence": 0.95,
-    #     "source_page": 1,
-    #     "source_text": "...Sunset Plaza is a premium...",
-    #     "user_edited": false
-    #   }
-    # }
-    extracted_data = Column(JSONB, default={})
-
-    # Pre-built citation lookup: {citations: [{source_index, field_id, page, filename, bbox}, ...]}
-    # Parallel to rag_service._build_citation_context() — built at detect_fields_task time.
-    # Frontend resolves [S{n}:p{N}] tokens → bbox for PDF highlighting without array searching.
-    citation_context = Column(JSONB, nullable=True)
-
     # Output artifact (filled Excel file)
     # Same pattern as WorkflowRun:
     # {"backend": "r2", "key": "fills/abc123.xlsx", "size": 45120}
@@ -173,6 +129,8 @@ class TemplateFillRun(Base):
     total_fields_filled = Column(Integer)
     auto_mapped_count = Column(Integer)  # How many fields were auto-mapped
     user_edited_count = Column(Integer)  # How many mappings user changed
+    user_corrected_count = Column(Integer, nullable=True)   # LLM extracted a value, user changed it
+    user_filled_blank_count = Column(Integer, nullable=True) # LLM missed it, user filled it in
 
     # Cost tracking
     cost_usd = Column(Float, default=0.0)
@@ -199,6 +157,32 @@ class TemplateFillRun(Base):
     # Relationships
     template = relationship("ExcelTemplate", back_populates="fill_runs")
     document = relationship("Document", foreign_keys=[document_id])
+    fill_run_data = relationship(
+        "FillRunData",
+        back_populates="fill_run",
+        uselist=False,
+        cascade="all, delete-orphan",
+        lazy="select",
+    )
 
     def __repr__(self):
         return f"<TemplateFillRun(id={self.id}, template_id={self.template_id}, status={self.status})>"
+
+
+class FillRunData(Base):
+    """
+    Heavy JSONB blobs for a fill run, split from template_fill_runs for list-query performance.
+    1:1 with TemplateFillRun — always created alongside it, deleted via CASCADE.
+    """
+    __tablename__ = "fill_run_data"
+
+    fill_run_id = Column(
+        String(36),
+        ForeignKey("template_fill_runs.id", ondelete="CASCADE"),
+        primary_key=True,
+    )
+    field_mapping = Column(JSONB, nullable=True)
+    extracted_data = Column(JSONB, nullable=True)
+    citation_context = Column(JSONB, nullable=True)
+
+    fill_run = relationship("TemplateFillRun", back_populates="fill_run_data")

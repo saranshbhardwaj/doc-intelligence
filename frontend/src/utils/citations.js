@@ -9,8 +9,13 @@
  * the field mapping) carries the document_index that resolves Dn → document_id.
  */
 
-/** Regex that matches canonical [S1:p5] and legacy [ref:hex:pN] citation tokens. */
-export const CITATION_REGEX = /\[S\d+:p\d+\]|\[ref:[a-f0-9]+:p\d+\]/g;
+/**
+ * Regex that matches:
+ *   [S1:p5]               — canonical single citation
+ *   [S5:p7, S26:p6]       — multi-citation (LLM sometimes emits these; parsed as separate tokens)
+ *   [ref:hex:pN]          — legacy format
+ */
+export const CITATION_REGEX = /\[S\d+:p\d+(?:,\s*S\d+:p\d+)*\]|\[ref:[a-f0-9]+:p\d+\]/g;
 
 /**
  * Remark plugin that converts [Dn:pN] citation tokens into custom `citation`
@@ -80,11 +85,18 @@ function expandTextNode(textNode) {
     if (match.index > lastIndex) {
       nodes.push({ type: "text", value: text.slice(lastIndex, match.index) });
     }
-    nodes.push({
-      type: "citation",
-      value: match[0],
-      data: { hName: "citation", hProperties: { token: match[0] } },
-    });
+    // A token may expand to multiple citations (e.g. [S5:p7, S26:p6] → two nodes)
+    const parsed = parseCitation(match[0]);
+    const tokens = parsed
+      ? parsed.map((p) => `[S${p.sourceIndex + 1}:p${p.page}]`)
+      : [match[0]];
+    for (const tok of tokens) {
+      nodes.push({
+        type: "citation",
+        value: tok,
+        data: { hName: "citation", hProperties: { token: tok } },
+      });
+    }
     lastIndex = match.index + match[0].length;
   }
 
@@ -107,23 +119,36 @@ function expandTextNode(textNode) {
  * @param {string} token
  * @returns {{ sourceIndex: number, page: number } | null}
  */
+/**
+ * Parse a citation token to structured data. Handles single and multi-citations.
+ *
+ *   [S1:p5]              → [{ sourceIndex: 0, page: 5 }]
+ *   [S5:p7, S26:p6]      → [{ sourceIndex: 4, page: 7 }, { sourceIndex: 25, page: 6 }]
+ *   [ref:a1b2c3d4:p5]    → [{ sourceIndex: 0, page: 5 }]
+ *
+ * Always returns an array. Returns null if the token cannot be parsed.
+ */
 export function parseCitation(token) {
   if (!token) return null;
 
-  // Canonical: [S{n}:p{N}]
-  const m = token.match(/\[S(\d+):p(\d+)\]/);
-  if (m) {
-    return { sourceIndex: parseInt(m[1], 10) - 1, page: parseInt(m[2], 10) };
-  }
-
-  // Legacy: [ref:{hex8}:p{N}] — old chat format stored in DB before migration
-  // We can only recover the page; source is assumed to be S1 (index 0).
+  // Legacy: [ref:{hex8}:p{N}]
   const leg = token.match(/\[ref:[a-f0-9]+:p(\d+)\]/i);
   if (leg) {
-    return { sourceIndex: 0, page: parseInt(leg[1], 10) };
+    return [{ sourceIndex: 0, page: parseInt(leg[1], 10) }];
   }
 
-  return null;
+  // Canonical: [S{n}:p{N}] — single or comma-separated multi-citation
+  const inner = token.match(/^\[(.+)\]$/);
+  if (!inner) return null;
+
+  const parts = inner[1].split(/,\s*/);
+  const results = [];
+  for (const part of parts) {
+    const m = part.trim().match(/^S(\d+):p(\d+)$/);
+    if (!m) return null; // malformed — bail out entirely
+    results.push({ sourceIndex: parseInt(m[1], 10) - 1, page: parseInt(m[2], 10) });
+  }
+  return results.length > 0 ? results : null;
 }
 
 /**
@@ -192,7 +217,11 @@ export function splitTextWithCitations(text) {
     }
     const parsed = parseCitation(match[0]);
     if (parsed) {
-      parts.push({ token: match[0], ...parsed });
+      // Expand multi-citations into individual entries
+      for (const p of parsed) {
+        const tok = `[S${p.sourceIndex + 1}:p${p.page}]`;
+        parts.push({ token: tok, ...p });
+      }
     } else {
       parts.push(match[0]);
     }

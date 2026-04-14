@@ -401,8 +401,8 @@ export default function ExcelGrid({
                             <div className={isExpanded ? "whitespace-pre-wrap" : "truncate"} style={{
                               fontWeight: excelStyle.fontWeight,
                               fontStyle: isTemplateDefault ? 'italic' : excelStyle.fontStyle,
-                              color: isTemplateDefault ? 'hsl(var(--muted-foreground))' : excelStyle.color,
-                              opacity: isTemplateDefault ? 0.6 : undefined,
+                              color: excelStyle.color ?? (isTemplateDefault ? 'hsl(var(--muted-foreground))' : undefined),
+                              opacity: isTemplateDefault && !excelStyle.backgroundColor ? 0.6 : undefined,
                             }}>
                               {displayValue || <span className="text-muted-foreground/40">—</span>}
                             </div>

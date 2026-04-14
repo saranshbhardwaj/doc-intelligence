@@ -174,7 +174,8 @@ def parse_document_for_indexing_task(self, payload: Dict[str, Any]) -> Dict[str,
     except Exception as e:
         tracker.mark_error(
             error_stage="parsing",
-            error_message=str(e),
+            error_message="Failed to parse document — please try re-uploading.",
+            internal_error=str(e)[:1000],
             error_type="parsing_error",
             is_retryable=True
         )
@@ -311,7 +312,8 @@ def chunk_document_for_indexing_task(self, payload: Dict[str, Any]) -> Dict[str,
     except Exception as e:
         tracker.mark_error(
             error_stage="chunking",
-            error_message=str(e),
+            error_message="Failed to process document — please try re-uploading.",
+            internal_error=str(e)[:1000],
             error_type="chunking_error",
             is_retryable=True
         )
@@ -409,7 +411,8 @@ def embed_chunks_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
     except Exception as e:
         tracker.mark_error(
             error_stage="embedding",
-            error_message=str(e),
+            error_message="Failed to process document — please try re-uploading.",
+            internal_error=str(e)[:1000],
             error_type="embedding_error",
             is_retryable=True
         )
@@ -589,10 +592,11 @@ def store_vectors_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         except Exception as bulk_error:
             db.rollback()
             logger.error(
-                f"Bulk insert failed: {bulk_error}",
-                extra={"document_id": document_id, "chunks_count": len(db_chunks)}
+                f"Bulk insert failed for document {document_id}: {bulk_error}",
+                extra={"document_id": document_id, "chunks_count": len(db_chunks)},
+                exc_info=True,
             )
-            raise ValueError(f"Failed to bulk insert chunks: {str(bulk_error)}")
+            raise ValueError("Failed to store document chunks in database.")
 
         # Update canonical Document status and stats
         doc_repo = DocumentRepository()
@@ -671,7 +675,8 @@ def store_vectors_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
     except Exception as e:
         tracker.mark_error(
             error_stage="storing",
-            error_message=str(e),
+            error_message="Failed to store document — please try re-uploading.",
+            internal_error=str(e)[:1000],
             error_type="storage_error",
             is_retryable=True
         )

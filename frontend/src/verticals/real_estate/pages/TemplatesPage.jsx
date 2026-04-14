@@ -931,9 +931,6 @@ function FillRunsList({
                   <TableHead className="text-xs font-bold uppercase tracking-[0.18em] text-muted-foreground">
                     Date
                   </TableHead>
-                  <TableHead className="text-xs font-bold uppercase tracking-[0.18em] text-muted-foreground">
-                    Stage
-                  </TableHead>
                   <TableHead className="text-xs font-bold uppercase tracking-[0.18em] text-muted-foreground pr-4 text-right">
                     Actions
                   </TableHead>
@@ -981,11 +978,6 @@ function FillRunsList({
                     {/* Date */}
                     <TableCell className="library-table-cell whitespace-nowrap text-sm text-muted-foreground">
                       {new Date(fillRun.created_at).toLocaleDateString()}
-                    </TableCell>
-
-                    {/* Stage */}
-                    <TableCell className="library-table-cell text-sm text-muted-foreground">
-                      {fillRun.current_stage ? fillRun.current_stage.replace(/_/g, ' ') : '—'}
                     </TableCell>
 
                     {/* Actions */}

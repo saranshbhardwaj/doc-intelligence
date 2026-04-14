@@ -40,6 +40,7 @@ from app.utils.chunk_metadata import validate_and_normalize_chunks
 from app.core.rag.chat_persistence import ChatPersistence
 from app.core.rag.comparison_flow import ComparisonChatHandler
 from app.core.rag.document_matching import DocumentMatcher
+from app.core.rag.query_decomposer import decompose_and_embed
 from app.core.rag.low_signal import is_low_signal_message, low_signal_response
 from app.core.rag.eval_contract import (
     RAG_EVAL_CONTRACT_VERSION,
@@ -65,7 +66,27 @@ import functools  # noqa: E402
 import json  # noqa: E402
 import re  # noqa: E402
 import time  # noqa: E402
+from collections import OrderedDict  # noqa: E402
 from app.services.service_locator import get_reranker  # noqa: E402
+
+# Module-level QU cache keyed by (session_id, query).
+# Stores the result of the QueryUnderstanding LLM call so the comparison
+# confirmation flow (which re-calls rag_service.chat() with the same query)
+# skips the redundant Haiku call. Bounded to 200 entries via OrderedDict LRU.
+_qu_cache: "OrderedDict[tuple, object]" = OrderedDict()
+_QU_CACHE_MAX = 200
+
+
+def _qu_cache_get(session_id: str, query: str):
+    return _qu_cache.get((session_id, query))
+
+
+def _qu_cache_put(session_id: str, query: str, understanding) -> None:
+    key = (session_id, query)
+    _qu_cache[key] = understanding
+    _qu_cache.move_to_end(key)
+    while len(_qu_cache) > _QU_CACHE_MAX:
+        _qu_cache.popitem(last=False)
 
 
 class RAGService:
@@ -248,14 +269,24 @@ class RAGService:
 
         doc_filenames = [d["filename"] for d in doc_info]
 
-        # Analyze query with LLM (cheap Haiku call)
-        # Pass recent_messages so the model can detect follow-ups and rewrite queries
+        # Analyze query with LLM (cheap Haiku call).
+        # Skip the call when the same session + query was already analyzed moments ago
+        # (e.g. comparison confirmation re-invokes chat() with the identical query).
         query_understanding_start = time.monotonic()
-        understanding = await self.query_understanding.understand(
-            query=user_message,
-            document_filenames=doc_filenames,
-            recent_messages=recent_messages if recent_messages else None,
-        )
+        cached_understanding = _qu_cache_get(session_id, user_message)
+        if cached_understanding is not None:
+            understanding = cached_understanding
+            logger.info(
+                "Query understanding cache hit — skipping LLM call",
+                extra={"session_id": session_id, "query": user_message[:50]},
+            )
+        else:
+            understanding = await self.query_understanding.understand(
+                query=user_message,
+                document_filenames=doc_filenames,
+                recent_messages=recent_messages if recent_messages else None,
+            )
+            _qu_cache_put(session_id, user_message, understanding)
         query_understanding_ms = round((time.monotonic() - query_understanding_start) * 1000, 2)
         stage_timings_ms["query_understanding"] = query_understanding_ms
         logger.info(
@@ -285,6 +316,15 @@ class RAGService:
         )
         narrow_explicit_fact_lookup = is_narrow_explicit_fact_lookup(understanding)
 
+        # For narrow fact lookups, enrich BM25 with synonym variants from QU.
+        # data_field_synonyms is the expanded list (e.g. "asking price" → 5 variants);
+        # data_fields stays tight (1-3 items) so narrow_explicit_fact_lookup is unaffected.
+        if narrow_explicit_fact_lookup and understanding.data_field_synonyms:
+            query_lower = retrieval_query.lower()
+            extra = [t for t in understanding.data_field_synonyms if t.lower() not in query_lower]
+            if extra:
+                retrieval_query = retrieval_query + " " + " ".join(extra)
+
         logger.info(
             "History and retrieval query decision",
             extra={
@@ -302,6 +342,7 @@ class RAGService:
                 "confidence": understanding.confidence,
                 "data_fields_count": len(understanding.data_fields or []),
                 "data_fields": (understanding.data_fields or [])[:5],
+                "data_field_synonyms_count": len(understanding.data_field_synonyms or []),
                 "entity_types": [e.entity_type for e in (understanding.entities or [])],
                 "narrow_explicit_fact_lookup": narrow_explicit_fact_lookup,
             }
@@ -335,11 +376,12 @@ class RAGService:
         )
 
         if should_compare and document_ids and len(document_ids) >= 2 and getattr(settings, 'comparison_enabled', True) and force_comparison is not False:
-            # ≤3 docs in session: proceed automatically
-            if len(document_ids) <= 3:
+            _max_docs = settings.comparison_max_documents
+            # ≤max_docs in session: proceed automatically
+            if len(document_ids) <= _max_docs:
                 final_doc_ids = document_ids
                 logger.debug(
-                    "Auto-proceeding with comparison (≤3 documents)",
+                    f"Auto-proceeding with comparison (≤{_max_docs} documents)",
                     extra={
                         "session_id": session_id,
                         "num_docs": len(document_ids)
@@ -347,22 +389,22 @@ class RAGService:
                 )
 
             else:
-                # >3 docs: check if user mentioned specific documents
+                # >max_docs: check if user mentioned specific documents
                 matched_ids = self.document_matcher.match_entities_to_documents(understanding.entities, doc_info)
 
-                # User mentioned 2-3 specific docs: use them directly
-                if matched_ids and len(matched_ids) >= 2 and len(matched_ids) <= 3:
+                # User mentioned 2-max_docs specific docs: use them directly
+                if matched_ids and len(matched_ids) >= 2 and len(matched_ids) <= _max_docs:
                     final_doc_ids = matched_ids
                     logger.debug(
-                        "Auto-proceeding with user-mentioned documents (2-3 docs)",
+                        f"Auto-proceeding with user-mentioned documents ({len(matched_ids)} docs)",
                         extra={
                             "session_id": session_id,
                             "num_docs": len(matched_ids)
                         }
                     )
 
-                # User mentioned >3 specific docs: ask user to select up to 3
-                elif matched_ids and len(matched_ids) > 3:
+                # User mentioned >max_docs specific docs: ask user to select up to max_docs
+                elif matched_ids and len(matched_ids) > _max_docs:
                     logger.debug(
                         f"User mentioned {len(matched_ids)} documents, requesting selection",
                         extra={
@@ -380,9 +422,9 @@ class RAGService:
                     selection_event = {
                         "type": "selection_needed",
                         "documents": selection_docs,
-                        "pre_selected": matched_ids[:3],  # Pre-select first 3
+                        "pre_selected": matched_ids[:_max_docs],  # Pre-select first max_docs
                         "original_query": user_message,
-                        "message": f"You mentioned {len(matched_ids)} documents. Please select up to 3 to compare:"
+                        "message": f"You mentioned {len(matched_ids)} documents. Please select up to {_max_docs} to compare:"
                     }
                     yield ("comparison_selection", selection_event)
                     return  # Wait for user selection
@@ -408,7 +450,7 @@ class RAGService:
                         "documents": selection_docs,
                         "pre_selected": [],  # No pre-selection
                         "original_query": user_message,
-                        "message": "Select 2-3 documents to compare:"
+                        "message": f"Select 2–{_max_docs} documents to compare:"
                     }
                     yield ("comparison_selection", selection_event)
                     return  # Wait for user selection
@@ -470,6 +512,14 @@ class RAGService:
             }
             yield ("comparison_selection", selection_event)
             return
+
+        # Determine if ambient mode applies:
+        # AMBIGUOUS scope + multiple session documents (and we didn't ask user to select)
+        is_ambient = (
+            scope_mode == ScopeMode.AMBIGUOUS.value
+            and bool(document_ids)
+            and len(document_ids) > 1
+        )
 
         scoped_doc_ids = document_ids
         did_scope_to_single_doc = False
@@ -556,16 +606,61 @@ class RAGService:
         )
         retrieval_start = time.monotonic()
 
+        # Ambient mode: query decomposition before retrieval
+        if is_ambient:
+            decomp_result = await decompose_and_embed(
+                query=understanding.reformulated_query or user_message,
+                query_understanding=understanding,
+                embedding_provider=self.embedder,
+                llm_client=self.llm_client,
+            )
+            # Use first sub-query as retrieval string (v1 — merged embedding injection is a future upgrade)
+            effective_retrieval_query = (
+                decomp_result.sub_queries[0]
+                if decomp_result.was_decomposed and decomp_result.sub_queries
+                else (understanding.reformulated_query or user_message)
+            )
+            logger.info(
+                "Ambient mode: query decomposition complete",
+                extra={
+                    "session_id": session_id,
+                    "was_decomposed": decomp_result.was_decomposed,
+                    "sub_query_count": len(decomp_result.sub_queries),
+                }
+            )
+        else:
+            effective_retrieval_query = retrieval_query
+
+        # Use wider top_k for ambient mode (broader retrieval window across all docs)
+        effective_top_k = settings.ambient_top_k if is_ambient else retrieval_candidates
+
+        # Compute QU confidence early so we can choose the right semantic floor before retrieval.
+        qu_confidence = understanding.confidence if understanding else 1.0
+        # When the reranker will be skipped (low QU confidence or ambient), use a tighter semantic
+        # floor to reject weak candidates before they reach the LLM — the reranker normally does
+        # this cleanup, so without it we need the floor to compensate.
+        reranker_will_run = (
+            not is_ambient
+            and bool(self.reranker)
+            and settings.rag_use_reranker_chat
+            and qu_confidence >= settings.rag_reranker_skip_confidence_threshold
+        )
+        semantic_floor = (
+            settings.rag_chat_semantic_similarity_floor
+            if reranker_will_run
+            else settings.rag_chat_semantic_similarity_floor_no_reranker
+        )
+
         # Use hybrid retriever (combines semantic + keyword search)
         # Use reformulated query for better keyword matching, but pass understanding for HyDE
         # Retrieve more candidates for potential re-ranking
         hybrid_results = self.hybrid_retriever.retrieve(
-            query=retrieval_query,  # rewritten (follow-up) or reformulated query
+            query=effective_retrieval_query,
             collection_id=collection_id,
-            top_k=retrieval_candidates,
+            top_k=effective_top_k,
             document_ids=scoped_doc_ids,  # May be narrowed to a single matched document
             query_understanding=understanding,  # For HyDE enhancement
-            min_semantic_similarity=settings.rag_chat_semantic_similarity_floor
+            min_semantic_similarity=semantic_floor
         )
 
         doc_profiles = self._build_document_profiles(doc_info)
@@ -600,12 +695,58 @@ class RAGService:
         # ------------------------------------------------------------------
         # STEP 2: Re-ranking (optional, cross-encoder based)
         rerank_min_candidates = max(1, settings.rag_reranker_min_candidates_chat)
+        # Ambient mode uses filter_noise instead of rerank; exclude it from the standard path.
+        # Also skip when QU confidence is low — reranking on an uncertain query signal degrades ranking.
+        # (qu_confidence computed above before retrieval to pick the right semantic floor)
         should_rerank = (
-            bool(self.reranker)
-            and settings.rag_use_reranker_chat
+            reranker_will_run
             and len(hybrid_results) >= rerank_min_candidates
         )
-        if should_rerank:
+        if (
+            not should_rerank
+            and not is_ambient
+            and bool(self.reranker)
+            and qu_confidence < settings.rag_reranker_skip_confidence_threshold
+        ):
+            logger.info(
+                "Skipping reranker: low QU confidence; tighter semantic floor applied",
+                extra={
+                    "session_id": session_id,
+                    "confidence": qu_confidence,
+                    "semantic_floor": semantic_floor,
+                },
+            )
+        if is_ambient and self.reranker and hybrid_results:
+            # Ambient mode: noise filtering instead of top-N reranking.
+            # Keep all chunks that score above the noise threshold so every
+            # document in the session has a chance to contribute context.
+            rerank_start = time.monotonic()
+            relevant_chunks = await asyncio.get_running_loop().run_in_executor(
+                None,
+                functools.partial(
+                    self.reranker.filter_noise,
+                    query=effective_retrieval_query,
+                    chunks=hybrid_results,
+                    threshold=settings.rag_reranker_ambient_noise_threshold,
+                )
+            )
+            rerank_ms = round((time.monotonic() - rerank_start) * 1000, 2)
+            stage_timings_ms["rerank"] = rerank_ms
+            logger.info(
+                f"Ambient noise filtering complete: {len(relevant_chunks)} chunks passed threshold",
+                extra={
+                    "session_id": session_id,
+                    "threshold": settings.rag_reranker_ambient_noise_threshold,
+                    "candidates": len(hybrid_results),
+                    "rerank_ms": rerank_ms,
+                }
+            )
+        elif is_ambient:
+            logger.warning(
+                "Ambient mode active but no reranker available — falling back to standard top-k truncation"
+            )
+            # execution falls through to standard top-k truncation below
+        elif should_rerank:
             logger.info(
                 f"Starting re-ranking of {len(hybrid_results)} candidates",
                 extra={"session_id": session_id}
@@ -834,13 +975,23 @@ class RAGService:
         # ------------------------------------------------------------------
         # STEP 4: Build prompt (split for Anthropic prompt caching)
         prompt_start = time.monotonic()
-        system_prompt, user_content = self.prompt_builder.build_split(
-            user_message=user_message,
-            relevant_chunks=relevant_chunks,
-            recent_messages=recent_messages,
-            summary_text=summary_text,
-            include_history=include_history,
-        )
+        if is_ambient:
+            system_prompt, user_content = self.prompt_builder.build_ambient_split(
+                user_message=user_message,
+                relevant_chunks=relevant_chunks,
+                recent_messages=recent_messages,
+                summary_text=summary_text,
+                doc_id_to_index=None,
+                include_history=include_history,
+            )
+        else:
+            system_prompt, user_content = self.prompt_builder.build_split(
+                user_message=user_message,
+                relevant_chunks=relevant_chunks,
+                recent_messages=recent_messages,
+                summary_text=summary_text,
+                include_history=include_history,
+            )
         stage_timings_ms["prompt_build"] = round((time.monotonic() - prompt_start) * 1000, 2)
         logger.info(
             "Prompt built",

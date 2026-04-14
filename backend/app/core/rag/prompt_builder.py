@@ -85,7 +85,8 @@ class PromptBuilder:
 
             # Source index is the chunk's position (1-based)
             citation_hint = f"[S{i}:p{citation_page}]"
-            source_info = f"Source {i}: {doc_id} (Page {page_label}) {citation_hint}"
+            doc_label = metadata.get("document_filename") or doc_id
+            source_info = f"{citation_hint} {doc_label} (Page {page_label})"
             if chunk.get('section_heading'):
                 source_info += f" - {chunk['section_heading']}"
             context_sections.append(f"{source_info}\n{chunk['text']}\n")
@@ -116,6 +117,48 @@ class PromptBuilder:
             f"{context}\n\n---\n\n"
             f"USER QUESTION: {user_message}\n\nANSWER:" )
 
+    def _build_split_with_instructions(
+        self,
+        instructions_with_chunks: str,
+        user_message: str,
+        relevant_chunks: List[Dict[str, Any]],
+        recent_messages: List[Dict[str, Any]],
+        summary_text: Optional[str],
+        doc_id_to_index: Optional[Dict[str, int]],
+        include_history: bool,
+    ) -> tuple:
+        """Shared implementation for build_split() and build_ambient_split()."""
+        instructions = (
+            instructions_with_chunks
+            if relevant_chunks
+            else self._prompts.system_instructions_no_chunks
+        )
+        system_parts = [instructions]
+        if include_history and summary_text:
+            system_parts.append(f"\n=== CONVERSATION SUMMARY ===\n{summary_text.strip()}")
+        system_prompt = "\n".join(system_parts)
+
+        recent_section = ""
+        if include_history and recent_messages:
+            lines = [f"{m['role'].title()}: {m['content']}" for m in recent_messages]
+            recent_section = "=== RECENT MESSAGES ===\n" + "\n".join(lines) + "\n\n"
+
+        if relevant_chunks:
+            context = self._format_chunks(relevant_chunks, doc_id_to_index=doc_id_to_index)
+            user_content = (
+                f"{recent_section}"
+                f"DOCUMENT EXCERPTS:\n\n{context}\n\n---\n\n"
+                f"USER QUESTION: {user_message}\n\nANSWER:"
+            )
+        else:
+            user_content = (
+                f"{recent_section}"
+                "DOCUMENT EXCERPTS:\n\n[No relevant document excerpts found for this query]\n\n---\n\n"
+                f"USER QUESTION: {user_message}\n\nANSWER:"
+            )
+
+        return system_prompt, user_content
+
     def build_split(
         self,
         user_message: str,
@@ -144,38 +187,41 @@ class PromptBuilder:
         When include_history=False (standalone questions), the system prompt contains
         only the instructions — identical across ALL sessions → maximum cache hit rate.
         """
-        # --- System prompt (cached) ---
-        instructions = (
-            self._prompts.system_instructions_with_chunks
-            if relevant_chunks
-            else self._prompts.system_instructions_no_chunks
+        return self._build_split_with_instructions(
+            instructions_with_chunks=self._prompts.system_instructions_with_chunks,
+            user_message=user_message,
+            relevant_chunks=relevant_chunks,
+            recent_messages=recent_messages,
+            summary_text=summary_text,
+            doc_id_to_index=doc_id_to_index,
+            include_history=include_history,
         )
-        system_parts = [instructions]
-        if include_history and summary_text:
-            system_parts.append(f"\n=== CONVERSATION SUMMARY ===\n{summary_text.strip()}")
-        system_prompt = "\n".join(system_parts)
 
-        # --- User content (dynamic, not cached) ---
-        recent_section = ""
-        if include_history and recent_messages:
-            lines = [f"{m['role'].title()}: {m['content']}" for m in recent_messages]
-            recent_section = "=== RECENT MESSAGES ===\n" + "\n".join(lines) + "\n\n"
+    def build_ambient_split(
+        self,
+        user_message: str,
+        relevant_chunks: List[Dict[str, Any]],
+        recent_messages: List[Dict[str, Any]],
+        summary_text: Optional[str] = None,
+        doc_id_to_index: Optional[Dict[str, int]] = None,
+        include_history: bool = True,
+    ) -> tuple:
+        """
+        Return (system_prompt, user_content) for ambient multi-document mode.
 
-        if relevant_chunks:
-            context = self._format_chunks(relevant_chunks, doc_id_to_index=doc_id_to_index)
-            user_content = (
-                f"{recent_section}"
-                f"DOCUMENT EXCERPTS:\n\n{context}\n\n---\n\n"
-                f"USER QUESTION: {user_message}\n\nANSWER:"
-            )
-        else:
-            user_content = (
-                f"{recent_section}"
-                "DOCUMENT EXCERPTS:\n\n[No relevant document excerpts found for this query]\n\n---\n\n"
-                f"USER QUESTION: {user_message}\n\nANSWER:"
-            )
-
-        return system_prompt, user_content
+        Same structure as build_split() but uses ambient_system_instructions,
+        which instructs the LLM to answer per-document rather than producing
+        a single merged answer.
+        """
+        return self._build_split_with_instructions(
+            instructions_with_chunks=self._prompts.ambient_system_instructions,
+            user_message=user_message,
+            relevant_chunks=relevant_chunks,
+            recent_messages=recent_messages,
+            summary_text=summary_text,
+            doc_id_to_index=doc_id_to_index,
+            include_history=include_history,
+        )
 
     def build_comparison_prompt(
         self,
