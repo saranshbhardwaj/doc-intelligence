@@ -179,6 +179,43 @@ class UpdateFillRunRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=255)
 
 
+# ==================== Helper Functions ====================
+
+
+def _compute_correction_counts(extracted_data: dict) -> dict:
+    """
+    Compute user correction counts from a flat extracted_data dict.
+
+    Counts:
+    - user_corrected_count: user_edited=True, 'original_value' key present, value is not None
+    - user_filled_blank_count: user_edited=True, 'original_value' key present, value is None
+    - user_edited_count: all fields where user_edited=True (includes legacy edits without original_value)
+    """
+    user_corrected = 0
+    user_filled_blank = 0
+    user_edited_total = 0
+
+    for key, data in extracted_data.items():
+        if key == "manual_edits":
+            continue
+        if not isinstance(data, dict):
+            continue
+        if not data.get("user_edited"):
+            continue
+        user_edited_total += 1
+        if "original_value" in data:
+            if data["original_value"] is not None:
+                user_corrected += 1
+            else:
+                user_filled_blank += 1
+
+    return {
+        "user_corrected_count": user_corrected,
+        "user_filled_blank_count": user_filled_blank,
+        "user_edited_count": user_edited_total,
+    }
+
+
 # ==================== Template Management Endpoints ====================
 
 
@@ -996,7 +1033,20 @@ async def update_extracted_data(
         # Write blob separately from lean metadata
         repo.update_fill_run_data(fill_run_id, extracted_data=extracted_data)
 
-        lean_updates = {"total_fields_filled": total_fields}
+        # Compute correction counts for analytics
+        flat_fields = extracted_data.get("llm_extracted", extracted_data)
+        # manual_edits (raw cell overrides by sheet+cell address) are excluded intentionally —
+        # correction counts track LLM field-level extraction quality, not direct cell edits.
+        counts = _compute_correction_counts(flat_fields)
+
+        lean_updates = {
+            "total_fields_filled": total_fields,
+            "user_edited_count": counts["user_edited_count"],
+            # user_corrected_count and user_filled_blank_count columns added in migration
+            # r5s6t7u8v9w0 — wired here after Task 3
+            "user_corrected_count": counts["user_corrected_count"],
+            "user_filled_blank_count": counts["user_filled_blank_count"],
+        }
 
         # If fill run is already completed, reset to awaiting_review
         # This allows user to regenerate Excel with updated field values

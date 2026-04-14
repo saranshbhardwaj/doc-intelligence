@@ -10,6 +10,18 @@ import { ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/
 import { Area, AreaChart, CartesianGrid, XAxis, YAxis } from "recharts";
 import { Skeleton } from "@/components/ui/skeleton";
 import { BarChart3 } from "lucide-react";
+import { useEffect, useState } from "react";
+
+function useIsMobile(breakpoint = 640) {
+  const [isMobile, setIsMobile] = useState(() => window.innerWidth < breakpoint);
+  useEffect(() => {
+    const mq = window.matchMedia(`(max-width: ${breakpoint - 1}px)`);
+    const handler = (e) => setIsMobile(e.matches);
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
+  }, [breakpoint]);
+  return isMobile;
+}
 
 const chartConfig = {
   chat_messages: {
@@ -31,6 +43,7 @@ const chartConfig = {
 };
 
 export default function ActivityChart({ data, loading, hasPE = true, hasRE = true }) {
+  const isMobile = useIsMobile();
   if (loading) {
     return (
       <Card>
@@ -74,7 +87,7 @@ export default function ActivityChart({ data, loading, hasPE = true, hasRE = tru
       <CardHeader>
         <CardTitle>Activity Over Time</CardTitle>
         <CardDescription>
-          Daily activity —{" "}
+          Daily activity:{" "}
           {[
             "chat messages",
             hasRE && "template fills",
@@ -84,8 +97,8 @@ export default function ActivityChart({ data, loading, hasPE = true, hasRE = tru
         </CardDescription>
       </CardHeader>
       <CardContent>
-        <ChartContainer config={chartConfig} className="h-[240px] sm:h-[300px]">
-          <AreaChart data={data} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+        <ChartContainer config={chartConfig} className="h-[240px] sm:h-[300px] overflow-hidden">
+          <AreaChart data={data} margin={{ top: 10, right: 10, left: isMobile ? -20 : 0, bottom: 0 }}>
             <defs>
               <linearGradient id="fillChat" x1="0" y1="0" x2="0" y2="1">
                 <stop offset="5%" stopColor="hsl(var(--primary))" stopOpacity={0.3} />
@@ -114,7 +127,13 @@ export default function ActivityChart({ data, loading, hasPE = true, hasRE = tru
               tickLine={false}
               axisLine={false}
             />
-            <YAxis className="text-[10px] sm:text-xs" tickLine={false} axisLine={false} />
+            <YAxis
+              className="text-[10px]"
+              tickLine={false}
+              axisLine={false}
+              width={isMobile ? 20 : 32}
+              tickCount={isMobile ? 3 : 5}
+            />
             <ChartTooltip content={<ChartTooltipContent />} />
             <Area
               type="monotone"

@@ -351,27 +351,32 @@ export default function PDFViewer({
                 Number.isFinite(Number(highlightBbox.x1)) &&
                 Number.isFinite(Number(highlightBbox.y1));
               return (
-                <div key={`page_${currentPage}`} data-page-number={currentPage} className="mb-4 relative">
-                  <Page
-                    pageNumber={currentPage}
-                    width={renderedPageWidth}
-                    renderTextLayer={true}
-                    renderAnnotationLayer={true}
-                    onMouseUp={handleTextSelection}
-                    onLoadSuccess={(page) => onPageLoadSuccess(currentPage, page)}
-                    className="shadow-md bg-card"
-                  />
-
-                  {/* Highlight overlay - show on correct page */}
-                  {hasRenderableBbox && highlightBbox.page === currentPage && pageSize?.width && pageSize?.height && (
-                    <HighlightOverlay
-                      bbox={highlightBbox}
-                      pageWidth={pageSize.width}
-                      pageHeight={pageSize.height}
-                      scale={scale}
-                      onClick={handleHighlightClick}
+                <div key={`page_${currentPage}`} data-page-number={currentPage} className="mb-4">
+                  {/* Positioning context for overlay must be scoped to the canvas only,
+                      not the label below — otherwise % offsets are calculated against
+                      a taller container and the highlight drifts downward. */}
+                  <div className="relative">
+                    <Page
+                      pageNumber={currentPage}
+                      width={renderedPageWidth}
+                      renderTextLayer={true}
+                      renderAnnotationLayer={true}
+                      onMouseUp={handleTextSelection}
+                      onLoadSuccess={(page) => onPageLoadSuccess(currentPage, page)}
+                      className="shadow-md bg-card"
                     />
-                  )}
+
+                    {/* Highlight overlay - show on correct page */}
+                    {hasRenderableBbox && highlightBbox.page === currentPage && pageSize?.width && pageSize?.height && (
+                      <HighlightOverlay
+                        bbox={highlightBbox}
+                        pageWidth={pageSize.width}
+                        pageHeight={pageSize.height}
+                        scale={scale}
+                        onClick={handleHighlightClick}
+                      />
+                    )}
+                  </div>
 
                   {/* Page number label */}
                   <div className="text-center text-xs text-muted-foreground mt-2">

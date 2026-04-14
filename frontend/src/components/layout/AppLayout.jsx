@@ -416,17 +416,19 @@ export default function AppLayout({ children, lockViewport = false, headerLeft =
                 >
                   Real Estate
                 </Link>
-                <Link
-                  to="/app/pe"
-                  onClick={() => setMobileNavOpen(false)}
-                  className={`block px-3 py-2 rounded-lg text-sm transition-colors ${
-                    currentVertical === "pe"
-                      ? "bg-primary/10 text-primary"
-                      : "text-muted-foreground hover:bg-popover"
-                  }`}
-                >
-                  Private Equity
-                </Link>
+                {hasPE && (
+                  <Link
+                    to="/app/pe"
+                    onClick={() => setMobileNavOpen(false)}
+                    className={`block px-3 py-2 rounded-lg text-sm transition-colors ${
+                      currentVertical === "pe"
+                        ? "bg-primary/10 text-primary"
+                        : "text-muted-foreground hover:bg-popover"
+                    }`}
+                  >
+                    Private Equity
+                  </Link>
+                )}
               </div>
             </div>
           </div>

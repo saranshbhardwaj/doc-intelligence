@@ -7,19 +7,24 @@ export default function FAQ() {
 
   const faqs = [
     {
-      question: "What file formats do you support?",
+      question: "What document types does Basilfy support?",
       answer:
-        "We support text-based PDFs, scanned PDFs, and Word documents. For Excel template fill workflows, we support .xlsx files.",
+        "Basilfy supports offering memoranda, rent rolls, operating statements, and property appraisals in PDF and Word (.docx) format. For template fill, we support .xlsx Excel files.",
+    },
+    {
+      question: "How does template fill work?",
+      answer:
+        "Upload your PDF and pick your Excel template. Basilfy goes through the document and fills in the cells: cap rate, NOI, occupancy, asking price, debt service. You review each value with its source citation, fix anything off, and download.",
     },
     {
       question: "How accurate is the extraction?",
       answer:
-        "We achieve 95%+ accuracy on standard deal documents. Every extracted field includes a citation back to the source page and a confidence score for any inferred values. So you can verify exactly where the data came from. We always recommend reviewing before critical deal decisions.",
+        "We achieve 95%+ accuracy on standard deal documents. Every extracted field includes a citation back to the source page and a confidence score. We always recommend reviewing before using in deal decisions.",
     },
     {
-      question: "Is my data secure? What happens to my documents?",
+      question: "Is my data secure? Are my documents used for AI training?",
       answer:
-        "Your data security is our top priority. All uploads are encrypted in transit and at rest. Your documents are processed and then deleted from our servers after 30 days. We never share your documents with third parties, and all processing is confidential.",
+        "All uploads are encrypted in transit and at rest. Your documents are never used to train any AI model. Not ours, not anyone else's. When you delete a document, it's gone immediately.",
     },
     {
       question: "How long does processing take?",
@@ -27,24 +32,14 @@ export default function FAQ() {
         "Most documents (40-80 pages) are processed in 1-6 minutes. You'll see real-time progress updates while your document is being analyzed.",
     },
     {
-      question: "What data do you extract from deal documents?",
+      question: "What Excel templates are supported?",
       answer:
-        "For PE deals: company overview, financials (revenue, EBITDA, margins, FCF), balance sheet, valuation multiples, capital structure, customer metrics, management team, risks, and strategic rationale. For real estate: NOI, cap rates, occupancy, rent rolls, lease terms, operating expenses, and market comps. All data is delivered in structured Excel format.",
-    },
-    {
-      question: "Do you support real estate documents like rent rolls and offering memoranda?",
-      answer:
-        "Yes! Basilfy supports real estate document types including offering memoranda, rent rolls, operating statements, property appraisals, and market reports. Our RE workflows extract NOI, cap rates, occupancy, lease terms, and more, and can auto-populate your Excel underwriting templates.",
-    },
-    {
-      question: "Do you support languages other than English?",
-      answer:
-        "Currently, we only support English-language documents. Support for other languages is on our roadmap.",
+        "Any standard .xlsx template works. You define which cells map to which fields (cap rate, NOI, etc.) in the template schema, and Basilfy fills them automatically. Contact us to help set up your template.",
     },
     {
       question: "What if the extraction has errors?",
       answer:
-        "If you find inaccuracies, please use the feedback form on the results page. We review all feedback and continuously improve our AI models. For critical errors, contact us at saranshbhardwaj@gmail.com and we'll re-process your document manually.",
+        "Every extracted value shows its source citation so you can verify it. You can override any value before filling. If you find persistent inaccuracies, use the feedback form or contact us at saranshbhardwaj@gmail.com and we'll improve the extraction for your document type.",
     },
   ];
 

@@ -129,6 +129,8 @@ class TemplateFillRun(Base):
     total_fields_filled = Column(Integer)
     auto_mapped_count = Column(Integer)  # How many fields were auto-mapped
     user_edited_count = Column(Integer)  # How many mappings user changed
+    user_corrected_count = Column(Integer, nullable=True)   # LLM extracted a value, user changed it
+    user_filled_blank_count = Column(Integer, nullable=True) # LLM missed it, user filled it in
 
     # Cost tracking
     cost_usd = Column(Float, default=0.0)

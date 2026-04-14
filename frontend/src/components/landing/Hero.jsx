@@ -63,22 +63,23 @@ export default function Hero({ onGetStarted }) {
           {/* Badge */}
           <div className="inline-flex items-center gap-2 px-4 py-2 rounded-full bg-primary/10 text-primary border border-primary/20 text-sm font-medium mb-8">
             <Zap className="w-4 h-4" />
-            AI-Powered Document Intelligence
+            Now in Closed Beta
           </div>
 
           {/* Main heading */}
           <h1 className="font-display text-5xl sm:text-6xl lg:text-7xl font-extrabold text-foreground mb-6 leading-tight">
-            AI-Powered Intelligence for
+            Turn Offering Memorandums
             <br className="hidden sm:block" />
             <span className="bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
-              {" "}PE & Real Estate
+              {" "}into Excel in Minutes
             </span>
           </h1>
 
           {/* Subheading */}
           <p className="text-xl sm:text-2xl text-muted-foreground mb-10 max-w-3xl mx-auto leading-relaxed">
-            Stop spending hours on manual document review. Extract structured
-            data, run AI workflows, and generate deal documents — in minutes.
+            Upload your OM or rent roll. Basilfy extracts cap rates, NOI, occupancy,
+            and asking price. It fills your Excel template automatically.
+            Review, fix anything off, and move on.
           </p>
 
           {/* CTAs */}
