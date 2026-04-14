@@ -48,6 +48,9 @@ next-env.d.ts
 __pycache__/
 *.py[cod]
 venv/
+
+# Local tool installations (e.g. pip --user installs inside container mounts)
+backend/.local/
 .venv/
 
 # Node
