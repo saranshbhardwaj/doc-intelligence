@@ -37,6 +37,14 @@ def _build_database_urls(raw_url: str) -> tuple[str, str]:
 
     sync_url  = base.replace("postgresql://", "postgresql+psycopg://",  1)
     async_url = base.replace("postgresql://", "postgresql+asyncpg://", 1)
+
+    # Append prepare_threshold=0 to the sync URL query string so psycopg3
+    # disables prepared statements even when connect_args is ignored (e.g. when
+    # the URL is passed through an external pool or middleware on Railway).
+    separator = "&" if "?" in sync_url else "?"
+    if "prepare_threshold" not in sync_url:
+        sync_url = f"{sync_url}{separator}prepare_threshold=0"
+
     return sync_url, async_url
 
 
