@@ -19,8 +19,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "../../backend"))
 
 def call_api(prompt, options, context):
     import anthropic
-    from app.config import settings
-
     vars_ = context.get("vars", {})
     system_prompt = vars_.get("system_prompt", "")
     user_message = vars_.get("user_message", "")
@@ -28,13 +26,20 @@ def call_api(prompt, options, context):
     if not system_prompt or not user_message:
         return {"error": "Missing system_prompt or user_message in test vars"}
 
-    client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    model = os.environ.get("EVAL_TEMPLATE_MODEL", "claude-haiku-4-5-20251001")
+    max_tokens = int(os.environ.get("EVAL_TEMPLATE_MAX_TOKENS", "16000"))
+
+    if not api_key:
+        return {"error": "ANTHROPIC_API_KEY not set in evals/.env"}
+
+    client = anthropic.Anthropic(api_key=api_key)
 
     try:
         # Streaming required by Anthropic API when max_tokens is large (>~21k)
         with client.messages.stream(
-            model=settings.synthesis_llm_model,
-            max_tokens=settings.synthesis_llm_max_tokens,
+            model=model,
+            max_tokens=max_tokens,
             temperature=0.0,
             system=[{"type": "text", "text": system_prompt}],
             messages=[{"role": "user", "content": user_message}],

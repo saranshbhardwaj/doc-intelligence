@@ -1,0 +1,15 @@
+{
+  "_comment": "Maps user questions (case-insensitive) to expected substrings in the RAG answer.",
+  "_comment2": "Used by export_eval_dataset.py --annotations to inject Tier-3 value assertions.",
+  "_comment3": "Substring match only — partial values are fine. Leave empty to skip Tier-3 for that question.",
+
+  "what is the asking price for tulsa storage unit?": "2,500,000",
+  "what is the cap rate for lane prairie storage?": "8.49",
+  "what is the address of lane prairie storage?": "Joshua, TX",
+  "what is the 2024 property tax for point blank portfolio?": "15,275",
+  "what is the lot size and median income for tulsa storage unit?": "59,300",
+
+  "compare the cap rates between lane prairie storage and tulsa storage. which is a better investment?": "8.11",
+  "compare the noi and gross potential rent between lane prairie and tulsa storage.": "202,790",
+  "what are the occupancy rates at lane prairie vs tulsa storage? which has more upside?": "92"
+}
