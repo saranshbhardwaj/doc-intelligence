@@ -47,8 +47,10 @@ def _extract_context_from_system_prompt(system_prompt: str) -> str:
 
 
 def call_api(prompt, options, context):
-    import anthropic
-    from app.config import settings
+    try:
+        import anthropic
+    except Exception as exc:
+        return {"error": f"import anthropic failed: {exc}"}
 
     vars_ = context.get("vars", {})
     system_prompt = vars_.get("system_prompt", "")
@@ -64,12 +66,21 @@ def call_api(prompt, options, context):
     if not context_text:
         context_text = _extract_context_from_system_prompt(system_prompt)
 
-    client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+    # Read directly from env vars — avoids pulling in app.config which requires
+    # the full backend env (Supabase URL, Redis, etc.) to be present.
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    model = os.environ.get("EVAL_RAG_MODEL", "claude-haiku-4-5-20251001")
+    max_tokens = int(os.environ.get("EVAL_RAG_MAX_TOKENS", "4096"))
+
+    if not api_key:
+        return {"error": "ANTHROPIC_API_KEY not set in evals/.env"}
+
+    client = anthropic.Anthropic(api_key=api_key)
 
     try:
         with client.messages.stream(
-            model=settings.synthesis_llm_model,
-            max_tokens=settings.synthesis_llm_max_tokens,
+            model=model,
+            max_tokens=max_tokens,
             temperature=0.0,
             system=[{"type": "text", "text": system_prompt}],
             messages=[{"role": "user", "content": user_message}],

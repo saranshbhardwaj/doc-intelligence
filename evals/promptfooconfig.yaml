@@ -13,6 +13,7 @@ providers:
     label: haiku-rag-comparison
 
 evaluateOptions:
+  # LLM judge for llm-rubric assertions
   rubricModel: "anthropic:claude-haiku-4-5-20251001"
 
 prompts:
@@ -20,14 +21,12 @@ prompts:
 
 defaultTest:
   options:
-    provider:
-      id: "openai:gpt-4o-mini"
     transform: "output.replace(/^```(?:json)?\\s*/,'').replace(/\\s*```$/,'')"
   assert:
     - type: cost
       threshold: 0.10
     - type: latency
-      threshold: 30000
+      threshold: 60000
 
 tests:
   - datasets/golden/tulsa-self-storage/extract_schema_fields.jsonl

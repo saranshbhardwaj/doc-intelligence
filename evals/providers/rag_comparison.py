@@ -57,8 +57,6 @@ def _extract_context_from_comparison_prompt(prompt_text: str) -> str:
 
 def call_api(prompt, options, context):
     import anthropic
-    from app.config import settings
-
     vars_ = context.get("vars", {})
     # In comparison mode, the full prompt (instructions + paired chunks) is stored
     # as system_prompt. We send it as the user message to match stream_chat(prompt).
@@ -69,14 +67,21 @@ def call_api(prompt, options, context):
 
     context_text = _extract_context_from_comparison_prompt(full_prompt) or vars_.get("context", "").strip()
 
-    client = anthropic.Anthropic(api_key=settings.anthropic_api_key)
+    api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+    model = os.environ.get("EVAL_RAG_MODEL", "claude-haiku-4-5-20251001")
+    max_tokens = int(os.environ.get("EVAL_RAG_MAX_TOKENS", "4096"))
+
+    if not api_key:
+        return {"error": "ANTHROPIC_API_KEY not set in evals/.env"}
+
+    client = anthropic.Anthropic(api_key=api_key)
 
     try:
         # Send the full prompt as user content — no system_prompt split
         # (matches production: comparison_flow.py → llm_client.stream_chat(prompt))
         with client.messages.stream(
-            model=settings.synthesis_llm_model,
-            max_tokens=settings.synthesis_llm_max_tokens,
+            model=model,
+            max_tokens=max_tokens,
             temperature=0.0,
             messages=[{"role": "user", "content": full_prompt}],
         ) as stream:
