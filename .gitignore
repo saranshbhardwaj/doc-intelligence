@@ -89,3 +89,4 @@ backend/data/
 backend/.cache
 backend/.local/
 backend/tests/fixtures/excel/Synthesis - Tulsa Storage OK - Copy.xlsx
+DESIGN.md

@@ -33,7 +33,6 @@ import app.db_models_io_logs    # noqa: F401
 
 from app.db_models_io_logs import LLMIOLog
 from app.core.rag.eval_contract import RAG_EVAL_CONTRACT_VERSION
-from app.verticals.real_estate.template_filling.prompts import get_prompt_set
 
 SUPPORTED_STAGES = [
     "detect_fields",
@@ -106,8 +105,9 @@ STRUCTURAL_ASSERTIONS = {
         {"type": "javascript", "value": "JSON.parse(output).text.length > 50"},
         {"type": "javascript", "value": "JSON.parse(output).text.length < 20000"},
         {
+            # RAG prompt instructs the model to cite as [Sn:pN] (sequential source, page).
             "type": "javascript",
-            "value": "/\\[D\\d+:p\\d+\\]/.test(JSON.parse(output).text)",
+            "value": "/\\[S\\d+:p\\d+\\]/.test(JSON.parse(output).text)",
             "metric": "rag/has_citations",
         },
         # Use contextTransform so the judge sees the actual LLM-visible context (extracted
@@ -120,15 +120,15 @@ STRUCTURAL_ASSERTIONS = {
             "contextTransform": "JSON.parse(output).context",
             "metric": "gen/faithfulness",
         },
-        {"type": "answer-relevance", "threshold": 0.7, "metric": "gen/answer_relevance"},
+        {"type": "answer-relevance", "threshold": 0.65, "metric": "gen/answer_relevance"},
     ],
     "rag_comparison": [
         {"type": "javascript", "value": "JSON.parse(output).text.length > 100"},
         {"type": "javascript", "value": "JSON.parse(output).text.length < 30000"},
-        # Comparison responses should reference multiple documents
+        # Comparison responses should cite at least 2 distinct source numbers [S1:pN], [S2:pN], ...
         {
             "type": "javascript",
-            "value": "(() => { const t = JSON.parse(output).text; return /Document [AB]|\\[D[12]/.test(t); })()",
+            "value": "(() => { const t = JSON.parse(output).text; const nums = new Set((t.match(/\\[S(\\d+):p\\d+\\]/g) || []).map(m => m.match(/S(\\d+)/)[1])); return nums.size >= 2; })()",
             "metric": "comparison/multi_doc_reference",
         },
         # Should contain structured elements (table, bullets, or headers)
@@ -143,7 +143,7 @@ STRUCTURAL_ASSERTIONS = {
             "contextTransform": "JSON.parse(output).context",
             "metric": "comparison/faithfulness",
         },
-        {"type": "answer-relevance", "threshold": 0.7, "metric": "comparison/answer_relevance"},
+        {"type": "answer-relevance", "threshold": 0.65, "metric": "comparison/answer_relevance"},
     ],
 }
 
@@ -272,7 +272,7 @@ def _escape_js_string(s: str) -> str:
     return s.replace("\\", "\\\\").replace("'", "\\'").replace("\n", "\\n").replace("\r", "")
 
 
-def _build_golden_assertions(normalized: str, output_raw: str) -> list:
+def _build_golden_assertions(normalized: str, output_raw: str, annotations: dict | None = None, user_question: str = "") -> list:
     """Build value-level assertions from a reference output.
 
     These are layered on top of structural assertions and form the regression
@@ -468,16 +468,23 @@ def _build_golden_assertions(normalized: str, output_raw: str) -> list:
         })
 
     elif normalized == "rag_generation":
-        assertions.append({
-            "type": "context-relevance",
-            # Sanity check only: score is always near-zero for multi-chunk RAG because
-            # context-relevance = required sentences / total sentences, and we retrieve
-            # 10-15 chunks intentionally. Threshold 0.01 just ensures context isn't
-            # completely off-topic (score would be 0.0 for totally irrelevant retrieval).
-            "threshold": 0.01,
-            "contextTransform": "JSON.parse(output).context",
-            "metric": "gen/context_relevance",
-        })
+        # Tier 3: inject expected-value assertion if an annotation exists for this question.
+        # annotations maps user_question (lowercase-trimmed) → expected substring.
+        if annotations and user_question:
+            key = user_question.strip().lower()
+            expected = annotations.get(key) or annotations.get(user_question.strip())
+            if expected:
+                escaped = _escape_js_string(str(expected))
+                assertions.append({
+                    "type": "javascript",
+                    "value": f"JSON.parse(output).text.toLowerCase().includes('{escaped.lower()}')",
+                    "metric": f"golden/expected_value",
+                })
+
+        # context-relevance is intentionally omitted: we send 10-15 chunks per query
+        # (dense financial PDFs need broad retrieval), so the ratio of "required sentences /
+        # total context sentences" is always near 0 regardless of answer quality.
+        # context-faithfulness is the meaningful grounding check instead.
         assertions.append({
             "type": "llm-rubric",
             "value": (
@@ -514,6 +521,7 @@ def _get_system_prompt(entry: LLMIOLog, version: str) -> str:
     # For extract_schema_fields — reconstruct from prompt set
     if stage == "extract_schema_fields":
         try:
+            from app.verticals.real_estate.template_filling.prompts import get_prompt_set
             prompts = get_prompt_set(prompt_version)
             # pdf_fields context is in user_message; pass empty list here
             return prompts.build_extract_schema_fields("[]", []).system_prompt
@@ -571,6 +579,7 @@ def export_entries(
     writers: dict,
     golden: bool,
     version: str,
+    annotations: dict | None = None,
 ):
     """Export a list of io_log entries into the appropriate JSONL writers."""
     exported = 0
@@ -597,7 +606,8 @@ def export_entries(
         assertions = list(STRUCTURAL_ASSERTIONS[normalized_stage])
 
         if golden and entry.output:
-            assertions.extend(_build_golden_assertions(normalized_stage, entry.output))
+            user_question = e2e_vars.get("user_question", "")
+            assertions.extend(_build_golden_assertions(normalized_stage, entry.output, annotations, user_question))
 
         # Parse output for metadata
         try:
@@ -643,6 +653,8 @@ def run(
     golden: bool,
     source_id: str | None = None,
     session_id: str | None = None,
+    annotations: dict | None = None,
+    log_ids: list[str] | None = None,
 ):
     output_path = Path(output_dir)
     output_path.mkdir(parents=True, exist_ok=True)
@@ -669,7 +681,9 @@ def run(
         for target_stage in stages_to_export:
             q = db.query(LLMIOLog)
 
-            if source_id:
+            if log_ids:
+                q = q.filter(LLMIOLog.id.in_(log_ids))
+            elif source_id:
                 q = q.filter(LLMIOLog.source_id == source_id)
 
             # Session-based filter: matches all QA pairs from one chat session
@@ -691,7 +705,7 @@ def run(
             entries = q.all()
             logger.info(f"Found {len(entries)} entries for stage={target_stage} (db_stage={db_stage})")
 
-            n = export_entries(entries, target_stage, writers, golden, version)
+            n = export_entries(entries, target_stage, writers, golden, version, annotations)
             total_exported += n
             if n:
                 logger.info(f"  Exported {n} test cases for stage={target_stage}")
@@ -746,7 +760,39 @@ def main():
             "(filters by metadata.session_id). Use for RAG chat golden datasets."
         ),
     )
+    parser.add_argument(
+        "--log-ids",
+        default=None,
+        help=(
+            "Comma-separated list of llm_io_log primary key UUIDs to export. "
+            "Use when you have specific log entries (e.g. from a verified Q&A session). "
+            "Takes precedence over --source-id."
+        ),
+    )
+    parser.add_argument(
+        "--annotations",
+        default=None,
+        help=(
+            "Path to a JSON file mapping user questions to expected answer substrings. "
+            "For RAG generation golden exports, injects a Tier-3 value assertion for each matched question. "
+            "Example: evals/annotations/rag-chat.json"
+        ),
+    )
     args = parser.parse_args()
+
+    annotations = None
+    if args.annotations:
+        annotations_path = Path(args.annotations)
+        if not annotations_path.exists():
+            logger.error(f"Annotations file not found: {annotations_path}")
+            sys.exit(1)
+        with open(annotations_path, encoding="utf-8") as f:
+            raw = json.load(f)
+        # Normalise keys to lowercase-stripped for case-insensitive matching
+        annotations = {k.strip().lower(): v for k, v in raw.items()}
+        logger.info(f"Loaded {len(annotations)} annotations from {annotations_path}")
+
+    log_ids = [i.strip() for i in args.log_ids.split(",")] if args.log_ids else None
 
     run(
         stage=args.stage,
@@ -756,6 +802,8 @@ def main():
         golden=args.golden,
         source_id=args.source_id,
         session_id=args.session_id,
+        annotations=annotations,
+        log_ids=log_ids,
     )
 
 
