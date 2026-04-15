@@ -1,7 +1,7 @@
 # backend/app/database.py
 """Database configuration and session management"""
 import os
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine, event, text
 from sqlalchemy.ext.declarative import declarative_base
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncSession, async_sessionmaker
@@ -85,16 +85,31 @@ else:
     # concurrent workers collide on statement names (DuplicatePreparedStatement).
     # See: https://www.psycopg.org/psycopg3/docs/advanced/prepare.html
     connect_args = {"prepare_threshold": 0}
-    # PostgreSQL connection pool configuration for production scalability
+    # PostgreSQL connection pool configuration.
+    # PgBouncer (port 6543, transaction mode) handles physical connection multiplexing,
+    # so SQLAlchemy's pool only needs to hold a small number of client-side slots per
+    # container. Large pool_size values waste resources since PgBouncer serialises the
+    # actual Postgres connections anyway.
+    # 5 containers × (5 + 5) = ~50 client slots → PgBouncer maps these to ~10-20 real connections.
     pool_config = {
-        "pool_size": 20,           # Base connections per container
-        "max_overflow": 10,        # Allow 10 overflow (total 30 max)
-        "pool_pre_ping": True,     # Validate connections before reuse (prevents stale connections)
-        "pool_recycle": 3600,      # Recycle connections after 1 hour
-        "pool_timeout": 30,        # Wait 30s for connection before error
+        "pool_size": 5,            # Small — PgBouncer does the real pooling
+        "max_overflow": 5,         # Total 10 per container
+        "pool_pre_ping": True,     # Validate connections before reuse
+        "pool_recycle": 1800,      # 30 min — transaction mode connections are cheap to recreate
+        "pool_timeout": 30,        # Wait 30s for a slot before error
     }
 
 engine = create_engine(SYNC_DATABASE_URL, connect_args=connect_args, **pool_config)
+
+# Disable psycopg3 server-side prepared statements on every new physical connection.
+# connect_args alone is insufficient — SQLAlchemy's dialect.initialize() runs
+# `select current_schema()` before connect_args settings are applied, which collides
+# on PgBouncer (transaction mode, port 6543). Setting the attribute directly on the
+# raw dbapi connection is the only reliable way to disable prepare for ALL queries.
+if not DATABASE_URL.startswith("sqlite"):
+    @event.listens_for(engine, "connect")
+    def disable_prepared_statements(dbapi_connection, connection_record):
+        dbapi_connection.prepare_threshold = 0
 
 # Create session factory
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
@@ -103,10 +118,10 @@ SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
 async_pool_config = {}
 if not DATABASE_URL.startswith("sqlite"):
     async_pool_config = {
-        "pool_size": 20,
-        "max_overflow": 10,
+        "pool_size": 5,
+        "max_overflow": 5,
         "pool_pre_ping": True,
-        "pool_recycle": 3600,
+        "pool_recycle": 1800,
         "pool_timeout": 30,
     }
 
