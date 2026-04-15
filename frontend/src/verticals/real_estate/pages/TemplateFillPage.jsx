@@ -4,23 +4,22 @@
  * Layout: [PDF Viewer 50%] | [Tabbed: Fields/Excel 50%]
  */
 
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useAppAuth } from "@/hooks/useAppAuth";
 import DocumentViewer from '../../../components/pdf/DocumentViewer';
 import FieldsList from '../components/FieldsList';
 import ExcelGridView from '../components/ExcelGridView';
 import { useTemplateFill, useTemplateFillActions, useUser } from '../../../store';
-import { Loader2, AlertCircle, FileText, Table, List, Download, ArrowLeft, CheckCircle2, ExternalLink, X, Sparkles, Search, GitMerge, FileSpreadsheet, PartyPopper } from 'lucide-react';
+import { Loader2, AlertCircle, FileText, Table, List, Download, ArrowLeft, CheckCircle2, ExternalLink, X, Search, GitMerge, FileSpreadsheet, PartyPopper } from 'lucide-react';
 import { Badge } from '../../../components/ui/badge';
 import { Button } from '../../../components/ui/button';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '../../../components/ui/tabs';
+import { Tabs, TabsContent } from '../../../components/ui/tabs';
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from '../../../components/ui/resizable';
-import { Progress } from '../../../components/ui/progress';
-import { Card } from '../../../components/ui/card';
 import { Alert, AlertDescription, AlertTitle } from '../../../components/ui/alert';
 import AppLayout from '../../../components/layout/AppLayout';
 import { streamTemplateFillProgress, continueFillRun, downloadFilledExcel, startTemplateFill } from '../../../api/re-templates';
+import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import FeedbackButton from '../../../components/feedback/FeedbackButton';
 import CompletionFeedbackModal from '../../../components/feedback/CompletionFeedbackModal';
@@ -44,81 +43,126 @@ function formatStatus(status) {
 
 // Pipeline stage definitions for AI processing visualization
 const PIPELINE_STAGES = [
-  { key: 'detect', icon: Search, label: 'Scanning PDF', sub: 'Reading document structure and extracting fields', progress: [0, 35] },
-  { key: 'map', icon: GitMerge, label: 'AI Field Mapping', sub: 'Matching extracted fields to Excel template cells', progress: [35, 75] },
-  { key: 'fill', icon: FileSpreadsheet, label: 'Filling Template', sub: 'Writing values into Excel cells', progress: [75, 100] },
+  { key: 'detect', icon: Search, label: 'Scanning PDF', progress: [0, 35] },
+  { key: 'map', icon: GitMerge, label: 'Mapping Fields', progress: [35, 75] },
+  { key: 'fill', icon: FileSpreadsheet, label: 'Filling Template', progress: [75, 100] },
 ];
 
-function AIPipelineView({ progress, message, fillRun: _fillRun }) {
-  const _currentStageIndex = PIPELINE_STAGES.findIndex(
-    (s, i) => progress < (PIPELINE_STAGES[i + 1]?.progress[0] ?? 100)
-  );
+function AIPipelineView({ progress, message }) {
   const activeIndex = PIPELINE_STAGES.findIndex((s, i) => {
     const next = PIPELINE_STAGES[i + 1];
     return progress >= s.progress[0] && progress < (next?.progress[0] ?? 101);
   });
 
+  // Track when each stage becomes active so we can show elapsed time
+  const stageStartTimes = useRef({});
+  const [tick, setTick] = useState(0);
+
+  useEffect(() => {
+    const key = PIPELINE_STAGES[activeIndex]?.key;
+    if (key && stageStartTimes.current[key] === undefined) {
+      stageStartTimes.current[key] = Date.now();
+    }
+  }, [activeIndex]);
+
+  useEffect(() => {
+    const id = setInterval(() => setTick(t => t + 1), 1000);
+    return () => clearInterval(id);
+  }, []);
+
+  function getElapsed(stageKey, isDone, isActive) {
+    const start = stageStartTimes.current[stageKey];
+    if (!start) return null;
+    if (isDone) {
+      // Find when the next stage started (as a proxy for when this one ended)
+      const stageIdx = PIPELINE_STAGES.findIndex(s => s.key === stageKey);
+      const nextKey = PIPELINE_STAGES[stageIdx + 1]?.key;
+      const end = nextKey ? stageStartTimes.current[nextKey] : Date.now();
+      return end ? ((end - start) / 1000).toFixed(1) : null;
+    }
+    if (isActive) {
+      // eslint-disable-next-line no-unused-expressions
+      tick; // subscribe to tick
+      return ((Date.now() - start) / 1000).toFixed(1);
+    }
+    return null;
+  }
+
   return (
-    <div className="h-full flex flex-col items-center justify-center p-8 gap-8">
-      {/* Central AI animation */}
-      <div className="relative">
-        <div className="w-20 h-20 rounded-2xl glass-card flex items-center justify-center">
-          <Sparkles className="h-9 w-9 text-primary" />
-        </div>
-        <div className="absolute inset-0 rounded-2xl bg-primary/10 animate-ping opacity-30" />
-      </div>
-
-      <div className="text-center space-y-1 max-w-xs">
-        <h3 className="font-display text-lg font-semibold text-foreground">Processing</h3>
-        <p className="text-sm text-muted-foreground">{message || 'Analyzing document...'}</p>
-      </div>
-
-      {/* Overall progress bar */}
-      <div className="w-full max-w-xs space-y-2">
-        <Progress value={progress} className="h-1.5" />
-        <p className="text-xs text-muted-foreground text-center">{progress}% complete</p>
-      </div>
-
-      {/* Pipeline stages */}
-      <div className="w-full max-w-sm space-y-3">
-        {PIPELINE_STAGES.map((stage, i) => {
-          const isDone = progress >= (PIPELINE_STAGES[i + 1]?.progress[0] ?? 101);
-          const isActive = i === activeIndex;
-          const Icon = stage.icon;
-          return (
+    <div className="h-full flex flex-col items-center justify-center p-6">
+      <div className="glass-card rounded-2xl p-6 w-full max-w-sm space-y-5">
+        {/* Header + progress */}
+        <div className="space-y-3">
+          <div className="flex items-center justify-between">
+            <span className="text-sm font-semibold text-foreground tracking-[0.08px]">Processing</span>
+            <span className="text-xs font-mono text-muted-foreground tabular-nums">{progress}%</span>
+          </div>
+          <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
             <div
-              key={stage.key}
-              className={`flex items-start gap-3 p-3 rounded-xl transition-all duration-300 ${
-                isActive ? 'glass-card border border-primary/20' : isDone ? 'opacity-60' : 'opacity-30'
-              }`}
-            >
-              <div className={`w-8 h-8 rounded-lg flex items-center justify-center shrink-0 ${
-                isDone ? 'bg-primary/15' : isActive ? 'bg-primary/10' : 'bg-muted'
-              }`}>
-                {isDone ? (
-                  <CheckCircle2 className="h-4 w-4 text-primary" />
-                ) : isActive ? (
-                  <Loader2 className="h-4 w-4 text-primary animate-spin" />
-                ) : (
-                  <Icon className="h-4 w-4 text-muted-foreground" />
+              className="h-full rounded-full bg-primary transition-all duration-700"
+              style={{ width: `${progress}%` }}
+            />
+          </div>
+        </div>
+
+        {/* Stage rows */}
+        <div className="space-y-1">
+          {PIPELINE_STAGES.map((stage, i) => {
+            const isDone = progress >= (PIPELINE_STAGES[i + 1]?.progress[0] ?? 101);
+            const isActive = i === activeIndex;
+            const isPending = !isDone && !isActive;
+            const elapsed = getElapsed(stage.key, isDone, isActive);
+
+            return (
+              <div
+                key={stage.key}
+                className={cn(
+                  'flex items-center gap-3 px-3 py-2 rounded-xl transition-all duration-300',
+                  isActive && 'bg-primary/5 border border-primary/15',
+                  isDone && 'opacity-55',
+                  isPending && 'opacity-25',
                 )}
-              </div>
-              <div className="min-w-0">
-                <p className={`text-sm font-medium ${isDone || isActive ? 'text-foreground' : 'text-muted-foreground'}`}>
+              >
+                <div className="shrink-0 w-5 flex justify-center">
+                  {isDone ? (
+                    <CheckCircle2 className="h-4 w-4 text-primary" />
+                  ) : isActive ? (
+                    <Loader2 className="h-4 w-4 text-primary animate-spin" />
+                  ) : (
+                    <div className="h-4 w-4 rounded-full border-2 border-muted-foreground/30" />
+                  )}
+                </div>
+                <span className={cn(
+                  'flex-1 text-sm tracking-[0.07px]',
+                  (isDone || isActive) ? 'text-foreground font-medium' : 'text-muted-foreground',
+                )}>
                   {stage.label}
-                  {isDone && <span className="ml-2 text-xs text-primary font-normal">Done</span>}
-                </p>
-                {isActive && (
-                  <p className="text-xs text-muted-foreground mt-0.5">{stage.sub}</p>
-                )}
+                </span>
+                <span className="text-xs font-mono tabular-nums text-muted-foreground w-12 text-right">
+                  {elapsed != null ? `${elapsed}s` : '—'}
+                </span>
               </div>
-            </div>
-          );
-        })}
+            );
+          })}
+        </div>
+
+        {/* Live message ticker */}
+        {message && (
+          <div className="border-t border-border/50 pt-3">
+            <p
+              key={message}
+              className="text-xs text-muted-foreground tracking-[0.07px] animate-fade-in truncate"
+              title={message}
+            >
+              <span className="text-muted-foreground/50 mr-1.5">›</span>
+              {message}
+            </p>
+          </div>
+        )}
       </div>
 
-      <p className="text-xs text-muted-foreground/60 text-center max-w-xs">
-        Processing in the background · You can review the PDF while this runs
+      <p className="text-xs text-muted-foreground/50 text-center mt-4 tracking-[0.07px]">
+        You can review the PDF while this runs
       </p>
     </div>
   );
@@ -516,19 +560,19 @@ export default function TemplateFillPage() {
       </Button>
       <div className="min-w-0">
         <div className="flex items-center gap-2 min-w-0">
-          <span className="text-sm font-semibold text-foreground leading-tight truncate max-w-[220px]">
+          <span className="text-sm font-semibold text-foreground leading-tight truncate max-w-[220px] tracking-[0.08px]">
             {fillRun.name || 'Template Fill'}
           </span>
           <Badge
             variant={statusInfo.variant}
             className={statusInfo.variant === 'success'
-              ? 'h-5 px-2 text-[10px] bg-green-500 hover:bg-green-600 text-white shrink-0'
-              : 'h-5 px-2 text-[10px] shrink-0'}
+              ? 'h-5 px-2 text-[10px] bg-green-500 hover:bg-green-600 text-white shrink-0 tracking-[0.28px]'
+              : 'h-5 px-2 text-[10px] shrink-0 tracking-[0.28px]'}
           >
             {statusInfo.label}
           </Badge>
-          {!fillRun.template_id && <Badge variant="destructive" className="h-5 px-2 text-[10px] shrink-0">Template Deleted</Badge>}
-          {!fillRun.document_id && <Badge variant="destructive" className="h-5 px-2 text-[10px] shrink-0">Doc Deleted</Badge>}
+          {!fillRun.template_id && <Badge variant="destructive" className="h-5 px-2 text-[10px] shrink-0 tracking-[0.28px]">Template Deleted</Badge>}
+          {!fillRun.document_id && <Badge variant="destructive" className="h-5 px-2 text-[10px] shrink-0 tracking-[0.28px]">Doc Deleted</Badge>}
         </div>
       </div>
     </div>
@@ -543,7 +587,7 @@ export default function TemplateFillPage() {
             variant="default"
             onClick={handleContinue}
             disabled={isDownloading}
-            className="h-8 rounded-full px-3 text-xs font-medium shadow-sm"
+            className="h-8 rounded-xl px-3 text-xs font-medium shadow-sm tracking-[0.08px]"
           >
             <span className="mr-1.5 flex h-5 w-5 items-center justify-center rounded-full bg-primary-foreground/15 text-primary-foreground">
               {isDownloading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Download className="h-3.5 w-3.5" />}
@@ -563,12 +607,12 @@ export default function TemplateFillPage() {
           />
         </>
       ) : fillRun.status === 'awaiting_review' ? (
-        <Button size="sm" onClick={handleContinue} className="bg-blue-600 hover:bg-blue-700 text-white h-8 rounded-full px-3 text-xs">
+        <Button size="sm" onClick={handleContinue} className="bg-blue-600 hover:bg-blue-700 text-white h-8 rounded-xl px-3 text-xs tracking-[0.08px]">
           <CheckCircle2 className="h-3.5 w-3.5 mr-1.5" />
           Approve &amp; Fill
         </Button>
       ) : fillRun.status === 'filling' ? (
-        <Button size="sm" disabled className="bg-muted h-8 rounded-full px-3 text-xs">
+        <Button size="sm" disabled className="bg-muted h-8 rounded-xl px-3 text-xs tracking-[0.08px]">
           <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
           Filling...
         </Button>
@@ -662,15 +706,15 @@ export default function TemplateFillPage() {
           {/* Left Panel: PDF Viewer */}
           <ResizablePanel defaultSize={50} minSize={30} className="min-h-0 overflow-hidden">
             <div className="h-full min-h-0 flex flex-col bg-background overflow-hidden">
-              <div className="bg-card px-4 py-1 border-b flex-shrink-0">
+              <div className="bg-card px-4 py-2 border-b flex-shrink-0">
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-2">
                     <FileText className="h-3.5 w-3.5 text-muted-foreground" />
-                    <h2 className="font-medium text-xs text-foreground">PDF Document</h2>
+                    <h2 className="font-medium text-xs text-foreground tracking-[0.12px]">PDF Document</h2>
                   </div>
                   <div className="flex items-center gap-2">
                     {fillRun.document_metadata && (
-                      <Badge variant="secondary" className="text-[11px] px-2 py-0">
+                      <Badge variant="secondary" className="text-[10px] px-2 py-0 tracking-[0.28px]">
                         {fillRun.document_metadata.page_count} pages
                       </Badge>
                     )}
@@ -737,6 +781,7 @@ export default function TemplateFillPage() {
           <ResizablePanel defaultSize={50} minSize={30} className="min-h-0 overflow-hidden">
             <Tabs value={activeTab} onValueChange={setActiveTab} className="h-full min-h-0 flex flex-col overflow-hidden">
               <div className="sticky top-0 z-10 bg-card border-b flex-shrink-0">
+                {/* Processing progress stripe */}
                 {jobStatus === 'processing' && (
                   <div className="h-0.5 bg-muted overflow-hidden">
                     <div
@@ -745,30 +790,48 @@ export default function TemplateFillPage() {
                     />
                   </div>
                 )}
-                <div className="flex items-center justify-between px-4">
-                  <TabsList className="bg-transparent rounded-none p-0 h-auto border-b-0">
-                    <TabsTrigger
-                      value="excel"
-                      className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-4 py-2 gap-2"
+
+                {/* Pill tab switcher + inline stats + popout button */}
+                <div className="flex items-center justify-between px-3 py-2">
+                  <div className="flex items-center bg-muted/50 rounded-xl p-1 gap-0.5">
+                    <button
+                      onClick={() => setActiveTab('excel')}
+                      className={cn(
+                        'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium tracking-[0.08px] transition-all duration-150',
+                        activeTab === 'excel'
+                          ? 'bg-background shadow-sm text-foreground'
+                          : 'text-muted-foreground hover:text-foreground',
+                      )}
                     >
-                      <Table className="h-4 w-4" />
-                      <span className="text-sm font-medium">Excel Preview</span>
-                      <Badge variant="secondary">
-                        {fillRun.total_fields_mapped || 0} / {fillRun.total_template_fields || 0}
-                      </Badge>
-                    </TabsTrigger>
-                    <TabsTrigger
-                      value="fields"
-                      className="rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent px-4 py-2 gap-2"
+                      <Table className="h-3.5 w-3.5" />
+                      Excel
+                      <span className={cn(
+                        'ml-0.5 tabular-nums text-[10px] tracking-[0.07px]',
+                        activeTab === 'excel' ? 'text-muted-foreground' : 'text-muted-foreground/60',
+                      )}>
+                        {fillRun.total_fields_mapped || 0}/{fillRun.total_template_fields || 0}
+                      </span>
+                    </button>
+                    <button
+                      onClick={() => setActiveTab('fields')}
+                      className={cn(
+                        'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium tracking-[0.08px] transition-all duration-150',
+                        activeTab === 'fields'
+                          ? 'bg-background shadow-sm text-foreground'
+                          : 'text-muted-foreground hover:text-foreground',
+                      )}
                     >
-                      <List className="h-4 w-4" />
-                      <span className="text-sm font-medium">Extracted Fields</span>
-                      <Badge variant="secondary">
+                      <List className="h-3.5 w-3.5" />
+                      Fields
+                      <span className={cn(
+                        'ml-0.5 tabular-nums text-[10px] tracking-[0.07px]',
+                        activeTab === 'fields' ? 'text-muted-foreground' : 'text-muted-foreground/60',
+                      )}>
                         {fillRun.field_mapping?.pdf_fields?.length || 0}
-                      </Badge>
-                    </TabsTrigger>
-                  </TabsList>
-                  {activeTab === 'excel' && (
+                      </span>
+                    </button>
+                  </div>
+{activeTab === 'excel' && (
                     <Button
                       variant="ghost"
                       size="sm"
@@ -779,7 +842,6 @@ export default function TemplateFillPage() {
                           'width=1200,height=900'
                         );
                         if (popout) {
-                          // Register after a short delay to allow the window to load
                           setTimeout(() => registerExcelPopout(popout), 500);
                         }
                       }}

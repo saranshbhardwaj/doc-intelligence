@@ -53,6 +53,16 @@ def _get_page(chunk: dict) -> int:
 
 
 def call_api(prompt, options, context):
+    # Import all ORM models before any mapper initialization to avoid
+    # SQLAlchemy "failed to locate a name" errors on relationship resolution.
+    import app.db_models           # noqa: F401
+    import app.db_models_users     # noqa: F401
+    import app.db_models_documents # noqa: F401 — must be before db_models_chat (Document relationship)
+    import app.db_models_chat      # noqa: F401
+    import app.db_models_workflows # noqa: F401
+    import app.db_models_templates # noqa: F401
+    import app.db_models_io_logs   # noqa: F401
+
     from app.database import get_db
     from app.core.rag.hybrid_retriever import HybridRetriever
     from app.core.embeddings import get_embedding_provider
@@ -109,7 +119,7 @@ def call_api(prompt, options, context):
         return {
             "output": json.dumps(output),
             "tokenUsage": {"total": 0, "prompt": 0, "completion": 0},
-            "cost": 0,
+            "cost": None,
         }
     except Exception as exc:
         return {"error": str(exc)}
