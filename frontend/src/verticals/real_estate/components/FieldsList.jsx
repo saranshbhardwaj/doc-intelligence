@@ -1,21 +1,40 @@
 /**
  * Fields List Component
- * Displays extracted PDF fields with search, filtering, and pagination
+ * Airtable-style grid table of extracted PDF fields with search, filtering, and pagination.
  */
 
 import React, { useState, useMemo } from 'react';
 import { useAppAuth } from "@/hooks/useAppAuth";
 import { useTemplateFillActions } from '../../../store';
-import { Copy, Check, AlertCircle, Loader2, Search, ChevronLeft, ChevronRight, Filter } from 'lucide-react';
+import { Copy, Check, AlertCircle, Loader2, Search, ChevronLeft, ChevronRight, Filter, FileText } from 'lucide-react';
 import { Button } from '../../../components/ui/button';
-import { Badge } from '../../../components/ui/badge';
 import { Input } from '../../../components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '../../../components/ui/select';
+import { Popover, PopoverContent, PopoverTrigger } from '../../../components/ui/popover';
 import { cn } from '@/lib/utils';
 import { CitationSection } from './CitationBadge';
 
 const EDIT_SOURCE_PDF_PASTE = 'pdf_paste';
 const EDIT_SOURCE_MANUAL_INPUT = 'manual_input';
+
+/** Colored confidence dot + numeric label */
+function ConfidenceIndicator({ confidence }) {
+  const pct = Math.round((confidence || 0) * 100);
+  const dotClass =
+    pct >= 80 ? 'bg-green-500' : pct >= 50 ? 'bg-amber-500' : 'bg-destructive';
+  const textClass =
+    pct >= 80
+      ? 'text-green-600 dark:text-green-400'
+      : pct >= 50
+      ? 'text-amber-600 dark:text-amber-400'
+      : 'text-destructive';
+  return (
+    <span className="flex items-center gap-1.5">
+      <span className={cn('inline-block h-1.5 w-1.5 rounded-full shrink-0', dotClass)} />
+      <span className={cn('text-xs tabular-nums tracking-[0.07px]', textClass)}>{pct}%</span>
+    </span>
+  );
+}
 
 export default function FieldsList({
   fillRunId,
@@ -28,6 +47,7 @@ export default function FieldsList({
   const { getToken } = useAppAuth();
   const { updateFieldData } = useTemplateFillActions();
   const [editingField, setEditingField] = useState(null);
+  const [editDraft, setEditDraft] = useState('');
   const [savingField, setSavingField] = useState(null);
   const [error, setError] = useState(null);
 
@@ -35,7 +55,7 @@ export default function FieldsList({
   const [searchQuery, setSearchQuery] = useState('');
   const [filterStatus, setFilterStatus] = useState('all'); // all, mapped, unmapped
   const [currentPage, setCurrentPage] = useState(1);
-  const [pageSize, setPageSize] = useState(10);
+  const [pageSize, setPageSize] = useState(20);
 
   // Use pdf_fields from field_mapping (available after field detection)
   // Fall back to extractedData (available after extraction phase)
@@ -74,7 +94,6 @@ export default function FieldsList({
   const filteredFields = useMemo(() => {
     let filtered = allFields;
 
-    // Apply search filter
     if (searchQuery.trim()) {
       const query = searchQuery.toLowerCase();
       filtered = filtered.filter(([fieldId, fieldData]) => {
@@ -88,7 +107,6 @@ export default function FieldsList({
       });
     }
 
-    // Apply status filter
     if (filterStatus === 'mapped') {
       filtered = filtered.filter(([fieldId]) => getFieldMapping(fieldId));
     } else if (filterStatus === 'unmapped') {
@@ -102,44 +120,31 @@ export default function FieldsList({
   const totalPages = Math.ceil(filteredFields.length / pageSize);
   const paginatedFields = useMemo(() => {
     const start = (currentPage - 1) * pageSize;
-    const end = start + pageSize;
-    return filteredFields.slice(start, end);
+    return filteredFields.slice(start, start + pageSize);
   }, [filteredFields, currentPage, pageSize]);
 
-  // Reset to page 1 when filters change
   React.useEffect(() => {
     setCurrentPage(1);
   }, [searchQuery, filterStatus, pageSize]);
 
-  function getConfidenceBadgeVariant(confidence) {
-    if (confidence >= 0.8) return 'success';
-    if (confidence >= 0.5) return 'warning';
-    return 'destructive';
-  }
-
   async function handlePasteText(fieldId) {
     if (!selectedText?.text) return;
-
     try {
       setSavingField(fieldId);
       setError(null);
-
       const currentField = extractedData[fieldId] || {};
-      const updatedField = {
-        ...currentField,
-        value: selectedText.text,
-        confidence: 1.0,
-        user_edited: true,
-        source_page: selectedText.page,
-        source: EDIT_SOURCE_PDF_PASTE,
-        original_value: resolveOriginalValue(fieldId, currentField),
-      };
-
       const updatedData = {
         ...extractedData,
-        [fieldId]: updatedField,
+        [fieldId]: {
+          ...currentField,
+          value: selectedText.text,
+          confidence: 1.0,
+          user_edited: true,
+          source_page: selectedText.page,
+          source: EDIT_SOURCE_PDF_PASTE,
+          original_value: resolveOriginalValue(fieldId, currentField),
+        },
       };
-
       await updateFieldData(fillRunId, updatedData, getToken);
     } catch (err) {
       console.error('Failed to update field:', err);
@@ -153,22 +158,18 @@ export default function FieldsList({
     try {
       setSavingField(fieldId);
       setError(null);
-
       const currentField = extractedData[fieldId] || {};
-      const updatedField = {
-        ...currentField,
-        value: newValue,
-        confidence: 1.0,
-        user_edited: true,
-        source: EDIT_SOURCE_MANUAL_INPUT,
-        original_value: resolveOriginalValue(fieldId, currentField),
-      };
-
       const updatedData = {
         ...extractedData,
-        [fieldId]: updatedField,
+        [fieldId]: {
+          ...currentField,
+          value: newValue,
+          confidence: 1.0,
+          user_edited: true,
+          source: EDIT_SOURCE_MANUAL_INPUT,
+          original_value: resolveOriginalValue(fieldId, currentField),
+        },
       };
-
       await updateFieldData(fillRunId, updatedData, getToken);
       setEditingField(null);
     } catch (err) {
@@ -179,37 +180,39 @@ export default function FieldsList({
     }
   }
 
+  function startEdit(fieldId, currentValue) {
+    setEditingField(fieldId);
+    setEditDraft(currentValue || '');
+  }
+
   if (allFields.length === 0) {
     return (
       <div className="flex flex-col items-center justify-center h-full p-6 text-muted-foreground">
         <AlertCircle className="h-10 w-10 mb-3 text-muted-foreground/50" />
-        <p className="text-center text-sm">No fields detected yet</p>
+        <p className="text-center text-sm tracking-[0.07px]">No fields detected yet</p>
       </div>
     );
   }
 
   return (
     <div className="flex flex-col h-full">
-      {/* Header with Search and Filters */}
-      <div className="p-3 space-y-2 border-b bg-muted/20">
-        {/* Search */}
+      {/* Toolbar */}
+      <div className="px-3 py-2.5 space-y-2 border-b bg-muted/20 flex-shrink-0">
         <div className="relative">
-          <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
+          <Search className="absolute left-2.5 top-2.5 h-3.5 w-3.5 text-muted-foreground" />
           <Input
             type="text"
-            placeholder="Search fields by name, value, or cell..."
+            placeholder="Search by name, value, or cell…"
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
-            className="pl-8 h-9 text-sm"
+            className="pl-8 h-8 text-xs tracking-[0.07px]"
           />
         </div>
-
-        {/* Filters and Stats */}
         <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-2 flex-1">
-            <Filter className="h-4 w-4 text-muted-foreground" />
+          <div className="flex items-center gap-2">
+            <Filter className="h-3.5 w-3.5 text-muted-foreground shrink-0" />
             <Select value={filterStatus} onValueChange={setFilterStatus}>
-              <SelectTrigger className="h-8 text-xs w-[140px]">
+              <SelectTrigger className="h-7 text-xs w-[130px] tracking-[0.07px]">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
@@ -219,167 +222,206 @@ export default function FieldsList({
               </SelectContent>
             </Select>
           </div>
-
-          {/* Stats Badge */}
-          <Badge variant="outline" className="text-xs font-normal">
-            {filteredFields.length} of {allFields.length}
-          </Badge>
+          <span className="text-[11px] text-muted-foreground tracking-[0.28px] tabular-nums">
+            {filteredFields.length} / {allFields.length}
+          </span>
         </div>
       </div>
 
+      {/* Error */}
       {error && (
-        <div className="mx-3 mt-2 bg-destructive/10 text-destructive p-2.5 rounded-md text-xs border border-destructive/20">
+        <div className="mx-3 mt-2 bg-destructive/10 text-destructive p-2.5 rounded-lg text-xs border border-destructive/20 tracking-[0.07px] flex-shrink-0">
           {error}
         </div>
       )}
 
+      {/* Selected text banner */}
       {selectedText && (
-        <div className="mx-3 mt-2 bg-primary/5 border border-primary/20 p-2.5 rounded-md">
-          <p className="text-xs text-primary font-medium mb-1">Selected Text (Page {selectedText.page})</p>
-          <p className="text-xs text-foreground break-words">{selectedText.text}</p>
+        <div className="mx-3 mt-2 bg-primary/5 border border-primary/20 p-2.5 rounded-lg flex-shrink-0">
+          <p className="text-[11px] text-primary font-medium mb-1 tracking-[0.12px]">
+            Selected · Page {selectedText.page}
+          </p>
+          <p className="text-xs text-foreground break-words tracking-[0.07px] line-clamp-2">
+            {selectedText.text}
+          </p>
         </div>
       )}
 
-      {/* Fields List (Scrollable) */}
-      <div className="flex-1 overflow-auto p-3 space-y-2">
+      {/* Table */}
+      <div className="flex-1 overflow-auto">
         {paginatedFields.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-12 text-muted-foreground">
-            <Search className="h-10 w-10 mb-3 text-muted-foreground/50" />
-            <p className="text-center text-sm">No fields match your search</p>
+            <Search className="h-8 w-8 mb-3 text-muted-foreground/50" />
+            <p className="text-sm tracking-[0.07px]">No fields match your search</p>
           </div>
         ) : (
-          paginatedFields.map(([fieldId, fieldData]) => {
-            const mapping = getFieldMapping(fieldId);
-            const isEditing = editingField === fieldId;
-            const isSaving = savingField === fieldId;
+          <table className="w-full table-fixed border-collapse">
+            <thead className="sticky top-0 z-10 bg-card border-b border-border">
+              <tr>
+                <th className="w-[36%] px-3 py-2 text-left text-[11px] font-medium text-muted-foreground tracking-[0.28px] uppercase">
+                  Field Name
+                </th>
+                <th className="w-[32%] px-3 py-2 text-left text-[11px] font-medium text-muted-foreground tracking-[0.28px] uppercase">
+                  Value
+                </th>
+                <th className="w-[12%] px-3 py-2 text-left text-[11px] font-medium text-muted-foreground tracking-[0.28px] uppercase">
+                  Conf.
+                </th>
+                <th className="w-[20%] px-3 py-2 text-left text-[11px] font-medium text-muted-foreground tracking-[0.28px] uppercase">
+                  Maps To
+                </th>
+              </tr>
+            </thead>
+            <tbody>
+              {paginatedFields.map(([fieldId, fieldData]) => {
+                const mapping = getFieldMapping(fieldId);
+                const isEditing = editingField === fieldId;
+                const isSaving = savingField === fieldId;
+                const hasCitations = fieldData.citations && fieldData.citations.length > 0;
 
-            return (
-              <div
-                key={fieldId}
-                className={cn(
-                  "border rounded-md p-2.5 transition-colors",
-                  "hover:bg-accent/50",
-                  isSaving && "opacity-60"
-                )}
-              >
-                {/* Field Header */}
-                <div className="flex items-start justify-between mb-1.5">
-                  <div className="flex-1 min-w-0">
-                    <p className="text-xs font-medium text-foreground truncate">
-                      {fieldData.field_name || fieldData.label || fieldId}
-                    </p>
-                    {mapping && (
-                      <p className="text-xs text-muted-foreground mt-0.5">
-                        → {mapping.excel_sheet}!{mapping.excel_cell}
-                      </p>
+                return (
+                  <tr
+                    key={fieldId}
+                    className={cn(
+                      'border-b border-border/50 transition-colors group',
+                      'hover:bg-accent/30',
+                      isSaving && 'opacity-60',
                     )}
-                  </div>
-
-                  {/* Confidence Score */}
-                  <Badge
-                    variant={getConfidenceBadgeVariant(fieldData.confidence || 0)}
-                    className="ml-2 text-xs h-5"
                   >
-                    {Math.round((fieldData.confidence || 0) * 100)}%
-                  </Badge>
-                </div>
+                    {/* Field Name */}
+                    <td className="px-3 py-2 align-top">
+                      <div className="flex flex-col gap-0.5 min-w-0">
+                        <span className="text-xs font-medium text-foreground truncate tracking-[0.07px]">
+                          {fieldData.field_name || fieldData.label || fieldId}
+                        </span>
+                        {fieldData.field_type && (
+                          <span className="text-[10px] text-muted-foreground/70 tracking-[0.28px] uppercase">
+                            {fieldData.field_type}
+                          </span>
+                        )}
+                        {fieldData.user_edited && (
+                          <span className="inline-flex items-center gap-0.5 text-[10px] text-green-600 dark:text-green-400 tracking-[0.07px]">
+                            <Check className="h-2.5 w-2.5" />
+                            edited
+                          </span>
+                        )}
+                      </div>
+                    </td>
 
-                {/* Field Value */}
-                {isEditing ? (
-                  <div className="mb-2">
-                    <Input
-                      type="text"
-                      defaultValue={fieldData.value || ''}
-                      onBlur={(e) => {
-                        if (e.target.value !== fieldData.value) {
-                          handleFieldEdit(fieldId, e.target.value);
-                        } else {
-                          setEditingField(null);
-                        }
-                      }}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') {
-                          handleFieldEdit(fieldId, e.target.value);
-                        } else if (e.key === 'Escape') {
-                          setEditingField(null);
-                        }
-                      }}
-                      autoFocus
-                      className="h-7 text-xs"
-                    />
-                  </div>
-                ) : (
-                  <div
-                    onClick={() => setEditingField(fieldId)}
-                    className="mb-2 cursor-pointer"
-                  >
-                    <p className="text-xs text-foreground break-words">
-                      {fieldData.value || (
-                        <span className="text-muted-foreground italic">No value</span>
-                      )}
-                    </p>
-                  </div>
-                )}
-
-                {/* Actions */}
-                <div className="flex items-center gap-1.5 flex-wrap">
-                  {selectedText && (
-                    <Button
-                      size="sm"
-                      onClick={() => handlePasteText(fieldId)}
-                      disabled={isSaving}
-                      className="h-6 text-xs px-2"
-                    >
-                      {isSaving ? (
-                        <>
-                          <Loader2 className="h-3 w-3 animate-spin mr-1" />
-                          <span>Saving...</span>
-                        </>
+                    {/* Value — inline editable */}
+                    <td className="px-3 py-2 align-top">
+                      {isEditing ? (
+                        <Input
+                          type="text"
+                          value={editDraft}
+                          onChange={(e) => setEditDraft(e.target.value)}
+                          onBlur={() => {
+                            if (editDraft !== (fieldData.value || '')) {
+                              handleFieldEdit(fieldId, editDraft);
+                            } else {
+                              setEditingField(null);
+                            }
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') handleFieldEdit(fieldId, editDraft);
+                            else if (e.key === 'Escape') setEditingField(null);
+                          }}
+                          autoFocus
+                          className="h-7 text-xs px-2 tracking-[0.07px]"
+                        />
                       ) : (
-                        <>
-                          <Copy className="h-3 w-3 mr-1" />
-                          <span>Paste</span>
-                        </>
+                        <div className="flex items-start gap-1 min-w-0">
+                          <span
+                            onClick={() => startEdit(fieldId, fieldData.value)}
+                            title="Click to edit"
+                            className={cn(
+                              'text-xs break-words cursor-pointer rounded px-1 -mx-1 py-0.5 -my-0.5',
+                              'hover:bg-muted/60 transition-colors tracking-[0.07px]',
+                              fieldData.value ? 'text-foreground' : 'text-muted-foreground italic',
+                            )}
+                          >
+                            {fieldData.value || 'No value'}
+                          </span>
+                          {isSaving && (
+                            <Loader2 className="h-3 w-3 animate-spin text-muted-foreground shrink-0 mt-0.5" />
+                          )}
+                          {selectedText && !isSaving && (
+                            <button
+                              onClick={() => handlePasteText(fieldId)}
+                              title="Paste selected text"
+                              className="opacity-0 group-hover:opacity-100 transition-opacity shrink-0 mt-0.5"
+                            >
+                              <Copy className="h-3 w-3 text-muted-foreground hover:text-foreground" />
+                            </button>
+                          )}
+                        </div>
                       )}
-                    </Button>
-                  )}
+                    </td>
 
-                  {fieldData.user_edited && (
-                    <Badge variant="success" className="h-6 text-xs">
-                      <Check className="h-3 w-3 mr-1" />
-                      <span>Edited</span>
-                    </Badge>
-                  )}
-                </div>
+                    {/* Confidence */}
+                    <td className="px-3 py-2 align-top">
+                      <ConfidenceIndicator confidence={fieldData.confidence} />
+                    </td>
 
-                {/* Citations */}
-                {fieldData.citations && fieldData.citations.length > 0 && (
-                  <CitationSection
-                    citations={fieldData.citations}
-                    onCitationClick={onCitationClick}
-                    extractedData={fieldData}
-                    citationContext={citationContext}
-                    className="mt-0 pt-2"
-                  />
-                )}
-              </div>
-            );
-          })
+                    {/* Maps To + citations popover */}
+                    <td className="px-3 py-2 align-top">
+                      <div className="flex items-center gap-1.5 min-w-0">
+                        {mapping ? (
+                          <span className="font-mono text-[11px] text-muted-foreground tracking-[0.07px] truncate">
+                            {mapping.excel_sheet}!{mapping.excel_cell}
+                          </span>
+                        ) : (
+                          <span className="text-[11px] text-muted-foreground/50 tracking-[0.07px]">—</span>
+                        )}
+                        {hasCitations && (
+                          <Popover>
+                            <PopoverTrigger asChild>
+                              <button
+                                className="shrink-0 text-muted-foreground/60 hover:text-muted-foreground transition-colors"
+                                title="View citations"
+                              >
+                                <FileText className="h-3 w-3" />
+                              </button>
+                            </PopoverTrigger>
+                            <PopoverContent
+                              side="left"
+                              align="start"
+                              className="w-72 p-3"
+                            >
+                              <p className="text-[11px] font-medium text-muted-foreground tracking-[0.28px] uppercase mb-2">
+                                Citations
+                              </p>
+                              <CitationSection
+                                citations={fieldData.citations}
+                                onCitationClick={onCitationClick}
+                                extractedData={fieldData}
+                                citationContext={citationContext}
+                                className="mt-0 pt-0"
+                              />
+                            </PopoverContent>
+                          </Popover>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
         )}
       </div>
 
       {/* Pagination Footer */}
       {filteredFields.length > 0 && (
-        <div className="border-t p-3 bg-muted/20">
+        <div className="border-t px-3 py-2 bg-muted/20 flex-shrink-0">
           <div className="flex items-center justify-between gap-3">
-            {/* Page Size Selector */}
             <div className="flex items-center gap-2">
-              <span className="text-xs text-muted-foreground">Show</span>
+              <span className="text-[11px] text-muted-foreground tracking-[0.07px]">Show</span>
               <Select
                 value={pageSize.toString()}
                 onValueChange={(value) => setPageSize(parseInt(value))}
               >
-                <SelectTrigger className="h-8 w-[70px] text-xs">
+                <SelectTrigger className="h-7 w-[60px] text-xs">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
@@ -390,31 +432,28 @@ export default function FieldsList({
                 </SelectContent>
               </Select>
             </div>
-
-            {/* Page Info and Navigation */}
             <div className="flex items-center gap-2">
-              <span className="text-xs text-muted-foreground">
-                Page {currentPage} of {totalPages}
+              <span className="text-[11px] text-muted-foreground tabular-nums tracking-[0.07px]">
+                {currentPage} / {totalPages}
               </span>
-
               <div className="flex gap-1">
                 <Button
                   variant="outline"
                   size="sm"
                   onClick={() => setCurrentPage(p => Math.max(1, p - 1))}
                   disabled={currentPage === 1}
-                  className="h-8 w-8 p-0"
+                  className="h-7 w-7 p-0"
                 >
-                  <ChevronLeft className="h-4 w-4" />
+                  <ChevronLeft className="h-3.5 w-3.5" />
                 </Button>
                 <Button
                   variant="outline"
                   size="sm"
                   onClick={() => setCurrentPage(p => Math.min(totalPages, p + 1))}
                   disabled={currentPage === totalPages}
-                  className="h-8 w-8 p-0"
+                  className="h-7 w-7 p-0"
                 >
-                  <ChevronRight className="h-4 w-4" />
+                  <ChevronRight className="h-3.5 w-3.5" />
                 </Button>
               </div>
             </div>
