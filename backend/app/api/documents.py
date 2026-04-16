@@ -207,22 +207,19 @@ async def upload_document(
 
         else:
             # NEW DOCUMENT MODE: Create and process
-            # Create canonical document FIRST to get its ID
-            document = doc_repo.create_document(
-                org_id=user.org_id,
-                user_id=user.id,
-                filename=safe_filename,
-                file_path="",  # Will be updated after upload
-                file_size_bytes=len(file_bytes),
-                content_hash=content_hash,
-                page_count=0,  # Will be updated during parsing
-                status="processing"
-            )
+            #
+            # Operation order matters for atomicity:
+            #   1. Upload file to storage FIRST — if this fails, no DB row is created.
+            #   2. Create the document record with the real file_path already known — single commit.
+            #   3. Link to collection, create job.
+            #
+            # This prevents orphaned 'processing' rows with an empty file_path from
+            # appearing in the UI when a storage upload or subsequent DB write fails.
 
-            if not document:
-                raise HTTPException(status_code=500, detail="Failed to create document record")
+            # --- Step 1: Upload to storage (before any DB writes) ---
+            # We need a stable document ID for the storage key, so generate one up front.
+            pre_assigned_id = str(uuid.uuid4())
 
-            # Upload to storage using document's ID (ensures ID match)
             file_path = None
             try:
                 # Generate storage key: documents/{YYYY}/{MM}/{DD}/{document_id}_{filename}
@@ -231,10 +228,10 @@ async def upload_document(
                 _now = _dt.utcnow()
                 storage_key = (
                     f"documents/{_now.year}/{_now.month:02d}/{_now.day:02d}"
-                    f"/{document.id}_{safe_filename}"
+                    f"/{pre_assigned_id}_{safe_filename}"
                 )
                 storage.upload(temp_path, storage_key)
-                file_path = storage_key  # Store storage key (not local path)
+                file_path = storage_key
 
                 logger.info(
                     f"Uploaded document to {storage.get_storage_type()} storage",
@@ -248,7 +245,7 @@ async def upload_document(
                 try:
                     upload_dir = os.path.join("uploads", "chat", collection_id)
                     os.makedirs(upload_dir, exist_ok=True)
-                    fallback_path = os.path.join(upload_dir, f"{document.id}_{safe_filename}")
+                    fallback_path = os.path.join(upload_dir, f"{pre_assigned_id}_{safe_filename}")
 
                     shutil.move(temp_path, fallback_path)
                     file_path = fallback_path
@@ -258,16 +255,28 @@ async def upload_document(
                         extra={"original_error": str(e)}
                     )
                 except Exception as fallback_error:
-                    # Both R2 and local storage failed - rollback document creation
+                    # Both R2 and local storage failed — no DB row has been created yet.
                     logger.error(f"Local storage fallback also failed: {fallback_error}", exc_info=True)
-                    doc_repo.delete_document(document.id)
                     raise HTTPException(
                         status_code=500,
                         detail="Failed to store document file (both R2 and local storage failed)"
                     )
 
-            # Update document with file_path
-            doc_repo.update_file_path(document.id, file_path)
+            # --- Step 2: Create document record with real file_path (single commit) ---
+            document = doc_repo.create_document(
+                org_id=user.org_id,
+                user_id=user.id,
+                filename=safe_filename,
+                file_path=file_path,
+                file_size_bytes=len(file_bytes),
+                content_hash=content_hash,
+                page_count=0,  # Will be updated during parsing
+                status="processing",
+                document_id=pre_assigned_id,
+            )
+
+            if not document:
+                raise HTTPException(status_code=500, detail="Failed to create document record")
 
             # Create collection link
             collection_doc = collection_repo.link_document_to_collection(
@@ -354,12 +363,12 @@ async def upload_document(
             except Exception as del_err:
                 logger.error(f"Failed to delete document during cleanup: {del_err}")
 
-        # Cleanup uploaded file
+        # Cleanup local fallback file (R2 storage keys are not local paths)
         if file_path and os.path.exists(file_path):
             try:
                 os.remove(file_path)
             except Exception as del_err:
-                logger.error(f"Failed to delete file during cleanup: {del_err}")
+                logger.error(f"Failed to delete local fallback file during cleanup: {del_err}")
 
         # Re-raise original exception
         if isinstance(e, HTTPException):
