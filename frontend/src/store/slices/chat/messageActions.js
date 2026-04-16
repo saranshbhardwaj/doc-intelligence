@@ -144,7 +144,21 @@ export const createChatMessageActions = (set, get) => ({
             };
           });
 
-          get().fetchSessions(getToken);
+          // Optimistically bump current session's updated_at so it sorts to top —
+          // avoids full refetch + sidebar spinner on every message completion
+          const currentSessionId = get().chat.currentSession?.id;
+          if (currentSessionId) {
+            set((state) => ({
+              chat: {
+                ...state.chat,
+                sessions: state.chat.sessions.map((s) =>
+                  s.id === currentSessionId
+                    ? { ...s, updated_at: new Date().toISOString() }
+                    : s
+                ),
+              },
+            }));
+          }
         },
         onError: (error) => {
           console.error("Chat streaming error:", error);

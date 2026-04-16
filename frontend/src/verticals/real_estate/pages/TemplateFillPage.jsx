@@ -646,9 +646,10 @@ export default function TemplateFillPage() {
           </div>
         )}
 
-        {/* Error Alert */}
+        {/* Error Alert — always-present container prevents layout shift when alert appears */}
+        <div className={`px-6 overflow-hidden transition-all duration-200 ${jobStatus === 'failed' ? 'pt-4' : 'h-0'}`}>
         {jobStatus === 'failed' && (
-          <div className="px-6 pt-4">
+          <div>
             <Alert variant="destructive">
               <AlertCircle className="h-4 w-4" />
               <AlertTitle>Template Fill Failed</AlertTitle>
@@ -685,6 +686,7 @@ export default function TemplateFillPage() {
             </Alert>
           </div>
         )}
+        </div>
 
         {/* Mobile toolbar */}
         <div className="md:hidden flex items-center justify-between px-3 py-1.5 border-b bg-card flex-shrink-0">
