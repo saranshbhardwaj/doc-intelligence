@@ -69,6 +69,7 @@ export default function EmptyState({
   selectedDocumentIds = [],
   onSelectDocuments,
   onStartChat,
+  isCreating = false,
   getToken,
 }) {
   const [selectedCollectionId, setSelectedCollectionId] = useState(null);
@@ -230,7 +231,7 @@ export default function EmptyState({
               placeholder="e.g. Q3 Deal Review"
               value={sessionTitle}
               onChange={(e) => setSessionTitle(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && handleStartChat()}
+              onKeyDown={(e) => e.key === "Enter" && !isCreating && handleStartChat()}
               className="h-9 text-sm"
               autoFocus={false}
             />
@@ -466,11 +467,23 @@ export default function EmptyState({
             </Button>
             <Button
               onClick={handleStartChat}
-              disabled={selectedDocsInfo.length === 0}
+              disabled={selectedDocsInfo.length === 0 || isCreating}
               className="flex-1 md:flex-none gap-2"
             >
-              Start Chat
-              <Send className="w-4 h-4" />
+              {isCreating ? (
+                <>
+                  <svg className="animate-spin w-4 h-4" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" aria-hidden="true">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8v4a4 4 0 00-4 4H4z" />
+                  </svg>
+                  Starting…
+                </>
+              ) : (
+                <>
+                  Start Chat
+                  <Send className="w-4 h-4" />
+                </>
+              )}
             </Button>
           </div>
         </div>
