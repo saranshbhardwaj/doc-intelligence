@@ -30,6 +30,7 @@ export default function ChatPage() {
   const actions = useChatActions();
 
   const [selectedDocuments, setSelectedDocuments] = useState([]);
+  const [isCreatingSession, setIsCreatingSession] = useState(false);
   const [isInitializing, setIsInitializing] = useState(true);
   const [showNewChatDialog, setShowNewChatDialog] = useState(false);
   const [mobileSessionsOpen, setMobileSessionsOpen] = useState(false);
@@ -106,6 +107,8 @@ export default function ChatPage() {
   };
 
   const handleStartChat = async (documentIds, title) => {
+    if (isCreatingSession) return;
+    setIsCreatingSession(true);
     try {
       // Create new session with selected documents
       const session = await actions.createNewSession(getToken, {
@@ -121,6 +124,8 @@ export default function ChatPage() {
       }
     } catch (error) {
       console.error("Failed to create session:", error);
+    } finally {
+      setIsCreatingSession(false);
     }
   };
 
@@ -328,6 +333,7 @@ export default function ChatPage() {
         selectedDocumentIds={selectedDocuments}
         onSelectDocuments={setSelectedDocuments}
         onStartChat={handleStartChat}
+        isCreating={isCreatingSession}
         getToken={getToken}
       />
 
