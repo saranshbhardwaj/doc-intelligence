@@ -651,6 +651,13 @@ class RAGService:
             else settings.rag_chat_semantic_similarity_floor_no_reranker
         )
 
+        # Single-doc scope: disable the semantic floor entirely.
+        # The floor suppresses irrelevant chunks across documents, but when retrieval
+        # is already scoped to one document that concern is gone — retrieve all
+        # available chunks and let the reranker / top-k truncation handle quality.
+        if did_scope_to_single_doc or already_single_doc_scope:
+            semantic_floor = 0.0
+
         # Use hybrid retriever (combines semantic + keyword search)
         # Use reformulated query for better keyword matching, but pass understanding for HyDE
         # Retrieve more candidates for potential re-ranking
