@@ -51,7 +51,7 @@ Deployed on **Railway** (API + workers). Local dev via Docker Compose.
 | Auth | WorkOS AuthKit (RS256 JWT, `PyJWT` + `PyJWKClient` on backend) |
 | LLM | Anthropic Claude (via `llm_client.py`) |
 | Embedding | OpenAI `text-embedding-3-small` (768d) |
-| Reranker | `cross-encoder/ms-marco-MiniLM-L-6-v2` (CrossEncoder, ~1.5GB on worker) |
+| Reranker | `cross-encoder/ms-marco-MiniLM-L-6-v2` (CrossEncoder, ~1.5GB on API service) |
 | Document parsing | Azure Document Intelligence only |
 | Monitoring | Prometheus + Grafana |
 
@@ -83,7 +83,7 @@ docker compose exec api python scripts/reembed_all_chunks.py
 |---------|-------|-------|
 | `embedding_provider` | `"openai"` | Was `"sentence-transformer"` (removed Feb 2026) |
 | `embedding_dimension` | `768` | Matryoshka reduction |
-| `rag_reranker_model` | `"cross-encoder/ms-marco-MiniLM-L-6-v2"` | CrossEncoder, loads on worker |
+| `rag_reranker_model` | `"cross-encoder/ms-marco-MiniLM-L-6-v2"` | CrossEncoder, loads on API service (~1.5GB RAM) |
 | `use_redis_cache` | `True` | Always Redis, never file cache |
 | `cache_ttl` | `48` hours | Extraction result cache TTL |
 | `max_pages_per_extraction` | `150` | Guard for extraction pipeline |
@@ -363,7 +363,7 @@ Current head: `f3a4b5c6d7e8`
 - **`stream_chat()` yields dicts**, not strings: `{"type": "chunk", "text": str}` or `{"type": "usage", "data": {...}}`. Always check `item["type"] == "chunk"` before appending.
 - **Zustand selectors**: Actions must be **explicitly listed** in `useChatActions()` / other selectors in `store/index.js` to be accessible via `actions.*`.
 - **SSE error propagation**: Every Celery task exception path must call `tracker.mark_error()` — otherwise frontend stays stuck in "processing" state indefinitely.
-- **Reranker loads on worker** (not API): ~1.5GB RAM. Config changes require worker container restart.
+- **Reranker loads on the API service** (~1.5GB RAM): used for RAG/chat. worker-critical has reranking disabled (configurable via `config.py`). Config changes require API container restart.
 - **Embedding model change**: Requires DB migration (alter vector column dimension) + full re-embed of all chunks via script.
 - **Chat error display**: Error in `isProcessing` block disappears when processing stops — keep error state in separate block.
 - **No `alert()`**: Always use inline shadcn error components.
