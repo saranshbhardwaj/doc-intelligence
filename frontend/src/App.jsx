@@ -24,6 +24,7 @@ import NotFound from "./pages/NotFound";
 import AppNotFound from "./components/layout/AppNotFound";
 import RequireAuth from "./components/common/RequireAuth";
 import { Analytics } from '@vercel/analytics/react';
+import { SpeedInsights } from '@vercel/speed-insights/react';
 
 // Import vertical routes
 import { peRoutes, reRoutes } from "./routes/verticalRoutes";
@@ -119,6 +120,7 @@ export default function App() {
         </Routes>
       </BrowserRouter>
       <Analytics />
+      <SpeedInsights />
     </QueryClientProvider>
   );
 }
