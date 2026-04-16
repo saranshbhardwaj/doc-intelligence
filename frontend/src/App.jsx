@@ -23,6 +23,7 @@ import TermsPage from "./pages/TermsPage";
 import NotFound from "./pages/NotFound";
 import AppNotFound from "./components/layout/AppNotFound";
 import RequireAuth from "./components/common/RequireAuth";
+import { Analytics } from '@vercel/analytics/react';
 
 // Import vertical routes
 import { peRoutes, reRoutes } from "./routes/verticalRoutes";
@@ -117,6 +118,7 @@ export default function App() {
           <Route path="*" element={<NotFound />} />
         </Routes>
       </BrowserRouter>
+      <Analytics />
     </QueryClientProvider>
   );
 }
