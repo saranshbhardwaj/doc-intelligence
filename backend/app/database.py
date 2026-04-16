@@ -84,7 +84,7 @@ else:
     # does not support prepared statements across pooled connections. Without this,
     # concurrent workers collide on statement names (DuplicatePreparedStatement).
     # See: https://www.psycopg.org/psycopg3/docs/advanced/prepare.html
-    connect_args = {"prepare_threshold": 0}
+    connect_args = {"prepare_threshold": None}
     # PostgreSQL connection pool configuration.
     # PgBouncer (port 6543, transaction mode) handles physical connection multiplexing,
     # so SQLAlchemy's pool only needs to hold a small number of client-side slots per
@@ -109,7 +109,7 @@ engine = create_engine(SYNC_DATABASE_URL, connect_args=connect_args, **pool_conf
 if not DATABASE_URL.startswith("sqlite"):
     @event.listens_for(engine, "connect")
     def disable_prepared_statements(dbapi_connection, connection_record):
-        dbapi_connection.prepare_threshold = 0
+        dbapi_connection.prepare_threshold = None
 
 # Create session factory
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)
