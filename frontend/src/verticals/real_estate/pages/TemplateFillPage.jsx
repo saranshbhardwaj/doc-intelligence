@@ -24,6 +24,7 @@ import { toast } from 'sonner';
 import FeedbackButton from '../../../components/feedback/FeedbackButton';
 import CompletionFeedbackModal from '../../../components/feedback/CompletionFeedbackModal';
 import { shouldPromptForFeedback } from '../../../utils/feedbackRules';
+import { usePostHog } from '@posthog/react';
 
 // Helper function to format status for display
 function formatStatus(status) {
@@ -172,6 +173,7 @@ export default function TemplateFillPage() {
   const { fillRunId } = useParams();
   const navigate = useNavigate();
   const { getToken } = useAppAuth();
+  const posthog = usePostHog();
   const [currentPage, setCurrentPage] = useState(1);
   const [activeTab, setActiveTab] = useState('excel');
   const [highlightBbox, setHighlightBbox] = useState(null); // For PDF highlighting
@@ -278,11 +280,19 @@ export default function TemplateFillPage() {
         setJobStatus('completed');
         setJobProgress(100);
         setJobMessage('Template fill completed');
+        posthog?.capture('template_fill_completed', {
+          fill_run_id: fillRunId,
+          fields_mapped: fillRun.total_fields_mapped ?? 0,
+        });
         setShowCompletionBanner(true);
         setTimeout(() => setShowCompletionBanner(false), 8000);
       } else if (fillRun.status === 'failed') {
         setJobStatus('failed');
         setJobMessage(fillRun.error_message || 'Template fill failed');
+        posthog?.capture('template_fill_failed', {
+          fill_run_id: fillRunId,
+          error_message: fillRun.error_message || 'unknown',
+        });
       } else if (fillRun.status === 'awaiting_review') {
         // Auto-mapping complete, ready for user review
         setJobStatus('idle'); // Clear progress overlay
@@ -318,6 +328,12 @@ export default function TemplateFillPage() {
       onProgress: (data) => {
         setJobProgress(data.progress_percent || 0);
         setJobMessage(data.message || 'Processing...');
+        if (data.status) {
+          posthog?.capture('template_fill_step_changed', {
+            fill_run_id: fillRunId,
+            status: data.status,
+          });
+        }
 
         // Check if progress event contains a terminal status
         // This handles the case where backend sends progress events with terminal status
@@ -348,6 +364,10 @@ export default function TemplateFillPage() {
       },
       onError: (error) => {
         console.error('❌ Fill run error:', error);
+        posthog?.capture('template_fill_failed', {
+          fill_run_id: fillRunId,
+          error_message: error?.message || 'sse_error',
+        });
         setJobStatus('failed');
         setJobMessage(error?.message || 'An error occurred');
         // Reload fill run silently to get error details
@@ -414,6 +434,7 @@ export default function TemplateFillPage() {
       try {
         setIsDownloading(true);
         const blob = await downloadFilledExcel(getToken, fillRunId);
+        posthog?.capture('template_fill_downloaded', { fill_run_id: fillRunId });
 
         // Verify blob is valid
         if (blob.size === 0) {
@@ -491,7 +512,13 @@ export default function TemplateFillPage() {
     }
     try {
       setIsRetrying(true);
+      posthog?.capture('template_fill_retried', { fill_run_id: fillRunId });
       const newFillRun = await startTemplateFill(getToken, fillRun.template_id, fillRun.document_id);
+      posthog?.capture('template_fill_started', {
+        fill_run_id: newFillRun.fill_run_id,
+        template_id: fillRun.template_id,
+        document_id: fillRun.document_id,
+      });
       navigate(`/app/re/fills/${newFillRun.fill_run_id}`);
     } catch (err) {
       console.error('Failed to retry fill run:', err);

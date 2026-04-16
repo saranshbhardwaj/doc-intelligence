@@ -6,11 +6,13 @@
  *   import { useAuth } from '@clerk/clerk-react'  →  import { useAppAuth } from '../hooks/useAppAuth'
  *   useAuth()                                      →  useAppAuth()
  */
-import { useCallback } from "react";
+import { useCallback, useEffect } from "react";
 import { useAuth } from "@workos-inc/authkit-react";
+import { usePostHog } from "@posthog/react";
 
 export function useAppAuth() {
   const { user, isLoading, getAccessToken, signOut, organizationId } = useAuth();
+  const posthog = usePostHog();
 
   // Stabilize getToken so it doesn't change on every render.
   // Without this, any useCallback/useEffect depending on getToken would
@@ -20,6 +22,15 @@ export function useAppAuth() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [], // intentionally empty: getAccessToken identity is stable from WorkOS SDK
   );
+
+  // Identify the user in PostHog once WorkOS resolves the user
+  useEffect(() => {
+    if (user?.id) {
+      posthog?.identify(user.id, {
+        email: user.email,
+      });
+    }
+  }, [posthog, user?.id, user?.email]);
 
   return {
     isLoaded: !isLoading,

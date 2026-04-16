@@ -26,6 +26,7 @@
  */
 
 import { useState, useRef, useEffect, useLayoutEffect, useMemo, memo } from "react";
+import { usePostHog } from '@posthog/react';
 import {
   Send,
   Download,
@@ -77,6 +78,7 @@ export default function ActiveChat({
   onUpdateSessionTitle: _onUpdateSessionTitle,
   onExportSession,
 }) {
+  const posthog = usePostHog();
   const chatLimits = useUser()?.info?.limits?.chat_messages;
   const [message, setMessage] = useState("");
 
@@ -161,7 +163,9 @@ export default function ActiveChat({
   const handleSendMessage = (e) => {
     e.preventDefault();
     if (!message.trim() || isStreaming) return;
-
+    posthog?.capture('chat_message_sent', {
+      message_length: message.trim().length,
+    });
     onSendMessage?.(message.trim());
     setMessage("");
   };

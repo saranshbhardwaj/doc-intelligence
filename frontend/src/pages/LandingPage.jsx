@@ -2,6 +2,7 @@
 import { useNavigate, Link } from "react-router-dom";
 import { useAppAuth } from "@/hooks/useAppAuth";
 import { useEffect, useState } from "react";
+import { usePostHog } from '@posthog/react';
 import Hero from "../components/landing/Hero";
 import Features from "../components/landing/Features";
 import WorkflowShowcase from "../components/landing/WorkflowShowcase";
@@ -15,6 +16,7 @@ export default function LandingPage() {
   const { isDark, toggle } = useDarkMode();
   const { isSignedIn, isLoaded } = useAppAuth();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
+  const posthog = usePostHog();
 
   useEffect(() => {
     if (isLoaded && isSignedIn) {
@@ -23,6 +25,7 @@ export default function LandingPage() {
   }, [isLoaded, isSignedIn, navigate]);
 
   const handleGetStarted = () => {
+    posthog?.capture('get_started_clicked');
     navigate("/sign-up");
   };
 
@@ -59,7 +62,10 @@ export default function LandingPage() {
             {isLoaded && !isSignedIn && (
               <>
                 <button
-                  onClick={() => navigate("/sign-in", { state: { autoSignIn: true } })}
+                  onClick={() => {
+                    posthog?.capture('sign_in_clicked');
+                    navigate("/sign-in", { state: { autoSignIn: true } });
+                  }}
                   className="px-4 py-2 text-sm font-semibold text-muted-foreground hover:text-foreground transition-colors"
                 >
                   Sign In
@@ -133,6 +139,7 @@ export default function LandingPage() {
                   <button
                     onClick={() => {
                       setMobileMenuOpen(false);
+                      posthog?.capture('sign_in_clicked');
                       navigate("/sign-in", { state: { autoSignIn: true } });
                     }}
                     className="w-full text-left px-3 py-2 rounded-xl text-sm text-muted-foreground hover:bg-muted transition-colors"
