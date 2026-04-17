@@ -17,3 +17,14 @@ combined/
 .vscode/
 
 node_modules/
+
+# Local virtualenv - never copy into Docker image
+venv/
+.venv/
+
+# Local upload files - use R2 in production
+uploads/
+
+# Test artifacts
+celerybeat-schedule
+db.sqlite3

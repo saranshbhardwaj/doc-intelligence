@@ -1,6 +1,7 @@
 # app/utils/logging.py
 import logging
 import os
+import sys
 from logging.handlers import RotatingFileHandler
 from pythonjsonlogger import jsonlogger
 from app.config import settings
@@ -36,7 +37,8 @@ logger.setLevel(getattr(logging, LOG_LEVEL, logging.INFO))
 logger.addFilter(ContextFilter())
 
 # Console / stdout handler (always on for containers)
-stream_handler = logging.StreamHandler()
+stream_handler = logging.StreamHandler(sys.stdout)
+
 stream_handler.setFormatter(json_formatter)
 logger.addHandler(stream_handler)
 

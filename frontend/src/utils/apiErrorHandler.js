@@ -13,6 +13,7 @@
  * Error types for categorization
  */
 export const ErrorTypes = {
+  CANCELED: 'canceled_request',
   NETWORK: 'network_error',
   HTTP: 'http_error',
   TIMEOUT: 'timeout_error',
@@ -21,6 +22,15 @@ export const ErrorTypes = {
   SERVER: 'server_error',
   UNKNOWN: 'unknown_error',
 };
+
+export function isCanceledRequest(error) {
+  return (
+    error?.code === 'ERR_CANCELED' ||
+    error?.name === 'CanceledError' ||
+    error?.name === 'AbortError' ||
+    error?.message === 'canceled'
+  );
+}
 
 /**
  * Extract error message from various error formats
@@ -69,6 +79,10 @@ function extractErrorMessage(error) {
  * Determine error type from axios error
  */
 function determineErrorType(error) {
+  if (isCanceledRequest(error)) {
+    return ErrorTypes.CANCELED;
+  }
+
   // Network failure (no response received)
   if (!error.response) {
     if (error.code === 'ECONNABORTED' || error.message?.includes('timeout')) {
@@ -142,6 +156,9 @@ function getUserFriendlyMessage(error, errorType, extractedMessage) {
 
   // Provide user-friendly defaults based on error type
   switch (errorType) {
+    case ErrorTypes.CANCELED:
+      return 'Request canceled.';
+
     case ErrorTypes.NETWORK:
       return 'Unable to connect to server. Please check your internet connection and try again.';
 
@@ -180,7 +197,9 @@ function getUserFriendlyMessage(error, errorType, extractedMessage) {
  * @returns {Object} Normalized error object
  */
 export function handleApiError(error) {
-  console.error('[API Error Handler]', error);
+  if (!isCanceledRequest(error)) {
+    console.error('[API Error Handler]', error);
+  }
 
   // Determine error type
   const errorType = determineErrorType(error);
@@ -234,6 +253,10 @@ export function handleApiError(error) {
  */
 export function createErrorInterceptor() {
   return (error) => {
+    if (isCanceledRequest(error)) {
+      // Cancellation is expected during effect cleanup/reruns.
+      return Promise.reject(error);
+    }
     const normalizedError = handleApiError(error);
     // Enhance the error object with normalized data
     error.normalized = normalizedError;

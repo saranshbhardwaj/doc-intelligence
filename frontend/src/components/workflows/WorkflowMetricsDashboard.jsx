@@ -9,7 +9,7 @@ import { DollarSign, TrendingUp, BarChart3, Target, Building2, Users, AlertTrian
 import { Card } from "../ui/card";
 import { formatCurrency } from "../../utils/formatters";
 
-function MetricCard({ label, value, format = "text", currency = "USD", icon: Icon, color = "blue", trend }) {
+function MetricCard({ label, value, format = "text", currency = "USD", icon: _Icon, color = "blue", trend }) {
   const formatValue = () => {
     if (value === null || value === undefined) return "—";
 
@@ -138,13 +138,25 @@ export default function WorkflowMetricsDashboard({ data, run }) {
       )}
 
       {/* EBITDA Margin */}
-      {(latest?.margin || financials.metrics?.ebitda_margin_latest) && (
+      {(latest?.ebitda_margin || latest?.margin || financials.metrics?.ebitda_margin_latest) && (
         <MetricCard
           label="EBITDA Margin"
-          value={latest?.margin || financials.metrics.ebitda_margin_latest}
+          value={latest?.ebitda_margin || latest?.margin || financials.metrics.ebitda_margin_latest}
           format="percentage"
           icon={Target}
           color="purple"
+        />
+      )}
+
+      {/* Net Income */}
+      {latest && latest.net_income && (
+        <MetricCard
+          label="Net Income"
+          value={latest.net_income}
+          format="currency"
+          currency={currency}
+          icon={BarChart3}
+          color="green"
         />
       )}
 

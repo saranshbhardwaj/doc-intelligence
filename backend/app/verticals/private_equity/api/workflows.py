@@ -14,16 +14,13 @@ from app.repositories.workflow_repository import WorkflowRepository
 from app.auth import get_current_user
 from app.db_models_users import User
 from app.utils.logging import logger
-from app.services.tasks.workflows import start_workflow_chain
 from app.schemas.workflows import (
     WorkflowTemplateListItem,
     WorkflowTemplateDetail,
     WorkflowVariableSchema,
     WorkflowRunListItem,
-    WorkflowRunDetail,
     DocumentSummary,
 )
-from pydantic import BaseModel, Field
 
 # Reuse schemas from main workflows API
 from app.api.workflows import (
@@ -149,7 +146,7 @@ def list_pe_workflow_runs(
     repo = WorkflowRepository(db)
 
     # Get all runs for user
-    all_runs = repo.list_runs_for_user(user.id, limit=limit * 2, offset=offset)  # Get more to filter
+    all_runs = repo.list_runs_for_user(user.id, user.org_id, limit=limit * 2, offset=offset)  # Get more to filter
 
     # Filter to PE workflows only
     pe_runs = [run for run in all_runs if run.workflow and run.workflow.domain == "private_equity"][:limit]

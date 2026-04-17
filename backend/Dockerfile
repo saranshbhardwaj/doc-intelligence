@@ -22,18 +22,23 @@ ENV SHARED_UPLOAD_ROOT=/shared_uploads
 
 # Install Python deps separately to leverage layer cache
 COPY requirements.txt ./requirements.txt
-RUN pip install --upgrade pip && pip install -r requirements.txt
+RUN pip install --upgrade pip && \
+    pip install torch --index-url https://download.pytorch.org/whl/cpu && \
+    pip install -r requirements.txt
 
 # Copy application (exclude via .dockerignore)
 COPY . .
 
-# Adjust ownership for writable directories (logs, temp files, HuggingFace cache)
-RUN mkdir -p /shared_uploads /app/logs /app/.cache && chown -R appuser:app /shared_uploads /app/logs /app /app/.cache
+# Adjust ownership for writable directories (logs, temp files, HuggingFace cache, Prometheus metrics)
+RUN mkdir -p /shared_uploads /app/logs /app/.cache /tmp/prometheus_multiproc && chown -R appuser:app /shared_uploads /app/logs /app /app/.cache /tmp/prometheus_multiproc
 
 # Default envs (override via compose / Railway)
 ENV USE_CELERY=${USE_CELERY} \
     CELERY_BROKER_URL=${CELERY_BROKER_URL} \
     CELERY_RESULT_BACKEND=${CELERY_RESULT_BACKEND}
+
+ENV HOME=/app
+ENV HF_HOME=/app/.cache/huggingface
 
 # Switch to non-root user
 USER appuser
@@ -42,7 +47,8 @@ USER appuser
 EXPOSE 8000
 
 # Health command (optional)
-HEALTHCHECK --interval=120s --timeout=5s CMD curl -f http://localhost:8000/api/health || exit 1
+HEALTHCHECK --interval=30s --timeout=5s --retries=3 CMD curl -f http://localhost:8000/api/health || exit 1
 
-# Run uvicorn by default
-CMD ["python", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+# Run uvicorn with 2 workers for concurrent request handling.
+# Prometheus multiproc cleanup is handled by Python code in metrics_setup.py (PID-based)
+CMD ["python", "-Xfrozen_modules=off", "-m", "uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--workers", "1"]

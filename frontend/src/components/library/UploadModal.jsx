@@ -21,6 +21,7 @@ import {
   CheckCircle,
   AlertCircle,
   Folder,
+  Loader2,
 } from "lucide-react";
 import {
   Dialog,
@@ -48,8 +49,10 @@ export default function UploadModal({
   onCollectionChange,
   onUpload,
 }) {
+  const uploadAccept = ".pdf,.docx,.pptx,.jpg,.jpeg,.png,.bmp,.tif,.tiff,.heif,.heic";
   const [selectedFiles, setSelectedFiles] = useState([]);
   const [dragActive, setDragActive] = useState(false);
+  const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef(null);
 
   const handleDrag = useCallback((e) => {
@@ -65,8 +68,23 @@ export default function UploadModal({
   const validateFile = (file) => {
     const errors = [];
 
-    if (file.type !== "application/pdf") {
-      errors.push("Only PDF files are allowed");
+    // Check file type (MIME type + extension fallback)
+    const allowedTypes = new Set([
+      "application/pdf",
+      "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+      "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      "image/jpeg",
+      "image/png",
+      "image/bmp",
+      "image/tiff",
+      "image/heif",
+      "image/heic",
+    ]);
+    const ext = file.name.toLowerCase().split('.').pop();
+    const allowedExts = ["pdf", "docx", "pptx", "jpg", "jpeg", "png", "bmp", "tif", "tiff", "heif", "heic"];
+
+    if (!allowedTypes.has(file.type) && !allowedExts.includes(ext)) {
+      errors.push("Only PDF, DOCX, PPTX, JPEG, PNG, BMP, TIFF, HEIF, and HEIC files are allowed");
     }
 
     if (file.size > 50 * 1024 * 1024) {
@@ -80,7 +98,7 @@ export default function UploadModal({
     const fileArray = Array.from(files);
     const filesWithValidation = fileArray.map((file) => ({
       file,
-      id: Math.random().toString(36).substr(2, 9),
+      id: Math.random().toString(36).slice(2, 11),
       name: file.name,
       size: file.size,
       errors: validateFile(file),
@@ -113,7 +131,7 @@ export default function UploadModal({
     setSelectedFiles((prev) => prev.filter((f) => f.id !== fileId));
   };
 
-  const handleUpload = () => {
+  const handleUpload = async () => {
     if (!selectedCollectionId) {
       alert("Please select a collection");
       return;
@@ -125,9 +143,14 @@ export default function UploadModal({
       return;
     }
 
-    onUpload?.(validFiles.map((f) => f.file));
-    setSelectedFiles([]);
-    onOpenChange?.(false);
+    setUploading(true);
+    try {
+      await onUpload?.(validFiles.map((f) => f.file));
+      setSelectedFiles([]);
+      onOpenChange?.(false);
+    } finally {
+      setUploading(false);
+    }
   };
 
   const formatFileSize = (bytes) => {
@@ -139,17 +162,17 @@ export default function UploadModal({
   const validFilesCount = selectedFiles.filter((f) => f.errors.length === 0).length;
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-2xl">
+    <Dialog open={open} onOpenChange={uploading ? undefined : onOpenChange}>
+      <DialogContent className="sm:max-w-2xl max-h-[90vh] flex flex-col overflow-hidden">
         <DialogHeader>
           <DialogTitle className="text-xl">Upload Documents</DialogTitle>
           <DialogDescription>
-            Upload PDF documents to your collection. Files will be automatically
+            Upload documents to your collection. Supports PDF, Word, PowerPoint, and image files. Files will be automatically
             parsed, chunked, and embedded.
           </DialogDescription>
         </DialogHeader>
 
-        <div className="space-y-4 mt-4">
+        <div className="space-y-4 mt-4 overflow-y-auto flex-1 min-h-0">
           {/* Collection Selector */}
           <div>
             <Label className="text-sm font-medium mb-2 block">
@@ -193,49 +216,65 @@ export default function UploadModal({
             <input
               ref={fileInputRef}
               type="file"
-              accept=".pdf"
+              accept={uploadAccept}
               multiple
               onChange={handleFileInput}
               className="hidden"
             />
 
-            <div className="flex flex-col items-center justify-center py-12 px-4">
-              <div
-                className={`w-16 h-16 rounded-full flex items-center justify-center mb-4 transition-colors ${
-                  dragActive ? "bg-primary/20" : "bg-muted"
-                }`}
-              >
-                <Upload
-                  className={`w-8 h-8 transition-colors ${
-                    dragActive ? "text-primary" : "text-muted-foreground"
-                  }`}
-                />
+            {selectedFiles.length > 0 ? (
+              /* Compact strip once files are selected */
+              <div className="flex items-center justify-between px-4 py-2.5">
+                <span className="text-sm text-muted-foreground">
+                  {dragActive ? "Drop to add more" : "Drag more files or"}
+                </span>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 text-xs"
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  <Upload className="w-3 h-3 mr-1.5" />
+                  Add more files
+                </Button>
               </div>
-
-              <h3 className="text-base font-medium text-foreground mb-1">
-                {dragActive ? "Drop files here" : "Drag & drop PDF files"}
-              </h3>
-              <p className="text-sm text-muted-foreground mb-4">
-                or click to browse
-              </p>
-
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => fileInputRef.current?.click()}
-              >
-                Choose Files
-              </Button>
-
-              <p className="text-xs text-muted-foreground mt-4">
-                Max file size: 50MB • PDF only
-              </p>
-            </div>
+            ) : (
+              /* Full drop zone when no files selected */
+              <div className="flex flex-col items-center justify-center py-10 px-4">
+                <div
+                  className={`w-14 h-14 rounded-2xl flex items-center justify-center mb-3 transition-colors ${
+                    dragActive ? "bg-primary/20" : "bg-primary/10"
+                  }`}
+                >
+                  <Upload
+                    className={`w-7 h-7 transition-colors ${
+                      dragActive ? "text-primary" : "text-primary/60"
+                    }`}
+                  />
+                </div>
+                <h3 className="text-base font-medium text-foreground mb-1">
+                  {dragActive ? "Drop files here" : "Drag & drop documents"}
+                </h3>
+                <p className="text-sm text-muted-foreground mb-3">
+                  or click to browse
+                </p>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  Choose Files
+                </Button>
+                <p className="text-xs text-muted-foreground mt-3">
+                  Max file size: 50MB • PDF, DOCX, PPTX, JPEG, PNG, BMP, TIFF, HEIF, HEIC
+                </p>
+              </div>
+            )}
           </div>
 
           {/* File List */}
           {selectedFiles.length > 0 && (
-            <div className="space-y-2 max-h-64 overflow-y-auto">
+            <div className="space-y-2">
               <div className="flex items-center justify-between mb-2">
                 <Label className="text-sm font-medium">
                   Selected Files ({selectedFiles.length})
@@ -344,15 +383,30 @@ export default function UploadModal({
             )}
           </div>
           <div className="flex gap-2">
-            <Button variant="outline" onClick={() => onOpenChange?.(false)}>
+            <Button
+              variant="outline"
+              onClick={() => onOpenChange?.(false)}
+              disabled={uploading}
+              className="rounded-full"
+            >
               Cancel
             </Button>
             <Button
               onClick={handleUpload}
-              disabled={!selectedCollectionId || validFilesCount === 0}
+              disabled={!selectedCollectionId || validFilesCount === 0 || uploading}
+              className="rounded-full"
             >
-              <Upload className="w-4 h-4 mr-2" />
-              Upload {validFilesCount > 0 ? `(${validFilesCount})` : ""}
+              {uploading ? (
+                <>
+                  <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+                  Uploading...
+                </>
+              ) : (
+                <>
+                  <Upload className="w-4 h-4 mr-2" />
+                  Upload {validFilesCount > 0 ? `(${validFilesCount})` : ""}
+                </>
+              )}
             </Button>
           </div>
         </div>

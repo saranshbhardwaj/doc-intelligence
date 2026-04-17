@@ -5,8 +5,6 @@ Handles extraction results with proper ExtractedData model support.
 
 from typing import Dict, Any, Tuple
 from datetime import datetime
-from io import BytesIO
-import pandas as pd
 
 from .base_exporter import BaseExporter
 from app.models import ExtractedData
@@ -153,7 +151,7 @@ class ExtractionExporter(BaseExporter):
         # Footer
         self.add_divider()
         self.add_footer_text("This is a confidential document prepared for investment evaluation purposes.")
-        self.add_footer_text("Generated using AI-powered document intelligence from Sand Cloud.")
+        self.add_footer_text("Generated using AI-powered document intelligence from Basilfy.")
 
         if metadata.get('processing_time_ms'):
             self.add_footer_text(f"Processing Time: {metadata['processing_time_ms']}ms")

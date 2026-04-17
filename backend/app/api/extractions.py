@@ -8,8 +8,6 @@ This endpoint intelligently handles both cache hits and misses:
 from datetime import datetime
 import time
 import uuid
-import json
-import asyncio
 import hashlib
 import os
 
@@ -21,7 +19,7 @@ from pydantic import BaseModel
 from app.api.dependencies import (
     get_client_ip, document_processor, cache, analytics
 )
-from app.auth import get_current_user
+from app.auth import get_current_user, get_current_org_role, is_admin_role
 from app.db_models_users import User
 from app.models import ExtractedData
 from app.utils.file_utils import make_file_label
@@ -33,14 +31,24 @@ from app.utils.logging import logger
 from app.repositories.job_repository import JobRepository
 from app.repositories.extraction_repository import ExtractionRepository
 from app.repositories.document_repository import DocumentRepository
+from app.repositories.user_repository import UserRepository
+from app.services.beta_limits import (
+    enforce_extraction_limit,
+    enforce_page_limit,
+    log_shadow_credits,
+    reserve_shadow_credits,
+)
 
 # Orchestration service
-from app.services.tasks import start_extraction_chain
-from app.services.tasks.extractions import start_extraction_from_chunks_chain
+from celery import chain
+from app.verticals.private_equity.extraction.tasks import start_extraction_chain
+from app.verticals.private_equity.extraction.tasks import (
+    start_extraction_from_chunks_chain,
+    extract_structured_task,
+    store_extraction_result_task,
+)
 from app.services.artifacts import load_extraction_artifact, delete_artifact
 from app.utils.id_generator import generate_id
-from app.db_models_chat import DocumentChunk
-from app.database import SessionLocal
 from app.models import ExtractionListItem, PaginatedExtractionResponse
 import tempfile
 
@@ -62,9 +70,8 @@ async def list_user_extractions(
     """
     List extractions for the current user (paginated, newest first).
     """
-    logger.info("Listing user extractions", extra={"user_id": user.id, "limit": limit, "offset": offset})
     repo = ExtractionRepository()
-    extractions, total = repo.list_user_extractions(user.id, limit=limit, offset=offset, status=status)
+    extractions, total = repo.list_user_extractions(user.id, user.org_id, limit=limit, offset=offset, status=status)
     result = []
     for e in extractions:
         result.append(ExtractionListItem(
@@ -160,7 +167,7 @@ async def extract_document(
     try:
         # Concurrency guard: prevent starting new extraction if one is already active
         concurrency_repo = ExtractionRepository()
-        active_extraction = concurrency_repo.get_active_processing_extraction(user.id)
+        active_extraction = concurrency_repo.get_active_processing_extraction(user.id, user.org_id)
         if active_extraction:
             raise HTTPException(status_code=409, detail="Another extraction is already in progress. Please wait for it to finish.")
 
@@ -176,6 +183,7 @@ async def extract_document(
         extraction_repo = ExtractionRepository()
         existing_extraction = extraction_repo.check_duplicate_extraction(
             user_id=user.id,
+            org_id=user.org_id,
             content_hash=content_hash
         )
 
@@ -218,50 +226,9 @@ async def extract_document(
                 "extraction_id": existing_extraction.id
             })
 
-        # ============================================
-        # STEP 2: Check page limit (admin users have unlimited)
-        # ============================================
-        if user.tier != "admin" and user.pages_limit > 0:
-            # For free tier: Check total pages processed (one-time limit)
-            # For paid tiers: Check monthly pages (recurring limit)
-            if user.tier == "free":
-                # Free tier gets 100 pages ONE TIME total
-                if user.total_pages_processed >= user.pages_limit:
-                    raise HTTPException(
-                        status_code=403,
-                        detail={
-                            "error": "page_limit_exceeded",
-                            "message": f"Free tier limit reached ({user.pages_limit} pages total). Please upgrade to continue.",
-                            "pages_used": user.total_pages_processed,
-                            "pages_limit": user.pages_limit,
-                            "tier": user.tier
-                        }
-                    )
-            else:
-                # Paid tiers have monthly limits
-                if user.pages_this_month >= user.pages_limit:
-                    raise HTTPException(
-                        status_code=403,
-                        detail={
-                            "error": "page_limit_exceeded",
-                            "message": f"Monthly page limit reached ({user.pages_limit} pages). Your limit resets next month.",
-                            "pages_used": user.pages_this_month,
-                            "pages_limit": user.pages_limit,
-                            "tier": user.tier
-                        }
-                    )
+        # STEP 2: Check extraction quota (skip duplicates returned above)
+        enforce_extraction_limit(user)
 
-        # Log usage
-        if user.tier == "free":
-            logger.info(f"User page usage (total): {user.total_pages_processed}/{user.pages_limit}", extra={
-                "request_id": request_id,
-                "user_id": user.id
-            })
-        else:
-            logger.info(f"User page usage (monthly): {user.pages_this_month}/{user.pages_limit}", extra={
-                "request_id": request_id,
-                "user_id": user.id
-            })
 
         # ============================================
         # STEP 3: Check cache (global cache across all users)
@@ -273,6 +240,10 @@ async def extract_document(
                 "request_id": request_id,
                 "user_id": user.id
             })
+
+            cached_pages = int(cached_result.get("metadata", {}).get("pages", 0) or 0)
+            if cached_pages > 0:
+                enforce_page_limit(user, pages_to_add=cached_pages)
 
             analytics.track_event(
                 "cache_hit",
@@ -303,13 +274,14 @@ async def extract_document(
 
             extraction = extraction_repo.create_extraction_record(
                 extraction_id=request_id,
+                org_id=user.org_id,
                 user_id=user.id,
                 user_tier=user.tier,
                 filename=file.filename,
                 file_size_bytes=len(content),
                 content_hash=content_hash,
                 status="completed",
-                page_count=cached_result["metadata"]["pages"],
+                page_count=cached_pages,
                 from_cache=True,
                 context=context
             )
@@ -334,6 +306,26 @@ async def extract_document(
                     "user_id": user.id
                 })
 
+            if extraction:
+                user_repo = UserRepository()
+                usage_updated = user_repo.update_page_usage(
+                    user_id=user.id,
+                    pages_to_add=cached_pages,
+                    update_monthly=True
+                )
+                if not usage_updated:
+                    logger.warning(
+                        "Failed to update page usage for cache-hit extraction",
+                        extra={"request_id": request_id, "user_id": user.id, "pages": cached_pages}
+                    )
+
+                log_shadow_credits(
+                    user=user,
+                    operation_type="extraction_run",
+                    reference_id=request_id,
+                    metadata={"from_cache": True, "pages": cached_pages},
+                )
+
             # Return 200 OK with full result (sync behavior)
             return {
                 "success": True,
@@ -342,8 +334,8 @@ async def extract_document(
                     "extraction_id": request_id,
                     "request_id": request_id,
                     "filename": file.filename,
-                    "pages": cached_result["metadata"]["pages"],
-                    "characters_extracted": cached_result["metadata"]["characters_extracted"],
+                    "pages": cached_pages,
+                    "characters_extracted": cached_result.get("metadata", {}).get("characters_extracted", 0),
                     "processing_time_seconds": time.time() - start_time,
                     "timestamp": datetime.now().isoformat()
                 },
@@ -374,6 +366,7 @@ async def extract_document(
 
         extraction = extraction_repo.create_extraction_record(
             extraction_id=request_id,
+            org_id=user.org_id,
             user_id=user.id,
             user_tier=user.tier,
             filename=file.filename,
@@ -392,7 +385,8 @@ async def extract_document(
         job_id = str(uuid.uuid4())
         job_repo = JobRepository()
         job_state = job_repo.create_job(
-            extraction_id=request_id,
+            entity_type="extraction",
+            entity_id=request_id,
             status="queued",
             current_stage="queued",
             progress_percent=0,
@@ -405,25 +399,33 @@ async def extract_document(
 
         logger.info(f"Created job {job_id} for extraction {request_id}", extra={"job_id": job_id})
 
+        reserve_shadow_credits(
+            user=user,
+            operation_type="extraction_run",
+            reference_id=request_id,
+            metadata={"from_cache": False, "filename": file.filename},
+        )
+
         # ============================================
         # STEP 6: Start background processing (Celery or asyncio)
         if settings.use_celery:
-            # Persist uploaded file to a shared volume path so worker container can access
-            # Use /shared_uploads (ensure this directory is a bind/volume mount in docker-compose)
-            shared_root = os.getenv("SHARED_UPLOAD_ROOT", "/shared_uploads")
-            try:
-                os.makedirs(shared_root, exist_ok=True)
-            except Exception:
-                # Fallback to system temp if shared dir cannot be created
-                import tempfile
-                shared_root = tempfile.gettempdir()
-
+            import tempfile
+            from app.core.storage.storage_factory import get_storage_backend
             safe_filename = file.filename.replace("/", "_").replace("\\", "_")
-            temp_path = os.path.join(shared_root, f"{request_id}_{safe_filename}")
-            with open(temp_path, "wb") as f_out:
-                f_out.write(content)
-            logger.info("Saved uploaded file for Celery processing", extra={"job_id": job_id, "path": temp_path})
-            start_extraction_chain(temp_path, file.filename, job_id, request_id, user.id, context)
+            # Write to local temp then upload to storage so worker can access without a shared volume.
+            # This makes the extraction pipeline compatible with multi-replica deployments (Railway).
+            with tempfile.NamedTemporaryFile(delete=False, suffix=f"_{safe_filename}") as tmp:
+                tmp.write(content)
+                tmp_path = tmp.name
+            try:
+                storage = get_storage_backend()
+                # extractions/{extraction_id}/source_{filename} keeps upload and result.json as siblings
+                r2_key = f"extractions/{request_id}/source_{safe_filename}"
+                storage.upload(tmp_path, r2_key)
+                logger.info("Uploaded extraction file to storage", extra={"job_id": job_id, "storage_key": r2_key})
+                start_extraction_chain(r2_key, file.filename, job_id, request_id, user.id, context)
+            finally:
+                os.unlink(tmp_path)  # Local temp no longer needed after upload
 
         # ============================================
         # STEP 7: Return 202 Accepted with job_id (async behavior)
@@ -508,7 +510,7 @@ async def get_extraction_result(extraction_id: str):
 
     # Load from artifact column (R2 pointer or inline data)
     result_data = load_extraction_artifact(extraction.id, extraction.artifact)
-    logger.info(f"Retrieved extraction result from artifact", extra={
+    logger.info("Retrieved extraction result from artifact", extra={
         "extraction_id": extraction_id,
         "artifact_backend": extraction.artifact.get("backend", "inline") if isinstance(extraction.artifact, dict) else "inline"
     })
@@ -552,7 +554,7 @@ async def extract_temp_document(
     try:
         # Concurrency guard
         concurrency_repo = ExtractionRepository()
-        active_extraction = concurrency_repo.get_active_processing_extraction(user.id)
+        active_extraction = concurrency_repo.get_active_processing_extraction(user.id, user.org_id)
         if active_extraction:
             raise HTTPException(status_code=409, detail="Another extraction is already in progress. Please wait for it to finish.")
 
@@ -561,24 +563,31 @@ async def extract_temp_document(
         document_processor.validate_file(file.filename, content)
         content_hash = hashlib.sha256(content).hexdigest()
 
-        # Save temp file for processing
-        temp_dir = os.getenv("SHARED_UPLOAD_ROOT", tempfile.gettempdir())
-        os.makedirs(temp_dir, exist_ok=True)
+        # Upload file to storage so worker can access without a shared volume.
+        from app.core.storage.storage_factory import get_storage_backend
         safe_filename = file.filename.replace("/", "_").replace("\\", "_")
         request_id = generate_id()
-        temp_path = os.path.join(temp_dir, f"{request_id}_{safe_filename}")
-
-        with open(temp_path, "wb") as f:
-            f.write(content)
+        with tempfile.NamedTemporaryFile(delete=False, suffix=f"_{safe_filename}") as tmp:
+            tmp.write(content)
+            tmp_path = tmp.name
+        try:
+            storage = get_storage_backend()
+            # extractions/{extraction_id}/source_{filename} — consistent with result.json sibling
+            r2_key = f"extractions/{request_id}/source_{safe_filename}"
+            storage.upload(tmp_path, r2_key)
+            logger.info("Uploaded temp extraction file to storage", extra={"storage_key": r2_key})
+        finally:
+            os.unlink(tmp_path)
 
         # Create temporary document record
         document_id = generate_id()
         document_repo = DocumentRepository()
         doc = document_repo.create_document(
-            document_id=document_id,
+            org_id=user.org_id,
             user_id=user.id,
+            document_id=document_id,
             filename=file.filename,
-            file_path=temp_path,
+            file_path=r2_key,
             content_hash=content_hash,
             file_size_bytes=len(content),
             status="temp"
@@ -594,6 +603,7 @@ async def extract_temp_document(
         existing = extraction_repo.check_duplicate_by_content_hash(
             content_hash=content_hash,
             user_id=user.id,
+            org_id=user.org_id,
             context=context_clean
         )
 
@@ -621,12 +631,15 @@ async def extract_temp_document(
                 }
             }
 
+        enforce_extraction_limit(user)
+
         # Create extraction record
         extraction_id = generate_id()
 
         extraction = extraction_repo.create_extraction_from_document(
             extraction_id=extraction_id,
             document_id=document_id,
+            org_id=user.org_id,
             user_id=user.id,
             context=context_clean,
             status="processing"
@@ -640,7 +653,8 @@ async def extract_temp_document(
         job_repo = JobRepository()
         job = job_repo.create_job(
             job_id=job_id,
-            extraction_id=extraction_id,
+            entity_type="extraction",
+            entity_id=extraction_id,
             status="queued",
             current_stage="queued",
             progress_percent=0,
@@ -652,9 +666,16 @@ async def extract_temp_document(
 
         logger.info("Created temp extraction job", extra={"job_id": job_id, "extraction_id": extraction_id})
 
+        reserve_shadow_credits(
+            user=user,
+            operation_type="extraction_run",
+            reference_id=extraction_id,
+            metadata={"from_cache": False, "source": "temp_upload"},
+        )
+
         # Trigger full extraction pipeline
         start_extraction_chain(
-            file_path=temp_path,
+            file_path=r2_key,
             filename=file.filename,
             job_id=job_id,
             extraction_id=extraction_id,
@@ -710,7 +731,7 @@ async def extract_from_document(
     try:
         # Verify document exists and user owns it
         document_repo = DocumentRepository()
-        doc = document_repo.get_by_id(document_id)
+        doc = document_repo.get_by_id(document_id, user.org_id)
 
         if not doc:
             raise HTTPException(status_code=404, detail="Document not found")
@@ -723,7 +744,7 @@ async def extract_from_document(
 
         # Concurrency guard
         concurrency_repo = ExtractionRepository()
-        active_extraction = concurrency_repo.get_active_processing_extraction(user.id)
+        active_extraction = concurrency_repo.get_active_processing_extraction(user.id, user.org_id)
         if active_extraction:
             raise HTTPException(status_code=409, detail="Another extraction is already in progress. Please wait for it to finish.")
 
@@ -736,6 +757,7 @@ async def extract_from_document(
         existing = extraction_repo.check_duplicate_by_document_id(
             document_id=document_id,
             user_id=user.id,
+            org_id=user.org_id,
             context=context_clean
         )
 
@@ -763,6 +785,9 @@ async def extract_from_document(
                 }
             }
 
+        enforce_extraction_limit(user)
+        enforce_page_limit(user, pages_to_add=int(doc.page_count or 0))
+
         # Verify document has chunks
         chunks_count = document_repo.get_chunk_count(document_id)
         if chunks_count == 0:
@@ -776,6 +801,7 @@ async def extract_from_document(
         extraction = extraction_repo.create_extraction_from_document(
             extraction_id=extraction_id,
             document_id=document_id,
+            org_id=user.org_id,
             user_id=user.id,
             context=context_clean,
             status="processing"
@@ -789,7 +815,8 @@ async def extract_from_document(
         job_repo = JobRepository()
         job = job_repo.create_job(
             job_id=job_id,
-            extraction_id=extraction_id,
+            entity_type="extraction",
+            entity_id=extraction_id,
             status="queued",
             current_stage="queued",
             progress_percent=0,
@@ -804,6 +831,13 @@ async def extract_from_document(
             "extraction_id": extraction_id,
             "document_id": document_id
         })
+
+        reserve_shadow_credits(
+            user=user,
+            operation_type="extraction_run",
+            reference_id=extraction_id,
+            metadata={"from_cache": False, "source": "library_document", "document_id": document_id},
+        )
 
         # Trigger extraction from chunks pipeline
         start_extraction_from_chunks_chain(
@@ -838,7 +872,8 @@ async def extract_from_document(
 @router.delete("/api/extractions/{extraction_id}")
 async def delete_extraction(
     extraction_id: str,
-    user: User = Depends(get_current_user)
+    user: User = Depends(get_current_user),
+    request: Request = None
 ):
     """
     Delete an extraction and its associated artifacts.
@@ -851,13 +886,15 @@ async def delete_extraction(
 
     try:
         extraction_repo = ExtractionRepository()
-        extraction = extraction_repo.get_extraction(extraction_id)
+        extraction = extraction_repo.get_extraction(extraction_id, user.org_id)
 
         if not extraction:
             raise HTTPException(status_code=404, detail="Extraction not found")
 
         if extraction.user_id != user.id:
-            raise HTTPException(status_code=403, detail="Not authorized to delete this extraction")
+            role = get_current_org_role(request)
+            if not is_admin_role(role):
+                raise HTTPException(status_code=403, detail="Not authorized to delete this extraction")
 
         # Delete artifact from R2 if exists
         if extraction.artifact:
@@ -868,7 +905,7 @@ async def delete_extraction(
                 logger.warning(f"Failed to delete artifact from R2: {e}", extra={"extraction_id": extraction_id})
 
         # Delete extraction record
-        success = extraction_repo.delete_extraction(extraction_id, user.id)
+        success = extraction_repo.delete_extraction(extraction_id, user.id, user.org_id)
 
         if not success:
             raise HTTPException(status_code=500, detail="Failed to delete extraction")
@@ -908,7 +945,7 @@ async def retry_extraction(
     extraction_repo = ExtractionRepository()
     job_repo = JobRepository()
 
-    extraction = extraction_repo.get_extraction(extraction_id)
+    extraction = extraction_repo.get_extraction(extraction_id, user.org_id)
     if not extraction:
         raise HTTPException(status_code=404, detail="Extraction not found")
     if extraction.user_id != user.id:
@@ -925,40 +962,42 @@ async def retry_extraction(
     if not job.combined_context_path:
         raise HTTPException(status_code=400, detail="Cannot retry – combined context missing (pipeline did not reach summarizing stage)")
 
-    # Reset job state for retry (direct session update to clear error fields)
-    from app.database import SessionLocal
-    db = SessionLocal()
-    try:
-        job_db = db.query(type(job)).filter(type(job).job_id == job.job_id).first()
-        if job_db:
-            job_db.status = "queued"
-            job_db.current_stage = "queued"
-            job_db.progress_percent = 0
-            job_db.message = "Queued for retry (extracting stage)"
-            # Clear error fields
-            job_db.error_stage = None
-            job_db.error_message = None
-            job_db.error_type = None
-            job_db.is_retryable = True
-            db.commit()
-        else:
-            raise HTTPException(status_code=404, detail="Job state disappeared before retry")
-    finally:
-        db.close()
+    # Reset job state for retry via repository (clears error fields)
+    reset_ok = job_repo.reset_for_retry(job.job_id)
+    if not reset_ok:
+        raise HTTPException(status_code=404, detail="Job state disappeared before retry")
 
     # Update extraction status back to processing so history reflects active retry
     extraction_repo.update_status(extraction_id, status="processing")
 
-    # Kick off async retry from extraction stage
-    import asyncio as _asyncio
-    _asyncio.create_task(
-        retry_document_async(
-            job_id=job.job_id,
-            extraction_id=extraction_id,
-            resume_stage="extracting",
-            resume_data_path=job.combined_context_path
+    # Kick off async retry from extraction stage (use combined context)
+    try:
+        with open(job.combined_context_path, "r", encoding="utf-8") as f:
+            combined_context = f.read()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to load combined context: {e}")
+
+    payload = {
+        "job_id": job.job_id,
+        "extraction_id": extraction_id,
+        "user_id": extraction.user_id,
+        "filename": extraction.filename or "document",
+        "context": extraction.context,
+        "combined_context": combined_context,
+        "combined_context_path": job.combined_context_path,
+        "mode": "extraction",
+    }
+
+    if settings.use_celery:
+        retry_chain = chain(
+            extract_structured_task.s(payload),
+            store_extraction_result_task.s()
         )
-    )
+        retry_chain.apply_async()
+    else:
+        # Fallback: run synchronously in-process (not recommended for large jobs)
+        extract_result = extract_structured_task(payload)
+        store_extraction_result_task(extract_result)
 
     return {
         "success": True,
@@ -1003,7 +1042,7 @@ async def export_extraction(
     try:
         # Get extraction
         extraction_repo = ExtractionRepository()
-        extraction = extraction_repo.get_extraction(extraction_id)
+        extraction = extraction_repo.get_extraction(extraction_id, user.org_id)
 
         if not extraction:
             raise HTTPException(status_code=404, detail="Extraction not found")

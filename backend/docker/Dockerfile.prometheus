@@ -1,0 +1,11 @@
+FROM prom/prometheus:latest
+
+# Install envsubst (part of gettext)
+USER root
+RUN apk add --no-cache gettext
+
+COPY prometheus-railway.yml /etc/prometheus/prometheus.template.yml
+COPY docker/prometheus-entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+ENTRYPOINT ["/entrypoint.sh"]

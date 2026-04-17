@@ -1,3 +1,4 @@
+/* eslint-disable no-undef */
 /** @type {import('tailwindcss').Config} */
 export default {
   content: ["./index.html", "./src/**/*.{js,ts,jsx,tsx}"],
@@ -8,6 +9,10 @@ export default {
         lg: "var(--radius)",
         md: "calc(var(--radius) - 2px)",
         sm: "calc(var(--radius) - 4px)",
+      },
+      fontFamily: {
+        sans: ["Instrument Sans", "ui-sans-serif", "system-ui", "-apple-system", "Segoe UI", "sans-serif"],
+        display: ["Space Grotesk", "Instrument Sans", "ui-sans-serif", "system-ui", "sans-serif"],
       },
       colors: {
         background: "hsl(var(--background))",
@@ -58,8 +63,51 @@ export default {
           DEFAULT: "hsl(var(--warning))",
           foreground: "hsl(var(--foreground))",
         },
+        doc: {
+          a: "hsl(var(--doc-a))",
+          b: "hsl(var(--doc-b))",
+          c: "hsl(var(--doc-c))",
+        },
+        similarity: {
+          high: "hsl(var(--similarity-high))",
+          mid: "hsl(var(--similarity-mid))",
+          low: "hsl(var(--similarity-low))",
+        },
+        tertiary: {
+          DEFAULT: "hsl(var(--tertiary))",
+          foreground: "hsl(var(--tertiary-foreground))",
+        },
+        surface: {
+          DEFAULT: "hsl(var(--surface))",
+          soft: "hsl(var(--surface-soft))",
+          strong: "hsl(var(--surface-strong))",
+        },
+        shell: {
+          border: "hsl(var(--shell-border))",
+        },
+        glow: "hsl(var(--glow))",
+        // Document type badge tokens — bg-dt-X / text-dt-X-foreground
+        dt: {
+          spa:          { DEFAULT: "hsl(var(--dt-spa))",          foreground: "hsl(var(--dt-spa-fg))" },
+          merger:       { DEFAULT: "hsl(var(--dt-merger))",       foreground: "hsl(var(--dt-merger-fg))" },
+          customer:     { DEFAULT: "hsl(var(--dt-customer))",     foreground: "hsl(var(--dt-customer-fg))" },
+          employment:   { DEFAULT: "hsl(var(--dt-employment))",   foreground: "hsl(var(--dt-employment-fg))" },
+          "ip-license": { DEFAULT: "hsl(var(--dt-ip-license))",   foreground: "hsl(var(--dt-ip-license-fg))" },
+          vendor:       { DEFAULT: "hsl(var(--dt-vendor))",       foreground: "hsl(var(--dt-vendor-fg))" },
+          nda:          { DEFAULT: "hsl(var(--dt-nda))",          foreground: "hsl(var(--dt-nda-fg))" },
+          legal:        { DEFAULT: "hsl(var(--dt-legal))",        foreground: "hsl(var(--dt-legal-fg))" },
+          amendment:    { DEFAULT: "hsl(var(--dt-amendment))",    foreground: "hsl(var(--dt-amendment-fg))" },
+          financial:    { DEFAULT: "hsl(var(--dt-financial))",    foreground: "hsl(var(--dt-financial-fg))" },
+          qoe:          { DEFAULT: "hsl(var(--dt-qoe))",          foreground: "hsl(var(--dt-qoe-fg))" },
+          cim:          { DEFAULT: "hsl(var(--dt-cim))",          foreground: "hsl(var(--dt-cim-fg))" },
+          other:        { DEFAULT: "hsl(var(--dt-other))",        foreground: "hsl(var(--dt-other-fg))" },
+        },
       },
       keyframes: {
+        "page-enter": {
+          from: { opacity: "0", transform: "translateY(8px)" },
+          to: { opacity: "1", transform: "translateY(0)" },
+        },
         "accordion-down": {
           from: { height: "0" },
           to: { height: "var(--radix-accordion-content-height)" },
@@ -111,8 +159,26 @@ export default {
           from: { opacity: "0", transform: "scale(0.9)" },
           to: { opacity: "1", transform: "scale(1)" },
         },
+        // Landing page
+        "float": {
+          "0%, 100%": { transform: "translateY(0px)" },
+          "50%": { transform: "translateY(-12px)" },
+        },
+        "float-slow": {
+          "0%, 100%": { transform: "translateY(0px)" },
+          "50%": { transform: "translateY(-8px)" },
+        },
+        "ambient-drift": {
+          "0%, 100%": { transform: "translate3d(0, 0, 0) scale(1)" },
+          "50%": { transform: "translate3d(-2%, 3%, 0) scale(1.04)" },
+        },
+        "sheen-pass": {
+          "0%": { transform: "translateX(-120%)" },
+          "100%": { transform: "translateX(120%)" },
+        },
       },
       animation: {
+        "page-enter": "page-enter 0.3s ease-out both",
         "accordion-down": "accordion-down 0.2s ease-out",
         "accordion-up": "accordion-up 0.2s ease-out",
         // Library animations
@@ -127,8 +193,26 @@ export default {
         "message-pulse": "message-pulse 1.5s ease-in-out infinite",
         "message-glow": "message-glow 0.6s ease-out",
         "chip-fade-in": "chip-fade-in 0.2s ease-out",
+        // Landing page
+        "float": "float 6s ease-in-out infinite",
+        "float-slow": "float-slow 8s ease-in-out infinite",
+        "ambient-drift": "ambient-drift 14s ease-in-out infinite",
+        "sheen-pass": "sheen-pass 4.8s linear infinite",
+      },
+      boxShadow: {
+        panel:
+          "0 1px 0 0 hsl(var(--border)), 0 12px 32px -24px hsl(var(--foreground) / 0.35)",
+        shell:
+          "inset 0 1px 0 hsl(var(--border) / 0.22), 0 18px 40px -26px hsl(var(--foreground) / 0.35)",
+        hero:
+          "0 24px 54px -38px hsl(var(--foreground) / 0.35)",
+        glow:
+          "0 0 0 1px hsl(var(--glow) / 0.16), 0 10px 30px -18px hsl(var(--glow) / 0.2)",
       },
     },
   },
-  plugins: [require("tailwindcss-animate")],
+  plugins: [
+    require("tailwindcss-animate"),
+    require("@tailwindcss/typography"),
+  ],
 };

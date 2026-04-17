@@ -9,14 +9,12 @@ Session-centric architecture:
 
 from typing import Optional, List
 from datetime import datetime
-from fastapi import APIRouter, HTTPException, Depends, Query, Body
+from fastapi import APIRouter, HTTPException, Depends, Query, Request
 
-from app.auth import get_current_user
+from app.auth import get_current_user, get_current_org_role, is_admin_role
 from app.db_models_users import User
 from app.repositories.session_repository import SessionRepository
 from app.repositories.chat_repository import ChatRepository
-from app.database import SessionLocal
-from app.db_models_documents import Document
 from app.utils.logging import logger
 from app.models import CreateSessionRequest, UpdateSessionRequest, AddDocumentsRequest, SessionResponse, SessionDocumentInfo
 
@@ -45,6 +43,7 @@ async def create_session(
 
     # Create session
     session = session_repo.create_session(
+        org_id=user.org_id,
         user_id=user.id,
         title=request.title,
         description=request.description
@@ -59,7 +58,8 @@ async def create_session(
         added_count = session_repo.add_documents_to_session(
             session_id=session.id,
             document_ids=request.document_ids,
-            user_id=user.id
+            user_id=user.id,
+            org_id=user.org_id
         )
 
         logger.info(
@@ -74,12 +74,13 @@ async def create_session(
 
         # Fetch document details for response
         if added_count > 0:
-            session_with_docs = session_repo.get_session(session.id, user.id)
+            session_with_docs = session_repo.get_session(session.id, user.id, user.org_id)
             if session_with_docs and session_with_docs.document_links:
                 documents_info = [
                     SessionDocumentInfo(
                         id=link.document.id,
                         name=link.document.filename,
+                        page_count=link.document.page_count,
                         added_at=link.added_at
                     )
                     for link in session_with_docs.document_links
@@ -120,7 +121,7 @@ async def list_sessions(
     session_repo = SessionRepository()
 
     # Get sessions with pagination (now includes document counts)
-    session_results, total = session_repo.list_sessions(user.id, limit, offset)
+    session_results, total = session_repo.list_sessions(user.id, user.org_id, limit, offset)
 
     logger.info(
         "Listed user sessions",
@@ -173,7 +174,7 @@ async def get_session(
     session_repo = SessionRepository()
 
     # Get session with documents eagerly loaded
-    session = session_repo.get_session(session_id, user.id)
+    session = session_repo.get_session(session_id, user.id, user.org_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
@@ -184,6 +185,7 @@ async def get_session(
             SessionDocumentInfo(
                 id=link.document.id,
                 name=link.document.filename,
+                page_count=link.document.page_count,
                 added_at=link.added_at
             )
             for link in session.document_links
@@ -247,6 +249,7 @@ async def update_session(
     updated_session = session_repo.update_session(
         session_id=session_id,
         user_id=user.id,
+        org_id=user.org_id,
         title=request.title,
         description=request.description
     )
@@ -255,7 +258,7 @@ async def update_session(
         raise HTTPException(status_code=404, detail="Session not found")
 
     # Get full session with documents
-    session = session_repo.get_session(session_id, user.id)
+    session = session_repo.get_session(session_id, user.id, user.org_id)
 
     # Build document list
     documents_info = []
@@ -264,6 +267,7 @@ async def update_session(
             SessionDocumentInfo(
                 id=link.document.id,
                 name=link.document.filename,
+                page_count=link.document.page_count,
                 added_at=link.added_at
             )
             for link in session.document_links
@@ -317,7 +321,7 @@ async def add_documents_to_session(
     session_repo = SessionRepository()
 
     # Verify session exists
-    session = session_repo.get_session(session_id, user.id)
+    session = session_repo.get_session(session_id, user.id, user.org_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
@@ -325,7 +329,8 @@ async def add_documents_to_session(
     added_count = session_repo.add_documents_to_session(
         session_id=session_id,
         document_ids=request.document_ids,
-        user_id=user.id
+        user_id=user.id,
+        org_id=user.org_id
     )
 
     logger.info(
@@ -349,7 +354,8 @@ async def add_documents_to_session(
 async def remove_document_from_session(
     session_id: str,
     document_id: str,
-    user: User = Depends(get_current_user)
+    user: User = Depends(get_current_user),
+    request: Request = None
 ):
     """
     Remove a document from a session.
@@ -374,7 +380,8 @@ async def remove_document_from_session(
     success = session_repo.remove_document_from_session(
         session_id=session_id,
         document_id=document_id,
-        user_id=user.id
+        user_id=user.id,
+        org_id=user.org_id
     )
 
     if not success:
@@ -424,9 +431,8 @@ async def get_chat_history(
     # Use repositories
     session_repo = SessionRepository()
     chat_repo = ChatRepository()
-
     # Verify session access
-    session = session_repo.get_session(session_id, user.id)
+    session = session_repo.get_session(session_id, user.id, user.org_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
@@ -442,16 +448,21 @@ async def get_chat_history(
         }
     )
 
+    import json
+
     return {
         "session_id": session.id,
         "messages": [
             {
+                "id": msg.id,
                 "role": msg.role,
                 "content": msg.content,
                 "message_index": msg.message_index,
                 "created_at": msg.created_at.isoformat() if msg.created_at else None,
                 "source_chunks": msg.source_chunks,
-                "num_chunks_retrieved": msg.num_chunks_retrieved
+                "num_chunks_retrieved": msg.num_chunks_retrieved,
+                "comparison_metadata": json.loads(msg.comparison_metadata) if msg.comparison_metadata else None,
+                "citation_context": json.loads(msg.citation_metadata) if msg.citation_metadata else None
             }
             for msg in messages
         ],
@@ -462,7 +473,8 @@ async def get_chat_history(
 @router.delete("/sessions/{session_id}")
 async def delete_session(
     session_id: str,
-    user: User = Depends(get_current_user)
+    user: User = Depends(get_current_user),
+    request: Request = None
 ):
     """
     Delete a chat session (cascades to messages and document links).
@@ -484,15 +496,20 @@ async def delete_session(
     session_repo = SessionRepository()
 
     # Verify session exists before attempting delete
-    session = session_repo.get_session(session_id, user.id)
+    session = session_repo.get_session(session_id, user.id, user.org_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
+
+    if session.user_id != user.id:
+        role = get_current_org_role(request)
+        if not is_admin_role(role):
+            raise HTTPException(status_code=403, detail="Not authorized to delete this session")
 
     # Store info for logging before deletion
     message_count = session.message_count
     document_count = len(session.document_links) if session.document_links else 0
 
-    success = session_repo.delete_session(session_id, user.id)
+    success = session_repo.delete_session(session_id, user.id, user.org_id)
     if not success:
         raise HTTPException(status_code=500, detail="Failed to delete session")
 
@@ -539,7 +556,7 @@ async def export_session(
     chat_repo = ChatRepository()
 
     # Verify session access and get session with documents
-    session = session_repo.get_session(session_id, user.id)
+    session = session_repo.get_session(session_id, user.id, user.org_id)
     if not session:
         raise HTTPException(status_code=404, detail="Session not found")
 
@@ -559,6 +576,8 @@ async def export_session(
         ]
 
     # Format export data
+    import json
+
     export_data = {
         "session": {
             "id": session.id,
@@ -576,7 +595,8 @@ async def export_session(
                 "message_index": msg.message_index,
                 "created_at": msg.created_at.isoformat() if msg.created_at else None,
                 "source_chunks": msg.source_chunks,
-                "num_chunks_retrieved": msg.num_chunks_retrieved
+                "num_chunks_retrieved": msg.num_chunks_retrieved,
+                "citation_context": json.loads(msg.citation_metadata) if msg.citation_metadata else None
             }
             for msg in messages
         ],

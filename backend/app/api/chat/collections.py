@@ -2,9 +2,10 @@
 """Collection management endpoints for Chat Mode."""
 
 from typing import Optional
-from fastapi import APIRouter, Form, HTTPException, Depends, Query
+from fastapi import APIRouter, Form, HTTPException, Depends, Query, Request
+from app.db_models_documents import Document
 
-from app.auth import get_current_user
+from app.auth import get_current_user, get_current_org_role, is_admin_role
 from app.db_models_users import User
 from app.repositories.collection_repository import CollectionRepository
 from app.utils.logging import logger
@@ -48,6 +49,7 @@ async def create_collection(
     # Use repository for database operations
     collection_repo = CollectionRepository()
     collection = collection_repo.create_collection(
+        org_id=user.org_id,
         user_id=user.id,
         name=name,
         description=description.strip() if description else None
@@ -57,7 +59,7 @@ async def create_collection(
         raise HTTPException(status_code=500, detail="Failed to create collection")
 
     logger.info(
-        f"Created collection",
+        "Created collection",
         extra={"user_id": user.id, "collection_id": collection.id, "collection_name": name}
     )
 
@@ -71,26 +73,65 @@ async def create_collection(
     }
 
 
+def _serialize_document(d: Document) -> dict:
+    return {
+        "id": d.id,
+        "filename": d.filename,
+        "page_count": d.page_count,
+        "chunk_count": d.chunk_count,
+        "has_embeddings": d.chunk_count > 0 and d.status == "completed",
+        "status": d.status,
+        "error_message": d.error_message,
+        "created_at": d.created_at.isoformat() if d.created_at else None,
+        "completed_at": d.completed_at.isoformat() if d.completed_at else None,
+    }
+
+
 @router.get("/collections")
 async def list_collections(
     user: User = Depends(get_current_user),
     limit: int = Query(50, ge=1, le=100),
-    offset: int = Query(0, ge=0)
+    offset: int = Query(0, ge=0),
+    include_documents: bool = Query(False),
 ):
     """
     List all collections for the current user.
 
-    Args:
-        user: Current user
-        limit: Max results (1-100, default: 50)
-        offset: Pagination offset (>=0, default: 0)
-
-    Returns:
-        List of collections with pagination metadata
+    When include_documents=true, returns each collection with its documents
+    embedded, resolving the N+1 pattern in one round-trip.
     """
     collection_repo = CollectionRepository()
+
+    if include_documents:
+        rows, total = collection_repo.list_collections_with_documents(
+            user_id=user.id,
+            org_id=user.org_id,
+            limit=limit,
+            offset=offset,
+        )
+        return {
+            "collections": [
+                {
+                    "id": row["collection"].id,
+                    "name": row["collection"].name,
+                    "description": row["collection"].description,
+                    "document_count": row["collection"].document_count,
+                    "total_chunks": row["collection"].total_chunks,
+                    "embedding_model": row["collection"].embedding_model,
+                    "created_at": row["collection"].created_at.isoformat() if row["collection"].created_at else None,
+                    "updated_at": row["collection"].updated_at.isoformat() if row["collection"].updated_at else None,
+                    "documents": [_serialize_document(d) for d in row["documents"]],
+                }
+                for row in rows
+            ],
+            "total": total,
+            "limit": limit,
+            "offset": offset,
+        }
+
     collections, total = collection_repo.list_collections(
         user_id=user.id,
+        org_id=user.org_id,
         limit=limit,
         offset=offset
     )
@@ -118,17 +159,29 @@ async def list_collections(
 @router.get("/collections/{collection_id}")
 async def get_collection(
     collection_id: str,
-    user: User = Depends(get_current_user)
+    user: User = Depends(get_current_user),
+    limit: int = Query(50, ge=1, le=100),
+    offset: int = Query(0, ge=0),
+    sort_by: str = Query("created_at"),
+    sort_order: str = Query("desc"),
+    search: Optional[str] = Query(None),
+    status: Optional[str] = Query(None),
 ):
     """
-    Get collection details including documents.
+    Get collection details including documents with pagination.
 
     Args:
         collection_id: Collection ID (UUID format)
         user: Current user
+        limit: Maximum number of documents to return (1-100, default 50)
+        offset: Number of documents to skip (default 0)
+        sort_by: Field to sort by (created_at, filename, page_count, chunk_count)
+        sort_order: Sort order (asc or desc)
+        search: Optional search query for filename
+        status: Optional status filter (processing, completed, failed)
 
     Returns:
-        Collection with documents list
+        Collection with paginated documents list and total count
 
     Raises:
         HTTPException 404: Collection not found or access denied
@@ -136,12 +189,20 @@ async def get_collection(
     collection_repo = CollectionRepository()
 
     # Get collection (with ownership check)
-    collection = collection_repo.get_collection(collection_id, user.id)
+    collection = collection_repo.get_collection(collection_id, user.id, user.org_id)
     if not collection:
         raise HTTPException(status_code=404, detail="Collection not found")
 
-    # Get documents in collection
-    documents = collection_repo.list_documents(collection_id)
+    # Get documents in collection with pagination
+    documents, total = collection_repo.list_documents(
+        collection_id,
+        limit=limit,
+        offset=offset,
+        sort_by=sort_by,
+        sort_order=sort_order,
+        search=search,
+        status=status,
+    )
 
     return {
         "id": collection.id,
@@ -166,14 +227,18 @@ async def get_collection(
                 "completed_at": d.completed_at.isoformat() if d.completed_at else None,
             }
             for d in documents
-        ]
+        ],
+        "total": total,
+        "limit": limit,
+        "offset": offset,
     }
 
 
 @router.delete("/collections/{collection_id}")
 async def delete_collection(
     collection_id: str,
-    user: User = Depends(get_current_user)
+    user: User = Depends(get_current_user),
+    request: Request = None
 ):
     """
     Delete a collection (cascades to documents, chunks, sessions).
@@ -192,17 +257,22 @@ async def delete_collection(
     collection_repo = CollectionRepository()
 
     # Edge case: Check if collection exists before attempting delete
-    collection = collection_repo.get_collection(collection_id, user.id)
+    collection = collection_repo.get_collection(collection_id, user.id, user.org_id)
     if not collection:
         raise HTTPException(status_code=404, detail="Collection not found")
 
-    success = collection_repo.delete_collection(collection_id, user.id)
+    if collection.user_id != user.id:
+        role = get_current_org_role(request)
+        if not is_admin_role(role):
+            raise HTTPException(status_code=403, detail="Not authorized to delete this collection")
+
+    success = collection_repo.delete_collection(collection_id, user.id, user.org_id)
     if not success:
         # Should not happen if the above check passed, but defensive
         raise HTTPException(status_code=500, detail="Failed to delete collection")
 
     logger.info(
-        f"Deleted collection",
+        "Deleted collection",
         extra={
             "user_id": user.id,
             "collection_id": collection_id,
@@ -218,7 +288,8 @@ async def delete_collection(
 async def remove_document_from_collection(
     collection_id: str,
     document_id: str,
-    user: User = Depends(get_current_user)
+    user: User = Depends(get_current_user),
+    request: Request = None
 ):
     """
     Remove a document from a specific collection.
@@ -241,9 +312,14 @@ async def remove_document_from_collection(
     collection_repo = CollectionRepository()
 
     # Verify collection exists and belongs to user
-    collection = collection_repo.get_collection(collection_id, user.id)
+    collection = collection_repo.get_collection(collection_id, user.id, user.org_id)
     if not collection:
         raise HTTPException(status_code=404, detail="Collection not found")
+
+    if collection.user_id != user.id:
+        role = get_current_org_role(request)
+        if not is_admin_role(role):
+            raise HTTPException(status_code=403, detail="Not authorized to modify this collection")
 
     # Remove document from collection
     success = collection_repo.remove_document_from_collection(collection_id, document_id)
@@ -254,7 +330,7 @@ async def remove_document_from_collection(
         )
 
     logger.info(
-        f"Removed document from collection",
+        "Removed document from collection",
         extra={
             "user_id": user.id,
             "collection_id": collection_id,

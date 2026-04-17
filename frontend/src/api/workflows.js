@@ -2,7 +2,7 @@
  * Workflows API helpers
  */
 
-import { api, createAuthenticatedApi } from "./client";
+import { createAuthenticatedApi } from "./client";
 import { streamJobProgress } from "./sse-utils";
 
 export async function getRun(getToken, runId) {

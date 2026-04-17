@@ -6,8 +6,15 @@
 
 import { Badge } from "../ui/badge";
 
-export default function MetricPill({ metric }) {
+export default function MetricPill({ metric, richCitations = [], onCitationClick }) {
   if (!metric) return null;
+
+  // Get rich citation data for the citation token
+  const getRichCitation = (token) => {
+    return richCitations.find(
+      (rc) => rc.token === token || rc.id === token
+    );
+  };
 
   // Get status styling using existing tokens
   const getStatusClass = () => {
@@ -44,11 +51,45 @@ export default function MetricPill({ metric }) {
         </div>
 
         {/* Citation badge */}
-        {metric.citation && (
-          <Badge variant="outline" className="text-[10px] font-mono px-1 py-0">
-            {metric.citation}
-          </Badge>
-        )}
+        {metric.citation && (() => {
+          const richCite = getRichCitation(metric.citation);
+
+          // Extract filename without extension and truncate if needed
+          const getShortFilename = (filename) => {
+            if (!filename || filename === "Unknown") return "Doc";
+            const nameWithoutExt = filename.replace(/\.[^/.]+$/, "");
+            return nameWithoutExt.length > 20 ? nameWithoutExt.substring(0, 17) + "..." : nameWithoutExt;
+          };
+
+          const displayText = richCite
+            ? `[${getShortFilename(richCite.document)}:p${richCite.page || '?'}]`
+            : metric.citation;
+
+          // If we have rich citation and click handler, make it clickable
+          if (richCite && onCitationClick) {
+            return (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.preventDefault();
+                  e.stopPropagation();
+                  onCitationClick(richCite);
+                }}
+                className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 hover:bg-blue-200 dark:hover:bg-blue-900/50 transition-colors cursor-pointer border border-blue-300 dark:border-blue-700"
+                title={`Click to view: ${richCite.document || 'Document'} - Page ${richCite.page || '?'}`}
+              >
+                {displayText}
+              </button>
+            );
+          }
+
+          // Fallback: non-clickable badge
+          return (
+            <Badge variant="outline" className="text-[10px] font-mono px-1 py-0">
+              {displayText}
+            </Badge>
+          );
+        })()}
       </div>
     </div>
   );

@@ -3,12 +3,17 @@
 Main router that aggregates all RE vertical endpoints.
 Routes: /api/v1/re/*
 """
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+from app.auth import require_vertical
 
 # Import routers from sub-modules
 from .templates import router as templates_router
 
-router = APIRouter(prefix="/re", tags=["real_estate"])
+router = APIRouter(
+    prefix="/re",
+    tags=["real_estate"],
+    dependencies=[Depends(require_vertical("real_estate"))]
+)
 
 # Include sub-routers
 router.include_router(templates_router)

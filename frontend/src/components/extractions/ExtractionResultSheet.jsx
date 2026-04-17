@@ -4,8 +4,8 @@
  * Side sheet (opens from left) to display full extraction output
  * without leaving the ExtractPage.
  */
-import { useEffect, useState, useCallback } from "react";
-import { useAuth } from "@clerk/clerk-react";
+import { useEffect, useState, useCallback, useRef } from "react";
+import { useAppAuth } from "@/hooks/useAppAuth";
 import {
   Download,
   Trash2,
@@ -14,15 +14,16 @@ import {
   AlertCircle,
   Loader2,
 } from "lucide-react";
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from "../ui/sheet";
+import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from "../ui/sheet";
 import { Button } from "../ui/button";
 import { Card } from "../ui/card";
 import Spinner from "../common/Spinner";
 import ResultViews from "../results/ResultViews";
 import { fetchExtractionResult, deleteExtraction } from "../../api/extraction";
-import { exportToExcel } from "../../utils/excelExport";
-import { saveAs } from "file-saver";
 import { useExtraction, useExtractionActions } from "../../store";
+import FeedbackButton from "../feedback/FeedbackButton";
+import CompletionFeedbackModal from "../feedback/CompletionFeedbackModal";
+import { shouldPromptForFeedback } from "../../utils/feedbackRules";
 
 export default function ExtractionResultSheet({
   open,
@@ -30,14 +31,15 @@ export default function ExtractionResultSheet({
   extractionId: propExtractionId,
   onDelete,
 }) {
-  const { getToken } = useAuth();
+  const { getToken } = useAppAuth();
   const extraction = useExtraction();
-  const { retryExtraction, resetExtraction } = useExtractionActions();
+  const { retryExtraction } = useExtractionActions();
 
   const [loading, setLoading] = useState(false);
   const [data, setData] = useState(null);
   const [deleting, setDeleting] = useState(false);
-  const [exporting, setExporting] = useState(false);
+  const [showFeedbackModal, setShowFeedbackModal] = useState(false);
+  const feedbackPromptedForRef = useRef(null);
 
   const effectiveExtractionId = propExtractionId || extraction.extractionId;
 
@@ -60,34 +62,21 @@ export default function ExtractionResultSheet({
     loadData();
   }, [loadData]);
 
-  const handleExportJSON = () => {
-    if (!data) return;
-    setExporting(true);
-    try {
-      const filename =
-        data?.metadata?.filename ||
-        `${effectiveExtractionId || "extraction"}.json`;
-      const blob = new Blob([JSON.stringify(data, null, 2)], {
-        type: "application/json",
-      });
-      saveAs(blob, filename);
-    } finally {
-      setExporting(false);
+  useEffect(() => {
+    if (!open) {
+      feedbackPromptedForRef.current = null;
+      setShowFeedbackModal(false);
+      return;
     }
-  };
+    if (!effectiveExtractionId || loading || !data) return;
+    if (feedbackPromptedForRef.current === effectiveExtractionId) return;
 
-  const handleExportExcel = async () => {
-    if (!data) return;
-    setExporting(true);
-    try {
-      await exportToExcel(data.data || data, data.metadata);
-    } catch (err) {
-      console.error("Excel export failed", err);
-      alert("Excel export failed: " + (err.message || "Unknown error"));
-    } finally {
-      setExporting(false);
-    }
-  };
+    feedbackPromptedForRef.current = effectiveExtractionId;
+    setShowFeedbackModal(
+      shouldPromptForFeedback("extraction", effectiveExtractionId)
+    );
+  }, [open, effectiveExtractionId, loading, data]);
+
 
   const handleDelete = async () => {
     if (!effectiveExtractionId) return;
@@ -138,7 +127,7 @@ export default function ExtractionResultSheet({
     <Sheet open={open} onOpenChange={onOpenChange}>
       <SheetContent
         side="left"
-        className="w-[1400px] sm:max-w-[1400px] overflow-y-auto bg-background"
+        className="w-[100vw] sm:w-[95vw] lg:w-[1400px] sm:max-w-[95vw] lg:max-w-[1400px] overflow-y-auto bg-background"
       >
         <SheetHeader>
           <div className="flex items-center gap-3">
@@ -147,6 +136,9 @@ export default function ExtractionResultSheet({
               <SheetTitle className="text-xl font-bold text-foreground">
                 Extraction Result
               </SheetTitle>
+              <SheetDescription className="sr-only">
+                View extraction output details and export options.
+              </SheetDescription>
               {effectiveExtractionId && (
                 <p className="text-xs text-muted-foreground mt-1">
                   ID: {effectiveExtractionId}
@@ -196,6 +188,13 @@ export default function ExtractionResultSheet({
                 {deleting ? "Deleting..." : "Delete"}
               </Button>
             )}
+            {effectiveExtractionId && (
+              <FeedbackButton
+                operationType="extraction"
+                entityId={effectiveExtractionId}
+                entitySummary={data?.metadata?.filename}
+              />
+            )}
           </div>
 
           {/* Progress / Error */}
@@ -234,7 +233,9 @@ export default function ExtractionResultSheet({
             </div>
           )}
 
-          {!loading && data && <ResultViews result={data} />}
+          {!loading && data && (
+            <ResultViews result={data} showLegacyFeedback={false} />
+          )}
 
           {!loading &&
             !data &&
@@ -246,6 +247,14 @@ export default function ExtractionResultSheet({
             )}
         </div>
       </SheetContent>
+
+      <CompletionFeedbackModal
+        isOpen={showFeedbackModal}
+        onClose={() => setShowFeedbackModal(false)}
+        operationType="extraction"
+        entityId={effectiveExtractionId}
+        entitySummary={data?.metadata?.filename}
+      />
     </Sheet>
   );
 }

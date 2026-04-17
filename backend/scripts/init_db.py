@@ -21,7 +21,7 @@ def main():
     """Initialize database - create all tables"""
     try:
         logger.info("=" * 60)
-        logger.info("Initializing Sand Cloud database...")
+        logger.info("Initializing Basilfy database...")
         logger.info("=" * 60)
 
         # Apply latest Alembic migrations instead of raw create_all

@@ -13,7 +13,7 @@ from typing import List, Dict
 import logging
 from sqlalchemy.orm import Session
 from app.core.rag.hybrid_retriever import HybridRetriever
-from app.core.rag.reranker import Reranker
+from app.services.service_locator import get_reranker
 from app.config import settings
 
 logger = logging.getLogger(__name__)
@@ -56,7 +56,7 @@ class WorkflowRetriever:
         self.use_reranker = use_reranker if use_reranker is not None else settings.rag_use_reranker
         self.reranker = None
         if self.use_reranker:
-            self.reranker = Reranker()
+            self.reranker = get_reranker()
 
         logger.info(
             f"WorkflowRetriever initialized: reranker={self.use_reranker}, "
@@ -97,14 +97,19 @@ class WorkflowRetriever:
         # Step 1: Collect candidates from all queries
         all_candidates = {}  # chunk_id -> chunk_dict
 
+        # Adaptive candidate sizing: favor tables for data-heavy sections
+        # query_top_k = 2 # TODO: changed to 2 for testing
+        query_top_k = 12 if prefer_tables else 10
+
         for query in queries:
             try:
                 # Hybrid retrieval for this query
                 candidates = self.hybrid_retriever.retrieve(
                     query=query,
                     collection_id=None,  # Use document_ids filter instead
-                    top_k=10,  # Get 10 per query
-                    document_ids=document_ids
+                    top_k=query_top_k,  # Adaptive per section
+                    document_ids=document_ids,
+                    min_semantic_similarity=settings.rag_workflow_semantic_similarity_floor
                 )
 
                 # Merge into all_candidates (keep best hybrid_score)
@@ -136,23 +141,15 @@ class WorkflowRetriever:
         # Note: Reranker handles compression internally, no need to pre-compress
         candidates_list = list(all_candidates.values())
 
-        if self.reranker and len(candidates_list) > 5:
+        if self.reranker and settings.rag_use_reranker_workflow and len(candidates_list) > 5:
             try:
                 # Combine queries for re-ranking intent
                 combined_query = " ".join(queries[:3])  # Use first 3 queries
-
-                # Create query analysis hint based on prefer_tables
-                query_analysis = {
-                    "query_type": "data_query" if prefer_tables else "narrative_query",
-                    "prefer_tables": prefer_tables,
-                    "prefer_narrative": not prefer_tables
-                }
 
                 # Re-rank (Reranker handles compression/truncation internally)
                 reranked = self.reranker.rerank(
                     query=combined_query,
                     chunks=candidates_list,
-                    query_analysis=query_analysis,
                     top_k=max_chunks * 2  # Get 2x for diversity filtering
                 )
 
@@ -193,7 +190,17 @@ class WorkflowRetriever:
         # - chunk_metadata: For future citation resolution (if chunks re-queried)
         for chunk in final_chunks:
             doc_id = chunk.get("document_id")
-            page_num = chunk.get("page_number", 0)
+            # Use bbox page if available (physical PDF page from Azure DI bounding_regions)
+            # This is more accurate than page_number which may contain document's internal numbering
+            metadata = chunk.get("chunk_metadata") or chunk.get("metadata") or {}
+            if isinstance(metadata, str):
+                import json
+                try:
+                    metadata = json.loads(metadata)
+                except (json.JSONDecodeError, TypeError):
+                    metadata = {}
+            bbox = metadata.get("bbox", {})
+            page_num = bbox.get("page") if bbox else chunk.get("page_number", 0)
             doc_index = doc_index_map.get(doc_id, 0)
             citation_token = f"[D{doc_index}:p{page_num}]"
 

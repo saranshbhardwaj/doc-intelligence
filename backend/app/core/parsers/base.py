@@ -8,10 +8,8 @@ from enum import Enum
 
 class ParserType(str, Enum):
     """Available parser types"""
-    PYMUPDF = "pymupdf"
     LLMWHISPERER = "llmwhisperer"
     TEXTRACT = "textract"
-    GOOGLE_LAYOUT = "google_layout"
     AZURE_DOCUMENT_INTELLIGENCE = "azure_document_intelligence"
 
 

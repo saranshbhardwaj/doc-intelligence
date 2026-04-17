@@ -12,6 +12,8 @@
 import { createAuthenticatedApi } from "./client";
 import { streamJobProgress } from "./sse-utils";
 
+const API_URL = import.meta.env.VITE_API_URL || "http://localhost:8000";
+
 /**
  * Collections API
  */
@@ -30,18 +32,31 @@ export async function createCollection(getToken, { name, description }) {
 
 export async function listCollections(
   getToken,
-  { limit = 50, offset = 0 } = {}
+  { limit = 50, offset = 0, includeDocuments = false } = {}
 ) {
   const api = createAuthenticatedApi(getToken);
   const response = await api.get("/api/chat/collections", {
-    params: { limit, offset },
+    params: { limit, offset, include_documents: includeDocuments || undefined },
   });
   return response.data;
 }
 
-export async function getCollection(getToken, collectionId) {
+export async function getCollection(
+  getToken,
+  collectionId,
+  {
+    limit = 50,
+    offset = 0,
+    sort_by = "created_at",
+    sort_order = "desc",
+    search = null,
+    status = null,
+  } = {}
+) {
   const api = createAuthenticatedApi(getToken);
-  const response = await api.get(`/api/chat/collections/${collectionId}`);
+  const response = await api.get(`/api/chat/collections/${collectionId}`, {
+    params: { limit, offset, sort_by, sort_order, search, status },
+  });
   return response.data;
 }
 
@@ -116,9 +131,7 @@ export async function connectToIndexingProgress(
           : errorData?.message || "Indexing failed";
       onError(new Error(errorMsg));
     },
-    onEnd: (data) => {
-      console.log("[Document Indexing] SSE stream ended:", data?.reason);
-    },
+    onEnd: () => {},
     autoReconnect,
     fetchInitialState,
     getJobStatus: fetchInitialState ? getJobStatus : null,
@@ -127,9 +140,9 @@ export async function connectToIndexingProgress(
 
 /**
  * Get job status for document indexing
- * Used by SSE utility for initial state fetching
+ * Used by SSE utility for initial state fetching and reconnection.
  */
-async function getJobStatus(jobId, getToken) {
+export async function getJobStatus(jobId, getToken) {
   const api = createAuthenticatedApi(getToken);
   const response = await api.get(`/api/jobs/${jobId}/status`);
   return response.data;
@@ -148,16 +161,22 @@ export function sendChatMessage(
   numChunks = 5,
   callbacks = {}
 ) {
-  const { onSession, onChunk, onComplete, onError } = callbacks;
+  const { onSession, onChunk, onComplete, onError, onComparisonContext, onCitationContext, onThinking, onSessionWarning, onComparisonSelection } = callbacks;
 
-  getToken().then((token) => {
+  Promise.race([
+    getToken(),
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('Authentication timed out. Please check your connection.')), 10_000)
+    ),
+  ])
+    .then((token) => {
     const formData = new FormData();
     formData.append("message", message);
     formData.append("num_chunks", numChunks.toString());
 
     // Use fetch for SSE streaming
     fetch(
-      `${import.meta.env.VITE_API_URL}/api/chat/sessions/${sessionId}/chat`,
+      `${API_URL}/api/chat/sessions/${sessionId}/chat`,
       {
         method: "POST",
         headers: {
@@ -202,11 +221,32 @@ export function sendChatMessage(
             if (eventType === "session" && eventData) {
               const data = JSON.parse(eventData);
               onSession?.(data.session_id);
+            } else if (eventType === "thinking" && eventData) {
+              // Handle thinking event for progress feedback
+              const data = JSON.parse(eventData);
+              onThinking?.(data);
+            } else if (eventType === "comparison_context" && eventData) {
+              // Handle comparison context from backend
+              const data = JSON.parse(eventData);
+              onComparisonContext?.(data);
+            } else if (eventType === "citation_context" && eventData) {
+              // Handle citation context for general chat
+              const data = JSON.parse(eventData);
+              onCitationContext?.(data);
+            } else if (eventType === "session_warning" && eventData) {
+              // Handle session warning (long conversation)
+              const data = JSON.parse(eventData);
+              onSessionWarning?.(data);
+            } else if (eventType === "comparison_selection" && eventData) {
+              // Handle comparison document selection request
+              const data = JSON.parse(eventData);
+              onComparisonSelection?.(data);
             } else if (eventType === "chunk" && eventData) {
               const data = JSON.parse(eventData);
               onChunk?.(data.chunk);
             } else if (eventType === "done") {
-              onComplete?.();
+              const doneData = eventData ? JSON.parse(eventData) : {};
+              onComplete?.(doneData);
             } else if (eventType === "error" && eventData) {
               const data = JSON.parse(eventData);
               onError?.(new Error(data.error));
@@ -218,7 +258,11 @@ export function sendChatMessage(
         console.error("Chat streaming error:", error);
         onError?.(error);
       });
-  });
+  })
+    .catch((error) => {
+      console.warn('⚠️ [Chat] Token fetch failed:', error.message);
+      onError?.(error);
+    });
 }
 
 /**
@@ -363,4 +407,118 @@ export async function getDocumentUsage(getToken, documentId) {
   const api = createAuthenticatedApi(getToken);
   const response = await api.get(`/api/chat/documents/${documentId}/usage`);
   return response.data;
+}
+
+/**
+ * Confirm comparison with selected documents or skip to normal RAG
+ *
+ * Called after user selects documents in comparison picker or clicks "Not comparing"
+ */
+export function confirmComparison(
+  getToken,
+  sessionId,
+  documentIds,
+  originalQuery,
+  skipComparison,
+  callbacks = {}
+) {
+  const {
+    onSession,
+    onChunk,
+    onComplete,
+    onError,
+    onComparisonContext,
+    onCitationContext,
+    onThinking,
+  } = callbacks;
+
+  Promise.race([
+    getToken(),
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('Authentication timed out. Please check your connection.')), 10_000)
+    ),
+  ])
+    .then((token) => {
+    fetch(
+      `${API_URL}/api/chat/sessions/${sessionId}/chat/comparison`,
+      {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          document_ids: documentIds,
+          original_query: originalQuery,
+          skip_comparison: skipComparison,
+        }),
+      }
+    )
+      .then(async (response) => {
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${await response.text()}`);
+        }
+
+        const reader = response.body.getReader();
+        const decoder = new TextDecoder();
+        let buffer = "";
+
+        while (true) {
+          const { done, value } = await reader.read();
+          if (done) break;
+
+          buffer += decoder.decode(value, { stream: true });
+          const events = buffer.split("\n\n");
+          buffer = events.pop() || "";
+
+          for (const event of events) {
+            if (!event.trim()) continue;
+
+            const lines = event.split("\n");
+            let eventType = "";
+            let eventData = "";
+
+            for (const line of lines) {
+              if (line.startsWith("event: ")) {
+                eventType = line.slice(7);
+              } else if (line.startsWith("data: ")) {
+                eventData = line.slice(6);
+              }
+            }
+
+            // Process events (same as sendChatMessage)
+            if (eventType === "session" && eventData) {
+              const data = JSON.parse(eventData);
+              onSession?.(data.session_id);
+            } else if (eventType === "thinking" && eventData) {
+              const data = JSON.parse(eventData);
+              onThinking?.(data);
+            } else if (eventType === "comparison_context" && eventData) {
+              const data = JSON.parse(eventData);
+              onComparisonContext?.(data);
+            } else if (eventType === "citation_context" && eventData) {
+              const data = JSON.parse(eventData);
+              onCitationContext?.(data);
+            } else if (eventType === "chunk" && eventData) {
+              const data = JSON.parse(eventData);
+              onChunk?.(data.chunk);
+            } else if (eventType === "done") {
+              const doneData = eventData ? JSON.parse(eventData) : {};
+              onComplete?.(doneData);
+            } else if (eventType === "error" && eventData) {
+              const data = JSON.parse(eventData);
+              onError?.(new Error(data.error));
+            }
+          }
+        }
+      })
+      .catch((error) => {
+        console.error("Comparison confirmation error:", error);
+        onError?.(error);
+      });
+  })
+    .catch((error) => {
+      console.warn('⚠️ [Chat] Token fetch failed:', error.message);
+      onError?.(error);
+    });
 }

@@ -11,12 +11,20 @@ from typing import Dict
 from fastapi import HTTPException
 
 from app.config import settings
-from app.services.extractions.prompts import (
+from app.verticals.private_equity.extraction.prompts import (
     CIM_EXTRACTION_SYSTEM_PROMPT,
     create_extraction_prompt,
 )
 from app.utils.logging import logger
 from app.utils.file_utils import save_raw_llm_response
+from app.utils.metrics import (
+    LLM_CACHE_HITS,
+    LLM_CACHE_MISSES,
+    LLM_REQUESTS_TOTAL,
+    LLM_TOKEN_USAGE,
+    LLM_COST_USD,
+)
+from app.utils.costs import compute_llm_cost
 
 class LLMClient:
     """Core Anthropic Claude API client.
@@ -30,12 +38,20 @@ class LLMClient:
     Note: Extraction-specific summarization moved to ExtractionLLMService.
     """
 
-    def __init__(self, api_key: str, model: str, max_tokens: int, max_input_chars: int, timeout_seconds: int = 120):
+    def __init__(
+        self,
+        api_key: str,
+        model: str,
+        max_tokens: int,
+        max_input_chars: int,
+        timeout_seconds: int = 120,
+        max_retries: int = 2,
+    ):
         # Create timeout object for Anthropic SDK
         # read timeout is the important one for long-running API calls
         timeout = Timeout(timeout=float(timeout_seconds), read=float(timeout_seconds), write=10.0, connect=5.0)
-        self.client = Anthropic(api_key=api_key, timeout=timeout)
-        self.async_client = AsyncAnthropic(api_key=api_key, timeout=timeout, max_retries=2)
+        self.client = Anthropic(api_key=api_key, timeout=timeout, max_retries=max_retries)
+        self.async_client = AsyncAnthropic(api_key=api_key, timeout=timeout, max_retries=max_retries)
 
         # Expensive LLM (for structured extraction)
         self.model = model
@@ -44,9 +60,9 @@ class LLMClient:
         self.timeout_seconds = timeout_seconds
 
         # Cheap LLM (for summarization)
-        self.cheap_model = settings.cheap_llm_model
-        self.cheap_max_tokens = settings.cheap_llm_max_tokens
-        self.cheap_timeout_seconds = settings.cheap_llm_timeout_seconds
+        self.cheap_model = settings.synthesis_llm_model
+        self.cheap_max_tokens = settings.synthesis_llm_max_tokens
+        self.cheap_timeout_seconds = settings.synthesis_llm_timeout_seconds
     
     async def extract_structured_data(
         self,
@@ -209,6 +225,13 @@ class LLMClient:
             model_name = getattr(message, "model", self.model)
             stop_reason = getattr(message, "stop_reason", None)
 
+            # Extract cache stats for observability
+            cache_read_tokens = getattr(usage, "cache_read_input_tokens", None) if usage else None
+            cache_write_tokens = getattr(usage, "cache_creation_input_tokens", None) if usage else None
+
+            self._record_llm_metrics(model_name, input_tokens, output_tokens,
+                                     cache_read_tokens, cache_write_tokens, "extraction")
+
             # Prepend the prefilled "{" to complete the JSON
             response_text = "{" + response_text
 
@@ -236,7 +259,9 @@ class LLMClient:
                 "usage": {
                     "input_tokens": input_tokens,
                     "output_tokens": output_tokens,
-                    "model": model_name
+                    "model": model_name,
+                    "cache_creation_input_tokens": cache_write_tokens,
+                    "cache_read_input_tokens": cache_read_tokens,
                 }
             }
 
@@ -288,7 +313,8 @@ class LLMClient:
         text: str,
         system_prompt: str,
         pydantic_model: type[BaseModel],
-        use_cache: bool = False
+        use_cache: bool = False,
+        max_retries_override: int | None = None,
     ) -> Dict:
         """
         Extract data with GUARANTEED schema compliance using Claude structured outputs.
@@ -329,7 +355,7 @@ class LLMClient:
             raise ValueError(f"System prompt must be a string, got {type(system_prompt)}")
         
         logger.info(
-            f"Calling Claude API with structured outputs (schema-enforced JSON)",
+            "Calling Claude API with structured outputs (schema-enforced JSON)",
             extra={
                 "prompt_length": len(text),
                 "system_prompt_length": len(system_prompt),
@@ -338,11 +364,12 @@ class LLMClient:
             }
         )
         
-        # Retry logic for transient errors
-        max_retries = 3
+        # Retry logic for transient errors.
+        # max_retries_override is the number of retries AFTER the first attempt.
+        max_attempts = 3 if max_retries_override is None else max(1, int(max_retries_override) + 1)
         retry_delay = 2
         
-        for attempt in range(max_retries):
+        for attempt in range(max_attempts):
             try:
                 # Build request with structured outputs
                 if use_cache:
@@ -355,22 +382,20 @@ class LLMClient:
                     ]
                     
                     message = await asyncio.to_thread(
-                        self.client.beta.messages.parse,
+                        self.client.messages.parse,
                         model=self.model,
                         max_tokens=self.max_tokens,
                         temperature=0.0,
-                        betas=["structured-outputs-2025-11-13"],  # ✅ Enable structured outputs
                         system=system_with_cache,
                         messages=[{"role": "user", "content": text}],
                         output_format=pydantic_model
                     )
                 else:
                     message = await asyncio.to_thread(
-                        self.client.beta.messages.parse,
+                        self.client.messages.parse,
                         model=self.model,
                         max_tokens=self.max_tokens,
                         temperature=0.0,
-                        betas=["structured-outputs-2025-11-13"],  # ✅ Enable structured outputs
                         system=system_prompt,
                         messages=[{"role": "user", "content": text}],
                         output_format=pydantic_model
@@ -387,9 +412,9 @@ class LLMClient:
                     "Error code: 529" in error_str
                 )
                 
-                if is_retryable and attempt < max_retries - 1:
+                if is_retryable and attempt < max_attempts - 1:
                     wait_time = retry_delay * (2 ** attempt)
-                    logger.warning(f"API error, retrying in {wait_time}s (attempt {attempt + 1}/{max_retries})")
+                    logger.warning(f"API error, retrying in {wait_time}s (attempt {attempt + 1}/{max_attempts})")
                     await asyncio.sleep(wait_time)
                 else:
                     raise
@@ -398,19 +423,29 @@ class LLMClient:
         try:
             response_text = message.content[0].text.strip()
             usage = getattr(message, "usage", None)
-            
+
             # ✅ Already validated by SDK!
             parsed_output = message.parsed_output
-            
+
+            # Extract usage stats
+            input_tokens = getattr(usage, "input_tokens", None) if usage else None
+            output_tokens = getattr(usage, "output_tokens", None) if usage else None
+            cache_read_tokens = getattr(usage, "cache_read_input_tokens", None) if usage else None
+            cache_write_tokens = getattr(usage, "cache_creation_input_tokens", None) if usage else None
+            model_name = getattr(message, "model", self.model)
+
+            self._record_llm_metrics(model_name, input_tokens, output_tokens,
+                                     cache_read_tokens, cache_write_tokens, "structured")
+
             # Log cache usage if available
-            if hasattr(usage, "cache_creation_input_tokens"):
+            if cache_write_tokens or cache_read_tokens:
                 cache_stats = {
-                    "cache_creation_tokens": getattr(usage, "cache_creation_input_tokens", 0),
-                    "cache_read_tokens": getattr(usage, "cache_read_input_tokens", 0),
-                    "regular_input_tokens": getattr(usage, "input_tokens", 0),
+                    "cache_creation_tokens": cache_write_tokens or 0,
+                    "cache_read_tokens": cache_read_tokens or 0,
+                    "regular_input_tokens": input_tokens or 0,
                 }
                 logger.info("Cache usage stats", extra=cache_stats)
-            
+
             stop_reason = getattr(message, "stop_reason", None)
             
             # Warn if truncated (but JSON still valid!)
@@ -547,35 +582,74 @@ class LLMClient:
 
         return text
     
+    def _record_llm_metrics(
+        self,
+        model: str,
+        input_tokens: int | None,
+        output_tokens: int | None,
+        cache_read_tokens: int | None,
+        cache_write_tokens: int | None,
+        operation_type: str,
+    ) -> None:
+        LLM_REQUESTS_TOTAL.labels(model=model, operation_type=operation_type).inc()
+        if input_tokens:
+            LLM_TOKEN_USAGE.labels(model=model, token_type="input", operation_type=operation_type).inc(input_tokens)
+        if output_tokens:
+            LLM_TOKEN_USAGE.labels(model=model, token_type="output", operation_type=operation_type).inc(output_tokens)
+        if cache_read_tokens:
+            LLM_TOKEN_USAGE.labels(model=model, token_type="cache_read", operation_type=operation_type).inc(cache_read_tokens)
+            LLM_CACHE_HITS.labels(operation_type=operation_type).inc()
+        else:
+            LLM_CACHE_MISSES.labels(operation_type=operation_type).inc()
+        if cache_write_tokens:
+            LLM_TOKEN_USAGE.labels(model=model, token_type="cache_write", operation_type=operation_type).inc(cache_write_tokens)
+        if input_tokens and output_tokens:
+            cost = compute_llm_cost(model, input_tokens, output_tokens)
+            if cost:
+                LLM_COST_USD.labels(model=model, operation_type=operation_type).inc(cost)
+
     def _create_prompt(self, text: str, context: str = None) -> str:
         """Create extraction prompt using the new comprehensive format"""
         return create_extraction_prompt(text, context)
 
-    async def stream_chat(self, prompt: str):
+    async def stream_chat(self, prompt: str, system_prompt: str = None, model_override: str = None):
         """
         Stream chat response from Claude (for real-time RAG chat).
 
         Args:
-            prompt: Full prompt with context and question
+            prompt: User content (recent messages + chunks + question)
+            system_prompt: Optional stable system prompt. When provided, sent with
+                           cache_control: ephemeral for Anthropic prompt caching.
+                           Only pass this from rag_service; llm_service callers omit it.
+            model_override: Optional model ID to use instead of self.model. Used by
+                            cheap sub-tasks (e.g. query decomposition) that should
+                            run on a less expensive model such as claude-haiku.
 
         Yields:
             Dict with either:
             - {"type": "chunk", "text": str} for response chunks
             - {"type": "usage", "data": {...}} for final usage data
         """
+        effective_model = model_override if model_override else self.model
         logger.info(
-            f"Streaming chat response (prompt: {len(prompt)} chars)",
-            extra={"prompt_length": len(prompt), "model": self.model}
+            f"Streaming chat response (prompt: {len(prompt)} chars, system: {len(system_prompt) if system_prompt else 0} chars)",
+            extra={"prompt_length": len(prompt), "model": effective_model, "has_system_prompt": bool(system_prompt)}
         )
 
         try:
-            # Use async with on the AWAITED stream
-            async with self.async_client.messages.stream(
-                model=self.model,
+            stream_kwargs = dict(
+                model=effective_model,
                 max_tokens=self.max_tokens,
                 temperature=0.0,
                 messages=[{"role": "user", "content": prompt}]
-            ) as stream:
+            )
+            if system_prompt:
+                stream_kwargs["system"] = [
+                    {"type": "text", "text": system_prompt, "cache_control": {"type": "ephemeral"}}
+                ]
+
+            # Use async with on the AWAITED stream
+            async with self.async_client.messages.stream(**stream_kwargs) as stream:
                 # Stream text chunks
                 async for text in stream.text_stream:
                     yield {"type": "chunk", "text": text}
@@ -603,6 +677,14 @@ class LLMClient:
                         }
                     )
 
+                    self._record_llm_metrics(
+                        usage_data["model"],
+                        usage_data["input_tokens"],
+                        usage_data["output_tokens"],
+                        usage_data.get("cache_read_input_tokens"),
+                        usage_data.get("cache_creation_input_tokens"),
+                        "chat"
+                    )
                     yield {"type": "usage", "data": usage_data}
 
         except Exception as e:

@@ -7,15 +7,17 @@ class Settings(BaseSettings):
     """Application settings from environment variables"""
 
     # API Keys
-    anthropic_api_key: str
+    anthropic_api_key: str = ""  # Required at runtime; default allows container to boot for health checks
+    anthropic_admin_api_key: str = ""  # sk-ant-admin-... from Anthropic Console (for Usage & Cost API)
     admin_api_key: str = "change-this-in-production"  # For analytics endpoint access
 
-    # Authentication (Clerk)
-    clerk_secret_key: str = ""  # Get from https://dashboard.clerk.com
-    clerk_publishable_key: str = ""  # Used by frontend
+    # Authentication (WorkOS AuthKit)
+    workos_client_id: str = ""  # Get from https://dashboard.workos.com
+    workos_api_key: str = ""    # WorkOS API key (sk_...)
 
     # Database
     database_url: str = ""
+    supabase_database_url: str = ""  # Use this name in Railway (DATABASE_URL is reserved)
 
     # Azure Document Intelligence (optional)
     azure_doc_intelligence_api_key: str = ""
@@ -35,36 +37,30 @@ class Settings(BaseSettings):
     # Full extraction scalability limits
     max_pages_per_extraction: int = 150  # Max document size for full extraction (larger docs should use workflows)
 
-    # ===== PARSER CONFIGURATION =====
-    # Which parser to use for each tier + PDF type combination
-    parser_free_digital: str = "pymupdf"
-    parser_free_scanned: str = "none"  # "none" means not supported - will reject
-    parser_pro_digital: str = "pymupdf"
-    parser_pro_scanned: str = "none"  # Pro tier scanned PDF parser (e.g., "azure", "docai")
-    parser_enterprise_digital: str = "pymupdf"
-    parser_enterprise_scanned: str = "none"  # Enterprise tier scanned PDF parser
+    # ===== EXCEL TEMPLATE MAPPING CONFIGURATION =====
+    # Schema-based mapping system for known Excel templates
+    excel_schema_only: bool = True  # If True, only use schema (skip generic analyzer)
+    excel_skip_schema: bool = False  # If True, skip schema (use generic analyzer only)
+    # Default (both False) = Hybrid mode: schema first, generic fallback
+    re_template_prompt_version: str = "v1"  # Active prompt version for template fill LLM calls
+    rag_prompt_version: str = "v1"  # Active prompt version for RAG chat LLM calls
+
+    # ===== LLM I/O CAPTURE (Eval / Debugging) =====
+    # Off by default — never store full prompts in production unless explicitly enabled.
+    # Set CAPTURE_LLM_IO_LOG=true to capture prompts/responses into llm_io_logs table
+    # for eval dataset export. Applies to all verticals (template fill, RAG, PE).
+    capture_llm_io_log: bool = True
 
     # ===== PARSER TIMEOUTS =====
     parser_timeout_seconds: int = 300  # Generic parser timeout
 
-    # ===== GOOGLE DOCUMENT AI (Optional) =====
-    # Google Cloud settings for Document AI OCR
-    google_cloud_project_id: str = ""
-    google_application_credentials: str = ""
-    document_ai_processor_id: str = ""
-    document_ai_location: str = "us"
-    gcs_bucket_name: str = ""  # Required for batch processing (>15 pages)
-
     # ===== TESTING OVERRIDES (Development Only - DO NOT USE IN PRODUCTION) =====
-    # Force specific parser for all requests (overrides tier logic)
-    # Example: FORCE_PARSER=llmwhisperer to test OCR
+    # Force specific parser for all requests
+    # Example: FORCE_PARSER=azure_document_intelligence to override default
     force_parser: str = ""
 
     # Force specific user tier for all requests (overrides database lookup)
-    # Example: FORCE_USER_TIER=pro to test pro tier features
     force_user_tier: str = ""
-
-    document_ai_timeout_seconds: int = 900
 
     # File Upload Limits
     max_file_size_mb: int = 5
@@ -86,12 +82,55 @@ class Settings(BaseSettings):
     synthesis_llm_max_tokens: int = 50000  # Haiku 4.5 max output: 64K tokens (leave room for overhead)
     synthesis_llm_timeout_seconds: int = 600  # 10 minutes for large workflow outputs
 
+    # PE diligence classification fallback
+    pe_diligence_classifier_llm_fallback_enabled: bool = True
+    pe_diligence_classifier_llm_min_confidence: float = 0.60
+    pe_diligence_classifier_llm_input_chars: int = 4000
+
+    pe_diligence_llm_classification_enabled: bool = True  # opt-in until validated
+
+    # PE diligence investigation LLM claim augmentation
+    pe_diligence_investigation_llm_enabled: bool = True
+    pe_diligence_investigation_llm_max_chunks: int = 30  # max unmatched chunks to send to LLM
+
+    # PE diligence amendment linking (T11)
+    pe_diligence_amendment_linking_enabled: bool = True  # opt-in until validated
+    pe_diligence_amendment_linking_input_chars: int = 4000  # chars of amendment text sent to LLM
+    pe_diligence_amendment_linking_max_room_docs: int = 100  # system prompt size guard
+    pe_diligence_amendment_linking_concurrency: int = 10  # parallel LLM call cap
+
+    # PE diligence LLM clause extraction (stage 4b)
+    pe_diligence_llm_clause_extraction_enabled: bool = True  # opt-in until validated
+    pe_diligence_llm_clause_max_chunks_per_type: int = 10    # max candidate chunks per clause_type
+    pe_diligence_llm_clause_min_confidence: float = 0.50     # discard extracted clauses below this
+    pe_diligence_llm_clause_min_semantic_similarity: float = 0.20  # drop hybrid chunks below this cosine similarity before LLM
+
+    # PE diligence LLM numeric extraction (stage 5b)
+    pe_diligence_llm_numeric_extraction_enabled: bool = True  # opt-in until validated
+    pe_diligence_llm_numeric_max_chunks: int = 30              # max financial chunks sent to LLM
+    pe_diligence_llm_numeric_min_confidence: float = 0.50      # discard extracted metrics below this
+
+    # PE diligence per-document LLM analysis (runs for every classified doc)
+    pe_diligence_per_doc_analysis_top_k: int = 12            # chunks sent to LLM after reranking (was 8)
+    pe_diligence_per_doc_rerank_fetch_k: int = 20            # chunks fetched before reranking (headroom)
+    pe_diligence_per_doc_analysis_concurrency: int = 5       # parallel LLM calls cap
+
+    # PE diligence LLM findings synthesis (cross-doc, stage 7)
+    pe_diligence_llm_findings_synthesis_enabled: bool = True  # opt-in until validated
+    pe_diligence_llm_findings_max_input_chars: int = 30000     # max chars assembled for synthesis prompt
+
+    # PE diligence LLM summary generation (stage 9 upgrade)
+    pe_diligence_llm_summary_generation_enabled: bool = True  # opt-in until validated
+    pe_diligence_llm_summary_max_input_chars: int = 40000      # max chars assembled for summary prompt
+
     # ===== CHAT MEMORY SETTINGS =====
     # Number of most recent messages (user+assistant turns) to include verbatim
-    chat_verbatim_message_count: int = 4
-    # Ratio of estimated token usage (history + current user message) to max input
-    # at which we trigger summarization of older history (0.50 - 0.60 per user guidance)
-    chat_summary_trigger_ratio: float = 0.55
+    # Increased from 4 to 6 — gives 3 full user-assistant turns when history is included
+    chat_verbatim_message_count: int = 6
+    # Compact conversation history when (summary + recent messages) exceed this char count.
+    # Keeps conversation portion of the prompt under budget so chunks are never trimmed.
+    # Budget breakdown: total=50k, chunks=~30k, instructions=~1.7k → ~15k for conversation.
+    chat_conversation_char_budget: int = 15_000
     # Minimum number of messages before we even consider summarization
     chat_summary_min_messages: int = 8
     # Hard cap on total messages examined when building context (for safety)
@@ -105,6 +144,8 @@ class Settings(BaseSettings):
     chat_answer_reserve_chars: int = 10_000
     # Cache TTL for conversation summaries (seconds). If 0 or negative, caching disabled.
     chat_summary_cache_ttl_seconds: int = 86_400
+    # Warn user after N user messages (round-trip count) - recommend new session
+    chat_max_turns_before_warning: int = 30
 
     # Celery / Task Queue
     use_celery: bool = False  # Toggle to enable Celery task pipeline
@@ -113,29 +154,28 @@ class Settings(BaseSettings):
 
     # Cache backend selection
     # If enabled, DocumentCache will use Redis instead of file-backed JSON files
-    use_redis_cache: bool = False
+    use_redis_cache: bool = True
     redis_url: str = "redis://localhost:6379/1"
 
     # Chunking Settings
     enable_chunking: bool = True  # Enable multi-stage LLM processing with chunking
     chunk_batch_size: int = 10  # Number of narrative chunks to process per cheap LLM call
+    chunk_overlap_paragraphs: int = 1  # Paragraphs to repeat from previous chunk (structured docs)
+    chunk_overlap_sentences: int = 2   # Sentences to repeat from previous chunk (unstructured/fallback docs)
 
     # ===== EMBEDDINGS CONFIGURATION =====
-    # Which embedding provider to use: "sentence-transformer" (free, local) or "openai" (paid, API)
-    embedding_provider: str = "sentence-transformer"
+    # Embedding provider: "openai" (API) or "sentence-transformer" (local, not currently used)
+    embedding_provider: str = "openai"
 
-    # Sentence Transformer settings (used if embedding_provider="sentence-transformer")
-    sentence_transformer_model: str = "all-MiniLM-L6-v2"  # Fast, good quality, 384 dimensions
-    # Other options: "all-mpnet-base-v2" (768d, slower but better), "multi-qa-MiniLM-L6-cos-v1" (384d, optimized for Q&A)
-
-    # OpenAI settings (used if embedding_provider="openai")
+    # OpenAI settings (active embedding provider)
     openai_api_key: str = ""  # Required if using OpenAI embeddings
-    openai_embedding_model: str = "text-embedding-3-small"  # 1536 dimensions, $0.02 per 1M tokens
-    # Other options: "text-embedding-3-large" (3072d, better quality, 2x price)
+    openai_embedding_model: str = "text-embedding-3-small"  # $0.02 per 1M tokens
+    # Other options: "text-embedding-3-large" (higher quality, 2x price)
+    openai_embedding_dimensions: int = 768  # Reduced from default 1536 via Matryoshka dimensionality reduction
 
-    # Vector dimension (auto-set based on model, but can override)
-    # all-MiniLM-L6-v2: 384, all-mpnet-base-v2: 768, text-embedding-3-small: 1536
-    embedding_dimension: int = 384
+    # Vector dimension (must match embedding model output)
+    # text-embedding-3-small with dimensions=768: 768, all-MiniLM-L6-v2: 384
+    embedding_dimension: int = 768
 
     # ===== RAG HYBRID SEARCH SETTINGS =====
     # Combines semantic (vector) search with keyword (BM25/FTS) search
@@ -147,10 +187,45 @@ class Settings(BaseSettings):
     rag_hybrid_rrf_k: int = 60
 
     # Number of candidates to retrieve from each search method before merging
-    rag_retrieval_candidates: int = 20
+    rag_retrieval_candidates: int = 15
 
     # Final number of chunks to return after re-ranking (Phase 2)
-    rag_final_top_k: int = 10
+    # Reduced from 12 to 8 — research shows 6-9 chunks is quality sweet spot
+    rag_final_top_k: int = 8
+
+    # Tighter budgets for narrow single-document fact lookups.
+    # 15/7: enough candidates that the target chunk survives reranking even when phrasing differs.
+    # Previous 10/5 was too aggressive — caused fact chunks to be cut by reranker on term mismatch.
+    rag_scoped_retrieval_candidates: int = 15
+    rag_scoped_final_top_k: int = 7
+
+    # Scope-aware ranking and guardrails (single-doc / ambiguous multi-doc handling)
+    rag_scope_match_reweight_enabled: bool = True
+    rag_scope_match_boost_weight: float = 0.30
+    rag_scope_mismatch_penalty_weight: float = 0.30
+    rag_scope_guardrail_regenerate_enabled: bool = True
+    rag_scope_guardrail_require_citations: bool = False
+
+    # Semantic similarity floors (raw cosine similarity) for filtering low-signal hits
+    rag_chat_semantic_similarity_floor: float = 0.12
+    # Tighter floor used when the reranker is skipped (low QU confidence or ambient mode).
+    # The reranker normally cleans up weak candidates; this compensates when it doesn't run.
+    rag_chat_semantic_similarity_floor_no_reranker: float = 0.25
+    rag_workflow_semantic_similarity_floor: float = 0.06
+
+    # ===== DOCUMENT COMPARISON SETTINGS =====
+    # Schema-based comparison system for multi-document analysis
+    comparison_enabled: bool = True  # Enable document comparison feature
+    comparison_similarity_threshold: float = 0.40  # Min similarity for pairing chunks (0-1); tuned for embedding cosine (not cross-encoder)
+    comparison_chunks_per_doc: int = 8  # Chunks to retrieve per document (reduced from 10)
+    comparison_max_pairs: int = 8  # Max pairs/clusters to include in prompt
+    comparison_max_documents: int = 3  # Max number of documents to compare (2-3)
+    # Ambient mode: wider retrieval when query is AMBIGUOUS across multi-doc session
+    ambient_top_k: int = 10            # Retrieval candidates for AMBIGUOUS multi-doc queries (vs rag_final_top_k=8)
+    # Early-exit pairing/clustering when retrieval signal is weak
+    # Set to 0 to disable score-based early-exit
+    comparison_pairing_min_top_score: float = 0.00
+    comparison_pairing_min_chunks_per_doc: int = 1
 
     # ===== RAG RE-RANKER SETTINGS =====
     # Cross-encoder re-ranking for improved relevance scoring
@@ -159,7 +234,8 @@ class Settings(BaseSettings):
     rag_use_reranker: bool = True
 
     # Cross-encoder model for re-ranking
-    # Options: "cross-encoder/ms-marco-MiniLM-L-6-v2", "BAAI/bge-reranker-base", "BAAI/bge-reranker-large"
+    # Options: "cross-encoder/ms-marco-MiniLM-L-6-v2" (22M params, ~3-5x faster on CPU)
+    #          "BAAI/bge-reranker-base" (110M params, higher quality, multilingual)
     rag_reranker_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
 
     # Batch size for re-ranking (process multiple query-doc pairs together)
@@ -170,6 +246,47 @@ class Settings(BaseSettings):
 
     # Apply metadata boosting to re-ranker scores (gentle nudge for tables/narrative)
     rag_reranker_apply_metadata_boost: bool = True
+
+    # Skip re-ranking when candidate pool is tiny (chat/general RAG)
+    rag_reranker_min_candidates_chat: int = 6
+
+    # Skip per-document re-ranking in comparison flow when candidate pool is tiny
+    rag_reranker_min_candidates_comparison: int = 6
+
+    # Per-mode reranker toggles.
+    # Comparison: disabled — embedding cosine pairing handles relevance; reranker adds ~76s with no benefit.
+    # Chat: enabled — improves precision for real-time queries (MiniLM-L-6 ~5-8s on CPU).
+    # Workflow: enabled — background Celery task, blocking is fine, quality matters for report generation.
+    rag_use_reranker_comparison: bool = False
+    rag_use_reranker_chat: bool = True
+    rag_use_reranker_workflow: bool = False
+
+    # ===== CONTEXT EXPANSION SETTINGS =====
+    # Expand retrieved chunks with related context (tables, narratives, parents)
+
+    # Enable context expansion for all query types (not just comparison)
+    rag_expansion_enabled: bool = True
+
+    # Quality gate for expansion - only expand chunks above this rerank score (0.0-1.0)
+    # Lowered from 0.4: MiniLM-L-6-v2 outputs lower raw scores than BAAI/bge-reranker-base
+    # (top scores of ~0.35 are still genuinely relevant). 0.2 lets expansion run for most
+    # queries while still filtering very low-confidence chunks.
+    rag_expansion_rerank_floor: float = 0.2
+
+    # Ambient mode noise filter: drop chunks scoring below this threshold (raw CrossEncoder logit).
+    # 0.05 removes only genuinely irrelevant chunks (TOC, disclaimers, unrelated sections).
+    rag_reranker_ambient_noise_threshold: float = 0.05
+
+    # Skip reranker when query understanding confidence is below this threshold.
+    # Low confidence means QU is uncertain (e.g. timeout) — reranking on a weak query signal is noisy.
+    # 0.4 preserves reranking for most real queries (confidence usually 0.7+) but skips timed-out/ambiguous cases.
+    rag_reranker_skip_confidence_threshold: float = 0.4
+
+    # Score inheritance factors for expanded chunks (0.0-1.0)
+    # Lower = expanded chunks rank below original chunks
+    rag_expansion_score_narrative: float = 0.90  # Table → linked narrative
+    rag_expansion_score_table: float = 0.85      # Narrative → linked table
+    rag_expansion_score_parent: float = 0.75     # Continuation → parent
 
     # ===== RAG CHUNK COMPRESSION SETTINGS =====
     # Handle chunks that exceed re-ranker token limits
@@ -211,7 +328,7 @@ class Settings(BaseSettings):
     analytics_dir: Path = log_dir / "analytics" 
     
     # CORS
-    cors_origins: list[str] = ["http://localhost:5173"]
+    cors_origins: list[str] = ["http://localhost:5173", "http://localhost:5174"]
     @field_validator("cors_origins", mode="before")
     def parse_cors_origins(cls, v):
         if isinstance(v, str):
@@ -235,12 +352,22 @@ class Settings(BaseSettings):
     r2_endpoint_url: str = ""  # e.g. https://<accountid>.r2.cloudflarestorage.com
     r2_presign_expiry: int = 3600  # seconds for signed URL validity
 
+    # ===== DOCUMENT STORAGE SETTINGS =====
+    # Use R2 for document (PDF/Excel) storage instead of local filesystem
+    use_r2_for_documents: bool = True  # Toggle R2 for document uploads
+    documents_presign_expiry: int = 7200  # 2 hours (longer than exports for PDF viewing during template fill)
+
+    # Storage backend type (used by storage_factory)
+    # Options: "r2" or "local" - automatically determined by use_r2_for_documents
+    storage_backend: str = "r2"  # Auto-set based on use_r2_for_documents
+
     # ===== WORKFLOW BUDGET SETTINGS =====
     # Maximum tokens and cost per workflow run (to prevent runaway costs)
     workflow_max_tokens_per_run: int = 200_000  # Max tokens (input + output) per workflow run
     workflow_max_cost_per_run_usd: float = 5.0  # Max USD cost per workflow run
     workflow_max_attempts: int = 3  # Max LLM generation attempts with retry
     workflow_context_max_chars: int = 150_000  # Max context characters per workflow run
+    workflow_map_reduce_token_threshold: int = 10_000  # Tokens above which map-reduce is used
     
     class Config:
         # Point explicitly to backend/.env so scripts run from repo root still load variables

@@ -4,7 +4,7 @@
  */
 import { useEffect, useState, useCallback } from "react";
 import { useParams, useNavigate } from "react-router-dom";
-import { useAuth } from "@clerk/clerk-react";
+import { useAppAuth } from "@/hooks/useAppAuth";
 import AppLayout from "../components/layout/AppLayout";
 import { Button } from "../components/ui/button";
 import { Card } from "../components/ui/card";
@@ -12,7 +12,6 @@ import Spinner from "../components/common/Spinner";
 import ResultViews from "../components/results/ResultViews";
 import { fetchExtractionResult, deleteExtraction } from "../api/extraction";
 import { exportToExcel } from "../utils/excelExport";
-import { useExtractionActions } from "../store";
 import { saveAs } from "file-saver";
 import {
   ArrowLeft,
@@ -26,14 +25,11 @@ import {
 export default function ExtractionDetailPage() {
   const { id } = useParams();
   const navigate = useNavigate();
-  const { getToken } = useAuth();
-  const { retryExtraction } = useExtractionActions();
-
+  const { getToken } = useAppAuth();
   const [loading, setLoading] = useState(true);
   const [data, setData] = useState(null);
   const [error, setError] = useState(null);
   const [deleting, setDeleting] = useState(false);
-  const [retrying, setRetrying] = useState(false);
   const [exporting, setExporting] = useState(false);
 
   const loadData = useCallback(async () => {
@@ -94,20 +90,6 @@ export default function ExtractionDetailPage() {
           (err.response?.data?.detail || err.message)
       );
       setDeleting(false);
-    }
-  };
-
-  const handleRetry = async () => {
-    setRetrying(true);
-    try {
-      const token = await getToken();
-      await retryExtraction(id, token);
-      navigate("/app/extract?retry=" + id);
-    } catch (err) {
-      console.error("Retry failed", err);
-      alert("Retry failed: " + (err.response?.data?.detail || err.message));
-    } finally {
-      setRetrying(false);
     }
   };
 

@@ -7,7 +7,7 @@ from sqlalchemy.dialects.postgresql import TSVECTOR, JSONB
 from pgvector.sqlalchemy import Vector  # pgvector extension for embeddings
 from app.database import Base
 import uuid
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Tuple
 
 
 class Collection(Base):
@@ -22,6 +22,7 @@ class Collection(Base):
     __tablename__ = "collections"
 
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    org_id = Column(String(64), nullable=False, index=True)  # Clerk org ID (tenant)
     user_id = Column(String(100), nullable=False, index=True)  # Clerk user ID
 
     name = Column(String(255), nullable=False)  # User-provided name
@@ -60,6 +61,7 @@ class CollectionDocument(Base):
     document_id = Column(String(36), ForeignKey("documents.id", ondelete="CASCADE"), nullable=False)
 
     # Link metadata
+    file_path = Column(String(512), nullable=True)  # Original file path from upload
     added_at = Column(DateTime(timezone=True), server_default=func.now())
 
     # Relationships
@@ -100,18 +102,18 @@ class DocumentChunk(Base):
     tables = Column(JSONB, nullable=True)  # Structured table metadata: [{"table_id": 0, "text": "...", "row_count": 2, "column_count": 3}]
     chunk_index = Column(Integer, nullable=False)  # Order within document (0, 1, 2, ...)
 
-    # Full-text search vector (auto-generated from text column)
-    # PostgreSQL tsvector for keyword/lexical search (BM25-like ranking)
-    # Automatically maintained by PostgreSQL trigger (see migration)
+    # Full-text search vector for keyword/lexical search (BM25-like ranking via ts_rank_cd).
+    # AUTO-POPULATED by PostgreSQL trigger `tsvector_update` (migration c4d5e6f7a8b9).
+    # Do NOT set this column in application code — the DB trigger handles it on every INSERT/UPDATE.
     text_search_vector = Column(TSVECTOR, nullable=True)
 
-    # Embedding vector (384 dimensions for all-MiniLM-L6-v2)
-    # NOTE: If you change embedding models, you'll need a new migration
-    embedding = Column(Vector(384), nullable=True)
+    # Embedding vector (768 dimensions for text-embedding-3-small with dimensions=768)
+    # NOTE: If you change embedding dimensions, you'll need a new migration
+    embedding = Column(Vector(768), nullable=True)
     embedding_model = Column(String(100), nullable=True)  # Track which model created this embedding
     embedding_version = Column(String(20), nullable=True)  # Model version for gradual migration
 
-    # Basic chunk metadata (backward compatible)
+    # Basic chunk metadata (legacy anchor page only; use chunk_metadata.page_range/bbox for multi-page chunks)
     page_number = Column(Integer, nullable=True)
     section_type = Column(String(50), nullable=True)  # "narrative", "table", etc.
     section_heading = Column(Text, nullable=True)
@@ -160,6 +162,79 @@ class DocumentChunk(Base):
     # Relationships
     document = relationship("Document", back_populates="chunks")
 
+
+    @staticmethod
+    def _coerce_page_int(value: Any) -> Optional[int]:
+        """Safely coerce metadata page values to int."""
+        try:
+            if value is None:
+                return None
+            return int(value)
+        except Exception:
+            return None
+
+    @classmethod
+    def resolve_page_info(
+        cls,
+        chunk_metadata: Optional[Dict[str, Any]],
+        fallback_page_number: Optional[int],
+    ) -> Tuple[Optional[int], List[int]]:
+        """Resolve an anchor page and page range from chunk metadata.
+
+        Priority for anchor page: bbox.page -> page_range[0] -> first region page -> fallback.
+        """
+        meta = chunk_metadata if isinstance(chunk_metadata, dict) else {}
+
+        range_pages: List[int] = []
+        raw_page_range = meta.get("page_range")
+        if isinstance(raw_page_range, list):
+            for page in raw_page_range:
+                parsed = cls._coerce_page_int(page)
+                if parsed is not None:
+                    range_pages.append(parsed)
+
+        region_pages: List[int] = []
+        for key in ("value_bounding_regions", "bounding_regions", "key_bounding_regions"):
+            regions = meta.get(key)
+            if not isinstance(regions, list):
+                continue
+            for region in regions:
+                if not isinstance(region, dict):
+                    continue
+                parsed = cls._coerce_page_int(region.get("page_number"))
+                if parsed is not None:
+                    region_pages.append(parsed)
+
+        bbox_page = None
+        bbox = meta.get("bbox")
+        if isinstance(bbox, dict):
+            bbox_page = cls._coerce_page_int(bbox.get("page"))
+
+        fallback_page = cls._coerce_page_int(fallback_page_number)
+
+        ordered_candidates = [bbox_page]
+        if range_pages:
+            ordered_candidates.append(range_pages[0])
+        if region_pages:
+            ordered_candidates.append(region_pages[0])
+        ordered_candidates.append(fallback_page)
+
+        anchor_page = next((p for p in ordered_candidates if p is not None), None)
+
+        all_pages: List[int] = []
+        for page in [*range_pages, *region_pages]:
+            if page not in all_pages:
+                all_pages.append(page)
+        if anchor_page is not None and anchor_page not in all_pages:
+            all_pages.insert(0, anchor_page)
+        if fallback_page is not None and fallback_page not in all_pages:
+            all_pages.append(fallback_page)
+
+        return anchor_page, all_pages
+
+    def get_page_info(self) -> Tuple[Optional[int], List[int]]:
+        """Instance helper wrapper around resolve_page_info."""
+        return self.resolve_page_info(self.chunk_metadata, self.page_number)
     # Helper methods for metadata access
     def get_section_id(self) -> Optional[str]:
         """Get section ID from metadata."""
@@ -245,9 +320,11 @@ class ChatSession(Base):
     __tablename__ = "chat_sessions"
     __table_args__ = (
         Index("idx_chat_sessions_user_id", "user_id"),
+        Index("idx_chat_sessions_org_id", "org_id"),
     )
 
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    org_id = Column(String(64), nullable=False, index=True)  # Clerk org ID (tenant)
     user_id = Column(String(100), nullable=False, index=True)  # Clerk user ID
 
     # Session metadata
@@ -256,6 +333,17 @@ class ChatSession(Base):
 
     # Stats
     message_count = Column(Integer, default=0)  # Cached count
+
+    # Conversation summary persistence (progressive summarization)
+    last_summary_text = Column(Text, nullable=True)  # Latest summary
+    last_summary_key_facts = Column(JSONB, nullable=True, server_default='[]')  # Important preserved facts
+    last_summarized_index = Column(Integer, nullable=True, server_default='0')  # Message index summarized up to
+    last_summary_updated_at = Column(DateTime(timezone=True), nullable=True)  # When summary was last updated
+
+    # Stable citation document index: {"D1": "doc-uuid-A", "D2": "doc-uuid-B", ...}
+    # Assigned once (by session_documents.added_at order), never changes for the session lifetime.
+    # Used to resolve [D1:p5] citation tokens in LLM responses consistently across all turns.
+    document_index = Column(JSONB, nullable=True, server_default='{}')
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
@@ -298,7 +386,21 @@ class ChatMessage(Base):
     tokens_used = Column(Integer, nullable=True)
     cost_usd = Column(Float, nullable=True)
 
+    # Granular token tracking for observability
+    input_tokens = Column(Integer, nullable=True)
+    output_tokens = Column(Integer, nullable=True)
+    cache_read_tokens = Column(Integer, nullable=True)
+    cache_write_tokens = Column(Integer, nullable=True)
+
+    # Comparison metadata (for page refresh persistence)
+    comparison_metadata = Column(Text, nullable=True)  # JSON serialized ComparisonContext
+
+    # Citation metadata (for clickable citations in general chat)
+    citation_metadata = Column(Text, nullable=True)  # JSON serialized citation context
+
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     # Relationships
     session = relationship("ChatSession", back_populates="messages")
+
+

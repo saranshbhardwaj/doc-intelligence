@@ -1,9 +1,10 @@
 import hashlib
 import json
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List, Dict, Any
 from datetime import datetime, timedelta
 from app.utils.logging import logger
+from app.utils.metrics import DOC_CACHE_HITS, DOC_CACHE_MISSES
 
 
 class DocumentCache:
@@ -27,7 +28,7 @@ class DocumentCache:
         cache_path = self._get_cache_path(content_hash)
 
         if not cache_path.exists():
-            logger.info(f"Cache MISS for hash {content_hash[:8]}...")
+            DOC_CACHE_MISSES.labels(cache_type="file").inc()
             return None
 
         try:
@@ -35,15 +36,15 @@ class DocumentCache:
             cached_at = datetime.fromisoformat(cache_data["cached_at"])
 
             if datetime.now() - cached_at > self.cache_ttl:
-                logger.info(f"Cache EXPIRED for hash {content_hash[:8]}...")
                 cache_path.unlink(missing_ok=True)
+                DOC_CACHE_MISSES.labels(cache_type="file").inc()
                 return None
-
-            logger.info(f"Cache HIT for hash {content_hash[:8]}...")
+            DOC_CACHE_HITS.labels(cache_type="file").inc()
             return cache_data["result"]
 
         except Exception as e:
             logger.error(f"Cache read error: {e}")
+            DOC_CACHE_MISSES.labels(cache_type="file").inc()
             return None
 
     def set(self, content: bytes, result: dict):
@@ -58,11 +59,10 @@ class DocumentCache:
 
         try:
             cache_path.write_text(json.dumps(cache_data, indent=2))
-            logger.info(f"Cached result for hash {content_hash[:8]}...")
         except Exception as e:
             logger.error(f"Cache write error: {e}")
 
-    def clear_expired(self):
+    def clear_expired(self) -> int:
         count = 0
         for cache_file in self.cache_dir.glob("*.json"):
             try:
@@ -78,4 +78,35 @@ class DocumentCache:
         if count > 0:
             logger.info(f"Cleared {count} expired cache entries")
 
+        return count
+
+    def list_entries(self, limit: int = 100) -> List[Dict[str, Any]]:
+        """List all cached document files."""
+        entries = []
+        for cache_file in list(self.cache_dir.glob("*.json"))[:limit]:
+            try:
+                cache_data = json.loads(cache_file.read_text())
+                cached_at = datetime.fromisoformat(cache_data.get("cached_at", ""))
+                age_seconds = (datetime.now() - cached_at).total_seconds()
+                ttl_remaining = self.cache_ttl.total_seconds() - age_seconds
+                entries.append({
+                    "key": cache_file.stem,
+                    "cached_at": cache_data.get("cached_at"),
+                    "ttl_seconds": int(ttl_remaining) if ttl_remaining > 0 else None
+                })
+            except Exception:
+                continue
+        return entries
+
+    def clear_all(self) -> int:
+        """Clear all cache files."""
+        count = 0
+        for cache_file in self.cache_dir.glob("*.json"):
+            try:
+                cache_file.unlink()
+                count += 1
+            except Exception as e:
+                logger.error(f"Failed to delete cache file {cache_file}: {e}")
+        if count > 0:
+            logger.info(f"Cleared {count} file cache entries")
         return count

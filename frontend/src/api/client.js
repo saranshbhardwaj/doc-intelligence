@@ -37,25 +37,42 @@ export function createAuthenticatedApi(getToken) {
     timeout: 500_000,
   });
 
-  // Add auth token to all requests
+  // Add auth token to all requests.
+  // getToken() contacts Clerk's servers — wrap in a timeout so a slow/unreachable
+  // Clerk doesn't hang every API request indefinitely.
   authenticatedApi.interceptors.request.use(async (config) => {
     try {
-      const token = await getToken();
+      const token = await Promise.race([
+        getToken(),
+        new Promise((_, reject) =>
+          setTimeout(() => reject(new Error('getToken timeout')), 10_000)
+        ),
+      ]);
       if (token) {
         config.headers.Authorization = `Bearer ${token}`;
       } else {
         console.warn('⚠️ [Auth] No token returned from getToken()');
       }
     } catch (error) {
-      console.error('❌ [Auth] Failed to get auth token:', error);
+      // Log quietly — request proceeds without auth and server returns 401
+      console.warn('⚠️ [Auth] Token fetch failed:', error.message);
     }
     return config;
   });
 
-  // Handle errors with centralized error handler
+  // Handle errors — redirect to /access-pending on 403 "access_pending"
   authenticatedApi.interceptors.response.use(
     (response) => response,
-    createErrorInterceptor()
+    (error) => {
+      if (
+        error.response?.status === 403 &&
+        error.response?.data?.detail === "access_pending"
+      ) {
+        window.location.href = "/access-pending";
+        return new Promise(() => {}); // Never resolve — page is navigating
+      }
+      return createErrorInterceptor()(error);
+    }
   );
 
   return authenticatedApi;

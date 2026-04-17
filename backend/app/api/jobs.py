@@ -2,29 +2,21 @@
 """Real-time job progress tracking with Server-Sent Events (SSE)"""
 import asyncio
 import json
-from typing import AsyncGenerator, Optional
+from typing import Optional
 
 from fastapi import APIRouter, HTTPException, Query, Depends
 from sse_starlette.sse import EventSourceResponse, ServerSentEvent
-import httpx
 
 from app.db_models_users import User
 from app.utils.logging import logger
-from app.auth import get_current_user
+from app.auth import get_current_user, _verify_token, _claim
 from app.repositories.job_repository import JobRepository
-from app.repositories.extraction_repository import ExtractionRepository
-from clerk_backend_api import Clerk
-from clerk_backend_api.security.types import AuthenticateRequestOptions
-from app.config import settings
 
 # Import job progress tracker (separate module to avoid circular imports)
-from app.services.job_tracker import JobProgressTracker
 from app.services.pubsub import safe_subscribe
+from app.core.entity_types import build_entity_complete_event, resolve_entity_owner
 
 router = APIRouter()
-
-# Initialize Clerk client for token verification
-clerk = Clerk(bearer_auth=settings.clerk_secret_key)
 
 
 @router.get("/api/jobs/{job_id}/stream")
@@ -41,40 +33,25 @@ async def stream_job_progress(job_id: str, token: Optional[str] = Query(None)):
     """
 
     # Verify authentication via token query parameter
+    # (EventSource doesn't support custom headers, so the token is passed as ?token=)
     if not token:
         raise HTTPException(status_code=401, detail="Missing authentication token")
 
     try:
-        # Convert token to httpx request for Clerk SDK authentication
-        # EventSource doesn't support custom headers, so we receive token as query param
-        # but Clerk expects it in the Authorization header
         logger.info(f"[SSE] Verifying token for job {job_id}...", extra={"job_id": job_id})
-
-        httpx_request = httpx.Request(
-            method="GET",
-            url=f"http://localhost/api/jobs/{job_id}/stream",  # URL doesn't matter for token verification
-            headers={"Authorization": f"Bearer {token}"}
-        )
-
-        # Authenticate the request with Clerk
-        # Empty options accepts session tokens by default (not OAuth tokens)
-        request_state = clerk.authenticate_request(
-            httpx_request,
-            AuthenticateRequestOptions()
-        )
-
-        if not request_state.is_signed_in:
-            logger.error(f"[SSE] User is not signed in for job {job_id}", extra={"job_id": job_id})
-            raise HTTPException(status_code=401, detail="Not signed in")
-
-        # Extract user_id from the token payload ('sub' field in JWT)
-        user_id = request_state.payload.get('sub') if request_state.payload else None
+        payload = _verify_token(token)
+        user_id = payload.get("sub")           # standard JWT claim — no namespace
+        org_id = payload.get(_claim("org_id"))
 
         if not user_id:
-            logger.error(f"[SSE] Could not extract user_id from token for job {job_id}", extra={"job_id": job_id})
             raise HTTPException(status_code=401, detail="Could not extract user_id from token")
+        if not org_id:
+            raise HTTPException(status_code=401, detail="Could not extract org_id from token")
 
-        logger.info(f"[SSE] Authenticated user {user_id} for job {job_id}", extra={"job_id": job_id, "user_id": user_id})
+        logger.info(
+            f"[SSE] Authenticated user {user_id} for job {job_id}",
+            extra={"job_id": job_id, "user_id": user_id, "org_id": org_id}
+        )
     except HTTPException:
         raise
     except Exception as e:
@@ -85,7 +62,6 @@ async def stream_job_progress(job_id: str, token: Optional[str] = Query(None)):
     # Note: We check job existence inside event_generator to send proper error events
     # This initial check is just for ownership verification
     job_repo = JobRepository()
-    extraction_repo = ExtractionRepository()
 
     job = job_repo.get_job(job_id)
 
@@ -114,71 +90,58 @@ async def stream_job_progress(job_id: str, token: Optional[str] = Query(None)):
             }
         )
 
-    # Generic ownership verification: check which entity type this job belongs to
-    # JobState supports: extraction_id, document_id, workflow_run_id (exactly one is set)
-    entity_owner_id = None
-    entity_type = None
+    # For terminal-state jobs (failed/completed), skip ownership check and go straight to
+    # event_generator which will emit the appropriate SSE event and close cleanly.
+    # This prevents HTTP 404 when the associated entity (e.g. document) was cleaned up.
+    if job.status in ("failed", "completed"):
+        async def terminal_event_generator():
+            if job.status == "completed":
+                complete_data = build_entity_complete_event(job)
+                yield ServerSentEvent(data=json.dumps(complete_data), event="complete")
+            else:
+                yield ServerSentEvent(data=json.dumps({
+                    'stage': job.error_stage,
+                    'message': job.error_message,
+                    'type': job.error_type,
+                    'retryable': job.is_retryable
+                }), event="error")
+            yield ServerSentEvent(data=json.dumps({'reason': job.status, 'job_id': job_id}), event="end")
 
-    if job.extraction_id:
-        # Extract Mode: verify through extraction
-        extraction = extraction_repo.get_extraction(job.extraction_id)
-        if not extraction:
-            raise HTTPException(status_code=404, detail=f"Extraction not found for job {job_id}")
-        entity_owner_id = extraction.user_id
-        entity_type = "extraction"
+        return EventSourceResponse(
+            terminal_event_generator(),
+            headers={
+                "X-Accel-Buffering": "no",
+                "Cache-Control": "no-cache",
+                "Content-Type": "text/event-stream; charset=utf-8"
+            }
+        )
 
-    elif job.workflow_run_id:
-        # Workflow Mode: verify through workflow run
-        from app.repositories.workflow_repository import WorkflowRepository
-        from app.database import SessionLocal
-        db = SessionLocal()
-        try:
-            workflow_repo = WorkflowRepository(db)
-            run = workflow_repo.get_run(job.workflow_run_id)
-            if not run:
-                raise HTTPException(status_code=404, detail=f"Workflow run not found for job {job_id}")
-            entity_owner_id = run.user_id
-            entity_type = "workflow"
-        finally:
-            db.close()
-
-    elif job.document_id:
-        # Chat Mode: verify through document
-        from app.db_models_documents import Document
-        from app.database import SessionLocal
-        db = SessionLocal()
-        try:
-            doc = db.query(Document).filter(Document.id == job.document_id).first()
-            if not doc:
-                raise HTTPException(status_code=404, detail=f"Document not found for job {job_id}")
-            entity_owner_id = doc.user_id
-            entity_type = "document"
-        finally:
-            db.close()
-    else:
-        # No entity associated with job (should never happen due to DB constraints)
-        logger.error(f"[SSE] Job {job_id} has no associated entity (extraction_id, workflow_run_id, or document_id)",
-                    extra={"job_id": job_id})
-        raise HTTPException(status_code=404, detail=f"Job {job_id} has no associated entity")
+    # Generic ownership verification
+    entity_owner_id, entity_org_id = resolve_entity_owner(job.entity_type, job.entity_id, org_id)
 
     # Verify ownership
-    if entity_owner_id != user_id:
+    if entity_owner_id != user_id or (entity_org_id is not None and entity_org_id != org_id):
         logger.warning(
-            f"[SSE] User {user_id} attempted to access {entity_type} job {job_id} owned by {entity_owner_id}",
-            extra={"job_id": job_id, "user_id": user_id, "owner_id": entity_owner_id, "entity_type": entity_type}
+            f"[SSE] User {user_id} attempted to access {job.entity_type} job {job_id} owned by {entity_owner_id}",
+            extra={"job_id": job_id, "user_id": user_id, "org_id": org_id, "owner_id": entity_owner_id, "entity_org_id": entity_org_id, "entity_type": job.entity_type}
         )
         raise HTTPException(status_code=403, detail="You don't have permission to access this job")
 
     logger.info(
-        f"[SSE] User {user_id} authorized to stream {entity_type} job {job_id}",
-        extra={"job_id": job_id, "entity_type": entity_type}
+        f"[SSE] User {user_id} authorized to stream {job.entity_type} job {job_id}",
+        extra={"job_id": job_id, "entity_type": job.entity_type}
     )
 
     async def event_generator():
         """Async generator bridging Redis pub/sub to SSE.
 
         Defensive behaviors:
-          - Sends initial snapshot from DB (atomic ownership check already done)
+          - Subscribes to pub/sub BEFORE reading DB to close the race where the
+            job completes between the DB read and the subscribe call. Events
+            published in that gap would otherwise be lost, leaving the client
+            stuck. Subscribe-then-read guarantees the buffer captures any event
+            published after we join the channel.
+          - Sends initial snapshot from DB for immediate feedback
           - Falls back to lightweight periodic keepalive comments
           - Auto-terminates on complete/error/end events
           - Timeout guard
@@ -187,13 +150,17 @@ async def stream_job_progress(job_id: str, token: Optional[str] = Query(None)):
 
         end_sent = False  # Track if we've sent end event
 
-        # Initial DB snapshot (single query) for immediate feedback
+        # Subscribe BEFORE reading DB — events published between the read and
+        # a post-read subscribe would be lost forever (TOCTOU race).
+        pubsub = safe_subscribe(job_id)
+
+        # DB snapshot after subscribing: any terminal event published after this
+        # read is already buffered in pubsub and will be delivered below.
         job_repo = JobRepository()
         job = job_repo.get_job(job_id)
 
         if not job:
-            # Send proper error event instead of raising 404
-            # This allows frontend to handle gracefully and clear state
+            pubsub.close()
             logger.warning(f"[SSE] Job {job_id} not found - sending error event", extra={"job_id": job_id})
             yield ServerSentEvent(
                 data=json.dumps({
@@ -207,13 +174,30 @@ async def stream_job_progress(job_id: str, token: Optional[str] = Query(None)):
             return
 
         if job.status == "completed":
-            yield ServerSentEvent(data=json.dumps({
-                'message': job.message or 'Extraction completed successfully',
-                'extraction_id': job.extraction_id
-            }), event="complete")
+            pubsub.close()
+            complete_data = build_entity_complete_event(job)
+            yield ServerSentEvent(data=json.dumps(complete_data), event="complete")
             yield ServerSentEvent(data=json.dumps({'reason': 'completed', 'job_id': job_id}), event="end")
             return
+
+        # Template fill specific: Handle awaiting_review status
+        # This occurs after auto-mapping completes and user needs to review
+        if job.status in ("mapped", "awaiting_review"):
+            if job.entity_type == "template_fill_run":
+                from app.repositories.template_repository import TemplateRepository
+                fill_run = TemplateRepository.get_fill_run_by_id(job.entity_id)
+                if fill_run and fill_run.status == "awaiting_review":
+                    pubsub.close()
+                    yield ServerSentEvent(data=json.dumps({
+                        'message': job.message or 'Mapping complete - ready for review',
+                        'fill_run_id': job.entity_id,
+                        'status': 'awaiting_review'
+                    }), event="complete")
+                    yield ServerSentEvent(data=json.dumps({'reason': 'awaiting_review', 'job_id': job_id}), event="end")
+                    return
+
         if job.status == "failed":
+            pubsub.close()
             yield ServerSentEvent(data=json.dumps({
                 'stage': job.error_stage,
                 'message': job.error_message,
@@ -223,7 +207,8 @@ async def stream_job_progress(job_id: str, token: Optional[str] = Query(None)):
             yield ServerSentEvent(data=json.dumps({'reason': 'failed', 'job_id': job_id}), event="end")
             return
 
-        # In-progress initial event
+        # In-progress: send current DB snapshot so client has immediate feedback,
+        # then drain pub/sub for live updates (including anything buffered above).
         yield ServerSentEvent(data=json.dumps({
             'status': job.status,
             'current_stage': job.current_stage,
@@ -232,7 +217,6 @@ async def stream_job_progress(job_id: str, token: Optional[str] = Query(None)):
             'details': job.details or {}
         }), event="progress")
 
-        pubsub = safe_subscribe(job_id)
         max_duration = 800  # seconds
         elapsed = 0
         keepalive_interval = 8  # seconds for keepalive comment
@@ -315,55 +299,22 @@ async def stream_job_progress(job_id: str, token: Optional[str] = Query(None)):
 async def get_job_status(job_id: str, user: User = Depends(get_current_user)):
     """Get current job status (polling alternative to SSE) - REQUIRES AUTHENTICATION"""
     job_repo = JobRepository()
-    extraction_repo = ExtractionRepository()
+    org_id = user.org_id
 
     job = job_repo.get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    # Generic ownership verification (same as SSE endpoint)
-    entity_owner_id = None
-
-    if job.extraction_id:
-        extraction = extraction_repo.get_extraction(job.extraction_id)
-        if not extraction:
-            raise HTTPException(status_code=404, detail="Extraction not found")
-        entity_owner_id = extraction.user_id
-
-    elif job.workflow_run_id:
-        from app.repositories.workflow_repository import WorkflowRepository
-        from app.database import SessionLocal
-        db = SessionLocal()
-        try:
-            workflow_repo = WorkflowRepository(db)
-            run = workflow_repo.get_run(job.workflow_run_id)
-            if not run:
-                raise HTTPException(status_code=404, detail="Workflow run not found")
-            entity_owner_id = run.user_id
-        finally:
-            db.close()
-
-    elif job.document_id:
-        from app.db_models_documents import Document
-        from app.database import SessionLocal
-        db = SessionLocal()
-        try:
-            doc = db.query(Document).filter(Document.id == job.document_id).first()
-            if not doc:
-                raise HTTPException(status_code=404, detail="Document not found")
-            entity_owner_id = doc.user_id
-        finally:
-            db.close()
-    else:
-        raise HTTPException(status_code=404, detail="Job has no associated entity")
+    entity_owner_id, entity_org_id = resolve_entity_owner(job.entity_type, job.entity_id, org_id)
 
     # Verify ownership
-    if entity_owner_id != user.id:
+    if entity_owner_id != user.id or (entity_org_id is not None and entity_org_id != org_id):
         raise HTTPException(status_code=403, detail="You don't have permission to access this job")
 
     return {
-        "job_id": job.id,
-        "extraction_id": job.extraction_id,
+        "job_id": job.job_id,
+        "entity_type": job.entity_type,
+        "entity_id": job.entity_id,
         "status": job.status,
         "current_stage": job.current_stage,
         "progress_percent": job.progress_percent,
@@ -371,8 +322,14 @@ async def get_job_status(job_id: str, user: User = Depends(get_current_user)):
         "details": job.details,
         "parsing_completed": job.parsing_completed,
         "chunking_completed": job.chunking_completed,
-        "summarizing_completed": job.summarizing_completed,
-        "extracting_completed": job.extracting_completed,
+        "embedding_completed": job.embedding_completed,
+        "storing_completed": job.storing_completed,
+        "context_completed": job.context_completed,
+        "artifact_completed": job.artifact_completed,
+        "field_detection_completed": job.field_detection_completed,
+        "auto_mapping_completed": job.auto_mapping_completed,
+        "data_extraction_completed": job.data_extraction_completed,
+        "excel_filling_completed": job.excel_filling_completed,
         "error": {
             "stage": job.error_stage,
             "message": job.error_message,
@@ -394,51 +351,16 @@ async def retry_job(job_id: str, user: User = Depends(get_current_user)):
     Other failures (parsing, chunking) require re-uploading the document.
     """
     job_repo = JobRepository()
-    extraction_repo = ExtractionRepository()
+    org_id = user.org_id
 
     job = job_repo.get_job(job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    # Generic ownership verification (same as SSE endpoint)
-    entity_owner_id = None
-    extraction = None
-
-    if job.extraction_id:
-        extraction = extraction_repo.get_extraction(job.extraction_id)
-        if not extraction:
-            raise HTTPException(status_code=404, detail="Extraction not found")
-        entity_owner_id = extraction.user_id
-
-    elif job.workflow_run_id:
-        from app.repositories.workflow_repository import WorkflowRepository
-        from app.database import SessionLocal
-        db = SessionLocal()
-        try:
-            workflow_repo = WorkflowRepository(db)
-            run = workflow_repo.get_run(job.workflow_run_id)
-            if not run:
-                raise HTTPException(status_code=404, detail="Workflow run not found")
-            entity_owner_id = run.user_id
-        finally:
-            db.close()
-
-    elif job.document_id:
-        from app.db_models_documents import Document
-        from app.database import SessionLocal
-        db = SessionLocal()
-        try:
-            doc = db.query(Document).filter(Document.id == job.document_id).first()
-            if not doc:
-                raise HTTPException(status_code=404, detail="Document not found")
-            entity_owner_id = doc.user_id
-        finally:
-            db.close()
-    else:
-        raise HTTPException(status_code=404, detail="Job has no associated entity")
+    entity_owner_id, entity_org_id = resolve_entity_owner(job.entity_type, job.entity_id, org_id)
 
     # Verify ownership
-    if entity_owner_id != user.id:
+    if entity_owner_id != user.id or (entity_org_id is not None and entity_org_id != org_id):
         raise HTTPException(status_code=403, detail="You don't have permission to retry this job")
 
     if job.status != "failed":
@@ -455,8 +377,6 @@ async def retry_job(job_id: str, user: User = Depends(get_current_user)):
         )
 
     resume_stage = "extracting"
-    resume_data_path = job.combined_context_path
-
     # Reset job state for retry using repository
     # Note: We need to add a method to handle complex updates like this
     # For now, we'll use update_job but we need to handle error_* fields
@@ -485,7 +405,8 @@ async def retry_job(job_id: str, user: User = Depends(get_current_user)):
     return {
         "success": True,
         "job_id": job_id,
-        "extraction_id": job.extraction_id,
+        "entity_type": job.entity_type,
+        "entity_id": job.entity_id,
         "resume_stage": resume_stage,
         "message": f"Job retry initiated from {resume_stage} stage"
     }

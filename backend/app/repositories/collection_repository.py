@@ -53,6 +53,7 @@ class CollectionRepository:
 
     def create_collection(
         self,
+        org_id: str,
         user_id: str,
         name: str,
         description: Optional[str] = None
@@ -70,6 +71,7 @@ class CollectionRepository:
         with self._get_session() as db:
             try:
                 collection = Collection(
+                    org_id=org_id,
                     user_id=user_id,
                     name=name,
                     description=description,
@@ -82,7 +84,7 @@ class CollectionRepository:
 
                 logger.info(
                     f"Created collection: {name}",
-                    extra={"collection_id": collection.id, "user_id": user_id}
+                    extra={"collection_id": collection.id, "org_id": org_id, "user_id": user_id}
                 )
 
                 return collection
@@ -90,7 +92,7 @@ class CollectionRepository:
             except SQLAlchemyError as e:
                 logger.error(
                     f"Failed to create collection: {e}",
-                    extra={"user_id": user_id, "collection_name": name, "error": str(e)}
+                    extra={"org_id": org_id, "user_id": user_id, "collection_name": name, "error": str(e)}
                 )
                 db.rollback()
                 return None
@@ -98,7 +100,8 @@ class CollectionRepository:
     def get_collection(
         self,
         collection_id: str,
-        user_id: str
+        user_id: str,
+        org_id: str
     ) -> Optional[Collection]:
         """Get collection by ID (with user ownership check).
 
@@ -113,18 +116,20 @@ class CollectionRepository:
             try:
                 return db.query(Collection).filter(
                     Collection.id == collection_id,
-                    Collection.user_id == user_id
+                    Collection.user_id == user_id,
+                    Collection.org_id == org_id
                 ).first()
             except SQLAlchemyError as e:
                 logger.error(
                     f"Failed to get collection: {e}",
-                    extra={"collection_id": collection_id, "error": str(e)}
+                    extra={"collection_id": collection_id, "org_id": org_id, "error": str(e)}
                 )
                 return None
 
     def get_collection_by_id(
         self,
-        collection_id: str
+        collection_id: str,
+        org_id: Optional[str] = None
     ) -> Optional[Collection]:
         """Get collection by ID (without ownership check - for background tasks).
 
@@ -139,19 +144,21 @@ class CollectionRepository:
         """
         with self._get_session() as db:
             try:
-                return db.query(Collection).filter(
-                    Collection.id == collection_id
-                ).first()
+                query = db.query(Collection).filter(Collection.id == collection_id)
+                if org_id:
+                    query = query.filter(Collection.org_id == org_id)
+                return query.first()
             except SQLAlchemyError as e:
                 logger.error(
                     f"Failed to get collection by ID: {e}",
-                    extra={"collection_id": collection_id, "error": str(e)}
+                    extra={"collection_id": collection_id, "org_id": org_id, "error": str(e)}
                 )
                 return None
 
     def list_collections(
         self,
         user_id: str,
+        org_id: str,
         limit: int = 50,
         offset: int = 0
     ) -> tuple[List[Collection], int]:
@@ -168,7 +175,8 @@ class CollectionRepository:
         with self._get_session() as db:
             try:
                 query = db.query(Collection).filter(
-                    Collection.user_id == user_id
+                    Collection.user_id == user_id,
+                    Collection.org_id == org_id
                 )
 
                 total = query.count()
@@ -182,14 +190,15 @@ class CollectionRepository:
             except SQLAlchemyError as e:
                 logger.error(
                     f"Failed to list collections: {e}",
-                    extra={"user_id": user_id, "error": str(e)}
+                    extra={"user_id": user_id, "org_id": org_id, "error": str(e)}
                 )
                 return [], 0
 
     def delete_collection(
         self,
         collection_id: str,
-        user_id: str
+        user_id: str,
+        org_id: str
     ) -> bool:
         """Delete a collection (cascades to documents, chunks, sessions).
 
@@ -204,13 +213,14 @@ class CollectionRepository:
             try:
                 collection = db.query(Collection).filter(
                     Collection.id == collection_id,
-                    Collection.user_id == user_id
+                    Collection.user_id == user_id,
+                    Collection.org_id == org_id
                 ).first()
 
                 if not collection:
                     logger.warning(
                         f"Collection not found for deletion: {collection_id}",
-                        extra={"collection_id": collection_id, "user_id": user_id}
+                        extra={"collection_id": collection_id, "org_id": org_id, "user_id": user_id}
                     )
                     return False
 
@@ -219,7 +229,7 @@ class CollectionRepository:
 
                 logger.info(
                     f"Deleted collection: {collection.name}",
-                    extra={"collection_id": collection_id, "user_id": user_id}
+                    extra={"collection_id": collection_id, "org_id": org_id, "user_id": user_id}
                 )
 
                 return True
@@ -227,7 +237,7 @@ class CollectionRepository:
             except SQLAlchemyError as e:
                 logger.error(
                     f"Failed to delete collection: {e}",
-                    extra={"collection_id": collection_id, "error": str(e)}
+                    extra={"collection_id": collection_id, "org_id": org_id, "error": str(e)}
                 )
                 db.rollback()
                 return False
@@ -284,7 +294,7 @@ class CollectionRepository:
                 db.commit()
 
                 logger.debug(
-                    f"Updated collection stats",
+                    "Updated collection stats",
                     extra={"collection_id": collection_id}
                 )
 
@@ -364,7 +374,7 @@ class CollectionRepository:
                 db.commit()
 
                 logger.info(
-                    f"Recomputed collection stats",
+                    "Recomputed collection stats",
                     extra={
                         "collection_id": collection_id,
                         "document_count": document_count,
@@ -381,6 +391,61 @@ class CollectionRepository:
                 )
                 db.rollback()
                 return False
+
+    def list_collections_with_documents(
+        self,
+        user_id: str,
+        org_id: str,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[list, int]:
+        """List collections with their documents in a single query.
+
+        Returns each collection paired with all its documents, avoiding the
+        N+1 pattern of fetching each collection individually.
+
+        Returns:
+            Tuple of (list of dicts {collection, documents}, total collection count)
+        """
+        with self._get_session() as db:
+            try:
+                col_query = db.query(Collection).filter(
+                    Collection.user_id == user_id,
+                    Collection.org_id == org_id,
+                )
+                total = col_query.count()
+                collections = col_query.order_by(Collection.updated_at.desc()).limit(limit).offset(offset).all()
+
+                if not collections:
+                    return [], 0
+
+                collection_ids = [c.id for c in collections]
+
+                # Single join query for all documents across all collections
+                rows = (
+                    db.query(Document, CollectionDocument.collection_id)
+                    .join(CollectionDocument, Document.id == CollectionDocument.document_id)
+                    .filter(CollectionDocument.collection_id.in_(collection_ids))
+                    .all()
+                )
+
+                # Group documents by collection_id
+                docs_by_collection: dict[str, list] = {cid: [] for cid in collection_ids}
+                for doc, cid in rows:
+                    docs_by_collection[cid].append(doc)
+
+                result = [
+                    {"collection": c, "documents": docs_by_collection[c.id]}
+                    for c in collections
+                ]
+                return result, total
+
+            except SQLAlchemyError as e:
+                logger.error(
+                    "Failed to list collections with documents",
+                    extra={"user_id": user_id, "org_id": org_id, "error": str(e)}
+                )
+                return [], 0
 
     # ============================================================================
     # COLLECTION DOCUMENT OPERATIONS
@@ -535,7 +600,7 @@ class CollectionRepository:
 
                 if not link:
                     logger.warning(
-                        f"Document not found in collection",
+                        "Document not found in collection",
                         extra={"collection_id": collection_id, "document_id": document_id}
                     )
                     return False
@@ -592,18 +657,28 @@ class CollectionRepository:
     def list_documents(
         self,
         collection_id: str,
-        limit: Optional[int] = None
-    ) -> List[Document]:
-        """List documents in a collection.
+        limit: int = 50,
+        offset: int = 0,
+        sort_by: str = "created_at",
+        sort_order: str = "desc",
+        search: Optional[str] = None,
+        status: Optional[str] = None,
+    ) -> tuple[List[Document], int]:
+        """List documents in a collection with pagination and filtering.
 
         Joins through collection_documents to get canonical document metadata.
 
         Args:
             collection_id: Collection ID
-            limit: Optional limit on results
+            limit: Maximum number of results (default 50)
+            offset: Number of results to skip (default 0)
+            sort_by: Field to sort by (created_at, filename, page_count, chunk_count)
+            sort_order: Sort order (asc or desc)
+            search: Optional search query for filename
+            status: Optional status filter (processing, completed, failed)
 
         Returns:
-            List of Document objects (from canonical documents table)
+            Tuple of (List of Document objects, total count)
         """
         with self._get_session() as db:
             try:
@@ -611,18 +686,44 @@ class CollectionRepository:
                     db.query(Document)
                     .join(CollectionDocument, Document.id == CollectionDocument.document_id)
                     .filter(CollectionDocument.collection_id == collection_id)
-                    .order_by(CollectionDocument.added_at.desc())
                 )
 
-                if limit:
-                    query = query.limit(limit)
+                # Apply search filter
+                if search:
+                    query = query.filter(Document.filename.ilike(f"%{search}%"))
 
-                return query.all()
+                # Apply status filter
+                if status:
+                    query = query.filter(Document.status == status)
+
+                # Get total count before pagination
+                total = query.count()
+
+                # Apply sorting
+                sort_column_map = {
+                    "created_at": Document.created_at,
+                    "filename": Document.filename,
+                    "page_count": Document.page_count,
+                    "chunk_count": Document.chunk_count,
+                }
+                sort_column = sort_column_map.get(sort_by, Document.created_at)
+
+                if sort_order == "asc":
+                    query = query.order_by(sort_column.asc())
+                else:
+                    query = query.order_by(sort_column.desc())
+
+                # Apply pagination
+                query = query.limit(limit).offset(offset)
+
+                documents = query.all()
+
+                return documents, total
 
             except SQLAlchemyError as e:
                 logger.error(
                     f"Failed to list documents: {e}",
                     extra={"collection_id": collection_id, "error": str(e)}
                 )
-                return []
+                return [], 0
 

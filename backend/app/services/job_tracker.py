@@ -9,9 +9,9 @@ from sqlalchemy.orm import Session
 from fastapi import HTTPException
 
 from app.db_models import JobState
-from app.repositories.job_repository import JobRepository
 from app.utils.logging import logger
 from app.services.pubsub import publish_event  # lightweight fire-and-forget
+from app.core.entity_types import build_entity_complete_event
 
 
 class JobProgressTracker:
@@ -28,6 +28,7 @@ class JobProgressTracker:
         self._last_commit_monotonic: float = 0.0
         self._throttle_seconds: float = 0.75  # minimum interval between lightweight progress commits
         self._min_progress_delta: int = 3     # commit only if progress advanced this much
+
 
     def get_job_state(self) -> JobState:
         """Get current job state from database using the tracker's session"""
@@ -146,13 +147,26 @@ class JobProgressTracker:
         error_stage: str,
         error_message: str,
         error_type: str = "unknown_error",
-        is_retryable: bool = True
+        is_retryable: bool = True,
+        internal_error: str | None = None,
     ):
-        """Mark job as failed with error details"""
+        """Mark job as failed.
+
+        Args:
+            error_stage: Pipeline stage where the failure occurred.
+            error_message: User-facing message. Stored in DB and sent to the
+                frontend via SSE. Must be human-readable — never pass raw
+                exception strings (stack traces, SQL, etc.) here.
+            error_type: Machine-readable error category.
+            is_retryable: Whether the user can retry this operation.
+            internal_error: Full technical details (exception str, stack trace,
+                SQL, etc.). Logged to Railway at ERROR level for ops debugging.
+                Never stored in DB or sent to the frontend.
+        """
         job = self.get_job_state()
         job.status = "failed"
         job.error_stage = error_stage
-        job.error_message = error_message[:1000]  # Truncate long errors
+        job.error_message = error_message[:1000]
         job.error_type = error_type
         job.is_retryable = is_retryable
         job.updated_at = datetime.now()
@@ -170,13 +184,19 @@ class JobProgressTracker:
             except Exception:
                 logger.exception("DB refresh failed in mark_error", extra={"job_id": self.job_id})
 
-        logger.error(f"Job {self.job_id} failed at {error_stage}: {error_message}", extra={
-            "job_id": self.job_id,
-            "error_stage": error_stage,
-            "error_type": error_type,
-            "details": job.details or {}
-        })
+        # Log user-facing message at ERROR level, plus full internal details if provided.
+        logger.error(
+            f"Job {self.job_id} failed at {error_stage}: {error_message}",
+            extra={
+                "job_id": self.job_id,
+                "error_stage": error_stage,
+                "error_type": error_type,
+                "details": job.details or {},
+                "internal_error": internal_error,
+            },
+        )
         try:
+            # Publish only the user-facing message — internal_error never leaves the server.
             publish_event(self.job_id, "error", {
                 "stage": job.error_stage,
                 "message": job.error_message,
@@ -185,7 +205,11 @@ class JobProgressTracker:
             })
             publish_event(self.job_id, "end", {"reason": "failed", "job_id": self.job_id})
         except Exception:
-            pass
+            logger.warning(
+                f"Failed to publish error/end SSE event for job {self.job_id} — "
+                "DB state is failed but frontend may not receive notification",
+                extra={"job_id": self.job_id}
+            )
 
     def mark_completed(self):
         """Mark job as successfully completed"""
@@ -193,7 +217,7 @@ class JobProgressTracker:
         job.status = "completed"
         job.progress_percent = 100
         job.current_stage = "completed"
-        job.message = "Extraction completed successfully"
+        job.message = job.message or "Job completed successfully"
         job.completed_at = datetime.now()
         job.updated_at = datetime.now()
         try:
@@ -214,13 +238,15 @@ class JobProgressTracker:
             "job_id": self.job_id
         })
         try:
-            publish_event(self.job_id, "complete", {
-                "message": job.message or "Extraction completed successfully",
-                "extraction_id": job.extraction_id
-            })
+            complete_data = build_entity_complete_event(job)
+            publish_event(self.job_id, "complete", complete_data)
             publish_event(self.job_id, "end", {"reason": "completed", "job_id": self.job_id})
         except Exception:
-            pass
+            logger.warning(
+                f"Failed to publish complete/end SSE event for job {self.job_id} — "
+                "DB state is completed but frontend may not receive notification",
+                extra={"job_id": self.job_id}
+            )
 
     def save_intermediate_result(
         self,

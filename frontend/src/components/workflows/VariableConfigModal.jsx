@@ -65,7 +65,7 @@ export default function VariableConfigModal({
   };
 
   const renderVariableInput = (varDef) => {
-    const { name, type, required, choices, min, max, description } = varDef;
+    const { name, type, required: _required, choices, min, max, description } = varDef;
     // Use default value if not set
     const value =
       variables[name] !== undefined &&
@@ -143,7 +143,7 @@ export default function VariableConfigModal({
   const requiredVars = variablesSchema.filter((v) => v.required);
 
   return (
-    <Dialog open={open} onOpenChange={isProcessing ? undefined : onOpenChange}>
+    <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl max-h-[85vh] overflow-hidden flex flex-col">
         <DialogHeader className="pb-4 border-b border-border">
           <div className="flex items-center gap-3">

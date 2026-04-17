@@ -11,6 +11,7 @@ from sqlalchemy import select, func
 from app.db_models_chat import DocumentChunk, CollectionDocument
 from app.core.embeddings import get_embedding_provider
 from app.core.rag.query_analyzer import QueryAnalyzer
+from app.core.rag.query_understanding import is_narrow_explicit_fact_lookup
 from app.core.rag.metadata_booster import MetadataBooster
 from app.config import settings
 from app.utils.logging import logger
@@ -58,7 +59,10 @@ class HybridRetriever:
         query: str,
         collection_id: Optional[str] = None,
         top_k: int = 20,
-        document_ids: Optional[List[str]] = None
+        document_ids: Optional[List[str]] = None,
+        query_understanding=None,  # QueryUnderstanding object (optional, for HyDE)
+        min_semantic_similarity: Optional[float] = None,
+        section_types: Optional[List[str]] = None,  # e.g. ["narrative"], ["table", "key_value_pairs"]
     ) -> List[Dict]:
         """
         Hybrid retrieval combining vector + keyword search
@@ -68,6 +72,7 @@ class HybridRetriever:
             collection_id: Optional collection to search within (if None, uses document_ids filter)
             top_k: Number of chunks to retrieve (for re-ranking)
             document_ids: Optional filter by specific documents (required if collection_id is None)
+            query_understanding: Optional QueryUnderstanding object for HyDE enhancement
 
         Returns:
             List of chunks with hybrid scores, sorted by relevance
@@ -80,24 +85,51 @@ class HybridRetriever:
             extra={"query": query[:50], "collection_id": collection_id}
         )
 
-        # 2. Semantic search (vector similarity)
+        # 2. Semantic search (vector similarity, with optional HyDE enhancement)
         semantic_results = self._semantic_search(
-            query, collection_id, top_k=top_k, document_ids=document_ids
+            query,
+            collection_id,
+            top_k=top_k,
+            document_ids=document_ids,
+            query_understanding=query_understanding,  # Pass for HyDE
+            min_semantic_similarity=min_semantic_similarity,
+            section_types=section_types,
         )
 
         # 3. Keyword search (BM25/FTS)
         keyword_results = self._keyword_search(
-            query, collection_id, top_k=top_k, document_ids=document_ids
+            query, collection_id, top_k=top_k, document_ids=document_ids,
+            section_types=section_types,
         )
 
         # 4. Merge and normalize scores
         merged = self._merge_results(semantic_results, keyword_results)
 
         # 5. Apply metadata boosting
-        boosted = self._apply_metadata_boost(merged, query_analysis)
+        # Use QueryUnderstanding if available for LLM-determined boost values, otherwise use QueryAnalyzer result
+        boost_input = query_understanding if query_understanding else query_analysis
+        boosted = self._apply_metadata_boost(merged, boost_input)
 
         # 6. Sort by hybrid score and return top-k
         ranked = sorted(boosted, key=lambda x: x["hybrid_score"], reverse=True)[:top_k]
+
+        # Log chunk type distribution for observability
+        type_counts = {"table": 0, "key_value": 0, "narrative": 0, "unknown": 0}
+        for chunk in ranked:
+            chunk_type = chunk.get("section_type")
+            if not chunk_type:
+                metadata = chunk.get("chunk_metadata") or {}
+                if isinstance(metadata, dict):
+                    chunk_type = metadata.get("chunk_type")
+
+            if chunk_type == "table" or chunk.get("is_tabular"):
+                type_counts["table"] += 1
+            elif chunk_type in ("key_value_pairs", "key_value"):
+                type_counts["key_value"] += 1
+            elif chunk_type == "narrative":
+                type_counts["narrative"] += 1
+            else:
+                type_counts["unknown"] += 1
 
         logger.info(
             f"Hybrid retrieval complete: {len(ranked)} chunks, "
@@ -105,7 +137,8 @@ class HybridRetriever:
             f"keyword_candidates={len(keyword_results)}",
             extra={
                 "top_score": ranked[0]["hybrid_score"] if ranked else 0,
-                "query_type": query_analysis["query_type"]
+                "query_type": query_analysis["query_type"],
+                "chunk_type_counts": type_counts
             }
         )
 
@@ -116,16 +149,53 @@ class HybridRetriever:
         query: str,
         collection_id: Optional[str],
         top_k: int,
-        document_ids: Optional[List[str]]
+        document_ids: Optional[List[str]],
+        query_understanding=None,
+        min_semantic_similarity: Optional[float] = None,
+        section_types: Optional[List[str]] = None,
     ) -> List[Dict]:
         """
         Semantic search using pgvector cosine similarity
 
+        With optional HyDE (Hypothetical Document Embeddings) enhancement.
+
         Returns:
             List of chunks with semantic_score (0-1, normalized)
         """
-        # Embed query
-        query_embedding = self.embedder.embed_text(query)
+        # Generate query embedding, optionally enhanced with HyDE
+        use_hyde = (
+            query_understanding
+            and query_understanding.hypothetical_response
+            and not is_narrow_explicit_fact_lookup(query_understanding)
+        )
+
+        if use_hyde:
+            # HyDE: Average query embedding with hypothetical response embedding
+            query_emb = self.embedder.embed_text(query)
+            hyde_emb = self.embedder.embed_text(query_understanding.hypothetical_response)
+
+            # Weighted average (query 40%, HyDE 60%)
+            # HyDE often performs better for complex queries
+            query_embedding = [
+                0.4 * q + 0.6 * h
+                for q, h in zip(query_emb, hyde_emb)
+            ]
+
+            logger.debug(
+                "Using HyDE-enhanced embedding for semantic search",
+                extra={"query": query[:50]}
+            )
+        else:
+            if (
+                query_understanding
+                and query_understanding.hypothetical_response
+                and is_narrow_explicit_fact_lookup(query_understanding)
+            ):
+                logger.info(
+                    "HyDE disabled for narrow explicit fact lookup",
+                    extra={"query": query[:50]}
+                )
+            query_embedding = self.embedder.embed_text(query)
 
         # Build query with cosine distance
         distance_expr = DocumentChunk.embedding.cosine_distance(query_embedding).label("distance")
@@ -140,6 +210,7 @@ class HybridRetriever:
             DocumentChunk.section_heading,
             DocumentChunk.section_type,
             DocumentChunk.chunk_metadata,
+            DocumentChunk.tables,
             distance_expr
         )
 
@@ -157,6 +228,10 @@ class HybridRetriever:
         else:
             raise ValueError("Either collection_id or document_ids must be provided")
 
+        # Optional section_type filter (e.g. prefer narrative or table chunks)
+        if section_types:
+            stmt = stmt.where(DocumentChunk.section_type.in_(section_types))
+
         # Order by distance (ascending = most similar first)
         stmt = stmt.order_by(distance_expr).limit(top_k)
 
@@ -165,6 +240,37 @@ class HybridRetriever:
 
         if not results:
             logger.warning(f"No semantic results found for query: {query[:50]}")
+            return []
+
+        # Apply semantic similarity floor (raw cosine similarity)
+        if min_semantic_similarity and min_semantic_similarity > 0:
+            total_before = len(results)
+            filtered_results = [r for r in results if (1.0 - r.distance) >= min_semantic_similarity]
+            total_after = len(filtered_results)
+            top_raw = max([1.0 - r.distance for r in results]) if results else 0.0
+            logger.info(
+                "Applied semantic similarity floor",
+                extra={
+                    "query": query[:50],
+                    "floor": min_semantic_similarity,
+                    "before": total_before,
+                    "after": total_after,
+                    "top_raw_similarity": top_raw
+                }
+            )
+            if filtered_results:
+                results = filtered_results
+            else:
+                logger.info(
+                    "Semantic floor removed all results; falling back to top-k unfiltered",
+                    extra={
+                        "query": query[:50],
+                        "floor": min_semantic_similarity,
+                        "before": total_before
+                    }
+                )
+
+        if not results:
             return []
 
         # Convert distance to similarity and normalize
@@ -180,6 +286,15 @@ class HybridRetriever:
             # Normalize to 0-1 range within this result set
             normalized_score = (similarity - min_sim) / sim_range if sim_range > 0 else 1.0
 
+            # Extract bbox from chunk_metadata for PDF highlighting
+            metadata = r.chunk_metadata or {}
+            if isinstance(metadata, str):
+                import json
+                try:
+                    metadata = json.loads(metadata)
+                except Exception:
+                    metadata = {}
+
             chunks.append({
                 "id": r.id,
                 "document_id": r.document_id,
@@ -189,7 +304,11 @@ class HybridRetriever:
                 "is_tabular": r.is_tabular,
                 "section_heading": r.section_heading,
                 "section_type": r.section_type,
-                "chunk_metadata": r.chunk_metadata,  # Include metadata with document_filename
+                "chunk_metadata": metadata,
+                "tables": r.tables,
+                # Extract bbox at top level for easy access
+                "bbox": metadata.get("bbox"),
+                "page_range": metadata.get("page_range"),
                 "semantic_score": normalized_score,
                 "raw_similarity": similarity,
                 "distance": r.distance
@@ -202,7 +321,8 @@ class HybridRetriever:
         query: str,
         collection_id: Optional[str],
         top_k: int,
-        document_ids: Optional[List[str]]
+        document_ids: Optional[List[str]],
+        section_types: Optional[List[str]] = None,
     ) -> List[Dict]:
         """
         Keyword search using PostgreSQL Full-Text Search (ts_rank_cd)
@@ -212,8 +332,18 @@ class HybridRetriever:
         Returns:
             List of chunks with keyword_score (0-1, normalized)
         """
-        # Convert query to tsquery
-        tsquery = func.plainto_tsquery('english', query)
+        # Convert query to tsquery using OR logic for better recall.
+        # plainto_tsquery uses AND (all terms must appear in the same chunk), which
+        # is too strict for RAG: financial documents split across many chunks often
+        # have only one or two of the query terms per chunk.
+        # websearch_to_tsquery with "term1 OR term2 OR ..." gives any-term matching,
+        # maximising recall for the BM25 leg while semantic search handles precision.
+        query_terms = query.strip().split()
+        if len(query_terms) == 1:
+            tsquery = func.plainto_tsquery('english', query)
+        else:
+            or_query = ' OR '.join(query_terms)
+            tsquery = func.websearch_to_tsquery('english', or_query)
 
         # Use ts_rank_cd for ranking with document length normalization
         # Normalization flag 2: divide by document length (BM25-like behavior)
@@ -233,6 +363,7 @@ class HybridRetriever:
             DocumentChunk.section_heading,
             DocumentChunk.section_type,
             DocumentChunk.chunk_metadata,
+            DocumentChunk.tables,
             rank_expr
         )
 
@@ -252,6 +383,10 @@ class HybridRetriever:
 
         # Match filter (full-text search)
         stmt = stmt.where(DocumentChunk.text_search_vector.op('@@')(tsquery))
+
+        # Optional section_type filter
+        if section_types:
+            stmt = stmt.where(DocumentChunk.section_type.in_(section_types))
 
         # Order by rank (descending = highest rank first)
         stmt = stmt.order_by(rank_expr.desc()).limit(top_k)
@@ -273,6 +408,15 @@ class HybridRetriever:
             # Normalize to 0-1 range
             normalized_score = (r.rank - min_rank) / rank_range if rank_range > 0 else 1.0
 
+            # Extract bbox from chunk_metadata for PDF highlighting
+            metadata = r.chunk_metadata or {}
+            if isinstance(metadata, str):
+                import json
+                try:
+                    metadata = json.loads(metadata)
+                except Exception:
+                    metadata = {}
+
             chunks.append({
                 "id": r.id,
                 "document_id": r.document_id,
@@ -282,7 +426,11 @@ class HybridRetriever:
                 "is_tabular": r.is_tabular,
                 "section_heading": r.section_heading,
                 "section_type": r.section_type,
-                "chunk_metadata": r.chunk_metadata,  # Include metadata with document_filename
+                "chunk_metadata": metadata,
+                "tables": r.tables,
+                # Extract bbox at top level for easy access
+                "bbox": metadata.get("bbox"),
+                "page_range": metadata.get("page_range"),
                 "keyword_score": normalized_score,
                 "raw_rank": r.rank
             })
@@ -316,26 +464,22 @@ class HybridRetriever:
         # Get all unique chunk IDs
         all_chunk_ids = set(semantic_ranks.keys()) | set(keyword_ranks.keys())
 
+        # Build chunk data lookups for O(1) access (avoid O(N²) nested loops)
+        semantic_dict = {r["id"]: r for r in semantic_results}
+        keyword_dict = {r["id"]: r for r in keyword_results}
+
         # Build merged result dict
         merged_dict = {}
 
         for chunk_id in all_chunk_ids:
-            # Find original chunk data (prefer semantic for metadata completeness)
-            chunk_data = None
-            for r in semantic_results:
-                if r["id"] == chunk_id:
-                    chunk_data = r.copy()
-                    break
-
-            if not chunk_data:
-                for r in keyword_results:
-                    if r["id"] == chunk_id:
-                        chunk_data = r.copy()
-                        break
+            # Prefer semantic for metadata completeness, fall back to keyword
+            chunk_data = semantic_dict.get(chunk_id) or keyword_dict.get(chunk_id)
 
             if not chunk_data:
                 logger.warning(f"Chunk {chunk_id} not found in either result set (should not happen)")
                 continue
+
+            chunk_data = chunk_data.copy()
 
             # Calculate RRF score
             rrf_score = 0.0
@@ -371,20 +515,20 @@ class HybridRetriever:
     def _apply_metadata_boost(
         self,
         results: List[Dict],
-        query_analysis: Dict
+        query_input
     ) -> List[Dict]:
         """
         Apply intelligent metadata-based boosting using shared MetadataBooster.
 
         Args:
             results: Merged results with hybrid scores
-            query_analysis: Query analysis results from QueryAnalyzer
+            query_input: Query analysis (Dict from QueryAnalyzer or QueryUnderstanding object)
 
         Returns:
             Results with boosted hybrid scores
         """
         return self.metadata_booster.apply_boost(
             results,
-            query_analysis,
+            query_input,
             score_field="hybrid_score"
         )

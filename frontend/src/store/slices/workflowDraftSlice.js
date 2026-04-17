@@ -10,6 +10,7 @@
  */
 
 import { streamWorkflowProgress } from "../../api/workflows";
+import { createWorkflowPdfActions } from "./workflowPdfActions";
 
 export const createWorkflowDraftSlice = (set, get) => ({
   // ========== State ==========
@@ -32,6 +33,14 @@ export const createWorkflowDraftSlice = (set, get) => ({
       stage: null,
       message: null,
       cleanup: null, // SSE cleanup function
+    },
+
+    // PDF viewer state (for citation navigation in workflow results)
+    pdfViewer: {
+      activeDocumentId: null,
+      urlCache: {},
+      highlightBbox: null,
+      isLoadingUrl: false,
     },
   },
 
@@ -174,7 +183,6 @@ export const createWorkflowDraftSlice = (set, get) => ({
    * @param {Function} cleanup - Optional SSE cleanup function
    */
   startWorkflowExecution: (jobId, runId, cleanup = null) => {
-    console.log("🚀 Starting workflow execution tracking:", { jobId, runId });
     set((state) => ({
       workflowDraft: {
         ...state.workflowDraft,
@@ -257,11 +265,9 @@ export const createWorkflowDraftSlice = (set, get) => ({
     const { jobId, runId } = get().workflowDraft.execution;
 
     if (!jobId || !runId) {
-      console.log("❌ No active workflow to reconnect");
       return;
     }
 
-    console.log("🔄 Reconnecting to workflow execution:", { jobId, runId });
 
     try {
       const cleanup = await streamWorkflowProgress(jobId, getToken, {
@@ -281,15 +287,13 @@ export const createWorkflowDraftSlice = (set, get) => ({
           const errorType =
             typeof errorData === "object" ? errorData?.type : null;
           if (errorType === "not_found") {
-            console.log("🗑️ Job not found - clearing execution state");
             get().resetWorkflowExecution();
             return;
           }
 
           get().failWorkflowExecution(errorMsg);
         },
-        onEnd: async (data) => {
-          console.log("🏁 Workflow SSE stream ended:", data?.reason);
+        onEnd: async () => {
           // If stream ended due to not_found, state is already cleared in onError
           // Don't reset jobId/runId here for other cases - keep them for result page navigation
         },
@@ -320,8 +324,6 @@ export const createWorkflowDraftSlice = (set, get) => ({
     if (cleanup) {
       cleanup();
     }
-
-    console.log("🛑 Workflow execution canceled");
     set((state) => ({
       workflowDraft: {
         ...state.workflowDraft,
@@ -344,7 +346,6 @@ export const createWorkflowDraftSlice = (set, get) => ({
       cleanup();
     }
 
-    console.log("🔄 Resetting workflow execution state");
     set((state) => ({
       workflowDraft: {
         ...state.workflowDraft,
@@ -360,4 +361,7 @@ export const createWorkflowDraftSlice = (set, get) => ({
       },
     }));
   },
+
+  // ========== PDF Viewer Actions (for citation navigation) ==========
+  ...createWorkflowPdfActions(set, get),
 });

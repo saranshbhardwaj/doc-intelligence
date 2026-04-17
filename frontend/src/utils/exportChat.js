@@ -14,6 +14,9 @@ import {
   HeadingLevel,
   AlignmentType,
   BorderStyle,
+  Table,
+  TableRow,
+  TableCell,
 } from 'docx';
 
 /**
@@ -26,6 +29,8 @@ export async function exportAsMarkdown(exportData) {
   }
 
   const { session, messages } = exportData;
+  const stripCitations = (text = '') =>
+    text.replace(/\[D\d+:p\d+\]/g, '').replace(/\s{2,}/g, ' ').trim();
 
   // Build markdown content
   let markdown = `# ${session.title}\n\n`;
@@ -39,11 +44,7 @@ export async function exportAsMarkdown(exportData) {
     const timestamp = new Date(msg.created_at).toLocaleTimeString();
 
     markdown += `### ${role} · ${timestamp}\n\n`;
-    markdown += `${msg.content}\n\n`;
-
-    if (msg.source_chunks && msg.source_chunks.length > 0) {
-      markdown += `*📚 Sources: ${msg.num_chunks_retrieved} chunks retrieved*\n\n`;
-    }
+    markdown += `${stripCitations(msg.content)}\n\n`;
 
     if (index < messages.length - 1) {
       markdown += `---\n\n`;
@@ -70,6 +71,105 @@ export async function exportAsWord(exportData) {
   }
 
   const { session, messages } = exportData;
+
+  const stripCitations = (text = '') =>
+    text.replace(/\[D\d+:p\d+\]/g, '').replace(/\s{2,}/g, ' ').trim();
+
+  const buildRunsFromText = (text = '', { size = 24, bold = false } = {}) => {
+    const runs = [];
+    const sanitized = stripCitations(text);
+    if (!sanitized) return runs;
+
+    const pattern = /(\*\*[^*]+\*\*)|(\*[^*]+\*)/g;
+    let lastIndex = 0;
+    let match;
+
+    while ((match = pattern.exec(sanitized)) !== null) {
+      if (match.index > lastIndex) {
+        runs.push(new TextRun({ text: sanitized.slice(lastIndex, match.index), size, bold }));
+      }
+
+      const token = match[0];
+      if (token.startsWith('**')) {
+        runs.push(new TextRun({ text: token.slice(2, -2), bold: true, size }));
+      } else if (token.startsWith('*')) {
+        runs.push(new TextRun({ text: token.slice(1, -1), italics: true, size }));
+      }
+
+      lastIndex = match.index + token.length;
+    }
+
+    if (lastIndex < sanitized.length) {
+      runs.push(new TextRun({ text: sanitized.slice(lastIndex), size, bold }));
+    }
+
+    return runs.length ? runs : [new TextRun({ text: sanitized, size, bold })];
+  };
+
+  const normalizeTableRow = (line) => {
+    const trimmed = line.trim();
+    const clean = trimmed.replace(/^\|/, '').replace(/\|$/, '');
+    return clean.split('|').map((cell) => cell.trim());
+  };
+
+  const parseMarkdownBlocks = (content = '') => {
+    const blocks = [];
+    const lines = content.split('\n');
+    let i = 0;
+
+    while (i < lines.length) {
+      const raw = lines[i];
+      const line = raw.trim();
+
+      if (!line) {
+        i += 1;
+        continue;
+      }
+
+      if (/^#{1,6}\s/.test(line)) {
+        const level = Math.min(line.match(/^#+/)[0].length, 6);
+        blocks.push({
+          type: 'heading',
+          level,
+          text: line.replace(/^#{1,6}\s*/, ''),
+        });
+        i += 1;
+        continue;
+      }
+
+      const nextLine = lines[i + 1]?.trim();
+      const isTable = line.includes('|') && /^\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)+\|?$/.test(nextLine || '');
+      if (isTable) {
+        const headerCells = normalizeTableRow(line);
+        const rows = [];
+        i += 2; // skip header + separator
+        while (i < lines.length && lines[i].includes('|')) {
+          const rowLine = lines[i].trim();
+          if (!rowLine) break;
+          rows.push(normalizeTableRow(rowLine));
+          i += 1;
+        }
+        blocks.push({ type: 'table', headers: headerCells, rows });
+        continue;
+      }
+
+      const paragraphLines = [line];
+      i += 1;
+      while (i < lines.length && lines[i].trim() && !/^#{1,6}\s/.test(lines[i].trim())) {
+        const candidate = lines[i].trim();
+        const candidateNext = lines[i + 1]?.trim();
+        const candidateIsTable = candidate.includes('|') && /^\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)+\|?$/.test(candidateNext || '');
+        if (candidateIsTable) {
+          break;
+        }
+        paragraphLines.push(candidate);
+        i += 1;
+      }
+      blocks.push({ type: 'paragraph', text: paragraphLines.join(' ') });
+    }
+
+    return blocks;
+  };
 
   // Build Word document
   const doc = new Document({
@@ -161,31 +261,83 @@ export async function exportAsWord(exportData) {
                 ],
                 spacing: { before: 200, after: 150 },
               }),
-
-              // Message content
-              new Paragraph({
-                text: msg.content,
-                spacing: { after: 100 },
-                alignment: isUser ? AlignmentType.LEFT : AlignmentType.LEFT,
-              }),
             ];
 
-            // Add sources if available
-            if (msg.source_chunks && msg.source_chunks.length > 0) {
+            const blocks = parseMarkdownBlocks(msg.content || '');
+            blocks.forEach((block) => {
+              if (block.type === 'heading') {
+                paragraphs.push(
+                  new Paragraph({
+                    children: buildRunsFromText(block.text, { size: 28, bold: true }),
+                    heading:
+                      block.level === 1
+                        ? HeadingLevel.HEADING_1
+                        : block.level === 2
+                        ? HeadingLevel.HEADING_2
+                        : HeadingLevel.HEADING_3,
+                    spacing: { before: 200, after: 120 },
+                  })
+                );
+                return;
+              }
+
+              if (block.type === 'table') {
+                const tableRows = [
+                  new TableRow({
+                    children: block.headers.map(
+                      (cell) =>
+                        new TableCell({
+                          margins: { top: 120, bottom: 120, left: 160, right: 160 },
+                          children: [
+                            new Paragraph({
+                              children: buildRunsFromText(cell, { size: 24, bold: true }),
+                              spacing: { after: 80 },
+                            }),
+                          ],
+                        })
+                    ),
+                  }),
+                  ...block.rows.map(
+                    (row) =>
+                      new TableRow({
+                        children: row.map(
+                          (cell) =>
+                            new TableCell({
+                              margins: { top: 120, bottom: 120, left: 160, right: 160 },
+                              children: [
+                                new Paragraph({
+                                  children: buildRunsFromText(cell, { size: 24 }),
+                                  spacing: { after: 80 },
+                                }),
+                              ],
+                            })
+                        ),
+                      })
+                  ),
+                ];
+
+                paragraphs.push(
+                  new Table({
+                    rows: tableRows,
+                  })
+                );
+                paragraphs.push(
+                  new Paragraph({
+                    text: '',
+                    spacing: { after: 200 },
+                  })
+                );
+                return;
+              }
+
               paragraphs.push(
                 new Paragraph({
-                  children: [
-                    new TextRun({
-                      text: `📚 Sources: ${msg.num_chunks_retrieved} chunks retrieved`,
-                      italics: true,
-                      size: 18,
-                      color: '6B7280',
-                    }),
-                  ],
-                  spacing: { after: 100 },
+                  children: buildRunsFromText(block.text, { size: 24 }),
+                  spacing: { after: 160 },
+                  alignment: isUser ? AlignmentType.LEFT : AlignmentType.LEFT,
                 })
               );
-            }
+            });
 
             // Add divider between messages (except last)
             if (index < messages.length - 1) {

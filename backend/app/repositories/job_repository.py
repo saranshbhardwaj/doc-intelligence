@@ -54,9 +54,8 @@ class JobRepository:
 
     def create_job(
         self,
-        extraction_id: Optional[str] = None,
-        document_id: Optional[str] = None,
-        workflow_run_id: Optional[str] = None,
+        entity_type: str,
+        entity_id: str,
         status: str = "queued",
         current_stage: str = "queued",
         progress_percent: int = 0,
@@ -65,15 +64,10 @@ class JobRepository:
     ) -> Optional[JobState]:
         """Create a new job state record.
 
-        Supports Extract Mode, Chat Mode, and Workflow Mode:
-        - Extract Mode: Pass extraction_id
-        - Chat Mode: Pass document_id (references canonical documents table)
-        - Workflow Mode: Pass workflow_run_id
-
         Args:
-            extraction_id: ID of extraction (for Extract Mode)
-            document_id: ID of canonical document (for Chat Mode)
-            workflow_run_id: ID of workflow run (for Workflow Mode)
+            entity_type: Type of entity being tracked (e.g. "extraction", "document",
+                         "workflow_run", "template_fill_run", "analysis_run")
+            entity_id: UUID of the entity
             status: Job status (default: "queued")
             current_stage: Current processing stage (default: "queued")
             progress_percent: Progress percentage 0-100 (default: 0)
@@ -83,30 +77,19 @@ class JobRepository:
         Returns:
             JobState object if successful, None on error
         """
-        if not extraction_id and not document_id and not workflow_run_id:
-            logger.error("Must provide one of extraction_id, document_id, or workflow_run_id")
-            return None
-        # Ensure caller does not set more than one (business rule; DB constraint will also enforce)
-        provided = [v for v in [extraction_id, document_id, workflow_run_id] if v]
-        if len(provided) != 1:
-            logger.error("Exactly one of extraction_id, document_id, workflow_run_id must be provided", extra={
-                "extraction_id": extraction_id,
-                "document_id": document_id,
-                "workflow_run_id": workflow_run_id
-            })
+        if not entity_type or not entity_id:
+            logger.error("entity_type and entity_id are required")
             return None
 
         with self._get_session() as db:
             try:
-                # Generate job_id if not provided
                 if not job_id:
                     job_id = generate_id()
 
                 job = JobState(
-                    job_id=job_id,  # Job tracking ID (required)
-                    extraction_id=extraction_id,
-                    document_id=document_id,
-                    workflow_run_id=workflow_run_id,
+                    job_id=job_id,
+                    entity_type=entity_type,
+                    entity_id=entity_id,
                     status=status,
                     current_stage=current_stage,
                     progress_percent=progress_percent,
@@ -117,13 +100,12 @@ class JobRepository:
                 db.refresh(job)
 
                 logger.info(
-                    f"Created job state record",
+                    "Created job state record",
                     extra={
-                        "job_id": job.job_id,  # Log tracking ID, not primary key
-                        "extraction_id": extraction_id,
-                        "document_id": document_id,
+                        "job_id": job.job_id,
+                        "entity_type": entity_type,
+                        "entity_id": entity_id,
                         "status": status,
-                        "workflow_run_id": workflow_run_id
                     }
                 )
 
@@ -132,11 +114,7 @@ class JobRepository:
             except SQLAlchemyError as e:
                 logger.error(
                     f"Failed to create job state: {e}",
-                    extra={
-                        "extraction_id": extraction_id,
-                        "document_id": document_id,
-                        "error": str(e)
-                    }
+                    extra={"entity_type": entity_type, "entity_id": entity_id, "error": str(e)}
                 )
                 db.rollback()
                 return None
@@ -166,8 +144,31 @@ class JobRepository:
                 )
                 return None
 
+    def get_job_by_entity(self, entity_type: str, entity_id: str) -> Optional[JobState]:
+        """Get job by entity type and ID.
+
+        Args:
+            entity_type: Type of entity (e.g. "extraction", "workflow_run")
+            entity_id: ID of the entity
+
+        Returns:
+            JobState object if found, None otherwise
+        """
+        with self._get_session() as db:
+            try:
+                return db.query(JobState).filter(
+                    JobState.entity_type == entity_type,
+                    JobState.entity_id == entity_id
+                ).first()
+            except SQLAlchemyError as e:
+                logger.error(
+                    f"Failed to get job by entity: {e}",
+                    extra={"entity_type": entity_type, "entity_id": entity_id, "error": str(e)}
+                )
+                return None
+
     def get_job_by_extraction_id(self, extraction_id: str) -> Optional[JobState]:
-        """Get job by extraction ID.
+        """Get job by extraction ID (backward compatibility wrapper).
 
         Args:
             extraction_id: Extraction ID
@@ -175,20 +176,10 @@ class JobRepository:
         Returns:
             JobState object if found, None otherwise
         """
-        with self._get_session() as db:
-            try:
-                return db.query(JobState).filter(
-                    JobState.extraction_id == extraction_id
-                ).first()
-            except SQLAlchemyError as e:
-                logger.error(
-                    f"Failed to get job by extraction_id: {e}",
-                    extra={"extraction_id": extraction_id, "error": str(e)}
-                )
-                return None
+        return self.get_job_by_entity("extraction", extraction_id)
 
     def get_job_by_document_id(self, document_id: str) -> Optional[JobState]:
-        """Get job by document ID.
+        """Get job by document ID (backward compatibility wrapper).
 
         Args:
             document_id: Canonical document ID
@@ -196,20 +187,10 @@ class JobRepository:
         Returns:
             JobState object if found, None otherwise
         """
-        with self._get_session() as db:
-            try:
-                return db.query(JobState).filter(
-                    JobState.document_id == document_id
-                ).first()
-            except SQLAlchemyError as e:
-                logger.error(
-                    f"Failed to get job by document_id: {e}",
-                    extra={"document_id": document_id, "error": str(e)}
-                )
-                return None
+        return self.get_job_by_entity("document", document_id)
 
     def get_job_by_workflow_run_id(self, workflow_run_id: str) -> Optional[JobState]:
-        """Get job by workflow run ID.
+        """Get job by workflow run ID (backward compatibility wrapper).
 
         Args:
             workflow_run_id: WorkflowRun ID
@@ -217,17 +198,7 @@ class JobRepository:
         Returns:
             JobState object if found, None otherwise
         """
-        with self._get_session() as db:
-            try:
-                return db.query(JobState).filter(
-                    JobState.workflow_run_id == workflow_run_id
-                ).first()
-            except SQLAlchemyError as e:
-                logger.error(
-                    f"Failed to get job by workflow_run_id: {e}",
-                    extra={"workflow_run_id": workflow_run_id, "error": str(e)}
-                )
-                return None
+        return self.get_job_by_entity("workflow_run", workflow_run_id)
 
     # ============================================================================
     # JOB UPDATES
@@ -289,7 +260,7 @@ class JobRepository:
                 db.commit()
 
                 logger.debug(
-                    f"Updated job state",
+                    "Updated job state",
                     extra={"job_id": job_id, "status": status}
                 )
 
@@ -330,6 +301,55 @@ class JobRepository:
             progress_percent=progress_percent,
             message=message
         )
+
+    def reset_for_retry(
+        self,
+        job_id: str,
+        message: str = "Queued for retry (extracting stage)"
+    ) -> bool:
+        """Reset a job back to queued state for retry.
+
+        Clears error fields and marks job as retryable.
+
+        Args:
+            job_id: Job tracking ID
+            message: Status message for retry queueing
+
+        Returns:
+            True if successful, False otherwise
+        """
+        with self._get_session() as db:
+            try:
+                job = db.query(JobState).filter(JobState.job_id == job_id).first()
+                if not job:
+                    logger.warning(
+                        "Job not found for retry reset",
+                        extra={"job_id": job_id}
+                    )
+                    return False
+
+                job.status = "queued"
+                job.current_stage = "queued"
+                job.progress_percent = 0
+                job.message = message
+                job.error_stage = None
+                job.error_message = None
+                job.error_type = None
+                job.is_retryable = True
+
+                db.commit()
+                logger.info(
+                    "Reset job state for retry",
+                    extra={"job_id": job_id}
+                )
+                return True
+            except SQLAlchemyError as e:
+                db.rollback()
+                logger.error(
+                    "Failed to reset job state for retry",
+                    extra={"job_id": job_id, "error": str(e)}
+                )
+                return False
 
     def mark_completed(
         self,
@@ -398,7 +418,7 @@ class JobRepository:
                 db.commit()
 
                 logger.info(
-                    f"Deleted job state",
+                    "Deleted job state",
                     extra={"job_id": job_id}
                 )
 

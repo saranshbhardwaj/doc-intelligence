@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from typing import List, Optional, Dict
 
 from azure.ai.documentintelligence import DocumentIntelligenceClient
-from azure.ai.documentintelligence.models import AnalyzeResult
+from azure.ai.documentintelligence.models import AnalyzeResult, DocumentAnalysisFeature
 from azure.ai.documentintelligence.models import AnalyzeDocumentRequest
 from azure.core.credentials import AzureKeyCredential
 from azure.core.exceptions import AzureError
@@ -20,6 +20,41 @@ from azure.core.exceptions import AzureError
 from app.core.parsers.base import DocumentParser, ParserOutput
 from app.config import settings
 from app.utils.logging import logger
+from app.utils.metrics import (
+    AZURE_DI_REQUESTS_TOTAL,
+    AZURE_DI_FAILURES_TOTAL,
+    AZURE_DI_RETRIES_TOTAL,
+    AZURE_DI_LATENCY_SECONDS,
+    AZURE_DI_PAGES_PROCESSED,
+    AZURE_DI_COST_USD,
+)
+
+
+def _parse_table_structure(table_text: str) -> tuple[list[str], list[list[str]], str]:
+    """Parse tab/newline separated table into headers, data rows, and name.
+
+    Expects format: HEADER1\tHEADER2\tHEADER3\n...
+
+    Returns: (column_headers, table_data_rows, table_name)
+    """
+    if not table_text.strip():
+        return [], [], ""
+
+    # Split by newlines first, then by tabs
+    rows = [r.split("\t") for r in table_text.split("\n") if r.strip()]
+    if not rows:
+        return [], [], ""
+
+    # First row contains headers
+    column_headers = rows[0]
+
+    # Remaining rows are data
+    table_data = rows[1:] if len(rows) > 1 else []
+
+    # Derive table name from first cell or use generic name
+    table_name = rows[0][0].strip() if rows[0][0].strip() else "Table Data"
+
+    return column_headers, table_data, table_name
 
 
 @dataclass
@@ -108,6 +143,9 @@ class AzureDocumentIntelligenceParser(DocumentParser):
         if not file_path or not isinstance(file_path, str):
             raise ValueError(f"Invalid file_path: {file_path} (expected non-empty string)")
 
+        # Determine file extension to conditionally include features
+        file_ext = file_path.lower().split('.')[-1] if '.' in file_path else ''
+
         # Edge case: Handle file open failures
         try:
             with open(file_path, "rb") as f:
@@ -124,43 +162,113 @@ class AzureDocumentIntelligenceParser(DocumentParser):
             raise ValueError(f"parse_error: PDF file at {file_path} is empty (0 bytes)")
 
         try:
-            # Attempt calling SDK using new AnalyzeDocumentRequest signature.
-            # Some releases of azure-ai-documentintelligence (including 1.0.0) expect a positional 'body'
-            # and can mis-handle keyword usage, producing a TypeError about missing positional 'body'.
-            analyze_request = AnalyzeDocumentRequest(bytes_source=pdf_bytes)
-            poller = None
-            try:
-                # Prefer positional invocation to avoid signature mismatch issues.
-                poller = self.client.begin_analyze_document(self.model_name, body=analyze_request)
-            except TypeError as te:
-                # Retry using raw bytes (older/alternate signature accepting the document directly)
-                logger.warning(
-                    "Azure begin_analyze_document signature mismatch; retrying with raw bytes",
-                    extra={"error": str(te)}
-                )
-                try:
-                    poller = self.client.begin_analyze_document(self.model_name, pdf_bytes)
-                except Exception as e:
-                    raise RuntimeError(f"parse_error: Azure begin_analyze_document failed after fallback: {e}") from e
-            except AzureError as ae:
-                raise RuntimeError(f"parse_error: Azure analyze call failed: {ae}") from ae
-            except Exception as e:
-                # Any unexpected failure during invocation – classify as parse_error
-                raise RuntimeError(f"parse_error: Unexpected Azure analyze invocation failure: {e}") from e
-            try:
-                # Apply explicit timeout; Azure SDK raises TimeoutError on wait expiry
-                result: AnalyzeResult = poller.result(timeout=self.timeout_seconds)
-            except TimeoutError as te:
-                processing_time_ms = int((time.time() - start_time) * 1000)
-                logger.error(
-                    f"Azure Document Intelligence timeout after {self.timeout_seconds}s (elapsed {processing_time_ms}ms)",
-                    extra={"timeout_seconds": self.timeout_seconds},
-                )
-                raise RuntimeError(
-                    f"Azure Document Intelligence processing exceeded timeout of {self.timeout_seconds}s"
-                ) from te
+            # Determine which features to request based on file type
+            # KEY_VALUE_PAIRS is only supported for PDF and images (JPEG, PNG, TIFF, BMP)
+            # NOT supported for DOCX or XLSX
+            features = []
+            if file_ext in ('pdf', 'jpg', 'jpeg', 'png', 'tiff', 'bmp', 'heif', 'heic'):
+                features.append(DocumentAnalysisFeature.KEY_VALUE_PAIRS)
+                logger.info(f"Requesting KEY_VALUE_PAIRS feature for {file_ext} file")
+            else:
+                logger.info(f"Skipping KEY_VALUE_PAIRS feature for {file_ext} file (not supported)")
 
-            # Edge case: Validate result is not None
+            # Retry logic for transient Azure API errors (rate limits, throttling)
+            max_retries = 3
+            retry_delay = 2  # seconds base delay
+            result = None
+
+            for attempt in range(max_retries):
+                api_start = time.time()
+                try:
+                    analyze_request = AnalyzeDocumentRequest(bytes_source=pdf_bytes)
+                    poller = None
+                    try:
+                        if features:
+                            poller = self.client.begin_analyze_document(
+                                self.model_name,
+                                body=analyze_request,
+                                features=features
+                            )
+                        else:
+                            poller = self.client.begin_analyze_document(
+                                self.model_name,
+                                body=analyze_request
+                            )
+                    except TypeError as te:
+                        logger.warning(
+                            "Azure begin_analyze_document signature mismatch; retrying with raw bytes",
+                            extra={"error": str(te)}
+                        )
+                        try:
+                            if features:
+                                poller = self.client.begin_analyze_document(
+                                    self.model_name,
+                                    pdf_bytes,
+                                    features=features
+                                )
+                            else:
+                                poller = self.client.begin_analyze_document(
+                                    self.model_name,
+                                    pdf_bytes
+                                )
+                        except Exception as e:
+                            raise RuntimeError(f"parse_error: Azure begin_analyze_document failed after fallback: {e}") from e
+
+                    try:
+                        result = poller.result(timeout=self.timeout_seconds)
+                    except TimeoutError as te:
+                        processing_time_ms = int((time.time() - start_time) * 1000)
+                        logger.error(
+                            f"Azure Document Intelligence timeout after {self.timeout_seconds}s (elapsed {processing_time_ms}ms)",
+                            extra={"timeout_seconds": self.timeout_seconds},
+                        )
+                        AZURE_DI_REQUESTS_TOTAL.labels(model=self.model_name).inc()
+                        AZURE_DI_FAILURES_TOTAL.labels(model=self.model_name, error_type="timeout").inc()
+                        raise RuntimeError(
+                            f"Azure Document Intelligence processing exceeded timeout of {self.timeout_seconds}s"
+                        ) from te
+
+                    # Success — record metrics
+                    api_elapsed = time.time() - api_start
+                    AZURE_DI_REQUESTS_TOTAL.labels(model=self.model_name).inc()
+                    AZURE_DI_LATENCY_SECONDS.labels(model=self.model_name).observe(api_elapsed)
+                    break  # Exit retry loop
+
+                except AzureError as ae:
+                    error_str = str(ae)
+                    is_retryable = (
+                        "429" in error_str or
+                        "Too Many Requests" in error_str or
+                        "throttled" in error_str.lower() or
+                        "503" in error_str or
+                        "Temporarily Unavailable" in error_str
+                    )
+
+                    if "429" in error_str or "Too Many Requests" in error_str or "throttled" in error_str.lower():
+                        error_type = "rate_limit"
+                    elif "503" in error_str:
+                        error_type = "service_unavailable"
+                    else:
+                        error_type = "azure_error"
+
+                    if is_retryable and attempt < max_retries - 1:
+                        AZURE_DI_RETRIES_TOTAL.labels(model=self.model_name).inc()
+                        wait_time = retry_delay * (2 ** attempt)  # 2s, 4s, 8s
+                        logger.warning(
+                            f"Azure DI API error ({error_type}), retrying in {wait_time}s "
+                            f"(attempt {attempt + 1}/{max_retries}): {ae}"
+                        )
+                        time.sleep(wait_time)
+                    else:
+                        AZURE_DI_REQUESTS_TOTAL.labels(model=self.model_name).inc()
+                        AZURE_DI_FAILURES_TOTAL.labels(model=self.model_name, error_type=error_type).inc()
+                        raise RuntimeError(f"parse_error: Azure analyze call failed: {ae}") from ae
+
+                except RuntimeError:
+                    # Don't retry RuntimeErrors (timeout, parse_error, fallback failures)
+                    raise
+
+            # Validate result is not None
             if result is None:
                 raise RuntimeError("parse_error: Azure API returned None result")
 
@@ -198,6 +306,10 @@ class AzureDocumentIntelligenceParser(DocumentParser):
 
             cost = page_count * self.cost_per_page
 
+            # Record page and cost metrics
+            AZURE_DI_PAGES_PROCESSED.labels(model=self.model_name).inc(page_count)
+            AZURE_DI_COST_USD.labels(model=self.model_name).inc(cost)
+
             logger.info(
                 f"Azure parser extracted {len(full_text)} chars from {page_count} pages in {processing_time_ms}ms (cost=${cost:.2f})"
             )
@@ -216,6 +328,72 @@ class AzureDocumentIntelligenceParser(DocumentParser):
             except Exception:
                 pass
 
+            # Extract key-value pairs from Azure DI
+            key_value_pairs = []
+            try:
+                for kv in getattr(result, "key_value_pairs", []) or []:
+                    # Extract key
+                    key_content = kv.key.content if kv.key else None
+                    if not key_content:
+                        continue
+
+                    # Extract value (may be None)
+                    value_content = kv.value.content if kv.value else None
+
+                    # Get page number and bounding regions from key and value separately.
+                    # Storing them separately lets downstream code highlight just the value
+                    # (what the user wants to verify) rather than the merged key+value area.
+                    page_num = None
+                    key_bounding_regions = []
+                    value_bounding_regions = []
+
+                    # Extract from key
+                    if kv.key and kv.key.bounding_regions:
+                        page_num = kv.key.bounding_regions[0].page_number
+                        for br in kv.key.bounding_regions:
+                            if br:
+                                key_bounding_regions.append({
+                                    "page_number": getattr(br, "page_number", None),
+                                    "polygon": getattr(br, "polygon", [])
+                                })
+
+                    # Extract from value
+                    if kv.value and kv.value.bounding_regions:
+                        if not page_num:  # Use value's page if key had no page
+                            page_num = kv.value.bounding_regions[0].page_number
+                        for br in kv.value.bounding_regions:
+                            if br:
+                                value_bounding_regions.append({
+                                    "page_number": getattr(br, "page_number", None),
+                                    "polygon": getattr(br, "polygon", [])
+                                })
+
+                    # Merged list kept for backward compatibility
+                    bounding_regions = key_bounding_regions + value_bounding_regions
+
+                    kv_data = {
+                        "key": key_content,
+                        "value": value_content,
+                        "confidence": getattr(kv, "confidence", 1.0),
+                        "page_number": page_num,
+                        "bounding_regions": bounding_regions,           # merged (backward compat)
+                        "key_bounding_regions": key_bounding_regions,   # just the key area
+                        "value_bounding_regions": value_bounding_regions,  # just the value area
+                    }
+                    key_value_pairs.append(kv_data)
+
+                    # DEBUG: Log first KV pair's bbox data
+                    if len(key_value_pairs) == 1:
+                        logger.info(f"[PARSER] First KV pair: '{key_content}' = '{value_content}', "
+                                  f"page={page_num}, bounding_regions count={len(bounding_regions)}")
+                        if bounding_regions:
+                            logger.info(f"[PARSER] First bounding region: {bounding_regions[0]}")
+
+                logger.info(f"[PARSER] Extracted {len(key_value_pairs)} key-value pairs from Azure DI")
+            except Exception as e:
+                logger.warning(f"Failed to extract key-value pairs: {e}")
+                # Continue without KV pairs if extraction fails
+
             metadata = {
                 "model_name": self.model_name,
                 "char_count": len(full_text),
@@ -230,6 +408,9 @@ class AzureDocumentIntelligenceParser(DocumentParser):
                 ],
                 "tables": tables_meta,
                 "total_tables": len(tables_meta),
+                # Key-value pairs extracted from Azure DI
+                "key_value_pairs": key_value_pairs,
+                "total_key_value_pairs": len(key_value_pairs),
                 # Store per-page data for chunking (includes text, narrative, and tables)
                 "pages_data": [
                     {
@@ -277,6 +458,7 @@ class AzureDocumentIntelligenceParser(DocumentParser):
             raise
         except AzureError as e:
             processing_time_ms = int((time.time() - start_time) * 1000)
+            AZURE_DI_FAILURES_TOTAL.labels(model=self.model_name, error_type="azure_error").inc()
             logger.error(
                 f"Azure Document Intelligence API error after {processing_time_ms}ms: {e}",
                 extra={"error_type": type(e).__name__},
@@ -284,6 +466,7 @@ class AzureDocumentIntelligenceParser(DocumentParser):
             raise RuntimeError(f"Azure Document Intelligence parsing failed: {e}") from e
         except Exception as e:
             processing_time_ms = int((time.time() - start_time) * 1000)
+            AZURE_DI_FAILURES_TOTAL.labels(model=self.model_name, error_type="other").inc()
             logger.exception(
                 f"Unexpected Azure parser failure after {processing_time_ms}ms: {e}",
             )
@@ -299,16 +482,33 @@ class AzureDocumentIntelligenceParser(DocumentParser):
         - sections: List of sections (hierarchical structure)
         - figures: List of figures with captions
         - content: Full document text (for span-based extraction)
+        - page_spans: Page span map for DOCX fallback
         """
+        # Build page span map for DOCX fallback (paragraphs/tables without bounding_regions)
+        page_spans_map: dict[int, list[tuple[int, int]]] = {}
+        for page in getattr(result, "pages", []) or []:
+            if page is None:
+                continue
+            page_num = getattr(page, "page_number", None)
+            if not page_num:
+                continue
+            page_spans_map[page_num] = []
+            for span in getattr(page, "spans", []) or []:
+                if span:
+                    offset = getattr(span, "offset", 0)
+                    length = getattr(span, "length", 0)
+                    page_spans_map[page_num].append((offset, offset + length))
+
         structured_data = {
             "paragraphs": [],
             "sections": [],
             "figures": [],
-            "content": getattr(result, "content", "")
+            "content": getattr(result, "content", ""),
+            "page_spans": page_spans_map  # For matching DOCX paragraphs/tables to pages
         }
 
         # Extract paragraphs with roles
-        logger.debug(f"Extracting paragraphs from Azure result")
+        logger.debug("Extracting paragraphs from Azure result")
         for para in getattr(result, "paragraphs", []) or []:
             if para is None:
                 continue
@@ -347,7 +547,7 @@ class AzureDocumentIntelligenceParser(DocumentParser):
         logger.info(f"Extracted {len(structured_data['paragraphs'])} paragraphs")
 
         # Extract sections (hierarchical grouping)
-        logger.debug(f"Extracting sections from Azure result")
+        logger.debug("Extracting sections from Azure result")
         for section in getattr(result, "sections", []) or []:
             if section is None:
                 continue
@@ -375,7 +575,7 @@ class AzureDocumentIntelligenceParser(DocumentParser):
         logger.info(f"Extracted {len(structured_data['sections'])} sections")
 
         # Extract figures with captions
-        logger.debug(f"Extracting figures from Azure result")
+        logger.debug("Extracting figures from Azure result")
         for figure in getattr(result, "figures", []) or []:
             if figure is None:
                 continue
@@ -430,30 +630,69 @@ class AzureDocumentIntelligenceParser(DocumentParser):
         """
         enhanced_pages = []
 
+        # Get page spans for DOCX fallback
+        page_spans = structured_data.get("page_spans", {})
+
         for page_data in pages_data:
             page_num = page_data.page_number
 
             # Find paragraphs on this page
             page_paragraphs = []
             for para in structured_data["paragraphs"]:
-                for br in para["bounding_regions"]:
-                    if br["page_number"] == page_num:
+                # Try bounding_regions first (PDF)
+                found_page = False
+                for br in para.get("bounding_regions", []) or []:
+                    if br and br.get("page_number") == page_num:
                         page_paragraphs.append(para)
+                        found_page = True
                         break
 
+                # Fallback: Use span matching (DOCX/XLSX)
+                if not found_page and para.get("spans"):
+                    para_spans = para.get("spans", [])
+                    if para_spans and para_spans[0]:
+                        para_offset = para_spans[0].get("offset", 0)
+                        # Check if paragraph span overlaps with this page's span
+                        for span_start, span_end in page_spans.get(page_num, []):
+                            if para_offset >= span_start and para_offset < span_end:
+                                page_paragraphs.append(para)
+                                break
+
             # Group paragraphs by role
-            paragraphs_by_role = {}
+            table_bboxes = self._extract_table_bboxes(page_data.table_data)
+            table_associated_paragraphs = []
+            narrative_paragraphs = []
+
             for para in page_paragraphs:
+                role = para.get("role") or "content"
+                # Only filter content paragraphs. Keep headings/titles for structure.
+                if role == "content" and self._is_table_associated_paragraph(para, table_bboxes):
+                    para["_is_table_associated"] = True
+                    table_associated_paragraphs.append(para)
+                    continue
+                narrative_paragraphs.append(para)
+
+            paragraphs_by_role = {}
+            for para in narrative_paragraphs:
                 role = para.get("role") or "content"
                 paragraphs_by_role.setdefault(role, []).append(para)
 
             # Find figures on this page
             page_figures = []
             for figure in structured_data["figures"]:
-                for br in figure["bounding_regions"]:
-                    if br["page_number"] == page_num:
+                # Try bounding_regions first (PDF)
+                found_page = False
+                for br in figure.get("bounding_regions", []) or []:
+                    if br and br.get("page_number") == page_num:
                         page_figures.append(figure)
+                        found_page = True
                         break
+
+                # Fallback: Use span matching (DOCX/XLSX)
+                # Note: DOCX figures might not be common, but handle it for completeness
+                if not found_page and figure.get("spans"):
+                    # Figures don't have direct spans, but check elements if present
+                    pass  # Skip for now - figures are rare in DOCX
 
             # Build enhanced page metadata
             enhanced_page = {
@@ -463,8 +702,9 @@ class AzureDocumentIntelligenceParser(DocumentParser):
                 "char_count": page_data.char_count,
 
                 # Rich structure
-                "paragraphs": page_paragraphs,
+                "paragraphs": narrative_paragraphs,
                 "paragraphs_by_role": paragraphs_by_role,
+                "table_associated_paragraphs": table_associated_paragraphs,
                 "tables": page_data.table_data,
                 "figures": page_figures,
 
@@ -498,6 +738,84 @@ class AzureDocumentIntelligenceParser(DocumentParser):
         )
 
         return enhanced_pages
+
+    def _extract_table_bboxes(self, tables: List[Dict]) -> List[Dict[str, float]]:
+        """Extract axis-aligned table bboxes from table bounding polygons."""
+        bboxes: List[Dict[str, float]] = []
+        for table in tables or []:
+            for br in table.get("bounding_regions", []) or []:
+                polygon = br.get("polygon")
+                if not polygon or len(polygon) < 8:
+                    continue
+                xs = polygon[0::2]
+                ys = polygon[1::2]
+                bboxes.append({
+                    "x0": min(xs),
+                    "y0": min(ys),
+                    "x1": max(xs),
+                    "y1": max(ys),
+                })
+        return bboxes
+
+    def _is_table_associated_paragraph(self, para: Dict, table_bboxes: List[Dict[str, float]]) -> bool:
+        """Return True when paragraph bbox significantly overlaps any table bbox."""
+        if not table_bboxes:
+            return False
+
+        para_bbox = self._paragraph_bbox(para)
+        if not para_bbox:
+            return False
+
+        para_area = self._bbox_area(para_bbox)
+        if para_area <= 0:
+            return False
+
+        for table_bbox in table_bboxes:
+            inter = self._intersection_area(para_bbox, table_bbox)
+            if inter <= 0:
+                continue
+            # Paragraph is considered tabular when most of its area sits inside a table.
+            if inter / para_area >= 0.55:
+                return True
+
+        return False
+
+    def _paragraph_bbox(self, para: Dict) -> Optional[Dict[str, float]]:
+        """Merge all paragraph regions into a single axis-aligned bbox."""
+        bboxes = []
+        for br in para.get("bounding_regions", []) or []:
+            polygon = br.get("polygon")
+            if not polygon or len(polygon) < 8:
+                continue
+            xs = polygon[0::2]
+            ys = polygon[1::2]
+            bboxes.append((min(xs), min(ys), max(xs), max(ys)))
+
+        if not bboxes:
+            return None
+
+        return {
+            "x0": min(b[0] for b in bboxes),
+            "y0": min(b[1] for b in bboxes),
+            "x1": max(b[2] for b in bboxes),
+            "y1": max(b[3] for b in bboxes),
+        }
+
+    @staticmethod
+    def _bbox_area(bbox: Dict[str, float]) -> float:
+        width = max(0.0, bbox["x1"] - bbox["x0"])
+        height = max(0.0, bbox["y1"] - bbox["y0"])
+        return width * height
+
+    @staticmethod
+    def _intersection_area(a: Dict[str, float], b: Dict[str, float]) -> float:
+        x0 = max(a["x0"], b["x0"])
+        y0 = max(a["y0"], b["y0"])
+        x1 = min(a["x1"], b["x1"])
+        y1 = min(a["y1"], b["y1"])
+        if x1 <= x0 or y1 <= y0:
+            return 0.0
+        return (x1 - x0) * (y1 - y0)
 
     def _count_paragraph_roles(self, paragraphs: List[Dict]) -> Dict[str, int]:
         """Count paragraphs by role.
@@ -554,6 +872,79 @@ class AzureDocumentIntelligenceParser(DocumentParser):
         if not pages_narrative:
             raise ValueError("No valid pages found in Azure result")
 
+        # DOCX/XLSX fallback: If lines extraction yielded no text, use paragraphs instead
+        # This is necessary because Azure DI stores DOCX content in paragraphs, not lines
+        total_line_text = sum(len(text.strip()) for text in pages_narrative.values())
+        if total_line_text == 0:
+            logger.info("Lines extraction yielded no text, falling back to paragraph-based extraction (DOCX/XLSX)")
+            pages_narrative_from_paras: dict[int, list[str]] = {}
+
+            # Build page span map for matching paragraphs to pages
+            page_spans: dict[int, list[tuple[int, int]]] = {}
+            for page in result.pages:
+                if page is None:
+                    continue
+                page_num = getattr(page, "page_number", None)
+                if not page_num:
+                    continue
+                page_spans[page_num] = []
+                for span in getattr(page, "spans", []) or []:
+                    if span:
+                        offset = getattr(span, "offset", 0)
+                        length = getattr(span, "length", 0)
+                        page_spans[page_num].append((offset, offset + length))
+
+            for para in getattr(result, "paragraphs", []) or []:
+                if para is None:
+                    continue
+
+                para_content = getattr(para, "content", "")
+                if not para_content or not para_content.strip():
+                    continue
+
+                # Try bounding regions first (for PDF)
+                page_num = None
+                bounding_regions = getattr(para, "bounding_regions", []) or []
+                for br in bounding_regions:
+                    if br is None:
+                        continue
+                    page_num = getattr(br, "page_number", None)
+                    if page_num:
+                        break
+
+                # Fallback: Use span matching (for DOCX/XLSX where bounding_regions may be missing)
+                if not page_num:
+                    para_spans = getattr(para, "spans", []) or []
+                    if para_spans and para_spans[0]:
+                        para_offset = getattr(para_spans[0], "offset", 0)
+
+                        # Find which page this paragraph belongs to based on span overlap
+                        for pnum, pspans in page_spans.items():
+                            for span_start, span_end in pspans:
+                                # Check if paragraph span starts within page span
+                                if para_offset >= span_start and para_offset < span_end:
+                                    page_num = pnum
+                                    break
+                            if page_num:
+                                break
+
+                # If still no page found, assign to page 1 (common for single-page DOCX)
+                if not page_num and len(result.pages) == 1:
+                    page_num = 1
+
+                if page_num:
+                    pages_narrative_from_paras.setdefault(page_num, []).append(para_content)
+
+            # Join paragraphs into page text
+            if pages_narrative_from_paras:
+                pages_narrative = {
+                    page_num: "\n\n".join(paras)
+                    for page_num, paras in pages_narrative_from_paras.items()
+                }
+                logger.info(f"Extracted text from {len(pages_narrative)} pages using paragraphs")
+            else:
+                logger.warning("Paragraph-based extraction also yielded no text")
+
         # Build table data by page
         tables_by_page: dict[int, List[Dict]] = {}
         for table in result.tables or []:
@@ -562,16 +953,32 @@ class AzureDocumentIntelligenceParser(DocumentParser):
                 logger.warning("Skipping None table in result.tables")
                 continue
 
-            if not table.bounding_regions:
-                logger.warning("Skipping table without bounding_regions")
-                continue
+            # Try to get page number from bounding_regions (PDF)
+            page_num = None
+            if table.bounding_regions and len(table.bounding_regions) > 0:
+                page_num = table.bounding_regions[0].page_number
 
-            # Edge case: Validate bounding_regions has at least one element
-            if len(table.bounding_regions) == 0:
-                logger.warning("Skipping table with empty bounding_regions")
-                continue
+            # Fallback: Use span matching (DOCX/XLSX without bounding_regions)
+            if not page_num:
+                table_spans = getattr(table, "spans", []) or []
+                if table_spans and table_spans[0]:
+                    table_offset = getattr(table_spans[0], "offset", 0)
+                    # Find which page this table belongs to
+                    for pnum, pspans in page_spans.items():
+                        for span_start, span_end in pspans:
+                            if table_offset >= span_start and table_offset < span_end:
+                                page_num = pnum
+                                break
+                        if page_num:
+                            break
 
-            page_num = table.bounding_regions[0].page_number
+            # If still no page found, assign to page 1 (single-page DOCX)
+            if not page_num and len(result.pages) == 1:
+                page_num = 1
+
+            if not page_num:
+                logger.warning("Skipping table - could not determine page number")
+                continue
 
             # Edge case: Validate page_num is valid
             if not isinstance(page_num, int) or page_num <= 0:
@@ -647,12 +1054,36 @@ class AzureDocumentIntelligenceParser(DocumentParser):
 
             table_row_count = getattr(table, 'row_count', 0) or len(cells_by_row)
 
+            # Extract bounding regions for PDF highlighting
+            table_bounding_regions = []
+            for br in getattr(table, "bounding_regions", []) or []:
+                if br:
+                    table_bounding_regions.append({
+                        "page_number": getattr(br, "page_number", None),
+                        "polygon": getattr(br, "polygon", [])
+                    })
+
+            # Parse table structure for field detection
+            table_text = "\n".join(table_text_lines)
+            column_headers, table_rows, table_name = _parse_table_structure(table_text)
+
             table_data = {
                 "table_id": len(tables_by_page.get(page_num, [])),
-                "text": "\n".join(table_text_lines),
+                "text": table_text,
                 "row_count": table_row_count,
                 "column_count": table_col_count,
+                "bounding_regions": table_bounding_regions,
+                "column_headers": column_headers,
+                "table_data": table_rows,
+                "table_name": table_name,
             }
+
+            # DEBUG: Log first table's bbox data
+            if len(tables_by_page.get(page_num, [])) == 0:
+                logger.info(f"[PARSER] First table on page {page_num}: {table_row_count}x{table_col_count}, "
+                          f"bounding_regions count={len(table_bounding_regions)}")
+                if table_bounding_regions:
+                    logger.info(f"[PARSER] First table bounding region: {table_bounding_regions[0]}")
 
             tables_by_page.setdefault(page_num, []).append(table_data)
 

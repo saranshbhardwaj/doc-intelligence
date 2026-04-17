@@ -1,7 +1,7 @@
 """Quick test for enhanced Azure parser - prints structure summary."""
 import asyncio
 import sys
-from app.services.parsers.azure_document_intelligence_parser import AzureDocumentIntelligenceParser
+from app.core.parsers.azure_document_intelligence_parser import AzureDocumentIntelligenceParser
 
 
 async def quick_test(pdf_path: str):

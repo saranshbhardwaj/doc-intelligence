@@ -28,6 +28,7 @@ VERTICAL_CONFIGS: Dict[str, VerticalConfig] = {
             "free_form_chat",
             "workflows",
             "extraction",
+            "diligence",
             "comparison",  # Future
         ],
         navigation_items=[
@@ -35,6 +36,7 @@ VERTICAL_CONFIGS: Dict[str, VerticalConfig] = {
             {"label": "Chat", "path": "/pe/chat", "icon": "message"},
             {"label": "Workflows", "path": "/pe/workflows", "icon": "flow"},
             {"label": "Extraction", "path": "/pe/extraction", "icon": "extract"},
+            {"label": "Diligence", "path": "/pe/diligence", "icon": "shield"},
             {"label": "Comparison", "path": "/pe/comparison", "icon": "compare", "coming_soon": True},
         ],
         db_prefix="pe",

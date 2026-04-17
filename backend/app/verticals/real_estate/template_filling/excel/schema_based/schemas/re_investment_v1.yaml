@@ -1,0 +1,1225 @@
+# Real Estate Investment Model Template - Version 1
+# This schema defines critical fields with known locations in the Excel template
+# Format: Define fingerprint cells for identification, then critical fields with their PDF aliases
+
+schema_id: "re_investment_v1"
+version: "1.0"
+name: "RE Investment Model"
+description: "Standard real estate investment analysis model with 21 sheets"
+total_sheets: 21
+
+# Fingerprint cells - used to identify this template (check 3-5 unique cells)
+fingerprint:
+  - sheet: "DASHBOARD"
+    cell: "B6"
+    expected_value: "Unit Count"
+  - sheet: "DASHBOARD"
+    cell: "B8"
+    expected_value: "Asking Price"
+  - sheet: "DASHBOARD"
+    cell: "B10"
+    expected_value: "Purchase Price"
+
+# Critical fields - define 50-100 most important fields
+# Fields not defined here will be handled by generic analyzer + LLM
+fields:
+
+  # --- redIQ Sheet - Key Investment Highlights ---
+
+  - id: "rediq_deal_name"
+    sheet: "redIQ"
+    label_cell: "D2"
+    value_cell: "F2"
+    data_type: "text"
+    pdf_aliases:
+      - "Deal Name"
+      - "Property Name"
+      - "Asset Name"
+
+  - id: "rediq_city"
+    sheet: "redIQ"
+    label_cell: "D3"
+    value_cell: "F3"
+    data_type: "text"
+    pdf_aliases:
+      - "City"
+      - "Location City"
+
+  - id: "rediq_state"
+    sheet: "redIQ"
+    label_cell: "D4"
+    value_cell: "F4"
+    data_type: "text"
+    pdf_aliases:
+      - "State"
+      - "State Code"
+
+  - id: "rediq_zip"
+    sheet: "redIQ"
+    label_cell: "D5"
+    value_cell: "F5"
+    data_type: "text"
+    pdf_aliases:
+      - "Zip"
+      - "Zip Code"
+      - "Postal Code"
+
+  - id: "rediq_address"
+    sheet: "redIQ"
+    label_cell: "D6"
+    value_cell: "F6"
+    data_type: "text"
+    pdf_aliases:
+      - "Address"
+      - "Street Address"
+      - "Property Address"
+
+  - id: "rediq_msa"
+    sheet: "redIQ"
+    label_cell: "D7"
+    value_cell: "F7"
+    data_type: "text"
+    pdf_aliases:
+      - "MSA"
+      - "Metropolitan Area"
+      - "Market"
+
+  - id: "rediq_year_built"
+    sheet: "redIQ"
+    label_cell: "D8"
+    value_cell: "F8"
+    data_type: "number"
+    pdf_aliases:
+      - "Year Built"
+      - "Construction Year"
+      - "Built"
+
+  - id: "rediq_year_renovated"
+    sheet: "redIQ"
+    label_cell: "D9"
+    value_cell: "F9"
+    data_type: "number"
+    pdf_aliases:
+      - "Year Renovated"
+      - "Renovation Year"
+      - "Renovated"
+
+  - id: "rediq_asset_class"
+    sheet: "redIQ"
+    label_cell: "D10"
+    value_cell: "F10"
+    data_type: "text"
+    pdf_aliases:
+      - "Asset Class"
+      - "Class"
+      - "Property Class"
+
+  - id: "rediq_num_buildings"
+    sheet: "redIQ"
+    label_cell: "D11"
+    value_cell: "F11"
+    data_type: "number"
+    pdf_aliases:
+      - "# Buildings"
+      - "Number of Buildings"
+      - "Buildings"
+
+  - id: "rediq_num_parking"
+    sheet: "redIQ"
+    label_cell: "D12"
+    value_cell: "F12"
+    data_type: "number"
+    pdf_aliases:
+      - "# Parking"
+      - "Number of Parking"
+      - "Parking Spaces"
+      - "Parking"
+
+  - id: "rediq_acres"
+    sheet: "redIQ"
+    label_cell: "D13"
+    value_cell: "F13"
+    data_type: "number"
+    pdf_aliases:
+      - "Acres"
+      - "Lot Size"
+      - "Land Size"
+
+  - id: "rediq_units"
+    sheet: "redIQ"
+    label_cell: "D14"
+    value_cell: "F14"
+    data_type: "number"
+    pdf_aliases:
+      - "Units"
+      - "Total Units"
+      - "Unit Count"
+      - "# Units"
+
+  - id: "rediq_management"
+    sheet: "redIQ"
+    label_cell: "D15"
+    value_cell: "F15"
+    data_type: "text"
+    pdf_aliases:
+      - "Management Software"        # exact label p10
+      - "Property Management"
+      - "Manager"
+      - "Management"
+
+  - id: "rediq_rr_as_of_date"
+    sheet: "redIQ"
+    label_cell: "D16"
+    value_cell: "F16"
+    data_type: "date"
+    pdf_aliases:
+      - "RR as of Date"
+      - "Rent Roll Date"
+      - "As of Date"
+
+  # --- DASHBOARD SHEET - Property Info ---
+
+  - id: "property_name"
+    sheet: "DASHBOARD"
+    label_cell: "B3"        # Cell containing the label
+    value_cell: "C3"        # Cell where the value should be filled
+    data_type: "text"
+    pdf_aliases:            # What to look for in PDF (case-insensitive)
+      - "Building Name"
+      - "Asset Name"
+
+  - id: "property_address"
+    sheet: "DASHBOARD"
+    label_cell: "B4"
+    value_cell: "C4"
+    data_type: "text"
+    pdf_aliases:
+      - "Property Address"
+      - "Address"
+      - "Location"
+      - "Street Address"
+
+  - id: "unit_count"
+    sheet: "DASHBOARD"
+    label_cell: "B6"
+    value_cell: "C6"
+    data_type: "number"
+    pdf_aliases:
+      - "Units"
+      - "Unit Count"
+      - "Total Units"
+      - "# Units"
+      - "Number of Units"
+
+  # --- DASHBOARD SHEET - Purchase Section ---
+
+  - id: "asking_price"
+    sheet: "DASHBOARD"
+    label_cell: "B8"
+    value_cell: "C8"
+    data_type: "currency"
+    pdf_aliases:
+      - "Asking Price"
+      - "Listing Price"
+      - "Sale Price"
+      - "Offer Price"
+      - "Price"
+
+  - id: "purchase_price"
+    sheet: "DASHBOARD"
+    label_cell: "B10"
+    value_cell: "C10"
+    data_type: "currency"
+    pdf_aliases:
+      - "Purchase Price"
+      - "Listing Price"
+      - "Sale Price"
+      - "Offer Price"
+      - "Price"
+  
+  # --- DASHBOARD SHEET - DEBT section ---
+
+  - id: "debt_down_payment_pct"
+    sheet: "DASHBOARD"
+    label_cell: "H5"
+    value_cell: "I5"
+    data_type: "percentage"
+    pdf_aliases:
+      - "Down Payment"               # keep
+      - "Down Payment %"             # add
+      - "Equity %"                   # add
+      - "35%"                        # risky but signals
+
+  - id: "debt_rate"
+    sheet: "DASHBOARD"
+    label_cell: "H6"
+    value_cell: "I6"
+    data_type: "percentage"
+    pdf_aliases:
+      - "Interest Rate"              # ADD THIS - exact PDF label
+      - "Interest Rate / Amortization"
+      - "Loan Rate"
+      - "Debt Rate"
+  
+  - id: "debt_i_o_mos"
+    sheet: "DASHBOARD"
+    label_cell: "H7"
+    value_cell: "I7"
+    data_type: "number"
+    pdf_aliases:
+      - "Debt I/O Period"
+
+  - id: "debt_amort"
+    sheet: "DASHBOARD"
+    label_cell: "H8"
+    value_cell: "I8"
+    data_type: "number"
+    pdf_aliases:
+      - "Amortization"               # ADD
+      - "Loan Term"                  # ADD
+      - "Amortization Period"        # ADD
+      - "Debt Amortization"
+
+  # --- DASHBOARD SHEET - REFI Exit ---
+  - id: "refi_cap_rate"
+    sheet: "DASHBOARD"
+    label_cell: "F29"
+    value_cell: "I29"
+    data_type: "percentage"
+    pdf_aliases:
+      - "Cap Rate at Refi"
+
+  - id: "refi_loan_value"
+    sheet: "DASHBOARD"
+    label_cell: "F30"
+    value_cell: "I30"
+    data_type: "percentage"
+    pdf_aliases:
+      - "loan value at refi"
+      - "LTV"
+  
+  - id: "refi_year_sale"
+    sheet: "DASHBOARD"
+    label_cell: "F31"
+    value_cell: "I31"
+    data_type: "number"
+    pdf_aliases:
+      - "Year sale"
+      - "End of year"
+  
+  - id: "refi_cap_rate"
+    sheet: "DASHBOARD"
+    label_cell: "F32"
+    value_cell: "I32"
+    data_type: "percentage"
+    pdf_aliases:
+      - "Cap Rate at Sale"
+
+  # --- DASHBOARD SHEET - Total equity shares ---
+  - id: "class_b_per_hurdle_member"
+    sheet: "DASHBOARD"
+    label_cell: "K4"
+    value_cell: "L4"
+    data_type: "percentage"
+    pdf_aliases:
+      - "Class B % to Hurdle"
+      - "Class B % to Preferred"
+      - "Class B % to IRR Hurdle"
+      - "Class B % to Preferred Return"
+      - "LP Split"
+
+  - id: "class_b_pref"
+    sheet: "DASHBOARD"
+    label_cell: "K6"
+    value_cell: "L6"
+    data_type: "percentage"
+    pdf_aliases:
+      - "Class B Preferred Return"
+      - "Class B Pref"
+      - "Preferred Return"
+      - "Pref to Class B"
+      - "Preferred Return to LPs"
+  
+  - id: "class_b_total_accrue"
+    sheet: "DASHBOARD"
+    label_cell: "K7"
+    value_cell: "L7"
+    data_type: "percentage"
+    pdf_aliases:
+      - "Class B Total Accrue"
+      - "Total Accrue to Class B"
+      - "Total Accrue to LPs"
+
+  - id: "class_b_hurdle"
+    sheet: "DASHBOARD"
+    label_cell: "K8"
+    value_cell: "L8"
+    data_type: "percentage"
+    pdf_aliases:
+      - "Class B Hurdle"
+      - "IRR Hurdle for Class B"
+      - "Preferred Return Hurdle for Class B"
+      - "Hurdle for LPs"
+
+  - id: "class_b_post_hurdle"
+    sheet: "DASHBOARD"
+    label_cell: "K9"
+    value_cell: "L9"
+    data_type: "percentage"
+    pdf_aliases:
+      - "Class B % Post Hurdle"
+      - "Class B % after Preferred"
+      - "Class B % after IRR Hurdle"
+      - "Class B % after Preferred Return"
+      - "LP Split after Hurdle"
+  
+  # --- Napkin SHEET - Napkin analyzer ---
+  - id: "napkin_ask_price"
+    sheet: "Napkin"
+    label_cell: "B8"
+    value_cell: "C8"
+    data_type: "currency"
+    pdf_aliases:
+      - "Asking Price"
+      - "Listing Price"
+      - "Sale Price"
+      - "Offer Price"
+      - "Price"
+  
+  - id: "napkin_expense_per_unit"
+    sheet: "Napkin"
+    label_cell: "B10"
+    value_cell: "C10"
+    data_type: "currency"
+    pdf_aliases:
+      - "Expense per Unit"
+      - "Operating Expense per Unit"
+      - "Opex per Unit"
+      - "Expense/Unit"
+  
+  - id: "napkin_walk_in_cap_rate"
+    sheet: "Napkin"
+    label_cell: "B11"
+    value_cell: "C11"
+    data_type: "percentage"
+    pdf_aliases:
+      - "Walk-in Cap Rate"
+      - "Cap Rate based on Current Rent Roll"
+      - "Current Cap Rate"
+      - "In-Place Cap Rate"
+
+  - id: "napkin_economic_vacancy_rate_current"
+    sheet: "Napkin"
+    label_cell: "B12"
+    value_cell: "C12"
+    data_type: "percentage"
+    pdf_aliases:
+      - "Current Economic Vacancy"
+      - "Economic Vacancy (Current)"
+      - "Current Vacancy Rate"
+      - "In-Place Vacancy Rate"
+      - "Rent Concessions"          # PDF label: "(Rent Concessions, Bad Debt) 14.49%"
+      - "Physical Vacancy Current"  # PDF label: "(Physical Vacancy) 8.01%"
+      - "Total Vacancy Current"     # combined: 22.51%
+
+# --- Napkin SHEET - Helpful data to track ---
+  - id: "napkin_year_built"
+    sheet: "Napkin"
+    label_cell: "B30"
+    value_cell: "C30"
+    data_type: "number"
+    pdf_aliases:
+      - "Year Built"
+      - "Construction Year"
+      - "Building Year"
+      - "Built Year"
+
+  - id: "napkin_vacancy"
+    sheet: "Napkin"
+    label_cell: "B33"
+    value_cell: "C33"
+    data_type: "number"
+    pdf_aliases:
+      - "Vacancy"
+      - "Vacant Units"
+      - "Number of Vacant Units"
+      - "Vacancy Count"
+
+  - id: "napkin_population"
+    sheet: "Napkin"
+    label_cell: "B36"
+    value_cell: "C36"
+    data_type: "number"
+    pdf_aliases:
+      - "Population"
+      - "Population in 1 Mile"
+      - "Population in 3 Miles"
+      - "Population in 5 Miles"
+
+  - id: "napkin_population_growth_rate"
+    sheet: "Napkin"
+    label_cell: "B37"
+    value_cell: "C37"
+    data_type: "percentage"
+    pdf_aliases:
+      - "Population Growth Rate"
+      - "Population Growth Rate in 1 Mile"
+      - "Population Growth Rate in 3 Miles"
+      - "Population Growth Rate in 5 Miles"
+
+# --- Napkin SHEET - Performa ---
+
+  - id: "napkin_avg_effective_rent"
+    sheet: "Napkin"
+    label_cell: "F5"
+    value_cell: "G5"
+    data_type: "currency"
+    pdf_aliases:
+      - "Average Rent"
+  
+  - id: "napkin_other_income_per_unit"
+    sheet: "Napkin"
+    label_cell: "F6"
+    value_cell: "G6"
+    data_type: "currency"
+    pdf_aliases:
+      - "Other Income per Unit"
+      - "Other Income/Unit"
+      - "Ancillary Income per Unit"
+      - "Ancillary Income/Unit"
+
+  - id: "napkin_expense_per_unit"
+    sheet: "Napkin"
+    label_cell: "F10"
+    value_cell: "G10"
+    data_type: "currency"
+    pdf_aliases:
+      - "Expense per Unit"
+      - "Operating Expense per Unit"
+      - "Opex per Unit"
+      - "Expense/Unit"
+
+  - id: "napkin_stabilized_cap_rate"
+    sheet: "Napkin"
+    label_cell: "F11"
+    value_cell: "G11"
+    data_type: "percentage"
+    pdf_aliases:
+      - "Pro Forma Cap Rate"
+      - "Stabilized Cap Rate"
+      - "Proforma Cap Rate"
+      - "Year 5 Cap Rate"
+
+  - id: "napkin_economic_vacancy_rate_performa"
+    sheet: "Napkin"
+    label_cell: "F12"
+    value_cell: "G12"
+    data_type: "percentage"
+    pdf_aliases:
+      - "Pro Forma Economic Vacancy"
+      - "Economic Vacancy (Pro Forma)"
+      - "Proforma Vacancy Rate"
+      - "Stabilized Vacancy Rate"
+      - "Physical Vacancy Pro Forma"  # PDF: "(Physical Vacancy) 10.00%"
+      - "Year 1 Vacancy Rate"         # PDF: "12.78% Year 1"
+
+  # --- Napkin SHEET - Retail or Mixed ---
+  - id: "napkin_retail_number_of_units"
+    sheet: "Napkin"
+    label_cell: "K32"
+    value_cell: "L32"
+    data_type: "number"
+    pdf_aliases:
+      - "Retail Number of Units"
+      - "Number of Retail Units"
+      - "Retail Unit Count"
+      - "Retail # Units"
+
+  - id: "napkin_retail_unit_average_sqft"
+    sheet: "Napkin"
+    label_cell: "K33"
+    value_cell: "L33"
+    data_type: "number"
+    pdf_aliases:
+      - "Unit Average Sqft"
+      - "Average Unit Sqft"
+      - "Unit Square Footage"
+
+  - id: "napkin_retail_sqft"
+    sheet: "Napkin"
+    label_cell: "K35"
+    value_cell: "L35"
+    data_type: "number"
+    pdf_aliases:
+      - "Retail Sqft"
+      - "Retail Square Footage"
+      - "Retail Size"
+
+  - id: "napkin_retail_construction_cost"
+    sheet: "Napkin"
+    label_cell: "K37"
+    value_cell: "L37"
+    data_type: "currency"
+    pdf_aliases:
+      - "Construction Cost"
+      - "Build Cost"
+      - "Development Cost"
+
+  - id: "napkin_retail_land_cost"
+    sheet: "Napkin"
+    label_cell: "K40"
+    value_cell: "L40"
+    data_type: "currency"
+    pdf_aliases:
+      - "Land Cost"
+      - "Land Acquisition Cost"
+
+  # --- Actuals & Unit Mix sheet ---
+  - id: "actuals_unit_mix_expenses_re_tax"
+    sheet: "Actuals&UnitMix"
+    label_cell: "B19"
+    value_cell: "C19"
+    data_type: "currency"
+    pdf_aliases:
+      - "Actuals & Unit Mix Expense Re Tax"
+      - "Actuals & Unit Mix Real Estate Tax"
+      - "Actuals & Unit Mix Property Tax"
+      - "Actuals & Unit Mix RE Tax Expense"
+  
+  - id: "actuals_unit_mix_expenses_insurance"
+    sheet: "Actuals&UnitMix"
+    label_cell: "B20"
+    value_cell: "C20"
+    data_type: "currency"
+    pdf_aliases:
+      - "Actuals & Unit Mix Insurance"
+      - "Actuals & Unit Mix Insurance Expense"
+
+  - id: "actuals_unit_mix_expenses_contract_services"
+    sheet: "Actuals&UnitMix"
+    label_cell: "B21"
+    value_cell: "C21"
+    data_type: "currency"
+    pdf_aliases:
+      - "Actuals & Unit Mix Contract Services"
+      - "Actuals & Unit Mix Contract Services Expense"
+
+  - id: "actuals_unit_mix_expenses_trash_removal"
+    sheet: "Actuals&UnitMix"
+    label_cell: "B22"
+    value_cell: "C22"
+    data_type: "currency"
+    pdf_aliases:
+      - "Utilities & Trash"
+      - "Actuals & Unit Mix Trash Removal"
+      - "Actuals & Unit Mix Trash Removal Expense"
+
+  - id: "actuals_unit_mix_expenses_electric"
+    sheet: "Actuals&UnitMix"
+    label_cell: "B23"
+    value_cell: "C23"
+    data_type: "currency"
+    pdf_aliases:
+      - "Actuals & Unit Mix Electric"
+      - "Actuals & Unit Mix Electric Expense"
+
+  - id: "actuals_unit_mix_expenses_fuel"
+    sheet: "Actuals&UnitMix"
+    label_cell: "B24"
+    value_cell: "C24"
+    data_type: "currency"
+    pdf_aliases:
+      - "Actuals & Unit Mix Fuel"
+      - "Actuals & Unit Mix Fuel Expense"
+
+  - id: "actuals_unit_mix_expenses_water_sewer"
+    sheet: "Actuals&UnitMix"
+    label_cell: "B25"
+    value_cell: "C25"
+    data_type: "currency"
+    pdf_aliases:
+      - "Actuals & Unit Mix Water & Sewer"
+      - "Actuals & Unit Mix Water & Sewer Expense"
+
+  - id: "actuals_unit_mix_expenses_other_utility"
+    sheet: "Actuals&UnitMix"
+    label_cell: "B26"
+    value_cell: "C26"
+    data_type: "currency"
+    pdf_aliases:
+      - "Actuals & Unit Mix Other Utility"
+      - "Actuals & Unit Mix Other Utility Expense"
+
+  - id: "actuals_unit_mix_expenses_legal"
+    sheet: "Actuals&UnitMix"
+    label_cell: "B27"
+    value_cell: "C27"
+    data_type: "currency"
+    pdf_aliases:
+      - "Actuals & Unit Mix Legal"
+      - "Actuals & Unit Mix Legal Expense"
+
+  - id: "actuals_unit_mix_expenses_property_management_fee"
+    sheet: "Actuals&UnitMix"
+    label_cell: "B28"
+    value_cell: "C28"
+    data_type: "currency"
+    pdf_aliases:
+      - "Actuals & Unit Mix Property Management Fee"
+      - "Actuals & Unit Mix Property Management Expense"
+
+  - id: "actuals_unit_mix_expenses_repairs_maintenance"
+    sheet: "Actuals&UnitMix"
+    label_cell: "B29"
+    value_cell: "C29"
+    data_type: "currency"
+    pdf_aliases:
+      - "Actuals & Unit Mix Repairs & Maintenance"
+      - "Actuals & Unit Mix Repairs & Maintenance Expense"
+
+  - id: "actuals_unit_mix_expenses_administrative"
+    sheet: "Actuals&UnitMix"
+    label_cell: "B30"
+    value_cell: "C30"
+    data_type: "currency"
+    pdf_aliases:
+      - "Actuals & Unit Mix Administrative"
+      - "Actuals & Unit Mix Administrative Expense"
+
+  - id: "actuals_unit_mix_expenses_personnel"
+    sheet: "Actuals&UnitMix"
+    label_cell: "B31"
+    value_cell: "C31"
+    data_type: "currency"
+    pdf_aliases:
+      - "Salaries, Taxes & Benefits" # exact PDF label p16
+      - "Salaries"
+      - "Personnel"
+      - "Payroll"
+
+  - id: "actuals_unit_mix_expenses_advertising"
+    sheet: "Actuals&UnitMix"
+    label_cell: "B32"
+    value_cell: "C32"
+    data_type: "currency"
+    pdf_aliases:
+      - "Marketing & Promotion"      # exact PDF label p16
+      - "Marketing"
+      - "Advertising"
+      - "Promotion"
+
+  - id: "actuals_unit_mix_expenses_landscaping"
+    sheet: "Actuals&UnitMix"
+    label_cell: "B33"
+    value_cell: "C33"
+    data_type: "currency"
+    pdf_aliases:
+      - "Actuals & Unit Mix Landscaping"
+      - "Actuals & Unit Mix Landscaping Expense"
+
+  - id: "actuals_unit_mix_expenses_credit_card_fees"
+    sheet: "Actuals&UnitMix"
+    label_cell: "B34"
+    value_cell: "C34"
+    data_type: "currency"
+    pdf_aliases:
+      - "Actuals & Unit Mix Credit Card Fees"
+      - "Actuals & Unit Mix Credit Card Fees Expense"
+
+  - id: "actuals_unit_mix_expenses_misc"
+    sheet: "Actuals&UnitMix"
+    label_cell: "B35"
+    value_cell: "C35"
+    data_type: "currency"
+    pdf_aliases:
+      - "Actuals & Unit Mix Misc"
+      - "Actuals & Unit Mix Misc Expense"
+
+  - id: "actuals_unit_mix_expenses_cap_ex_reserves"
+    sheet: "Actuals&UnitMix"
+    label_cell: "B37"
+    value_cell: "C37"
+    data_type: "currency"
+    pdf_aliases:
+      - "Actuals & Unit Mix Cap Ex Reserves"
+      - "Actuals & Unit Mix Cap Ex Reserves Expense"
+
+  - id: "actuals_unit_mix_current_insurance_policy"
+    sheet: "Actuals&UnitMix"
+    label_cell: "G30"
+    value_cell: "H30"
+    data_type: "currency"
+    pdf_aliases:
+      - "Property Insurance"         # exact PDF label p16
+      - "Insurance Expense"
+      - "Current Property Insurance"
+
+  - id: "actuals_unit_mix_current_admin_fee"
+    sheet: "Actuals&UnitMix"
+    label_cell: "G31"
+    value_cell: "H31"
+    data_type: "currency"
+    pdf_aliases:
+      - "Actuals & Unit Mix Current Admin Fee"
+      - "Actuals & Unit Mix Current Administrative Fee"
+      - "Actuals & Unit Mix Administrative Expense"
+      - "Actuals & Unit Mix Administrative"
+
+  - id: "actuals_unit_mix_current_late_fee"
+    sheet: "Actuals&UnitMix"
+    label_cell: "G32"
+    value_cell: "H32"
+    data_type: "currency"
+    pdf_aliases:
+      - "Actuals & Unit Mix Current Late Fee"
+      - "Actuals & Unit Mix Current Late Payment Fee"
+
+  - id: "actuals_unit_mix_current_covered_parking_fee"
+    sheet: "Actuals&UnitMix"
+    label_cell: "G33"
+    value_cell: "H33"
+    data_type: "currency"
+    pdf_aliases:
+      - "Actuals & Unit Mix Current Covered Parking Fee"
+      - "Actuals & Unit Mix Current Covered Parking Payment Fee"
+
+  - id: "actuals_unit_mix_current_uncovered_parking_fee"
+    sheet: "Actuals&UnitMix"
+    label_cell: "G34"
+    value_cell: "H34"
+    data_type: "currency"
+    pdf_aliases:
+      - "Actuals & Unit Mix Current Uncovered Parking Fee"
+      - "Actuals & Unit Mix Current Uncovered Parking Payment Fee"
+  
+  - id: "actuals_unit_mix_current_residential"
+    sheet: "Actuals&UnitMix"
+    label_cell: "G35"
+    value_cell: "H35"
+    data_type: "currency"
+    pdf_aliases:
+      - "Actuals & Unit Mix Current Residential Rent"
+      - "Actuals & Unit Mix Current Residential Payment"
+  
+  - id: "actuals_unit_mix_current_misc_fee"
+    sheet: "Actuals&UnitMix"
+    label_cell: "G36"
+    value_cell: "H36"
+    data_type: "currency"
+    pdf_aliases:
+      - "Actuals & Unit Mix Current Misc Fee"
+      - "Actuals & Unit Mix Current Misc Payment"
+
+  # --- P&L ---
+  # - id: "pl_real_estate_taxes"
+  #   sheet: "P&L"
+  #   label_cell: "B20"
+  #   value_cell: "C20"
+  #   data_type: "percentage"
+  #   pdf_aliases:
+  #     - "Real Estate Taxes"
+  #     - "Property Taxes"
+  #     - "RE Taxes"
+  #     - "Real Estate Tax Expense"
+  
+  # - id: "pl_insurance"
+  #   sheet: "P&L"
+  #   label_cell: "B21"
+  #   value_cell: "C21"
+  #   data_type: "percentage"
+  #   pdf_aliases:
+  #     - "Insurance"
+  #     - "Property Insurance"
+  #     - "RE Insurance"
+  #     - "Real Estate Insurance"
+  
+  # --- Deal Sheet - Investment Return Projection ---
+
+  - id: "deal_avg_coc"
+    sheet: "Deal Sheet"
+    label_cell: "B23"
+    value_cell: "C23"
+    data_type: "percentage"
+    pdf_aliases:
+      - "Average CoC"
+      - "Average Cash on Cash"
+      - "Cash on Cash Return"
+      - "Avg CoC"
+
+  - id: "deal_projected_irr"
+    sheet: "Deal Sheet"
+    label_cell: "B24"
+    value_cell: "C24"
+    data_type: "percentage"
+    pdf_aliases:
+      - "Projected IRR"
+      - "IRR"
+      - "Internal Rate of Return"
+
+  - id: "deal_equity_multiple"
+    sheet: "Deal Sheet"
+    label_cell: "B25"
+    value_cell: "D25"
+    data_type: "number"
+    pdf_aliases:
+      - "Equity Multiple"
+      - "Equity Multiplier"
+      - "EM"
+      - "MOIC"
+
+  - id: "deal_avg_annualized_return"
+    sheet: "Deal Sheet"
+    label_cell: "B26"
+    value_cell: "C26"
+    data_type: "percentage"
+    pdf_aliases:
+      - "AVG Annualized Return"
+      - "Average Annualized Return"
+      - "Annualized Return"
+
+  - id: "deal_per_door"
+    sheet: "Deal Sheet"
+    label_cell: "B27"
+    value_cell: "D27"
+    data_type: "currency"
+    pdf_aliases:
+      - "$ Per Door"
+      - "Per Door"
+      - "Price Per Door"
+      - "Per Unit"
+      - "Price Per Unit"
+
+  # --- Investor Sample Sheet ---
+
+  - id: "investor_sample_class_b_share_unit_ex"
+    sheet: "Investor Sample"
+    label_cell: "B3"
+    value_cell: "E3"
+    data_type: "currency"
+    pdf_aliases:
+      - "Returns - Class B Share Unit Ex"
+      - "Class B Share Unit"
+      - "Class B Unit Example"
+      - "Class B Investment Example"
+
+  - id: "investor_sample_class_c_share_unit_ex"
+    sheet: "Investor Sample"
+    label_cell: "B21"
+    value_cell: "E21"
+    data_type: "currency"
+    pdf_aliases:
+      - "Returns - Class C Share Unit Ex"
+      - "Class C Share Unit"
+      - "Class C Unit Example"
+      - "Class C Investment Example"
+
+  # Interior CapEx Override (row 26) - single override input
+  - id: "capex_interior_override_units"
+    sheet: "CapEx&Reserves"
+    label_cell: "B26"
+    value_cell: "C26"
+    data_type: "number"
+    pdf_aliases:
+      - "Interior CapEx Override Units"
+      - "Interior CapEx Override"
+      - "CapEx Override Units"
+
+  - id: "capex_interior_override_cost"
+    sheet: "CapEx&Reserves"
+    label_cell: "B26"
+    value_cell: "D26"
+    data_type: "currency"
+    pdf_aliases:
+      - "Interior CapEx Override Cost"
+      - "Interior CapEx Override"
+      - "CapEx Override Cost Per"
+
+# Tables with dynamic rows (rent roll, operating statement, etc.)
+tables:
+# --- Napkin SHEET - Market Metrics Table ---
+  - id: "napkin_market_metrics"
+    sheet: "Napkin"
+    data_start_row: 19
+    data_end_row: 21  # Only 3 rows of metrics
+    row_identifier_column: "K"  # Column K contains the metric names
+    columns:
+      - excel_column: "K"
+        header: "Metric"
+        data_type: "text"
+        pdf_aliases:
+          - "Market Cap Rate"
+          - "Market Value at Current Rents"
+          - "Market Value at Market Rents"
+          - "Cap Rate"
+
+      # Columns M-Y contain percentage values (no headers for these columns)
+      - excel_column: "M"
+        data_type: "percentage"
+
+      - excel_column: "N"
+        data_type: "percentage"
+
+      - excel_column: "O"
+        data_type: "percentage"
+
+      - excel_column: "P"
+        data_type: "percentage"
+
+      - excel_column: "Q"
+        data_type: "percentage"
+
+      - excel_column: "R"
+        data_type: "percentage"
+
+      - excel_column: "S"
+        data_type: "percentage"
+
+      - excel_column: "T"
+        data_type: "percentage"
+
+      - excel_column: "U"
+        data_type: "percentage"
+
+      - excel_column: "V"
+        data_type: "percentage"
+
+      - excel_column: "W"
+        data_type: "percentage"
+
+      - excel_column: "X"
+        data_type: "percentage"
+
+      - excel_column: "Y"
+        data_type: "percentage"
+
+# --- Napkin SHEET - Sale Scenarios Table ---
+  # - id: "napkin_sale_scenarios"
+  #   sheet: "Napkin"
+  #   header_row: 36
+  #   data_start_row: 37
+  #   # No row_identifier_column - rows are not explicitly labeled
+  #   columns:
+  #     - excel_column: "Q"
+  #       header: "Cap rate at sale"
+  #       data_type: "percentage"
+  #       pdf_aliases:
+  #         - "Cap rate at sale"
+  #         - "Exit Cap Rate"
+  #         - "Terminal Cap Rate"
+
+# --- Actuals & Unit Mix SHEET - Target rent analysis ---
+  - id: "actuals_unit_mix_target_rent_analysis"
+    sheet: "Actuals&UnitMix"
+    header_row: 4
+    data_start_row: 5
+    data_end_row: 16  # Only 12 rows of rent analysis
+    row_identifier_column: "G"  # Column with rent analysis categories
+    columns:
+      - excel_column: "G"
+        header: "Type"
+        data_type: "text"
+        pdf_aliases:
+          - "Unit Type"
+          - "Type"
+          - "Floor Plan"
+          - "Unit Mix"
+
+      - excel_column: "H"
+        header: "# Units"
+        data_type: "number"
+        pdf_aliases:
+          - "# Units"
+          - "Number of Units"
+          - "Units"
+          - "Unit Count"
+
+      - excel_column: "I"
+        header: "Sqft"
+        data_type: "number"
+        pdf_aliases:
+          - "Sq.Ft./Unit"
+          - "Sq Ft"
+          - "Square Feet"
+          - "SF"
+
+# --- Actuals & Unit Mix SHEET - Current rent analysis ---
+  - id: "actuals_unit_mix_current_rent_analysis"
+    sheet: "Actuals&UnitMix"
+    header_row: 4
+    data_start_row: 5
+    data_end_row: 16  # Only 12 rows of rent analysis
+    row_identifier_column: "K"  # Column with rent analysis categories
+    columns:
+      - excel_column: "K"
+        header: "Average"
+        data_type: "currency"
+        pdf_aliases:
+          - "Average Rent"
+          - "Avg Rent"
+          - "Current Rent"
+          - "In-Place Rent"
+          - "Rent/Unit"
+ 
+
+# ----- P&L SHEET ------
+
+  # Proforma escalators table
+  # - id: "pnl_proforma_escalators"
+  #   sheet: "P&L"
+  #   header_row: 2
+  #   data_start_row: 3
+  #   data_end_row: 4  # Annual Rent Escalator + Annual Expense Escalator
+  #   row_identifier_column: "B"  # Column with line item names (Annual Rent Escalator, Annual Expense Escalator)
+  #   columns:
+  #     - excel_column: "B"
+  #       header: "Line Item"
+  #       data_type: "text"
+  #       pdf_aliases:
+  #         - "Annual Rent Escalator"
+  #         - "Annual Expense Escalator"
+
+  #     - excel_column: "E"
+  #       header: "Year 1"
+  #       data_type: "percentage"
+  #       pdf_aliases:
+  #         - "Year 1 Escalator"
+  #         - "Year 1"
+
+  #     - excel_column: "G"
+  #       header: "Year 2"
+  #       data_type: "percentage"
+  #       pdf_aliases:
+  #         - "Year 2 Escalator"
+  #         - "Year 2"
+
+  #     - excel_column: "I"
+  #       header: "Year 3"
+  #       data_type: "percentage"
+  #       pdf_aliases:
+  #         - "Year 3 Escalator"
+  #         - "Year 3"
+
+  #     - excel_column: "K"
+  #       header: "Year 4"
+  #       data_type: "percentage"
+  #       pdf_aliases:
+  #         - "Year 4 Escalator"
+  #         - "Year 4"
+
+  #     - excel_column: "M"
+  #       header: "Year 5"
+  #       data_type: "percentage"
+  #       pdf_aliases:
+  #         - "Year 5 Escalator"
+  #         - "Year 5"
+
+  #     - excel_column: "O"
+  #       header: "Year 6"
+  #       data_type: "percentage"
+  #       pdf_aliases:
+  #         - "Year 6 Escalator"
+  #         - "Year 6"
+
+  #     - excel_column: "Q"
+  #       header: "Year 7"
+  #       data_type: "percentage"
+  #       pdf_aliases:
+  #         - "Year 7 Escalator"
+  #         - "Year 7"
+
+  # TODO: Add more P&L tables (actual income, actual expenses, etc.)
+
+
+# ----- CapEx&Reserves SHEET ------
+
+  # Interior CapEx - renovation line items
+  - id: "capex_interior_renovations"
+    sheet: "CapEx&Reserves"
+    header_row: 10
+    data_start_row: 12       # Skip row 11 (total row - calculated)
+    data_end_row: 21         # Rows 12-21 are the individual renovation items
+    row_identifier_column: "B"
+    columns:
+      - excel_column: "B"
+        header: "Interior Renovations"
+        data_type: "text"
+        pdf_aliases:
+          - "Kitchen counter top"
+          - "Kitchen appliances"
+          - "Apartment flooring"
+          - "Kitchen cabinet repair and paint"
+          - "Kitchen backsplash"
+          - "Apartment painting"
+          - "Kitchen lighting"
+          - "Kitchen cabinet hardware"
+          - "Bathroom vanity"
+          - "Bathroom tub repair"
+          - "Interior renovation"
+          - "Interior upgrade"
+
+      - excel_column: "C"
+        header: "Units"
+        data_type: "number"
+        pdf_aliases:
+          - "Units per renovation"
+          - "Renovation units"
+
+      - excel_column: "D"
+        header: "Cost Per"
+        data_type: "currency"
+        pdf_aliases:
+          - "Cost per unit"
+          - "Renovation cost"
+          - "CapEx cost"
+
+  # TODO: Add more CapEx&Reserves tables (exterior CapEx, etc.)
+
+
+# ----- Returns SHEET ------
+
+  # GP Partner splits table (rows 61-66)
+  - id: "returns_gp_partners"
+    sheet: "Returns"
+    header_row: 60
+    data_start_row: 61
+    data_end_row: 66           # GP Partner 1 through GP Partner 6
+    row_identifier_column: "B"
+    columns:
+      - excel_column: "B"
+        header: "Partner"
+        data_type: "text"
+        pdf_aliases:
+          - "GP Partner"
+          - "General Partner"
+          - "Partner"
+
+      - excel_column: "C"
+        header: "Acq"
+        data_type: "percentage"
+        pdf_aliases:
+          - "Acquisition"
+          - "Acq"
+
+      - excel_column: "D"
+        header: "AM"
+        data_type: "percentage"
+        pdf_aliases:
+          - "Asset Management"
+          - "AM"
+
+      - excel_column: "E"
+        header: "CF"
+        data_type: "percentage"
+        pdf_aliases:
+          - "Cash Flow"
+          - "CF"
+
+      - excel_column: "F"
+        header: "Exit/Refi"
+        data_type: "percentage"
+        pdf_aliases:
+          - "Exit/Refi"
+          - "Exit"
+          - "Refi"
+
+  # TODO: Add more Returns sheet tables (LP partners, etc.)

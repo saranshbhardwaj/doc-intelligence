@@ -7,7 +7,7 @@
 
 import { useEffect, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import { useAuth, UserButton, SignedIn } from "@clerk/clerk-react";
+import { useAppAuth } from "@/hooks/useAppAuth";
 import { Plus, MessageSquare, FileText, Trash2 } from "lucide-react";
 import { useChat, useChatActions } from "../store";
 import { Button } from "../components/ui/button";
@@ -19,7 +19,7 @@ import { useDarkMode } from "../hooks/useDarkMode";
 
 export default function CollectionsPage() {
   const navigate = useNavigate();
-  const { getToken } = useAuth();
+  const { getToken } = useAppAuth();
   const chat = useChat();
   const actions = useChatActions();
   const { isDark, toggle } = useDarkMode();
@@ -101,15 +101,6 @@ export default function CollectionsPage() {
                 toggle={toggle}
                 variant="inline"
               />
-              <SignedIn>
-                <UserButton
-                  appearance={{
-                    elements: {
-                      avatarBox: "w-10 h-10",
-                    },
-                  }}
-                />
-              </SignedIn>
             </div>
           </div>
         </div>

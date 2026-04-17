@@ -2,13 +2,13 @@
 import asyncio
 import os
 import time
-from datetime import datetime, timedelta
 from contextlib import asynccontextmanager
 from app.config import settings
 from app.utils.logging import logger
 from app.api.dependencies import cache
-from app.database import get_db
-from app.services.workflows.seeding import seed_workflows
+from app.database import get_db, async_engine
+from app.verticals.private_equity.workflows.seeding import seed_workflows
+from app.verticals.private_equity.diligence.playbook_seeds import seed_system_playbooks
 from app.core.embeddings.factory import get_embedding_provider
 from app.services.service_locator import get_reranker
 
@@ -40,25 +40,40 @@ async def lifespan(app):
     removed = cache.clear_expired()
     logger.info(f"Cache cleanup on startup: removed {removed} expired entries")
 
-    # Seed workflow templates (idempotent)
+    # Seed workflow templates (idempotent) — retry for Railway IPv6→IPv4 fallback
+    for attempt in range(3):
+        try:
+            db = next(get_db())
+            created = seed_workflows(db)
+            if created:
+                logger.info("Seeded workflows", extra={"count": len(created), "names": created})
+            else:
+                logger.info("No new workflows seeded (already present)")
+            db.close()
+            break
+        except Exception as e:
+            if attempt < 2:
+                logger.warning("Workflow seeding retry", extra={"attempt": attempt + 1, "error": str(e)})
+                await asyncio.sleep(5)
+            else:
+                logger.error("Workflow seeding failed after 3 attempts", extra={"error": str(e)})
+
+    # Seed PE diligence system playbooks (idempotent, slug-keyed)
     try:
         db = next(get_db())
-        created = seed_workflows(db)
-        if created:
-            logger.info("Seeded workflows", extra={"count": len(created), "names": created})
-        else:
-            logger.info("No new workflows seeded (already present)")
+        created = seed_system_playbooks(db)
+        logger.info("PE diligence playbooks seeded", extra={"created": created})
         db.close()
     except Exception as e:
-        logger.error("Workflow seeding failed", extra={"error": str(e)})
+        logger.error("PE diligence playbook seeding failed", extra={"error": str(e)})
 
     # Start background cleanup task (cache + uploaded file pruning)
     cleanup_task = asyncio.create_task(periodic_cleanup())
-    
+
     get_embedding_provider()
     if settings.rag_use_reranker:
         get_reranker()  # Preload reranker
-    
+
     logger.info("✅ Models ready")
 
     # yield control to the running app
@@ -66,11 +81,14 @@ async def lifespan(app):
 
     # ---------- Shutdown ----------
 
-    cleanup_task.cancel()  # Stop background task
+    cleanup_task.cancel()
     try:
         await cleanup_task
     except asyncio.CancelledError:
         pass
+
+    # Dispose async engine to release connection pool (prevents memory leak)
+    await async_engine.dispose()
     logger.info("Application shutting down")
 
 

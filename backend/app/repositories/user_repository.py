@@ -15,7 +15,7 @@ from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError, IntegrityError
 
 from app.database import SessionLocal
-from app.db_models_users import User
+from app.db_models_users import User, AllowedEmail
 from app.utils.logging import logger
 
 
@@ -65,9 +65,17 @@ class UserRepository:
                 )
                 return None
 
+    def _is_email_allowed(self, db: Session, email: str) -> bool:
+        """Check if email is in the allowlist (case-insensitive)."""
+        from sqlalchemy import func
+        return db.query(AllowedEmail).filter(
+            func.lower(AllowedEmail.email) == email.lower()
+        ).first() is not None
+
     def create_user(
         self,
         user_id: str,
+        org_id: str,
         email: str,
         tier: str = "free",
         pages_limit: int = 100,
@@ -76,13 +84,8 @@ class UserRepository:
     ) -> Optional[User]:
         """Create a new user.
 
-        Args:
-            user_id: User ID (Clerk ID)
-            email: User email address
-            tier: Subscription tier (default: "free")
-            pages_limit: Page processing limit (default: 100)
-            total_pages_processed: Total pages processed (default: 0)
-            pages_this_month: Pages processed this month (default: 0)
+        All new users are granted immediate active status with RE vertical access.
+        Admin is notified by email on each new sign-up.
 
         Returns:
             User object if successful, None on error (including duplicate)
@@ -91,8 +94,11 @@ class UserRepository:
             try:
                 user = User(
                     id=user_id,
+                    org_id=org_id,
                     email=email,
                     tier=tier,
+                    status="active",
+                    allowed_verticals=["real_estate"],
                     pages_limit=pages_limit,
                     total_pages_processed=total_pages_processed,
                     pages_this_month=pages_this_month
@@ -103,8 +109,11 @@ class UserRepository:
 
                 logger.info(
                     f"Created user: {user_id}",
-                    extra={"user_id": user_id, "email": email, "tier": tier}
+                    extra={"user_id": user_id, "org_id": org_id, "email": email, "tier": tier, "status": "active"}
                 )
+
+                from app.utils.notifications import send_new_signup_notification
+                send_new_signup_notification(email=email, user_id=user_id)
 
                 return user
 
@@ -164,6 +173,7 @@ class UserRepository:
     def get_or_create_user(
         self,
         user_id: str,
+        org_id: str,
         email: str,
         tier: str = "free",
         pages_limit: int = 100
@@ -185,6 +195,23 @@ class UserRepository:
         # Try to get existing user
         user = self.get_user(user_id)
         if user:
+            # Update org_id or email if changed
+            needs_update = user.org_id != org_id or (email and not email.endswith("@unknown.com") and user.email != email)
+            if needs_update:
+                try:
+                    with self._get_session() as db:
+                        db_user = db.query(User).filter(User.id == user_id).first()
+                        if db_user:
+                            if db_user.org_id != org_id:
+                                db_user.org_id = org_id
+                            if email and not email.endswith("@unknown.com") and db_user.email != email:
+                                db_user.email = email
+                            db.commit()
+                except SQLAlchemyError as e:
+                    logger.error(
+                        "Failed to update user",
+                        extra={"user_id": user_id, "org_id": org_id, "error": str(e)}
+                    )
             # Update last login and return
             self.update_last_login(user_id)
             return user
@@ -192,6 +219,7 @@ class UserRepository:
         # User doesn't exist - try to create
         user = self.create_user(
             user_id=user_id,
+            org_id=org_id,
             email=email,
             tier=tier,
             pages_limit=pages_limit,

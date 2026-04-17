@@ -1,0 +1,267 @@
+groups:
+  - name: docint_operations
+    interval: 30s
+    rules:
+      # === FAILURE RATE ALERTS ===
+      - alert: HighWorkflowFailureRate
+        expr: rate(workflow_runs_failed_total[5m]) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+          component: workflows
+        annotations:
+          summary: "High workflow failure rate"
+          description: "Workflow failures exceeding 0.1/sec for 5 minutes ({{ $value }} failures/sec)"
+
+      - alert: HighTemplateFillFailureRate
+        expr: rate(template_fills_failed_total[5m]) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+          component: template_fills
+        annotations:
+          summary: "High template fill failure rate"
+          description: "Template fill failures exceeding 0.05/sec for 5 minutes ({{ $value }} failures/sec)"
+
+      - alert: HighExtractionFailureRate
+        expr: rate(extractions_failed_total[5m]) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+          component: extractions
+        annotations:
+          summary: "High extraction failure rate"
+          description: "Extraction failures exceeding 0.05/sec for 5 minutes ({{ $value }} failures/sec)"
+
+      # === LATENCY ALERTS ===
+      - alert: HighChatLatency
+        expr: histogram_quantile(0.95, rate(chat_latency_seconds_bucket[5m])) > 10
+        for: 5m
+        labels:
+          severity: warning
+          component: chat
+        annotations:
+          summary: "High chat p95 latency"
+          description: "Chat p95 latency exceeding 10 seconds for 5 minutes ({{ $value }}s)"
+
+      - alert: HighWorkflowLatency
+        expr: histogram_quantile(0.95, rate(workflow_run_latency_seconds_bucket[5m])) > 120
+        for: 10m
+        labels:
+          severity: warning
+          component: workflows
+        annotations:
+          summary: "High workflow p95 latency"
+          description: "Workflow p95 latency exceeding 120 seconds for 10 minutes ({{ $value }}s)"
+
+      - alert: HighTemplateFillLatency
+        expr: histogram_quantile(0.95, rate(template_fill_latency_seconds_bucket[5m])) > 120
+        for: 10m
+        labels:
+          severity: warning
+          component: template_fills
+        annotations:
+          summary: "High template fill p95 latency"
+          description: "Template fill p95 latency exceeding 120 seconds for 10 minutes ({{ $value }}s)"
+
+      - alert: HighExtractionLatency
+        expr: histogram_quantile(0.95, rate(extraction_latency_seconds_bucket[5m])) > 180
+        for: 10m
+        labels:
+          severity: warning
+          component: extractions
+        annotations:
+          summary: "High extraction p95 latency"
+          description: "Extraction p95 latency exceeding 180 seconds for 10 minutes ({{ $value }}s)"
+
+      # === STUCK TASK ALERTS ===
+      - alert: HighCeleryQueueDepth
+        expr: celery_queue_length{queue="critical"} > 10
+        for: 5m
+        labels:
+          severity: warning
+          component: celery
+        annotations:
+          summary: "Critical queue has backed up tasks"
+          description: "Critical queue has {{ $value }} tasks waiting for >5 minutes - workers may be stuck or overwhelmed"
+
+      - alert: NoWorkflowCompletionsRecently
+        expr: |
+          (time() - workflow_runs_completed_total) > 1200
+          and
+          workflow_runs_completed_total > 0
+        for: 5m
+        labels:
+          severity: warning
+          component: workflows
+        annotations:
+          summary: "No workflow completions in 20 minutes"
+          description: "No workflows have completed in the last 20 minutes - workers may be stuck or tasks misrouted"
+
+      - alert: CeleryWorkerDown
+        expr: up{job=~"worker.*"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          component: celery
+        annotations:
+          summary: "Celery worker is down"
+          description: "Worker {{ $labels.instance }} has been down for 2 minutes"
+
+  - name: docint_llm
+    interval: 30s
+    rules:
+      # === LLM COST ALERTS ===
+      - alert: HighLLMCostRate
+        expr: rate(llm_cost_usd_total[1h]) > 100
+        for: 1h
+        labels:
+          severity: critical
+          component: llm
+        annotations:
+          summary: "LLM costs exceeding $100/hour"
+          description: "LLM costs are ${{ $value }}/hour, exceeding budget threshold"
+
+      - alert: VeryHighLLMCostRate
+        expr: rate(llm_cost_usd_total[15m]) > 500
+        for: 15m
+        labels:
+          severity: critical
+          component: llm
+        annotations:
+          summary: "LLM costs spiking (>$500/hour rate)"
+          description: "LLM cost spike detected: ${{ $value }}/hour over last 15 minutes"
+
+      # === CACHE PERFORMANCE ===
+      - alert: LowCacheHitRate
+        expr: |
+          rate(llm_cache_hits_total[10m]) /
+          (rate(llm_cache_hits_total[10m]) + rate(llm_cache_misses_total[10m])) < 0.2
+        for: 10m
+        labels:
+          severity: warning
+          component: llm
+        annotations:
+          summary: "Low LLM cache hit rate"
+          description: "Cache hit rate below 20% for 10 minutes ({{ $value | humanizePercentage }})"
+
+      # === TOKEN USAGE ALERTS ===
+      - alert: HighTokenUsageRate
+        expr: rate(llm_token_usage_total[5m]) > 1000000
+        for: 10m
+        labels:
+          severity: warning
+          component: llm
+        annotations:
+          summary: "High token usage rate"
+          description: "Token usage exceeding 1M tokens/5min for 10 minutes ({{ $value }} tokens/5min)"
+
+  - name: docint_external_apis
+    interval: 30s
+    rules:
+      # === EMBEDDING API ALERTS ===
+      - alert: HighEmbeddingFailureRate
+        expr: rate(embedding_failures_total[5m]) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+          component: embeddings
+        annotations:
+          summary: "High OpenAI embedding failure rate"
+          description: "Embedding failures exceeding 0.1/sec for 5 minutes ({{ $value }} failures/sec)"
+
+      - alert: HighEmbeddingLatency
+        expr: histogram_quantile(0.95, rate(embedding_latency_seconds_bucket[5m])) > 10
+        for: 5m
+        labels:
+          severity: warning
+          component: embeddings
+        annotations:
+          summary: "High OpenAI embedding p95 latency"
+          description: "Embedding p95 latency exceeding 10 seconds for 5 minutes ({{ $value }}s)"
+
+      - alert: EmbeddingRateLimitSpike
+        expr: rate(embedding_retries_total[5m]) > 0.5
+        for: 5m
+        labels:
+          severity: warning
+          component: embeddings
+        annotations:
+          summary: "OpenAI embedding API rate limiting detected"
+          description: "Embedding retries exceeding 0.5/sec for 5 minutes - hitting OpenAI rate limits"
+
+      # === AZURE DOCUMENT INTELLIGENCE ALERTS ===
+      - alert: HighAzureDIFailureRate
+        expr: rate(azure_di_failures_total[5m]) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+          component: azure_di
+        annotations:
+          summary: "High Azure Document Intelligence failure rate"
+          description: "Azure DI failures exceeding 0.05/sec for 5 minutes ({{ $value }} failures/sec)"
+
+      - alert: HighAzureDILatency
+        expr: histogram_quantile(0.95, rate(azure_di_latency_seconds_bucket[5m])) > 120
+        for: 10m
+        labels:
+          severity: warning
+          component: azure_di
+        annotations:
+          summary: "High Azure DI p95 latency"
+          description: "Azure DI p95 latency exceeding 120 seconds for 10 minutes ({{ $value }}s)"
+
+      - alert: AzureDIRateLimitSpike
+        expr: rate(azure_di_retries_total[5m]) > 0.2
+        for: 5m
+        labels:
+          severity: warning
+          component: azure_di
+        annotations:
+          summary: "Azure Document Intelligence rate limiting detected"
+          description: "Azure DI retries exceeding 0.2/sec for 5 minutes - hitting Azure throttling limits"
+
+      - alert: HighAzureDICostRate
+        expr: rate(azure_di_cost_usd_total[1h]) > 50
+        for: 1h
+        labels:
+          severity: warning
+          component: azure_di
+        annotations:
+          summary: "Azure DI costs exceeding $50/hour"
+          description: "Azure Document Intelligence costs are ${{ $value }}/hour"
+
+  - name: docint_infrastructure
+    interval: 30s
+    rules:
+      # === SERVICE HEALTH ===
+      - alert: ServiceDown
+        expr: up{job="api"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          component: infrastructure
+        annotations:
+          summary: "API service is down"
+          description: "The API service has been down for 2 minutes"
+
+      # === HIGH ERROR RATES ===
+      - alert: HighSecurityRequestRate
+        expr: rate(http_suspicious_requests_total[5m]) > 10
+        for: 5m
+        labels:
+          severity: warning
+          component: security
+        annotations:
+          summary: "High rate of suspicious HTTP requests"
+          description: "Suspicious request rate exceeding 10/sec for 5 minutes ({{ $value }}/sec)"
+
+      - alert: HighRateLimitingRate
+        expr: rate(http_requests_rate_limited_total[5m]) > 5
+        for: 5m
+        labels:
+          severity: warning
+          component: security
+        annotations:
+          summary: "High rate limiting activity"
+          description: "Rate limiting triggered >5 times/sec for 5 minutes ({{ $value }}/sec)"

@@ -16,7 +16,7 @@ from app.utils.logging import logger
 from app.utils.metrics import ARTIFACT_PERSIST_SECONDS, ARTIFACT_PERSIST_FAILURES
 
 try:
-    from app.services.storage.cloudflare_r2 import get_r2_storage
+    from app.core.storage.cloudflare_r2 import get_r2_storage
 except Exception:
     get_r2_storage = None  # type: ignore
 
@@ -141,7 +141,7 @@ def load_artifact(pointer_or_inline: Dict[str, Any]) -> Dict[str, Any]:
         try:
             data = storage.get_bytes(key)
             return json.loads(data.decode("utf-8"))
-        except Exception as e:
+        except Exception:
             logger.exception("Failed to load artifact from R2", extra={"key": key})
             raise
     # inline

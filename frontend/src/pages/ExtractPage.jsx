@@ -5,7 +5,7 @@
  */
 import { useState, useEffect, useRef } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { useAuth } from "@clerk/clerk-react";
+import { useAppAuth } from "@/hooks/useAppAuth";
 import {
   Upload,
   FileText,
@@ -31,10 +31,10 @@ import {
   useExtractionActions,
 } from "../store";
 
-const API_BASE = import.meta.env.VITE_API_BASE_URL || "http://localhost:8000";
+const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:8000";
 
 export default function ExtractPage() {
-  const { getToken } = useAuth();
+  const { getToken } = useAppAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const fileInputRef = useRef(null);
@@ -45,8 +45,8 @@ export default function ExtractPage() {
   // Local UI state
   const [mode, setMode] = useState("upload"); // 'upload' | 'library'
   const [selectedFile, setSelectedFile] = useState(null);
-  const [saveToLibrary, setSaveToLibrary] = useState(true);
-  const [collections, setCollections] = useState([]);
+  const [saveToLibrary] = useState(true);
+  const [, setCollections] = useState([]);
   const [selectedCollection, setSelectedCollection] = useState(null);
   const [selectedDocId, setSelectedDocId] = useState(null);
   const [selectedDocMeta, setSelectedDocMeta] = useState(null);
@@ -54,6 +54,7 @@ export default function ExtractPage() {
   const [extractionContext, setExtractionContext] = useState("");
   const [sheetOpen, setSheetOpen] = useState(false);
   const [selectedExtractionId, setSelectedExtractionId] = useState(null);
+  const [mobilePanel, setMobilePanel] = useState("source"); // source | recent
 
   // Extraction slice
   const extraction = useExtraction();
@@ -63,11 +64,7 @@ export default function ExtractPage() {
   const historyItems = extractionHistory?.items || [];
   const historyTotal = extractionHistory?.total || 0;
   const historyLoading = extractionHistory?.isLoading || false;
-  const historyError = extractionHistory?.error || null;
-
   const {
-    uploadDocument,
-    extractTempDocument: extractTemp,
     extractLibraryDocument,
     cancelExtraction,
     resetExtraction,
@@ -177,16 +174,36 @@ export default function ExtractPage() {
     navigate("/app/extractions");
   };
 
-  const handleDeleteExtraction = (extractionId) => {
-    console.log("🗑️ Extraction deleted:", extractionId);
+  const handleDeleteExtraction = (_extractionId) => {
     fetchExtractionHistory(getToken);
   };
 
   return (
     <AppLayout breadcrumbs={[{ label: "Extract" }]}>
-      <div className="flex-1 flex gap-4">
+      <div className="md:hidden mb-3 grid grid-cols-2 gap-2">
+        <Button
+          size="sm"
+          variant={mobilePanel === "source" ? "default" : "outline"}
+          onClick={() => setMobilePanel("source")}
+        >
+          Source
+        </Button>
+        <Button
+          size="sm"
+          variant={mobilePanel === "recent" ? "default" : "outline"}
+          onClick={() => setMobilePanel("recent")}
+        >
+          Recent
+        </Button>
+      </div>
+
+      <div className="flex-1 flex flex-col md:flex-row gap-3 md:gap-4 min-h-0">
         {/* LEFT PANEL - Source Selection */}
-        <div className="w-[420px] flex-shrink-0 bg-card rounded-lg border border-border p-6 overflow-y-auto">
+        <div
+          className={`${
+            mobilePanel === "source" ? "block" : "hidden"
+          } workflow-shell md:block w-full md:w-[420px] md:flex-shrink-0 p-4 md:p-6 overflow-y-auto`}
+        >
           <h2 className="text-lg font-semibold text-foreground mb-4">
             Extract Document
           </h2>
@@ -209,7 +226,11 @@ export default function ExtractPage() {
           {/* Library Mode */}
           {mode === "library" && (
             <div className="space-y-3">
-              <Button variant="outline" onClick={() => setSelectorOpen(true)}>
+              <Button
+                variant="outline"
+                onClick={() => setSelectorOpen(true)}
+                className="w-full sm:w-auto"
+              >
                 Choose from Library
               </Button>
               {selectedDocId && (
@@ -317,7 +338,11 @@ export default function ExtractPage() {
         </div>
 
         {/* RIGHT PANEL - Recent Extractions */}
-        <div className="flex-1 bg-card rounded-lg border border-border p-6 overflow-y-auto">
+        <div
+          className={`${
+            mobilePanel === "recent" ? "block" : "hidden"
+          } workflow-shell md:block flex-1 p-4 md:p-6 overflow-y-auto`}
+        >
           <div className="flex items-center justify-between mb-4">
             <h3 className="text-lg font-semibold text-foreground">
               Recent Extractions

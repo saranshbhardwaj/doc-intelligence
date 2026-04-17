@@ -7,25 +7,44 @@ This pipeline is ONLY for document uploads to the Library.
 It does NOT handle extraction logic (that's in tasks/extractions/).
 """
 from __future__ import annotations
-from typing import Dict, Any
+from typing import Dict, Any, Optional
 import json
 import asyncio
+import os
+from pathlib import Path
 
 from celery import shared_task, chain
-from sqlalchemy.sql import func
 
 from app.database import get_db
 from app.services.job_tracker import JobProgressTracker
-from app.services.embeddings import get_embedding_provider
-from app.services.parsers import ParserFactory
-from app.services.chunkers import ChunkerFactory
+from app.core.embeddings import get_embedding_provider
+from app.core.parsers import ParserFactory
+from app.core.chunkers import ChunkerFactory
 from app.repositories.collection_repository import CollectionRepository
 from app.repositories.document_repository import DocumentRepository
+from app.repositories.user_repository import UserRepository
 from app.db_models_chat import DocumentChunk
+from app.services.beta_limits import enforce_page_limit, log_shadow_credits
+from app.utils.document_uploads import IMAGE_EXTENSIONS, POWERPOINT_EXTENSIONS, WORD_EXTENSIONS
 from app.utils.logging import logger
 from app.utils.pdf_utils import detect_pdf_type
 from app.utils.file_utils import save_raw_text, save_chunks
-from app.config import settings
+from app.core.storage.storage_factory import get_storage_backend
+from app.utils.id_generator import generate_id
+
+
+def _remap_id_field(metadata: dict, field: str, id_map: dict) -> None:
+    """Rewrite a single chunker logical ID field to its DB UUID."""
+    val = metadata.get(field)
+    if val and val in id_map:
+        metadata[field] = id_map[val]
+
+
+def _remap_list_field(metadata: dict, field: str, id_map: dict) -> None:
+    """Rewrite a list of chunker logical IDs to their DB UUIDs (drop unmapped entries)."""
+    vals = metadata.get(field)
+    if vals and isinstance(vals, list):
+        metadata[field] = [id_map[v] for v in vals if v in id_map]
 
 
 def _get_db_session():
@@ -40,7 +59,7 @@ def _get_db_session():
 @shared_task(bind=True)
 def parse_document_for_indexing_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Parse PDF document for library indexing.
+    Parse uploaded document for library indexing.
 
     Input payload:
         - file_path: Path to uploaded PDF
@@ -63,6 +82,8 @@ def parse_document_for_indexing_task(self, payload: Dict[str, Any]) -> Dict[str,
     tracker = JobProgressTracker(db, job_id)
     doc_repo = DocumentRepository()
 
+    local_file_path = None  # Track if we downloaded from storage
+
     try:
         tracker.update_progress(
             status="parsing",
@@ -71,17 +92,48 @@ def parse_document_for_indexing_task(self, payload: Dict[str, Any]) -> Dict[str,
             message="Parsing document..."
         )
 
-        # Detect PDF type
-        pdf_type = detect_pdf_type(file_path)
-        tracker.update_progress(
-            progress_percent=8,
-            message=f"Detected {pdf_type} PDF"
-        )
+        # Download from storage if needed (file_path is storage key, not local path)
+        if not Path(file_path).exists():
+            storage = get_storage_backend()
+            local_file_path = f"/tmp/doc_{document_id}_{filename}"
 
-        # Get parser
-        parser = ParserFactory.get_parser(settings.force_user_tier or "free", pdf_type)
-        if not parser:
-            raise ValueError("No parser available for detected PDF type")
+            logger.info(
+                "Downloading document from storage",
+                extra={"storage_key": file_path, "local_path": local_file_path}
+            )
+
+            storage.download(file_path, local_file_path)
+            file_path = local_file_path  # Use local path for processing
+
+        # Determine file type from extension
+        file_ext = os.path.splitext(filename)[1].lower()
+
+        # Detect document type for metadata/logging (Azure DI handles these formats natively)
+        if file_ext in WORD_EXTENSIONS:
+            pdf_type = "digital"
+            tracker.update_progress(
+                progress_percent=8,
+                message="Detected DOCX document"
+            )
+        elif file_ext in POWERPOINT_EXTENSIONS:
+            pdf_type = "digital"
+            tracker.update_progress(
+                progress_percent=8,
+                message="Detected PowerPoint document"
+            )
+        elif file_ext in IMAGE_EXTENSIONS:
+            pdf_type = "scanned"
+            tracker.update_progress(
+                progress_percent=8,
+                message="Detected image document"
+            )
+        else:
+            pdf_type = detect_pdf_type(file_path)
+            tracker.update_progress(
+                progress_percent=8,
+                message=f"Detected {pdf_type} PDF"
+            )
+        parser = ParserFactory.get_parser()
 
         logger.info(
             f"Parsing document for indexing: {filename}",
@@ -122,7 +174,8 @@ def parse_document_for_indexing_task(self, payload: Dict[str, Any]) -> Dict[str,
     except Exception as e:
         tracker.mark_error(
             error_stage="parsing",
-            error_message=str(e),
+            error_message="Failed to parse document — please try re-uploading.",
+            internal_error=str(e)[:1000],
             error_type="parsing_error",
             is_retryable=True
         )
@@ -133,6 +186,20 @@ def parse_document_for_indexing_task(self, payload: Dict[str, Any]) -> Dict[str,
         )
         raise
     finally:
+        # Cleanup: Delete temporary local file if we downloaded from storage
+        if local_file_path and os.path.exists(local_file_path):
+            try:
+                os.remove(local_file_path)
+                logger.info(
+                    "Cleaned up temporary file",
+                    extra={"local_path": local_file_path}
+                )
+            except Exception as cleanup_error:
+                logger.warning(
+                    f"Failed to cleanup temporary file: {cleanup_error}",
+                    extra={"local_path": local_file_path}
+                )
+
         db.close()
 
 
@@ -177,7 +244,7 @@ def chunk_document_for_indexing_task(self, payload: Dict[str, Any]) -> Dict[str,
 
         # Convert parser_output dict back to ParserOutput object for chunker compatibility
         # The chunker expects an object with attributes, not a dict
-        from app.services.parsers.base import ParserOutput
+        from app.core.parsers.base import ParserOutput
         parser_output_obj = ParserOutput(
             text=parser_output["text"],
             page_count=parser_output["page_count"],
@@ -214,7 +281,7 @@ def chunk_document_for_indexing_task(self, payload: Dict[str, Any]) -> Dict[str,
 
         # Save chunks for debugging
         try:
-            save_chunks(document_id, chunks_list, payload.get("filename", "unknown"))
+            save_chunks(document_id, {"chunks": chunks_list}, payload.get("filename", "unknown"))
         except Exception as save_err:
             logger.warning(f"Failed to save chunks: {save_err}")
 
@@ -230,15 +297,23 @@ def chunk_document_for_indexing_task(self, payload: Dict[str, Any]) -> Dict[str,
             extra={"document_id": document_id, "chunker": chunker.__class__.__name__}
         )
 
+        # Strip parser_output (large text blob) from the chain payload to avoid
+        # exceeding Redis result backend size limits (~1MB). Promote only the
+        # fields needed by store_vectors_task to top-level keys.
+        trimmed_payload = {k: v for k, v in payload.items() if k != "parser_output"}
         return {
-            **payload,
+            **trimmed_payload,
             "chunks": chunks_list,
+            "page_count": parser_output.get("page_count", 0),
+            "processing_time_ms": parser_output.get("processing_time_ms", 0),
+            "parser_name": parser_output.get("parser_name", "unknown"),
         }
 
     except Exception as e:
         tracker.mark_error(
             error_stage="chunking",
-            error_message=str(e),
+            error_message="Failed to process document — please try re-uploading.",
+            internal_error=str(e)[:1000],
             error_type="chunking_error",
             is_retryable=True
         )
@@ -336,7 +411,8 @@ def embed_chunks_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
     except Exception as e:
         tracker.mark_error(
             error_stage="embedding",
-            error_message=str(e),
+            error_message="Failed to process document — please try re-uploading.",
+            internal_error=str(e)[:1000],
             error_type="embedding_error",
             is_retryable=True
         )
@@ -375,7 +451,8 @@ def store_vectors_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
     """
     job_id = payload["job_id"]
     document_id = payload["document_id"]
-    collection_id = payload["collection_id"]
+    collection_id = payload.get("collection_id")
+    user_id = payload.get("user_id")
 
     db = _get_db_session()
     tracker = JobProgressTracker(db, job_id)
@@ -399,6 +476,17 @@ def store_vectors_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         if not chunks:
             raise ValueError("No chunks to store")
 
+        # parser_output was stripped from payload in chunk_document_for_indexing_task
+        # to keep the Redis result payload small. The fields we need were promoted to top-level.
+        parser_info = payload.get("parser_output", {})  # may be absent — fallback to {}
+        page_count = int(payload.get("page_count") or parser_info.get("page_count", 0) or 0)
+
+        # Final gate before persistence: block storage if this indexing would exceed page quota.
+        user_repo = UserRepository()
+        user = user_repo.get_user(user_id) if user_id else None
+        if user and page_count > 0:
+            enforce_page_limit(user, pages_to_add=page_count)
+
         # Validate embedding dimensions if provided
         if embeddings and embedding_dimension:
             actual_dim = len(embeddings[0]) if embeddings[0] else 0
@@ -413,10 +501,26 @@ def store_vectors_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         document = db.query(Document).filter(Document.id == document_id).first()
         document_filename = document.filename if document else "Unknown"
 
-        # Create DocumentChunk records with embeddings
+        # Create DocumentChunk records with embeddings.
+        # Pre-assign UUIDs so we can build a chunker_id → db_uuid mapping and rewrite
+        # cross-chunk link fields (linked_narrative_id, linked_table_ids, sibling_chunk_ids,
+        # parent_chunk_id) before insert. Without this, context_expander queries by DB UUID
+        # but the metadata contains chunker logical IDs like "sec_4_para_4" → 0 rows returned.
         embedding_model = payload.get("embedding_model")
+
+        # Step 1: Pre-assign UUIDs and build chunker_id → db_uuid mapping
+        id_map: dict = {}
+        assigned_ids: list = []
+        for chunk in chunks:
+            db_uuid = generate_id()
+            assigned_ids.append(db_uuid)
+            chunker_id = chunk.get("metadata", {}).get("chunk_id")
+            if chunker_id:
+                id_map[chunker_id] = db_uuid
+
+        # Step 2: Build DocumentChunk objects with rewritten link fields
         db_chunks = []
-        for i, (chunk, embedding) in enumerate(zip(chunks, embeddings)):
+        for i, (chunk, embedding, db_uuid) in enumerate(zip(chunks, embeddings, assigned_ids)):
             metadata = chunk.get("metadata", {})
 
             # Inject citation metadata if not already present
@@ -433,35 +537,33 @@ def store_vectors_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                     # Limit to 200 chars
                     metadata["first_sentence"] = first_sentence[:200]
 
-            # Extract smart chunking metadata fields
-            # These fields go into the chunk_metadata JSONB column
-            smart_metadata_fields = [
-                "section_id", "parent_chunk_id", "sibling_chunk_ids",
-                "linked_narrative_id", "linked_table_ids",
-                "is_continuation", "chunk_sequence", "total_chunks_in_section",
-                "heading_hierarchy", "paragraph_roles", "page_range",
-                "table_caption", "table_context", "table_row_count", "table_column_count",
-                "figure_id", "figure_caption", "has_figures", "content_type",
-                # Citation metadata fields
-                "document_filename", "document_title", "page_label",
-                "first_sentence", "content_summary", "bbox", "source_url"
-            ]
+            # Store all metadata fields produced by the chunker.
+            # ChunkMetadataBuilder controls what goes in — no allowlist needed here.
+            chunk_metadata = dict(metadata)
 
-            # Build chunk_metadata dict (only include fields that exist)
-            chunk_metadata = {
-                key: metadata[key]
-                for key in smart_metadata_fields
-                if key in metadata
-            }
+            # Rewrite cross-chunk link fields from chunker logical IDs → DB UUIDs.
+            # The chunker uses generate_chunk_id() to produce strings like "sec_4_para_4";
+            # context_expander queries DocumentChunk.id (UUID) so these must match.
+            _remap_id_field(chunk_metadata, "linked_narrative_id", id_map)
+            _remap_id_field(chunk_metadata, "parent_chunk_id", id_map)
+            _remap_list_field(chunk_metadata, "linked_table_ids", id_map)
+            _remap_list_field(chunk_metadata, "sibling_chunk_ids", id_map)
 
             # Serialize JSONB fields for bulk_save_objects compatibility
             # bulk_save_objects() bypasses ORM type conversion, so we must manually serialize dicts/lists to JSON
             tables_data = chunk.get("tables", [])
             tables_json = json.dumps(tables_data) if tables_data else None
 
-            chunk_metadata_json = json.dumps(chunk_metadata) if chunk_metadata else None
+            # Pass dict directly — bulk_save_objects with psycopg2 serializes dicts to JSONB objects.
+            # Do NOT use json.dumps() here: that produces a JSONB string value, not a JSONB object,
+            # which breaks all dict-access operators (->, ->>, #>>) on the column.
+            chunk_metadata_json = chunk_metadata if chunk_metadata else None
 
+            # Note: text_search_vector is NOT set here.
+            # It is auto-populated by the PostgreSQL trigger `tsvector_update` (migration c4d5e6f7a8b9)
+            # which fires BEFORE INSERT on document_chunks.
             db_chunk = DocumentChunk(
+                id=db_uuid,  # Pre-assigned UUID — must match id_map entries used in link fields above
                 document_id=document_id,
                 text=chunk["text"],
                 narrative_text=chunk.get("narrative_text", ""),
@@ -490,17 +592,16 @@ def store_vectors_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         except Exception as bulk_error:
             db.rollback()
             logger.error(
-                f"Bulk insert failed: {bulk_error}",
-                extra={"document_id": document_id, "chunks_count": len(db_chunks)}
+                f"Bulk insert failed for document {document_id}: {bulk_error}",
+                extra={"document_id": document_id, "chunks_count": len(db_chunks)},
+                exc_info=True,
             )
-            raise ValueError(f"Failed to bulk insert chunks: {str(bulk_error)}")
+            raise ValueError("Failed to store document chunks in database.")
 
         # Update canonical Document status and stats
         doc_repo = DocumentRepository()
-        parser_info = payload.get("parser_output", {})
-        page_count = parser_info.get("page_count", 0)
-        processing_time_ms = parser_info.get("processing_time_ms", 0)
-        parser_used = parser_info.get("parser_name", "unknown")
+        processing_time_ms = payload.get("processing_time_ms") or parser_info.get("processing_time_ms", 0)
+        parser_used = payload.get("parser_name") or parser_info.get("parser_name", "unknown")
 
         doc_updated = doc_repo.mark_completed(
             document_id=document_id,
@@ -516,22 +617,21 @@ def store_vectors_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                 extra={"document_id": document_id, "collection_id": collection_id}
             )
 
-        # Update Collection stats using database aggregate functions
-        # This recomputes document_count and total_chunks from the database,
-        # ensuring accuracy and preventing race conditions from concurrent operations
-        collection_repo = CollectionRepository()
-        stats_updated = collection_repo.recompute_collection_stats(
-            collection_id=collection_id,
-            embedding_model=payload.get("embedding_model"),
-            embedding_dimension=payload.get("embedding_dimension")
-        )
-
-        if not stats_updated:
-            # Collection might have been deleted during indexing (edge case)
-            logger.warning(
-                f"Failed to recompute collection stats - collection may have been deleted",
-                extra={"collection_id": collection_id, "document_id": document_id}
+        # Update Collection stats only when indexing runs in collection context.
+        if collection_id:
+            collection_repo = CollectionRepository()
+            stats_updated = collection_repo.recompute_collection_stats(
+                collection_id=collection_id,
+                embedding_model=payload.get("embedding_model"),
+                embedding_dimension=payload.get("embedding_dimension")
             )
+
+            if not stats_updated:
+                # Collection might have been deleted during indexing (edge case)
+                logger.warning(
+                    "Failed to recompute collection stats - collection may have been deleted",
+                    extra={"collection_id": collection_id, "document_id": document_id}
+                )
 
         tracker.update_progress(
             progress_percent=95,
@@ -545,6 +645,26 @@ def store_vectors_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
             extra={"job_id": job_id, "collection_id": collection_id}
         )
 
+        if user and page_count > 0:
+            usage_updated = user_repo.update_page_usage(
+                user_id=user.id,
+                pages_to_add=page_count,
+                update_monthly=True,
+            )
+            if not usage_updated:
+                logger.warning(
+                    "Failed to increment page usage after indexing",
+                    extra={"user_id": user.id, "document_id": document_id, "page_count": page_count},
+                )
+
+            log_shadow_credits(
+                user=user,
+                operation_type="document_index_page",
+                units=page_count,
+                reference_id=document_id,
+                metadata={"collection_id": collection_id, "filename": payload.get("filename")},
+            )
+
         return {
             "status": "completed",
             "document_id": document_id,
@@ -555,7 +675,8 @@ def store_vectors_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
     except Exception as e:
         tracker.mark_error(
             error_stage="storing",
-            error_message=str(e),
+            error_message="Failed to store document — please try re-uploading.",
+            internal_error=str(e)[:1000],
             error_type="storage_error",
             is_retryable=True
         )
@@ -583,7 +704,7 @@ def start_document_indexing_chain(
     filename: str,
     job_id: str,
     document_id: str,  # Canonical Document ID (from documents table)
-    collection_id: str,
+    collection_id: Optional[str],
     user_id: str,
     canonical_document_id: str | None = None,  # DEPRECATED: document_id is already canonical
     content_hash: str | None = None
@@ -598,7 +719,8 @@ def start_document_indexing_chain(
         filename: Original filename
         job_id: JobState ID for progress tracking
         document_id: Canonical Document ID (from documents table)
-        collection_id: Collection ID
+        collection_id: Optional collection ID (required for chat collection indexing,
+            optional for vertical-specific indexing like PE diligence rooms)
         user_id: User ID
         canonical_document_id: DEPRECATED - document_id is already the canonical ID
         content_hash: SHA256 hash of file content (for deduplication tracking)
@@ -626,7 +748,7 @@ def start_document_indexing_chain(
         store_vectors_task.s(),
     )
 
-    result = task_chain.apply_async()
+    result = task_chain.apply_async(queue='default')
     logger.info(
         "Document indexing pipeline started",
         extra={
@@ -634,7 +756,8 @@ def start_document_indexing_chain(
             "job_id": job_id,
             "task_id": result.id,
             "collection_id": collection_id,
-            "document_id": document_id
+            "document_id": document_id,
+            "queue": "default"
         }
     )
     return result.id

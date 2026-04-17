@@ -9,12 +9,14 @@ Pattern:
 - Makes testing easier with repository mocking
 """
 from datetime import datetime
+import uuid
 from typing import Optional, List
 from contextlib import contextmanager
 from typing import Generator
 
 from app.db_models_users import UsageLog
 from pytz import timezone
+from sqlalchemy import func, case
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
 
@@ -56,6 +58,7 @@ class ExtractionRepository:
     def create_extraction(
         self,
         extraction_id: str,
+        org_id: str,
         user_id: str,
         user_tier: str,
         filename: str,
@@ -89,6 +92,7 @@ class ExtractionRepository:
             try:
                 extraction = Extraction(
                     id=extraction_id,
+                    org_id=org_id,
                     user_id=user_id,
                     user_tier=user_tier,
                     filename=filename,
@@ -107,7 +111,7 @@ class ExtractionRepository:
 
                 logger.debug(
                     f"Created extraction record: {extraction_id}",
-                    extra={"extraction_id": extraction_id}
+                    extra={"extraction_id": extraction_id, "org_id": org_id, "user_id": user_id}
                 )
 
                 return extraction
@@ -115,7 +119,7 @@ class ExtractionRepository:
             except SQLAlchemyError as e:
                 logger.error(
                     f"Failed to create extraction: {e}",
-                    extra={"extraction_id": extraction_id, "error": str(e)}
+                    extra={"extraction_id": extraction_id, "org_id": org_id, "error": str(e)}
                 )
                 db.rollback()
                 return None
@@ -310,7 +314,7 @@ class ExtractionRepository:
         """
         return self.update_status(extraction_id, "failed", error_message)
 
-    def get_extraction(self, extraction_id: str) -> Optional[Extraction]:
+    def get_extraction(self, extraction_id: str, org_id: Optional[str] = None) -> Optional[Extraction]:
         """Get extraction by ID.
 
         Args:
@@ -321,19 +325,21 @@ class ExtractionRepository:
         """
         with self._get_session() as db:
             try:
-                return db.query(Extraction).filter(
-                    Extraction.id == extraction_id
-                ).first()
+                query = db.query(Extraction).filter(Extraction.id == extraction_id)
+                if org_id:
+                    query = query.filter(Extraction.org_id == org_id)
+                return query.first()
             except SQLAlchemyError as e:
                 logger.error(
                     f"Failed to get extraction: {e}",
-                    extra={"extraction_id": extraction_id, "error": str(e)}
+                    extra={"extraction_id": extraction_id, "org_id": org_id, "error": str(e)}
                 )
                 return None
 
     def check_duplicate_extraction(
         self,
         user_id: str,
+        org_id: str,
         content_hash: str
     ) -> Optional[Extraction]:
         """Check if user already has completed extraction for this document.
@@ -349,13 +355,14 @@ class ExtractionRepository:
             try:
                 return db.query(Extraction).filter(
                     Extraction.user_id == user_id,
+                    Extraction.org_id == org_id,
                     Extraction.content_hash == content_hash,
                     Extraction.status == "completed"
                 ).first()
             except SQLAlchemyError as e:
                 logger.error(
                     f"Failed to check duplicate extraction: {e}",
-                    extra={"user_id": user_id, "error": str(e)}
+                    extra={"user_id": user_id, "org_id": org_id, "error": str(e)}
                 )
                 return None
 
@@ -363,6 +370,7 @@ class ExtractionRepository:
         self,
         extraction_id: str,
         document_id: str,
+        org_id: str,
         user_id: str,
         context: Optional[str] = None,
         status: str = "processing"
@@ -384,6 +392,7 @@ class ExtractionRepository:
                 extraction = Extraction(
                     id=extraction_id,
                     document_id=document_id,
+                    org_id=org_id,
                     user_id=user_id,
                     context=context,
                     status=status,
@@ -417,7 +426,7 @@ class ExtractionRepository:
 
                 logger.debug(
                     f"Created extraction record: {extraction_id}",
-                    extra={"extraction_id": extraction_id, "document_id": document_id}
+                    extra={"extraction_id": extraction_id, "document_id": document_id, "org_id": org_id}
                 )
 
                 return extraction
@@ -425,7 +434,7 @@ class ExtractionRepository:
             except SQLAlchemyError as e:
                 logger.error(
                     f"Failed to create extraction record: {e}",
-                    extra={"extraction_id": extraction_id, "error": str(e)}
+                    extra={"extraction_id": extraction_id, "org_id": org_id, "error": str(e)}
                 )
                 db.rollback()
                 return None
@@ -433,6 +442,7 @@ class ExtractionRepository:
     def create_extraction_record(
         self,
         extraction_id: str,
+        org_id: str,
         user_id: str,
         user_tier: str,
         filename: str,
@@ -464,6 +474,7 @@ class ExtractionRepository:
             try:
                 extraction = Extraction(
                     id=extraction_id,
+                    org_id=org_id,
                     user_id=user_id,
                     user_tier=user_tier,
                     filename=filename,
@@ -485,7 +496,7 @@ class ExtractionRepository:
 
                 logger.debug(
                     f"Created extraction record: {extraction_id}",
-                    extra={"extraction_id": extraction_id, "status": status}
+                    extra={"extraction_id": extraction_id, "org_id": org_id, "user_id": user_id, "status": status}
                 )
 
                 return extraction
@@ -493,7 +504,7 @@ class ExtractionRepository:
             except SQLAlchemyError as e:
                 logger.error(
                     f"Failed to create extraction record: {e}",
-                    extra={"extraction_id": extraction_id, "error": str(e)}
+                    extra={"extraction_id": extraction_id, "org_id": org_id, "error": str(e)}
                 )
                 db.rollback()
                 return None
@@ -501,6 +512,7 @@ class ExtractionRepository:
     def get_user_extractions(
         self,
         user_id: str,
+        org_id: str,
         limit: int = 50
     ) -> List[Extraction]:
         """Get recent extractions for a user.
@@ -515,20 +527,22 @@ class ExtractionRepository:
         with self._get_session() as db:
             try:
                 return db.query(Extraction).filter(
-                    Extraction.user_id == user_id
+                    Extraction.user_id == user_id,
+                    Extraction.org_id == org_id
                 ).order_by(
                     Extraction.created_at.desc()
                 ).limit(limit).all()
             except SQLAlchemyError as e:
                 logger.error(
                     f"Failed to get user extractions: {e}",
-                    extra={"user_id": user_id, "error": str(e)}
+                    extra={"user_id": user_id, "org_id": org_id, "error": str(e)}
                 )
                 return []
 
     def list_user_extractions(
         self,
         user_id: str,
+        org_id: str,
         limit: int = 50,
         offset: int = 0,
         status: Optional[str] = None
@@ -547,7 +561,8 @@ class ExtractionRepository:
         with self._get_session() as db:
             try:
                 query = db.query(Extraction).filter(
-                    Extraction.user_id == user_id
+                    Extraction.user_id == user_id,
+                    Extraction.org_id == org_id
                 )
 
                 # Apply status filter if provided
@@ -565,14 +580,15 @@ class ExtractionRepository:
             except SQLAlchemyError as e:
                 logger.error(
                     f"Failed to list user extractions: {e}",
-                    extra={"user_id": user_id, "error": str(e)}
+                    extra={"user_id": user_id, "org_id": org_id, "error": str(e)}
                 )
                 return [], 0
 
     def delete_extraction(
         self,
         extraction_id: str,
-        user_id: str
+        user_id: str,
+        org_id: str
     ) -> bool:
         """Delete an extraction (with ownership verification).
 
@@ -586,13 +602,14 @@ class ExtractionRepository:
         with self._get_session() as db:
             try:
                 extraction = db.query(Extraction).filter(
-                    Extraction.id == extraction_id
+                    Extraction.id == extraction_id,
+                    Extraction.org_id == org_id
                 ).first()
 
                 if not extraction:
                     logger.warning(
                         f"Extraction not found for deletion: {extraction_id}",
-                        extra={"extraction_id": extraction_id, "user_id": user_id}
+                        extra={"extraction_id": extraction_id, "user_id": user_id, "org_id": org_id}
                     )
                     return False
 
@@ -600,7 +617,7 @@ class ExtractionRepository:
                 if extraction.user_id != user_id:
                     logger.warning(
                         f"User {user_id} attempted to delete extraction owned by {extraction.user_id}",
-                        extra={"extraction_id": extraction_id, "user_id": user_id}
+                        extra={"extraction_id": extraction_id, "user_id": user_id, "org_id": org_id}
                     )
                     return False
 
@@ -634,33 +651,54 @@ class ExtractionRepository:
                 db.rollback()
                 return False
 
-    def get_extraction_stats(self, user_id: str) -> dict:
+    def get_extraction_stats(self, user_id: str, org_id: str) -> dict:
         """Get extraction statistics for a user.
+
+        Uses SQL aggregation for efficiency (single query instead of loading all extractions).
 
         Args:
             user_id: User identifier
+            org_id: Organization identifier
 
         Returns:
             Dictionary with stats (total_extractions, total_pages, etc.)
         """
         with self._get_session() as db:
             try:
-                extractions = db.query(Extraction).filter(
-                    Extraction.user_id == user_id
-                ).all()
+                # Use SQL aggregation to avoid loading all extractions into memory
+                result = db.query(
+                    func.count(Extraction.id).label("total_extractions"),
+                    func.coalesce(func.sum(Extraction.page_count), 0).label("total_pages"),
+                    func.coalesce(func.sum(Extraction.cost_usd), 0).label("total_cost"),
+                    func.sum(case(
+                        (Extraction.status == "completed", 1),
+                        else_=0
+                    )).label("successful"),
+                    func.sum(case(
+                        (Extraction.status == "failed", 1),
+                        else_=0
+                    )).label("failed"),
+                    func.sum(case(
+                        (Extraction.from_cache.is_(True), 1),
+                        else_=0
+                    )).label("from_cache")
+                ).filter(
+                    Extraction.user_id == user_id,
+                    Extraction.org_id == org_id
+                ).first()
 
                 return {
-                    "total_extractions": len(extractions),
-                    "total_pages": sum(e.page_count for e in extractions if e.page_count),
-                    "total_cost_usd": sum(e.cost_usd for e in extractions if e.cost_usd),
-                    "successful": len([e for e in extractions if e.status == "completed"]),
-                    "failed": len([e for e in extractions if e.status == "failed"]),
-                    "from_cache": len([e for e in extractions if e.from_cache])
+                    "total_extractions": result.total_extractions or 0,
+                    "total_pages": result.total_pages or 0,
+                    "total_cost_usd": round(float(result.total_cost or 0), 4),
+                    "successful": result.successful or 0,
+                    "failed": result.failed or 0,
+                    "from_cache": result.from_cache or 0
                 }
             except SQLAlchemyError as e:
                 logger.error(
                     f"Failed to get extraction stats: {e}",
-                    extra={"user_id": user_id, "error": str(e)}
+                    extra={"user_id": user_id, "org_id": org_id, "error": str(e)}
                 )
                 return {}
 
@@ -783,6 +821,52 @@ class ExtractionRepository:
                 db.rollback()
                 return False
 
+    def create_usage_log(
+        self,
+        user_id: str,
+        org_id: str,
+        extraction_id: Optional[str],
+        pages_processed: int,
+        operation_type: str = "extraction",
+        cost_usd: float = 0.0,
+        filename: Optional[str] = None
+    ) -> bool:
+        """Create a usage log entry.
+
+        Args:
+            user_id: User ID
+            extraction_id: Related extraction ID (optional)
+            pages_processed: Number of pages processed
+            operation_type: Operation type (extraction, parsing, etc.)
+            cost_usd: Cost in USD
+            filename: Optional filename for display
+
+        Returns:
+            True if created, False otherwise
+        """
+        with self._get_session() as db:
+            try:
+                usage_log = UsageLog(
+                    id=str(uuid.uuid4()),
+                    user_id=user_id,
+                    org_id=org_id,
+                    extraction_id=extraction_id,
+                    pages_processed=pages_processed,
+                    operation_type=operation_type,
+                    cost_usd=cost_usd,
+                    filename=filename
+                )
+                db.add(usage_log)
+                db.commit()
+                return True
+            except SQLAlchemyError as e:
+                logger.error(
+                    f"Failed to create usage log: {e}",
+                    extra={"user_id": user_id, "org_id": org_id, "extraction_id": extraction_id}
+                )
+                db.rollback()
+                return False
+
     def mark_extraction_failed(
         self,
         extraction_id: str,
@@ -830,6 +914,7 @@ class ExtractionRepository:
         self,
         content_hash: str,
         user_id: str,
+        org_id: str,
         context: Optional[str] = None
     ) -> Optional[Extraction]:
         """Check if user already extracted this file with same context.
@@ -858,7 +943,9 @@ class ExtractionRepository:
                     Document, Extraction.document_id == Document.id
                 ).filter(
                     Document.content_hash == content_hash,
+                    Document.org_id == org_id,
                     Extraction.user_id == user_id,
+                    Extraction.org_id == org_id,
                     Extraction.status == "completed"
                 )
 
@@ -873,7 +960,7 @@ class ExtractionRepository:
             except SQLAlchemyError as e:
                 logger.error(
                     f"Failed to check duplicate extraction: {e}",
-                    extra={"content_hash": content_hash, "user_id": user_id, "error": str(e)}
+                    extra={"content_hash": content_hash, "user_id": user_id, "org_id": org_id, "error": str(e)}
                 )
                 return None
 
@@ -881,6 +968,7 @@ class ExtractionRepository:
         self,
         document_id: str,
         user_id: str,
+        org_id: str,
         context: Optional[str] = None
     ) -> Optional[Extraction]:
         """Check if user already extracted this specific document with same context.
@@ -904,6 +992,7 @@ class ExtractionRepository:
                 query = db.query(Extraction).filter(
                     Extraction.document_id == document_id,
                     Extraction.user_id == user_id,
+                    Extraction.org_id == org_id,
                     Extraction.status == "completed"
                 )
 
@@ -918,11 +1007,11 @@ class ExtractionRepository:
             except SQLAlchemyError as e:
                 logger.error(
                     f"Failed to check duplicate extraction: {e}",
-                    extra={"document_id": document_id, "user_id": user_id, "error": str(e)}
+                    extra={"document_id": document_id, "user_id": user_id, "org_id": org_id, "error": str(e)}
                 )
                 return None
 
-    def get_active_processing_extraction(self, user_id: str) -> Optional[Extraction]:
+    def get_active_processing_extraction(self, user_id: str, org_id: str) -> Optional[Extraction]:
         """Return an active (queued or processing) extraction for user if one exists.
 
         Used to enforce single-concurrent-extraction constraint per user.
@@ -932,11 +1021,12 @@ class ExtractionRepository:
             try:
                 return db.query(Extraction).filter(
                     Extraction.user_id == user_id,
+                    Extraction.org_id == org_id,
                     Extraction.status.in_(["processing", "queued"])
                 ).order_by(Extraction.created_at.desc()).first()
             except SQLAlchemyError as e:
                 logger.error(
                     "Failed to check active processing extraction",
-                    extra={"user_id": user_id, "error": str(e)}
+                    extra={"user_id": user_id, "org_id": org_id, "error": str(e)}
                 )
                 return None

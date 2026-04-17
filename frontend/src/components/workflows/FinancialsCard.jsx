@@ -107,7 +107,8 @@ export default function FinancialsCard({ financials, currency = "USD", embedded 
                   <th className="text-left py-3 px-4 font-bold text-foreground">Year</th>
                   <th className="text-right py-3 px-4 font-bold text-foreground">Revenue</th>
                   <th className="text-right py-3 px-4 font-bold text-foreground">EBITDA</th>
-                  <th className="text-right py-3 px-4 font-bold text-foreground">Margin</th>
+                  <th className="text-right py-3 px-4 font-bold text-foreground">EBITDA Margin</th>
+                  <th className="text-right py-3 px-4 font-bold text-foreground">Net Income</th>
                 </tr>
               </thead>
               <tbody>
@@ -133,15 +134,18 @@ export default function FinancialsCard({ financials, currency = "USD", embedded 
                       {row.ebitda ? formatCurrency(row.ebitda, currency) : "—"}
                     </td>
                     <td className="py-3 px-4 text-right">
-                      {row.margin ? (
+                      {(row.ebitda_margin || row.margin) ? (
                         <span className={`font-semibold ${
-                          row.margin > 0.2 ? 'text-success' :
-                          row.margin > 0.1 ? 'text-primary' :
+                          (row.ebitda_margin || row.margin) > 0.2 ? 'text-success' :
+                          (row.ebitda_margin || row.margin) > 0.1 ? 'text-primary' :
                           'text-muted-foreground'
                         }`}>
-                          {(row.margin * 100).toFixed(1)}%
+                          {((row.ebitda_margin || row.margin) * 100).toFixed(1)}%
                         </span>
                       ) : "—"}
+                    </td>
+                    <td className="py-3 px-4 text-right font-mono text-foreground">
+                      {row.net_income ? formatCurrency(row.net_income, currency) : "—"}
                     </td>
                   </tr>
                 ))}

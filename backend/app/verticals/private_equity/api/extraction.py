@@ -4,10 +4,8 @@ Routes: /api/v1/pe/extraction/*
 
 Provides extraction functionality for PE vertical.
 """
-from fastapi import APIRouter, Depends, HTTPException, UploadFile, File, Form, Body, Request
-from fastapi.responses import JSONResponse, Response
+from fastapi import APIRouter, Depends, UploadFile, File, Form, Body, Request
 from typing import Optional
-from pydantic import BaseModel
 
 from app.auth import get_current_user
 from app.db_models_users import User
@@ -31,7 +29,7 @@ async def list_pe_extractions(
     """List extractions for PE vertical (user's extractions)."""
     logger.info("Listing PE extractions", extra={"user_id": user.id, "limit": limit, "offset": offset})
     repo = ExtractionRepository()
-    extractions, total = repo.list_user_extractions(user.id, limit=limit, offset=offset, status=status)
+    extractions, total = repo.list_user_extractions(user.id, user.org_id, limit=limit, offset=offset, status=status)
     result = []
     for e in extractions:
         result.append(ExtractionListItem(

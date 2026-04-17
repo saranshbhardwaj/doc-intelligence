@@ -10,12 +10,14 @@ RUN addgroup --system app && adduser --system --ingroup app appuser
 WORKDIR /worker
 
 COPY requirements.txt ./requirements.txt
-RUN pip install --upgrade pip && pip install -r requirements.txt
+RUN pip install --upgrade pip && \
+    pip install torch --index-url https://download.pytorch.org/whl/cpu && \
+    pip install -r requirements.txt
 
 COPY . .
 
-# Ensure ownership for runtime writable paths (logs, HuggingFace cache, etc.)
-RUN mkdir -p /shared_uploads /worker/logs /worker/.cache && chown -R appuser:app /shared_uploads /worker/logs /worker /worker/.cache
+# Ensure ownership for runtime writable paths (logs, HuggingFace cache, Prometheus metrics, etc.)
+RUN mkdir -p /shared_uploads /worker/logs /worker/.cache /tmp/prometheus_multiproc && chown -R appuser:app /shared_uploads /worker/logs /worker /worker/.cache /tmp/prometheus_multiproc
 
 ENV USE_CELERY=true
 ENV CELERY_BROKER_URL=${CELERY_BROKER_URL}
@@ -27,6 +29,12 @@ ENV HF_HOME=/worker/.cache/huggingface
 # Switch to non-root user
 USER appuser
 
-# Command to start celery worker; --pool=solo (single process). Remove --pool to enable multiprocessing.
-# Example for multi-process: celery -A app.celery_app.celery_app worker --loglevel=info --concurrency=4
-CMD ["celery", "-A", "app.celery_app.celery_app", "worker", "--loglevel=info", "--pool=solo"]
+# Solo pool: single-process worker (no multiprocess complexity).
+# Horizontal scaling via multiple worker containers in docker-compose.yml.
+# This approach:
+#   - Simplifies Prometheus metrics (no multiprocess aggregation issues)
+#   - Scales by adding more containers (industry standard)
+#   - Avoids worker recycling / prefork initialization problems
+# Each worker loads full app (~300-500MB), so scale container count based on load.
+# Use python -Xfrozen_modules=off for more reliable breakpoints.
+CMD ["python", "-Xfrozen_modules=off", "-m", "celery", "-A", "app.celery_app.celery_app", "worker", "--loglevel=info", "--pool=solo"]

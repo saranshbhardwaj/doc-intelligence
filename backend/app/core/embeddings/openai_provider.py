@@ -3,10 +3,18 @@
 OpenAI embedding provider (paid API).
 Uses OpenAI's embedding models via API.
 """
+import time
 from typing import List
 from openai import OpenAI
 from app.core.embeddings.base import EmbeddingProvider
 from app.utils.logging import logger
+from app.utils.metrics import (
+    EMBEDDING_REQUESTS_TOTAL,
+    EMBEDDING_FAILURES_TOTAL,
+    EMBEDDING_RETRIES_TOTAL,
+    EMBEDDING_LATENCY_SECONDS,
+    EMBEDDING_TOKEN_USAGE,
+)
 
 
 class OpenAIEmbedding(EmbeddingProvider):
@@ -24,23 +32,25 @@ class OpenAIEmbedding(EmbeddingProvider):
     - API latency
     """
 
-    # Model dimensions mapping
-    DIMENSIONS = {
+    # Default (maximum) dimensions per model
+    MAX_DIMENSIONS = {
         "text-embedding-3-small": 1536,
         "text-embedding-3-large": 3072,
-        "text-embedding-ada-002": 1536,  # Legacy model
+        "text-embedding-ada-002": 1536,  # Legacy model (does not support dimensions param)
     }
 
-    def __init__(self, api_key: str, model_name: str = "text-embedding-3-small"):
+    # Models that support the `dimensions` API parameter (Matryoshka dimensionality reduction)
+    SUPPORTS_DIMENSIONS_PARAM = {"text-embedding-3-small", "text-embedding-3-large"}
+
+    def __init__(self, api_key: str, model_name: str = "text-embedding-3-small", dimensions: int = None):
         """
         Initialize OpenAI embedding client.
 
         Args:
             api_key: OpenAI API key
             model_name: OpenAI embedding model name
-                - text-embedding-3-small: 1536d, $0.02 per 1M tokens (recommended)
-                - text-embedding-3-large: 3072d, $0.13 per 1M tokens (higher quality)
-                - text-embedding-ada-002: 1536d, legacy model
+            dimensions: Output dimension (reduced via Matryoshka). Only supported by v3 models.
+                If None, uses the model's default max dimension.
         """
         if not api_key:
             raise ValueError("OpenAI API key is required for OpenAI embeddings")
@@ -48,11 +58,22 @@ class OpenAIEmbedding(EmbeddingProvider):
         self._model_name = model_name
         self.client = OpenAI(api_key=api_key)
 
-        # Get dimension from mapping
-        if model_name not in self.DIMENSIONS:
-            raise ValueError(f"Unknown OpenAI model: {model_name}. Supported: {list(self.DIMENSIONS.keys())}")
+        if model_name not in self.MAX_DIMENSIONS:
+            raise ValueError(f"Unknown OpenAI model: {model_name}. Supported: {list(self.MAX_DIMENSIONS.keys())}")
 
-        self._dimension = self.DIMENSIONS[model_name]
+        max_dim = self.MAX_DIMENSIONS[model_name]
+
+        # Use custom dimensions if provided, otherwise use model default
+        if dimensions is not None:
+            if model_name not in self.SUPPORTS_DIMENSIONS_PARAM:
+                raise ValueError(f"Model {model_name} does not support custom dimensions")
+            if dimensions < 1 or dimensions > max_dim:
+                raise ValueError(f"dimensions must be between 1 and {max_dim} for {model_name}, got {dimensions}")
+            self._dimension = dimensions
+            self._use_dimensions_param = True
+        else:
+            self._dimension = max_dim
+            self._use_dimensions_param = False
 
         logger.info(f"OpenAI embeddings initialized: {model_name} (dimension: {self._dimension})")
 
@@ -78,37 +99,79 @@ class OpenAIEmbedding(EmbeddingProvider):
             logger.warning("Empty text provided for embedding, returning zero vector")
             return [0.0] * self._dimension
 
-        # Edge case: Handle API failures
-        try:
-            response = self.client.embeddings.create(
-                model=self._model_name,
-                input=text
-            )
+        # Retry logic for transient API errors (rate limits, overloads)
+        max_retries = 3
+        retry_delay = 2  # seconds base delay
 
-            # Edge case: Validate API response
-            if not response or not response.data:
-                raise RuntimeError("OpenAI API returned empty response")
+        for attempt in range(max_retries):
+            request_start = time.time()
+            try:
+                create_kwargs = {"model": self._model_name, "input": text}
+                if self._use_dimensions_param:
+                    create_kwargs["dimensions"] = self._dimension
+                response = self.client.embeddings.create(**create_kwargs)
 
-            if len(response.data) == 0:
-                raise RuntimeError("OpenAI API returned no embeddings")
+                # Record metrics
+                elapsed = time.time() - request_start
+                EMBEDDING_LATENCY_SECONDS.labels(model=self._model_name).observe(elapsed)
+                EMBEDDING_REQUESTS_TOTAL.labels(model=self._model_name).inc()
 
-            embedding = response.data[0].embedding
+                usage = getattr(response, "usage", None)
+                if usage:
+                    total_tokens = getattr(usage, "total_tokens", 0)
+                    if total_tokens:
+                        EMBEDDING_TOKEN_USAGE.labels(model=self._model_name).inc(total_tokens)
 
-            # Edge case: Validate embedding dimension
-            if len(embedding) != self._dimension:
-                logger.warning(
-                    f"OpenAI embedding dimension mismatch: expected {self._dimension}, got {len(embedding)}"
+                # Validate API response
+                if not response or not response.data:
+                    raise RuntimeError("OpenAI API returned empty response")
+                if len(response.data) == 0:
+                    raise RuntimeError("OpenAI API returned no embeddings")
+
+                embedding = response.data[0].embedding
+
+                if len(embedding) != self._dimension:
+                    logger.warning(
+                        f"OpenAI embedding dimension mismatch: expected {self._dimension}, got {len(embedding)}"
+                    )
+
+                return embedding
+
+            except Exception as e:
+                error_str = str(e)
+                is_retryable = (
+                    "429" in error_str or
+                    "529" in error_str or
+                    "Overloaded" in error_str or
+                    "overloaded_error" in error_str
                 )
 
-            return embedding
+                if "429" in error_str:
+                    error_type = "rate_limit"
+                elif "529" in error_str or "Overloaded" in error_str:
+                    error_type = "overload"
+                elif "timeout" in error_str.lower():
+                    error_type = "timeout"
+                else:
+                    error_type = "other"
 
-        except Exception as e:
-            logger.error(
-                f"OpenAI API embedding failed: {e}",
-                extra={"model": self._model_name, "text_length": len(text)},
-                exc_info=True
-            )
-            raise RuntimeError(f"Failed to generate OpenAI embedding: {e}") from e
+                if is_retryable and attempt < max_retries - 1:
+                    EMBEDDING_RETRIES_TOTAL.labels(model=self._model_name).inc()
+                    wait_time = retry_delay * (2 ** attempt)  # 2s, 4s, 8s
+                    logger.warning(
+                        f"OpenAI embedding API error ({error_type}), retrying in {wait_time}s "
+                        f"(attempt {attempt + 1}/{max_retries}): {e}"
+                    )
+                    time.sleep(wait_time)
+                else:
+                    EMBEDDING_REQUESTS_TOTAL.labels(model=self._model_name).inc()
+                    EMBEDDING_FAILURES_TOTAL.labels(model=self._model_name, error_type=error_type).inc()
+                    logger.error(
+                        f"OpenAI API embedding failed: {e}",
+                        extra={"model": self._model_name, "text_length": len(text), "attempts": attempt + 1},
+                        exc_info=True
+                    )
+                    raise RuntimeError(f"Failed to generate OpenAI embedding: {e}") from e
 
     def embed_batch(self, texts: List[str]) -> List[List[float]]:
         """
@@ -157,36 +220,76 @@ class OpenAIEmbedding(EmbeddingProvider):
             for i in range(0, len(valid_texts), max_batch_size):
                 batch = valid_texts[i:i + max_batch_size]
 
-                # Edge case: Handle API failures per batch
-                try:
-                    response = self.client.embeddings.create(
-                        model=self._model_name,
-                        input=batch
-                    )
+                # Retry logic for each batch chunk
+                batch_num = i // max_batch_size + 1
+                max_retries = 3
+                retry_delay = 2
 
-                    # Edge case: Validate API response
-                    if not response or not response.data:
-                        raise RuntimeError(f"OpenAI API returned empty response for batch {i//max_batch_size + 1}")
+                for attempt in range(max_retries):
+                    request_start = time.time()
+                    try:
+                        create_kwargs = {"model": self._model_name, "input": batch}
+                        if self._use_dimensions_param:
+                            create_kwargs["dimensions"] = self._dimension
+                        response = self.client.embeddings.create(**create_kwargs)
 
-                    if len(response.data) != len(batch):
-                        raise RuntimeError(
-                            f"OpenAI API returned {len(response.data)} embeddings "
-                            f"but expected {len(batch)} for batch {i//max_batch_size + 1}"
+                        # Record metrics
+                        elapsed = time.time() - request_start
+                        EMBEDDING_LATENCY_SECONDS.labels(model=self._model_name).observe(elapsed)
+                        EMBEDDING_REQUESTS_TOTAL.labels(model=self._model_name).inc()
+
+                        usage = getattr(response, "usage", None)
+                        if usage:
+                            total_tokens = getattr(usage, "total_tokens", 0)
+                            if total_tokens:
+                                EMBEDDING_TOKEN_USAGE.labels(model=self._model_name).inc(total_tokens)
+
+                        # Validate API response
+                        if not response or not response.data:
+                            raise RuntimeError(f"OpenAI API returned empty response for batch {batch_num}")
+                        if len(response.data) != len(batch):
+                            raise RuntimeError(
+                                f"OpenAI API returned {len(response.data)} embeddings "
+                                f"but expected {len(batch)} for batch {batch_num}"
+                            )
+
+                        batch_embeddings = [item.embedding for item in response.data]
+                        valid_embeddings.extend(batch_embeddings)
+                        break  # Success, exit retry loop
+
+                    except Exception as batch_error:
+                        error_str = str(batch_error)
+                        is_retryable = (
+                            "429" in error_str or "529" in error_str or
+                            "Overloaded" in error_str or "overloaded_error" in error_str
                         )
 
-                    # Extract embeddings (response.data is sorted by input order)
-                    batch_embeddings = [item.embedding for item in response.data]
-                    valid_embeddings.extend(batch_embeddings)
+                        if "429" in error_str:
+                            error_type = "rate_limit"
+                        elif "529" in error_str or "Overloaded" in error_str:
+                            error_type = "overload"
+                        else:
+                            error_type = "other"
 
-                except Exception as batch_error:
-                    logger.error(
-                        f"OpenAI API batch embedding failed for batch {i//max_batch_size + 1}: {batch_error}",
-                        extra={"model": self._model_name, "batch_size": len(batch)},
-                        exc_info=True
-                    )
-                    raise RuntimeError(
-                        f"Failed to generate OpenAI embeddings for batch {i//max_batch_size + 1}: {batch_error}"
-                    ) from batch_error
+                        if is_retryable and attempt < max_retries - 1:
+                            EMBEDDING_RETRIES_TOTAL.labels(model=self._model_name).inc()
+                            wait_time = retry_delay * (2 ** attempt)
+                            logger.warning(
+                                f"OpenAI embedding batch API error ({error_type}), retrying in {wait_time}s "
+                                f"(attempt {attempt + 1}/{max_retries})"
+                            )
+                            time.sleep(wait_time)
+                        else:
+                            EMBEDDING_REQUESTS_TOTAL.labels(model=self._model_name).inc()
+                            EMBEDDING_FAILURES_TOTAL.labels(model=self._model_name, error_type=error_type).inc()
+                            logger.error(
+                                f"OpenAI API batch embedding failed for batch {batch_num}: {batch_error}",
+                                extra={"model": self._model_name, "batch_size": len(batch), "attempts": attempt + 1},
+                                exc_info=True
+                            )
+                            raise RuntimeError(
+                                f"Failed to generate OpenAI embeddings for batch {batch_num}: {batch_error}"
+                            ) from batch_error
 
             # Reconstruct full results with zeros for invalid texts
             results = []

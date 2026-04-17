@@ -8,14 +8,14 @@ Pattern:
 - Repositories handle session management and error handling
 - Makes testing easier with repository mocking
 """
-from datetime import datetime
 from typing import Optional, List
 from contextlib import contextmanager
+from sqlalchemy import func, case
 from sqlalchemy.orm import Session
 from sqlalchemy.exc import SQLAlchemyError
 
 from app.database import SessionLocal
-from app.db_models_chat import ChatSession, ChatMessage
+from app.db_models_chat import ChatSession, ChatMessage, SessionDocument
 from app.utils.logging import logger
 
 
@@ -96,7 +96,13 @@ class ChatRepository:
         num_chunks_retrieved: Optional[int] = None,
         model_used: Optional[str] = None,
         tokens_used: Optional[int] = None,
-        cost_usd: Optional[float] = None
+        cost_usd: Optional[float] = None,
+        comparison_metadata: Optional[str] = None,
+        citation_metadata: Optional[str] = None,
+        input_tokens: Optional[int] = None,
+        output_tokens: Optional[int] = None,
+        cache_read_tokens: Optional[int] = None,
+        cache_write_tokens: Optional[int] = None
     ) -> Optional[ChatMessage]:
         """Save a chat message (user or assistant).
 
@@ -109,8 +115,14 @@ class ChatRepository:
             source_chunks: JSON array of chunk IDs used (for assistant messages)
             num_chunks_retrieved: Number of chunks retrieved
             model_used: LLM model used (for assistant messages)
-            tokens_used: Tokens consumed
+            tokens_used: Tokens consumed (legacy, total)
             cost_usd: Cost in USD
+            comparison_metadata: JSON serialized ComparisonContext (for comparison queries)
+            citation_metadata: JSON serialized citation context (for clickable citations)
+            input_tokens: Granular input tokens for observability
+            output_tokens: Granular output tokens for observability
+            cache_read_tokens: Cache read tokens for observability
+            cache_write_tokens: Cache write tokens for observability
 
         Returns:
             ChatMessage object if successful, None on error
@@ -127,7 +139,13 @@ class ChatRepository:
                     num_chunks_retrieved=num_chunks_retrieved,
                     model_used=model_used,
                     tokens_used=tokens_used,
-                    cost_usd=cost_usd
+                    cost_usd=cost_usd,
+                    comparison_metadata=comparison_metadata,
+                    citation_metadata=citation_metadata,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    cache_read_tokens=cache_read_tokens,
+                    cache_write_tokens=cache_write_tokens
                 )
                 db.add(message)
                 db.commit()
@@ -210,6 +228,31 @@ class ChatRepository:
                 )
                 return 0
 
+    def get_user_message_count(
+        self,
+        session_id: str
+    ) -> int:
+        """Get count of user messages in a session (for session length warning).
+
+        Args:
+            session_id: Session ID
+
+        Returns:
+            Number of user messages in session
+        """
+        with self._get_session() as db:
+            try:
+                return db.query(ChatMessage).filter(
+                    ChatMessage.session_id == session_id,
+                    ChatMessage.role == "user"
+                ).count()
+            except SQLAlchemyError as e:
+                logger.error(
+                    f"Failed to count user messages: {e}",
+                    extra={"session_id": session_id, "error": str(e)}
+                )
+                return 0
+
     def delete_message(
         self,
         message_id: str
@@ -239,7 +282,7 @@ class ChatRepository:
                 db.commit()
 
                 logger.debug(
-                    f"Deleted chat message",
+                    "Deleted chat message",
                     extra={"message_id": message_id}
                 )
 
@@ -259,6 +302,8 @@ class ChatRepository:
     ) -> dict:
         """Get statistics for a chat session.
 
+        Uses SQL aggregation for efficiency (single query instead of loading all messages).
+
         Args:
             session_id: Session ID
 
@@ -267,19 +312,29 @@ class ChatRepository:
         """
         with self._get_session() as db:
             try:
-                messages = db.query(ChatMessage).filter(
+                # Use SQL aggregation to avoid loading all messages into memory
+                result = db.query(
+                    func.count(ChatMessage.id).label("message_count"),
+                    func.sum(case(
+                        (ChatMessage.role == "user", 1),
+                        else_=0
+                    )).label("user_messages"),
+                    func.sum(case(
+                        (ChatMessage.role == "assistant", 1),
+                        else_=0
+                    )).label("assistant_messages"),
+                    func.coalesce(func.sum(ChatMessage.tokens_used), 0).label("total_tokens"),
+                    func.coalesce(func.sum(ChatMessage.cost_usd), 0).label("total_cost")
+                ).filter(
                     ChatMessage.session_id == session_id
-                ).all()
-
-                total_tokens = sum(m.tokens_used for m in messages if m.tokens_used)
-                total_cost = sum(m.cost_usd for m in messages if m.cost_usd)
+                ).first()
 
                 return {
-                    "message_count": len(messages),
-                    "user_messages": len([m for m in messages if m.role == "user"]),
-                    "assistant_messages": len([m for m in messages if m.role == "assistant"]),
-                    "total_tokens": total_tokens,
-                    "total_cost_usd": round(total_cost, 4)
+                    "message_count": result.message_count or 0,
+                    "user_messages": result.user_messages or 0,
+                    "assistant_messages": result.assistant_messages or 0,
+                    "total_tokens": result.total_tokens or 0,
+                    "total_cost_usd": round(float(result.total_cost or 0), 4)
                 }
 
             except SQLAlchemyError as e:
@@ -288,3 +343,64 @@ class ChatRepository:
                     extra={"session_id": session_id, "error": str(e)}
                 )
                 return {}
+
+    def get_or_build_document_index(self, session_id: str) -> dict:
+        """
+        Return the stable D-number → document_id mapping for a session, building
+        it on first call and persisting it to the DB.
+
+        Ordering: session_documents.added_at ASC — first document added = D1, etc.
+        Once built the index is frozen; new documents appended to the session get
+        the next available D-number on the next call.
+
+        Returns: {"D1": "doc-uuid-A", "D2": "doc-uuid-B", ...}
+        """
+        with self._get_session() as db:
+            session = db.query(ChatSession).filter(ChatSession.id == session_id).first()
+            if not session:
+                return {}
+
+            existing = session.document_index or {}
+
+            # Fetch all documents currently in the session, ordered by addition time
+            session_docs = (
+                db.query(SessionDocument)
+                .filter(SessionDocument.session_id == session_id)
+                .order_by(SessionDocument.added_at.asc())
+                .all()
+            )
+
+            if not session_docs:
+                return existing
+
+            # Build reverse map: doc_id → D-label (from existing index)
+            doc_id_to_label = {v: k for k, v in existing.items()}
+
+            # All documents already indexed — nothing to do
+            if len(doc_id_to_label) == len(session_docs):
+                return existing
+
+            updated = dict(existing)
+            changed = False
+            next_num = len(existing) + 1
+
+            for sd in session_docs:
+                if sd.document_id not in doc_id_to_label:
+                    label = f"D{next_num}"
+                    updated[label] = sd.document_id
+                    doc_id_to_label[sd.document_id] = label
+                    next_num += 1
+                    changed = True
+
+            if changed:
+                try:
+                    session.document_index = updated
+                    db.commit()
+                    logger.info(
+                        f"Built document_index for session {session_id}: {list(updated.keys())}"
+                    )
+                except SQLAlchemyError as e:
+                    logger.warning(f"Failed to persist document_index for session {session_id}: {e}")
+                    db.rollback()
+
+            return updated

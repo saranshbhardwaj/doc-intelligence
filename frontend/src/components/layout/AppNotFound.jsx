@@ -1,10 +1,10 @@
 // src/components/AppNotFound.jsx
 import AppLayout from "./AppLayout";
 import { Link } from "react-router-dom";
-import { useAuth } from "@clerk/clerk-react";
+import { useAppAuth } from "@/hooks/useAppAuth";
 
 export default function AppNotFound() {
-  const { isLoaded, userId } = useAuth();
+  const { isLoaded, userId } = useAppAuth();
 
   if (!isLoaded) return null;
 

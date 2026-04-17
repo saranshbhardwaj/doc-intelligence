@@ -1,6 +1,6 @@
 # backend/app/db_models.py
 """SQLAlchemy database models for Extract mode and job tracking"""
-from sqlalchemy import Column, String, Integer, Float, DateTime, Boolean, Text, ForeignKey, JSON, CheckConstraint, Index
+from sqlalchemy import Column, String, Integer, Float, DateTime, Boolean, Text, ForeignKey, Index
 from sqlalchemy.sql import func
 from sqlalchemy.orm import relationship
 from sqlalchemy.dialects.postgresql import JSONB
@@ -18,11 +18,13 @@ class Extraction(Base):
     __tablename__ = "extractions"
     __table_args__ = (
         Index("idx_extractions_user_id", "user_id"),
+        Index("idx_extractions_org_id", "org_id"),
         Index("idx_extractions_document_id", "document_id"),
     )
 
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     document_id = Column(String(36), ForeignKey("documents.id", ondelete="SET NULL"), nullable=True)
+    org_id = Column(String(64), nullable=False, index=True)  # Clerk org ID (tenant)
     user_id = Column(String(100), nullable=False, index=True)  # Clerk user ID
 
     # Snapshot of source document & parsing metadata (duplicated for fast access & historical audit)
@@ -50,6 +52,12 @@ class Extraction(Base):
 
     # Aggregated total cost (parser + LLM + storage, etc.)
     total_cost_usd = Column(Float, default=0.0)
+
+    # LLM token tracking for observability (separate from parser cost)
+    llm_input_tokens = Column(Integer, nullable=True)
+    llm_output_tokens = Column(Integer, nullable=True)
+    llm_model_name = Column(String(100), nullable=True)
+    llm_cost_usd = Column(Float, nullable=True)
 
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     completed_at = Column(DateTime(timezone=True), nullable=True)
@@ -103,36 +111,30 @@ class JobState(Base):
     """
     Track real-time job progress through processing pipeline.
 
-    Supports Extract Mode, Chat Mode, and Workflow Mode:
-    - Extract Mode: extraction_id is set
-    - Chat Mode: document_id is set (for chat indexing)
-    - Workflow Mode: workflow_run_id is set
+    Uses a polymorphic entity_type + entity_id pattern — extensible to any new
+    entity type without schema migrations. Integrity enforced at application level.
 
-    A CHECK constraint ensures exactly one foreign key is set (XOR logic).
+    Supported entity_type values:
+    - "extraction"        — PE extraction run
+    - "document"          — Library document indexing
+    - "workflow_run"      — PE workflow run
+    - "template_fill_run" — RE template fill run
+    - "analysis_run"      — PE diligence analysis run
+    - "investigation_run" — PE diligence investigation run
     """
     __tablename__ = "job_states"
     __table_args__ = (
-        # Ensure exactly ONE of extraction_id, document_id, workflow_run_id is set
-        CheckConstraint(
-            '((extraction_id IS NOT NULL AND document_id IS NULL AND workflow_run_id IS NULL) OR '
-            '(extraction_id IS NULL AND document_id IS NOT NULL AND workflow_run_id IS NULL) OR '
-            '(extraction_id IS NULL AND document_id IS NULL AND workflow_run_id IS NOT NULL))',
-            name='job_states_entity_exactly_one_fk_check'
-        ),
         Index("idx_job_states_job_id", "job_id"),
         Index("idx_job_states_status", "status"),
-        Index("idx_job_states_extraction_id", "extraction_id"),
-        Index("idx_job_states_document_id", "document_id"),
-        Index("idx_job_states_workflow_run_id", "workflow_run_id"),
+        Index("idx_job_states_entity", "entity_type", "entity_id"),
     )
 
     id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     job_id = Column(String(36), unique=True, nullable=False)  # Job ID for tracking
 
-    # Entity being processed (exactly one must be set)
-    extraction_id = Column(String(36), ForeignKey("extractions.id", ondelete="CASCADE"), nullable=True)
-    document_id = Column(String(36), ForeignKey("documents.id", ondelete="CASCADE"), nullable=True)
-    workflow_run_id = Column(String(36), ForeignKey("workflow_runs.id", ondelete="CASCADE"), nullable=True)
+    # Polymorphic entity reference — no FK constraint, integrity enforced at app level
+    entity_type = Column(String(50), nullable=False)  # e.g. "extraction", "document", "workflow_run"
+    entity_id = Column(String(36), nullable=False)    # UUID of the referenced entity
 
     # Current status
     status = Column(String(20), default="queued")  # queued, parsing, chunking, embedding, storing, completed, failed
@@ -142,15 +144,18 @@ class JobState(Base):
     # Stage tracking flags (completed stages)
     parsing_completed = Column(Boolean, default=False)
     chunking_completed = Column(Boolean, default=False)
-    summarizing_completed = Column(Boolean, default=False)
-    extracting_completed = Column(Boolean, default=False)
     embedding_completed = Column(Boolean, default=False)
     storing_completed = Column(Boolean, default=False)
 
     # Workflow-specific stage flags
     context_completed = Column(Boolean, default=False)
     artifact_completed = Column(Boolean, default=False)
-    validation_completed = Column(Boolean, default=False)
+
+    # Template fill-specific stage flags
+    field_detection_completed = Column(Boolean, default=False)
+    auto_mapping_completed = Column(Boolean, default=False)
+    data_extraction_completed = Column(Boolean, default=False)
+    excel_filling_completed = Column(Boolean, default=False)
 
     # File paths for cached intermediate results (for resume capability)
     parsed_output_path = Column(String(500), nullable=True)
@@ -171,3 +176,91 @@ class JobState(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     completed_at = Column(DateTime(timezone=True), nullable=True)
+
+
+class AnthropicUsageSnapshot(Base):
+    """Daily usage and cost snapshots from Anthropic Admin API.
+
+    Stores ground-truth token usage and costs as reported by Anthropic's billing system.
+    Used for cost reconciliation and validating internal tracking accuracy.
+    """
+    __tablename__ = "anthropic_usage_snapshots"
+    __table_args__ = (
+        Index("idx_anthropic_snapshots_date", "snapshot_date"),
+        Index("idx_anthropic_snapshots_date_model", "snapshot_date", "model"),
+        {"schema": None},  # Use default schema
+    )
+
+    id = Column(String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+
+    # Time dimensions
+    snapshot_date = Column(
+        DateTime(timezone=False),  # Store as date (no timezone)
+        nullable=False,
+        index=True,
+        comment="The date this snapshot covers (UTC)"
+    )
+    fetched_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        comment="When we fetched this data from Anthropic API"
+    )
+
+    # Model dimension
+    model = Column(
+        String(100),
+        nullable=False,
+        comment="Model name (e.g., claude-sonnet-4-5-20250929)"
+    )
+
+    # Usage data (from /usage_report/messages)
+    input_tokens = Column(
+        Integer,
+        nullable=False,
+        server_default="0",
+        comment="Input tokens (user messages + context)"
+    )
+    output_tokens = Column(
+        Integer,
+        nullable=False,
+        server_default="0",
+        comment="Output tokens (assistant responses)"
+    )
+    cache_read_input_tokens = Column(
+        Integer,
+        nullable=False,
+        server_default="0",
+        comment="Tokens read from prompt cache"
+    )
+    cache_creation_input_tokens = Column(
+        Integer,
+        nullable=False,
+        server_default="0",
+        comment="Tokens written to prompt cache"
+    )
+
+    # Cost data (from /cost_report)
+    cost_usd = Column(
+        Float,
+        nullable=False,
+        server_default="0",
+        comment="Cost in USD as reported by Anthropic"
+    )
+
+    # Raw API responses (for debugging/audit)
+    raw_usage_response = Column(
+        JSONB,
+        nullable=True,
+        comment="Raw usage API response for this snapshot"
+    )
+    raw_cost_response = Column(
+        JSONB,
+        nullable=True,
+        comment="Raw cost API response for this snapshot"
+    )
+
+
+# Import template models to ensure they're registered with SQLAlchemy when JobState is used
+# This prevents "failed to locate a name" errors in the worker
+from app.db_models_templates import TemplateFillRun  # noqa: F401, E402

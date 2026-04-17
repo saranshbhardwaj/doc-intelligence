@@ -9,8 +9,8 @@ import asyncio
 import sys
 from pathlib import Path
 from typing import Dict, List
-from app.services.parsers.azure_document_intelligence_parser import AzureDocumentIntelligenceParser
-from app.services.chunkers.azure_smart_chunker import AzureSmartChunker
+from app.core.parsers.azure_document_intelligence_parser import AzureDocumentIntelligenceParser
+from app.core.chunkers.azure_smart_chunker import AzureSmartChunker
 
 
 def estimate_tokens(text: str) -> int:

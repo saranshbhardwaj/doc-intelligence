@@ -13,8 +13,8 @@
     },
     "sections": {
       "type": "array",
-      "minItems": 12,
-      "maxItems": 13,
+      "minItems": 13,
+      "maxItems": 14,
       "items": {
         "type": "object",
         "required": ["key", "title", "content"],
@@ -27,6 +27,7 @@
               "company_overview",
               "market_competition",
               "financial_performance",
+              "capital_structure",
               "unit_economics",
               "track_record_value_creation",
               "risks",
@@ -132,6 +133,8 @@
                     "year": {"type": "integer", "minimum": 2000, "maximum": 2030},
                     "revenue": {"type": "number"},
                     "ebitda": {"type": "number"},
+                    "ebitda_margin": {"type": "number", "minimum": 0, "maximum": 1},
+                    "net_income": {"type": "number"},
                     "margin": {"type": "number", "minimum": 0, "maximum": 1},
                     "citation": {
                       "oneOf": [

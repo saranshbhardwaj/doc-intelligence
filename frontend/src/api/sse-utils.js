@@ -32,6 +32,7 @@ const _activeStreams = new Map(); // jobId -> { eventSource, callbacks }
  * @param {boolean} options.autoReconnect - Auto-reconnect on connection loss (default: true)
  * @param {boolean} options.fetchInitialState - Fetch initial job state before SSE (default: false)
  * @param {Function} options.getJobStatus - Function to fetch job status (required if fetchInitialState=true)
+ * @param {number} options.timeoutMs - Absolute timeout in milliseconds (default: 900000 = 15 min)
  * @returns {Promise<Function>} Cleanup function to close the connection
  *
  * Progress event structure:
@@ -69,25 +70,25 @@ export async function streamJobProgress(
     autoReconnect = true,
     fetchInitialState = false,
     getJobStatus = null,
+    timeoutMs = 9000000, // 15 minutes default timeout
   }
 ) {
   const baseURL = api.defaults.baseURL || "";
 
   // Get auth token and pass as query parameter (EventSource doesn't support headers)
-  const token = await getToken();
+  const token = await getToken({ skipCache: true });
   const url = `${baseURL}/api/jobs/${jobId}/stream?token=${encodeURIComponent(
     token
   )}`;
 
   // If stream already exists for this job, reuse and just update callbacks
   if (_activeStreams.has(jobId)) {
-    console.log(`[SSE Utils] Reusing existing stream for job ${jobId}`);
     const existing = _activeStreams.get(jobId);
     existing.callbacks = { onProgress, onComplete, onError, onEnd };
     return () => {
       try {
         existing.eventSource.close();
-      } catch (_) {}
+      } catch { /* ignore close errors */ }
       _activeStreams.delete(jobId);
     };
   }
@@ -96,7 +97,6 @@ export async function streamJobProgress(
   if (fetchInitialState && getJobStatus) {
     try {
       const initialState = await getJobStatus(jobId, getToken);
-      console.log("[SSE Utils] Fetched initial job state:", initialState);
 
       // Emit initial state to populate UI immediately
       if (initialState.status === "completed") {
@@ -132,7 +132,6 @@ export async function streamJobProgress(
     }
   }
 
-  console.log(`[SSE Utils] Creating new EventSource for job ${jobId}`);
   const eventSource = new EventSource(url);
   let streamEnded = false;
   let isCleaningUp = false;
@@ -145,7 +144,11 @@ export async function streamJobProgress(
     isCleaningUp = true;
     streamEnded = true;
 
-    console.log(`[SSE Utils] Cleaning up EventSource for job ${jobId}`);
+    // Clear timeout if it exists
+    if (timeoutHandle) {
+      clearTimeout(timeoutHandle);
+    }
+
     try {
       eventSource.close();
     } catch (err) {
@@ -153,6 +156,21 @@ export async function streamJobProgress(
     }
     _activeStreams.delete(jobId);
   };
+
+  // Set absolute timeout - fail the job if it doesn't complete within timeoutMs
+  const timeoutHandle = setTimeout(() => {
+    if (!streamEnded && !terminalFailed) {
+      console.error(`[SSE Utils] Job ${jobId} timed out after ${timeoutMs}ms`);
+      const { callbacks } = _activeStreams.get(jobId) || { callbacks: {} };
+      callbacks.onError?.({
+        message: `Job timed out after ${Math.floor(timeoutMs / 60000)} minutes. Please contact support if the issue persists.`,
+        type: "timeout",
+        isRetryable: false,
+      });
+      callbacks.onEnd?.({ reason: "timeout", job_id: jobId });
+      cleanup();
+    }
+  }, timeoutMs);
 
   // Progress event handler
   eventSource.addEventListener("progress", (event) => {
@@ -171,7 +189,6 @@ export async function streamJobProgress(
     const { callbacks } = _activeStreams.get(jobId) || { callbacks: {} };
     try {
       const data = JSON.parse(event.data);
-      console.log("[SSE Utils] 🎉 Complete event received:", data);
       callbacks.onComplete?.(data);
     } catch (err) {
       console.error("[SSE Utils] Failed to parse complete event:", err);
@@ -184,7 +201,6 @@ export async function streamJobProgress(
     streamEnded = true;
     try {
       const data = JSON.parse(event.data);
-      console.log("[SSE Utils] End event data:", data);
       callbacks.onEnd?.(data);
     } catch (err) {
       console.error("[SSE Utils] Failed to parse end event:", err);
@@ -223,15 +239,8 @@ export async function streamJobProgress(
   const baseDelay = 1000; // 1 second base delay
 
   eventSource.onerror = (err) => {
-    console.log(
-      `[SSE Utils] onerror fired: streamEnded=${streamEnded}, readyState=${eventSource.readyState}`
-    );
-
     // If domain error already received (application failure) or graceful end, skip transport reconnect
     if (isCleaningUp || streamEnded || receivedDomainError || terminalFailed) {
-      console.log(
-        "[SSE Utils] ✅ Ignoring transport onerror (terminal or ended)"
-      );
       return;
     }
 
@@ -258,9 +267,6 @@ export async function streamJobProgress(
       if (reconnectAttempts < allowedReconnects) {
         reconnectAttempts += 1;
         const delay = baseDelay * Math.pow(2, reconnectAttempts - 1); // exponential backoff
-        console.log(
-          `[SSE Utils] Attempting reconnect #${reconnectAttempts}/${allowedReconnects} in ${delay}ms`
-        );
         setTimeout(() => {
           streamJobProgress(jobId, getToken, {
             onProgress,
@@ -304,7 +310,6 @@ export function getActiveStreamCount() {
  * Close all active streams (useful for cleanup on logout)
  */
 export function closeAllStreams() {
-  console.log(`[SSE Utils] Closing all ${_activeStreams.size} active streams`);
   _activeStreams.forEach((stream) => {
     try {
       stream.eventSource.close();

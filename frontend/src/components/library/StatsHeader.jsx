@@ -1,19 +1,5 @@
-/**
- * StatsHeader Component
- *
- * Displays key metrics at the top of Library page
- * ChatGPT-inspired design with stat cards
- * Uses Tailwind tokenized animations from tailwind.config.js
- *
- * Input:
- *   - totalDocuments: number
- *   - totalCollections: number
- *   - processingCount: number
- *   - readyCount: number
- */
-
-import { FileText, Folder, Clock, CheckCircle } from "lucide-react";
-import { Card } from "../ui/card";
+import { useState } from "react";
+import { FileText, Folder, Clock, CheckCircle, ChevronDown, ChevronUp } from "lucide-react";
 
 export default function StatsHeader({
   totalDocuments = 0,
@@ -21,65 +7,104 @@ export default function StatsHeader({
   processingCount = 0,
   readyCount = 0,
 }) {
+  const [expanded, setExpanded] = useState(false);
+
   const stats = [
     {
       label: "Total Documents",
       value: totalDocuments,
       icon: FileText,
       color: "text-primary",
-      bgColor: "bg-primary/10",
     },
     {
       label: "Collections",
       value: totalCollections,
       icon: Folder,
       color: "text-blue-600 dark:text-blue-400",
-      bgColor: "bg-blue-500/10",
     },
     {
       label: "Processing",
       value: processingCount,
       icon: Clock,
       color: "text-warning",
-      bgColor: "bg-warning/10",
     },
     {
       label: "Ready",
       value: readyCount,
       icon: CheckCircle,
       color: "text-success",
-      bgColor: "bg-success/10",
     },
   ];
 
   return (
-    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
-      {stats.map((stat, index) => {
-        const Icon = stat.icon;
-        return (
-          <Card
-            key={stat.label}
-            // Using Tailwind utilities instead of custom classes:
-            // - animate-scale-up from tailwind.config.js
-            // - transition-all for smooth hover
-            // - hover:shadow-md for hover effect
-            className="p-4 transition-all hover:shadow-md animate-scale-up"
-            style={{ animationDelay: `${index * 50}ms` }}
-          >
-            <div className="flex items-center gap-3">
-              <div className={`p-2.5 rounded-lg ${stat.bgColor}`}>
-                <Icon className={`w-5 h-5 ${stat.color}`} />
+    <section className="library-shell mb-3 px-5 py-4 sm:mb-5 sm:px-6">
+      {/* Mobile: compact row with toggle */}
+      <div className="flex items-center justify-between lg:hidden">
+        <div>
+          <p className="shell-eyebrow">Workspace</p>
+          <h1 className="shell-title text-xl sm:text-2xl">Library</h1>
+        </div>
+        <button
+          onClick={() => setExpanded((v) => !v)}
+          className="flex items-center gap-1 rounded-full border border-border/70 px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted"
+          aria-label={expanded ? "Collapse stats" : "Expand stats"}
+        >
+          {expanded ? (
+            <>Collapse <ChevronUp className="h-3.5 w-3.5" /></>
+          ) : (
+            <>Stats <ChevronDown className="h-3.5 w-3.5" /></>
+          )}
+        </button>
+      </div>
+
+      {/* Mobile: expandable content */}
+      {expanded && (
+        <div className="mt-3 lg:hidden">
+          <p className="shell-subtitle mb-3">
+            Review collections, upload source files, and track indexing status in one place.
+          </p>
+          <div className="grid grid-cols-2 gap-x-5 gap-y-4 sm:grid-cols-4">
+            {stats.map((stat) => {
+              const Icon = stat.icon;
+              return (
+                <div key={stat.label} className="library-metric">
+                  <div className="flex items-center gap-2 text-muted-foreground">
+                    <Icon className={`h-4 w-4 ${stat.color}`} />
+                    <span className="library-metric-label">{stat.label}</span>
+                  </div>
+                  <p className="library-metric-value">{stat.value}</p>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Desktop: always visible */}
+      <div className="hidden lg:flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
+        <div className="space-y-1">
+          <p className="shell-eyebrow">Workspace</p>
+          <h1 className="shell-title">Library</h1>
+          <p className="shell-subtitle">
+            Review collections, upload source files, and track indexing status in one place.
+          </p>
+        </div>
+
+        <div className="grid grid-cols-2 gap-x-5 gap-y-4 sm:grid-cols-4 lg:min-w-[32rem]">
+          {stats.map((stat) => {
+            const Icon = stat.icon;
+            return (
+              <div key={stat.label} className="library-metric">
+                <div className="flex items-center gap-2 text-muted-foreground">
+                  <Icon className={`h-4 w-4 ${stat.color}`} />
+                  <span className="library-metric-label">{stat.label}</span>
+                </div>
+                <p className="library-metric-value">{stat.value}</p>
               </div>
-              <div className="flex-1">
-                <p className="text-sm text-muted-foreground">{stat.label}</p>
-                <p className="text-2xl font-semibold text-foreground">
-                  {stat.value}
-                </p>
-              </div>
-            </div>
-          </Card>
-        );
-      })}
-    </div>
+            );
+          })}
+        </div>
+      </div>
+    </section>
   );
 }

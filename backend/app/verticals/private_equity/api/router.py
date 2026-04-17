@@ -3,17 +3,26 @@
 Main router that aggregates all PE vertical endpoints.
 Routes: /api/v1/pe/*
 """
-from fastapi import APIRouter
+from fastapi import APIRouter, Depends
+from app.auth import require_vertical
 
 # Import routers from sub-modules
 from .workflows import router as workflows_router
 from .extraction import router as extraction_router
+from .diligence import router as diligence_router
+from .diligence_investigations import router as diligence_investigations_router
 
-router = APIRouter(prefix="/pe", tags=["private_equity"])
+router = APIRouter(
+    prefix="/pe",
+    tags=["private_equity"],
+    dependencies=[Depends(require_vertical("private_equity"))]
+)
 
 # Include sub-routers
 router.include_router(workflows_router)
 router.include_router(extraction_router)
+router.include_router(diligence_router)
+router.include_router(diligence_investigations_router)
 
 
 @router.get("/health")

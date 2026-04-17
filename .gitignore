@@ -48,6 +48,9 @@ next-env.d.ts
 __pycache__/
 *.py[cod]
 venv/
+
+# Local tool installations (e.g. pip --user installs inside container mounts)
+backend/.local/
 .venv/
 
 # Node
@@ -87,3 +90,4 @@ backend/.cache
 DESIGN.md
 backend/.local/
 backend/tests/fixtures/excel/Synthesis - Tulsa Storage OK - Copy.xlsx
+clickhouse/DESIGN.md

@@ -21,7 +21,7 @@ import HighlightCard from "./HighlightCard";
 import MetricPill from "./MetricPill";
 import FinancialsCard from "./FinancialsCard";
 
-export default function SectionCard({ section, index, currency = "USD", richCitations = [] }) {
+export default function SectionCard({ section, index, currency = "USD", richCitations = [], onCitationClick }) {
   if (!section) return null;
 
   // Map citation tokens to rich citation objects
@@ -50,14 +50,30 @@ export default function SectionCard({ section, index, currency = "USD", richCita
       const richCite = getRichCitation(token);
 
       if (richCite) {
+        // Extract filename without extension and truncate if needed
+        const getShortFilename = (filename) => {
+          if (!filename || filename === "Unknown") return "Doc";
+          const nameWithoutExt = filename.replace(/\.[^/.]+$/, ""); // Remove extension
+          // If filename is too long, take first few chars and add ellipsis
+          return nameWithoutExt.length > 20 ? nameWithoutExt.substring(0, 17) + "..." : nameWithoutExt;
+        };
+
+        const displayText = `[${getShortFilename(richCite.document)}:p${richCite.page || '?'}]`;
+
         parts.push(
-          <span
+          <button
             key={`cite-${match.index}`}
-            className="inline-flex items-center align-baseline mx-0.5 px-1.5 py-0.5 rounded text-xs font-mono font-semibold bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 hover:bg-blue-200 dark:hover:bg-blue-900/50 transition-colors cursor-help border border-blue-300 dark:border-blue-700"
-            title={`${richCite.document || 'Document'} - Page ${richCite.page || '?'}${richCite.section ? '\n' + richCite.section : ''}${richCite.snippet ? '\n"' + richCite.snippet.substring(0, 100) + '..."' : ''}`}
+            type="button"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              if (onCitationClick) onCitationClick(richCite);
+            }}
+            className="inline-flex items-center align-baseline mx-0.5 px-1.5 py-0.5 rounded text-xs font-mono font-semibold bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-300 hover:bg-blue-200 dark:hover:bg-blue-900/50 transition-colors cursor-pointer border border-blue-300 dark:border-blue-700"
+            title={`Click to view: ${richCite.document || 'Document'} - Page ${richCite.page || '?'}`}
           >
-            {token}
-          </span>
+            {displayText}
+          </button>
         );
       } else {
         // Fallback: plain citation token styled
@@ -153,6 +169,7 @@ export default function SectionCard({ section, index, currency = "USD", richCita
   const getIconColor = (key) => {
     const k = (key || "").toLowerCase();
     if (k.includes("executive") || k.includes("overview")) return "text-blue-600 dark:text-blue-400";
+    if (k.includes("capital") || k.includes("deal")) return "text-amber-600 dark:text-amber-400";
     if (k.includes("financial")) return "text-green-600 dark:text-green-400";
     if (k.includes("risk")) return "text-red-600 dark:text-red-400";
     if (k.includes("opportunit")) return "text-emerald-600 dark:text-emerald-400";
@@ -204,7 +221,13 @@ export default function SectionCard({ section, index, currency = "USD", richCita
           <div className="mb-6">
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
               {section.highlights.map((highlight, idx) => (
-                <HighlightCard key={idx} highlight={highlight} currency={currency} />
+                <HighlightCard
+                  key={idx}
+                  highlight={highlight}
+                  currency={currency}
+                  richCitations={richCitations}
+                  onCitationClick={onCitationClick}
+                />
               ))}
             </div>
           </div>
@@ -215,7 +238,12 @@ export default function SectionCard({ section, index, currency = "USD", richCita
           <div className="mb-6">
             <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
               {section.key_metrics.map((metric, idx) => (
-                <MetricPill key={idx} metric={metric} />
+                <MetricPill
+                  key={idx}
+                  metric={metric}
+                  richCitations={richCitations}
+                  onCitationClick={onCitationClick}
+                />
               ))}
             </div>
           </div>
@@ -295,20 +323,13 @@ export default function SectionCard({ section, index, currency = "USD", richCita
 
                       {richCite.document && richCite.document !== "Unknown" && (
                         <div className="mb-2">
-                          {richCite.url ? (
-                            <a
-                              href={richCite.url}
-                              target="_blank"
-                              rel="noopener noreferrer"
-                              className="text-sm font-medium text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 hover:underline"
-                            >
-                              {richCite.document}
-                            </a>
-                          ) : (
-                            <p className="text-sm font-medium text-foreground">
-                              {richCite.document}
-                            </p>
-                          )}
+                          <button
+                            type="button"
+                            onClick={() => onCitationClick && onCitationClick(richCite)}
+                            className="text-sm font-medium text-blue-600 dark:text-blue-400 hover:text-blue-800 dark:hover:text-blue-300 hover:underline cursor-pointer"
+                          >
+                            {richCite.document}
+                          </button>
                         </div>
                       )}
 

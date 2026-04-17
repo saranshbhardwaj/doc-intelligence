@@ -19,12 +19,9 @@ Consumers (SSE endpoint) subscribe to channel and forward each message as SSE ev
 from __future__ import annotations
 import json
 from typing import Any, Dict
-from functools import lru_cache
-from urllib.parse import urlparse
 
 import redis  # Provided transitively via celery[redis]
 
-from app.config import settings
 from app.utils.logging import logger
 
 
@@ -32,18 +29,10 @@ def job_channel(job_id: str) -> str:
     return f"job:progress:{job_id}"
 
 
-@lru_cache(maxsize=1)
-def _get_connection_params() -> Dict[str, Any]:
-    """Derive Redis connection params from celery broker URL or defaults."""
-    url = urlparse(settings.celery_broker_url)
-    host = url.hostname or "localhost"
-    port = url.port or 6379
-    db = int(url.path[1:] or 0) if url.path else 0
-    return {"host": host, "port": port, "db": db, "decode_responses": True}
-
-
 def get_redis() -> redis.Redis:
-    return redis.Redis(**_get_connection_params())
+    """Get Redis client for pub/sub with centralized connection pooling."""
+    from app.core.redis_client import get_redis_client
+    return get_redis_client(decode_responses=True)
 
 
 def publish_event(job_id: str, event: str, payload: Dict[str, Any]) -> None:

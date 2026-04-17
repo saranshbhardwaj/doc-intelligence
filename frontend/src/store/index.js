@@ -10,8 +10,11 @@ import { persist, createJSONStorage } from "zustand/middleware";
 import { useShallow } from "zustand/react/shallow";
 import { createExtractionSlice } from "./slices/extractionSlice";
 import { createUserSlice } from "./slices/userSlice";
-import { createChatSlice } from "./slices/chatSlice";
+import { createChatSlice } from "./slices/chat/chatSlice";
 import { createWorkflowDraftSlice } from "./slices/workflowDraftSlice";
+import { createTemplateFillSlice } from "./slices/templateFillSlice";
+import { createFeedbackSlice } from "./slices/feedbackSlice";
+import { createPeDiligenceSlice } from "./slices/peDiligenceSlice";
 
 /**
  * Main store combining all slices
@@ -23,6 +26,9 @@ export const useStore = create(
       ...createUserSlice(...args),
       ...createChatSlice(...args),
       ...createWorkflowDraftSlice(...args),
+      ...createTemplateFillSlice(...args),
+      ...createFeedbackSlice(...args),
+      ...createPeDiligenceSlice(...args),
     }),
     {
       name: "sand-cloud-storage", // localStorage key
@@ -45,15 +51,36 @@ export const useStore = create(
             jobId: state.workflowDraft.execution.jobId ?? null,
             runId: state.workflowDraft.execution.runId ?? null,
           },
+          // Don't persist pdfViewer (transient presigned URLs and highlight state)
+          pdfViewer: undefined,
         },
-        // Persist document indexing state for reconnection
+        // Persist document indexing jobs for reconnection
         chat: {
-          indexing: {
-            jobId: state.chat?.indexing?.jobId ?? null,
-            documentId: state.chat?.indexing?.documentId ?? null,
-            collectionId: state.chat?.indexing?.collectionId ?? null,
-            // Don't persist: isProcessing, progress, cleanup, message, error
+          indexingJobs: Object.fromEntries(
+            Object.entries(state.chat?.indexingJobs || {}).map(([docId, job]) => [
+              docId,
+              {
+                jobId: job.jobId,
+                documentId: job.documentId,
+                collectionId: job.collectionId,
+                // Don't persist: isProcessing, progress, cleanup, message, error
+              },
+            ])
+          ),
+          // Persist comparison UI preferences (NOT context - too large!)
+          comparisonUI: {
+            viewMode: state.chat?.comparison?.viewMode || 'cards',
           },
+        },
+        // Persist template fill state for reconnection
+        templateFill: {
+          fillRunId: state.templateFill?.fillRunId ?? null,
+          // Don't persist: fillRun, pdfUrl, pdfUrlExpiry, selectedText, isLoading, isSaving, error, pdfRefreshTimer
+        },
+        // Persist PE analysis job ID + room for SSE reconnection after page refresh
+        peDiligence: {
+          roomId: state.peDiligence?.roomId ?? null,
+          analysisJobId: state.peDiligence?.analysisJobId ?? null,
         },
       }),
       // Merge persisted slice keys into current state instead of overwriting
@@ -72,13 +99,29 @@ export const useStore = create(
               ...current.workflowDraft.execution,
               ...(persisted.workflowDraft?.execution || {}),
             },
+            // Always use fresh pdfViewer state (never persisted)
+            pdfViewer: current.workflowDraft.pdfViewer,
           },
           chat: {
             ...current.chat,
-            indexing: {
-              ...current.chat.indexing,
-              ...(persisted.chat?.indexing || {}),
+            indexingJobs: {
+              ...current.chat.indexingJobs,
+              ...(persisted.chat?.indexingJobs || {}),
             },
+            // Restore comparison UI preferences
+            comparison: {
+              ...current.chat.comparison,
+              viewMode: persisted.chat?.comparisonUI?.viewMode || current.chat.comparison.viewMode,
+            },
+          },
+          templateFill: {
+            ...current.templateFill,
+            ...persisted.templateFill,
+          },
+          peDiligence: {
+            ...current.peDiligence,
+            roomId: persisted.peDiligence?.roomId ?? null,
+            analysisJobId: persisted.peDiligence?.analysisJobId ?? null,
           },
         };
       },
@@ -161,8 +204,23 @@ export const useChatActions = () =>
       updateIndexingProgress: state.updateIndexingProgress,
       completeIndexing: state.completeIndexing,
       failIndexing: state.failIndexing,
-      reconnectIndexing: state.reconnectIndexing,
-      resetIndexing: state.resetIndexing,
+      reconnectAllIndexingJobs: state.reconnectAllIndexingJobs,
+      clearIndexingJob: state.clearIndexingJob,
+      clearAllIndexingJobs: state.clearAllIndexingJobs,
+      // Comparison mode actions
+      setComparisonContext: state.setComparisonContext,
+      clearComparison: state.clearComparison,
+      setComparisonViewMode: state.setComparisonViewMode,
+      toggleComparisonTopic: state.toggleComparisonTopic,
+      setComparisonSelectionNeeded: state.setComparisonSelectionNeeded,
+      clearComparisonSelection: state.clearComparisonSelection,
+      confirmComparisonSelection: state.confirmComparisonSelection,
+      // PDF viewer actions
+      highlightChunk: state.highlightChunk,
+      clearHighlight: state.clearHighlight,
+      setActivePdfDocument: state.setActivePdfDocument,
+      loadPdfUrlForDocument: state.loadPdfUrlForDocument,
+      clearPdfUrlCache: state.clearPdfUrlCache,
       // Legacy (deprecated)
       toggleDocumentSelection: state.toggleDocumentSelection,
       toggleSelectAll: state.toggleSelectAll,
@@ -170,8 +228,17 @@ export const useChatActions = () =>
     }))
   );
 
+// Comparison selectors
+export const useComparison = () =>
+  useStore((state) => state.chat.comparison);
+
+export const usePdfViewer = () =>
+  useStore((state) => state.chat.pdfViewer);
+
 // Workflow Draft selectors
 export const useWorkflowDraft = () => useStore((state) => state.workflowDraft);
+export const useWorkflowPdfViewer = () =>
+  useStore((state) => state.workflowDraft.pdfViewer);
 export const useWorkflowDraftActions = () =>
   useStore(
     useShallow((state) => ({
@@ -191,6 +258,68 @@ export const useWorkflowDraftActions = () =>
       reconnectWorkflowExecution: state.reconnectWorkflowExecution,
       cancelWorkflowExecution: state.cancelWorkflowExecution,
       resetWorkflowExecution: state.resetWorkflowExecution,
+      // PDF viewer actions (for citation navigation)
+      workflowHighlightChunk: state.workflowHighlightChunk,
+      workflowClearHighlight: state.workflowClearHighlight,
+      workflowSetActivePdfDocument: state.workflowSetActivePdfDocument,
+      workflowClearPdfViewer: state.workflowClearPdfViewer,
+    }))
+  );
+
+// Template Fill selectors
+export const useTemplateFill = () => useStore((state) => state.templateFill);
+export const useTemplateFillActions = () =>
+  useStore(
+    useShallow((state) => ({
+      loadFillRun: state.loadFillRun,
+      loadPdfUrl: state.loadPdfUrl,
+      setSelectedText: state.setSelectedText,
+      updateFieldData: state.updateFieldData,
+      updateMappings: state.updateMappings,
+      continueProcessing: state.continueProcessing,
+      resetTemplateFill: state.resetTemplateFill,
+      clearTemplateFillError: state.clearTemplateFillError,
+      registerPdfPopout: state.registerPdfPopout,
+      registerExcelPopout: state.registerExcelPopout,
+      navigatePdfToPage: state.navigatePdfToPage,
+      cleanupPopouts: state.cleanupPopouts,
+      cacheExcelWorkbook: state.cacheExcelWorkbook,
+      getCachedExcelWorkbook: state.getCachedExcelWorkbook,
+      clearCachedExcelWorkbook: state.clearCachedExcelWorkbook,
+      renameFillRun: state.renameFillRun,
+    }))
+  );
+
+// Feedback selectors
+export const useFeedback = () => useStore((state) => state.feedback);
+export const useFeedbackActions = () =>
+  useStore(
+    useShallow((state) => ({
+      openFeedbackModal: state.openFeedbackModal,
+      closeFeedbackModal: state.closeFeedbackModal,
+      isFeedbackModalOpen: state.isFeedbackModalOpen,
+      submitFeedback: state.submitFeedback,
+      hasFeedbackBeenSubmitted: state.hasFeedbackBeenSubmitted,
+      setFeedbackSubmitting: state.setFeedbackSubmitting,
+      isFeedbackSubmitting: state.isFeedbackSubmitting,
+    }))
+  );
+
+// PE Diligence selectors
+export const usePeDiligence = () => useStore((state) => state.peDiligence);
+
+export const usePeDiligenceActions = () =>
+  useStore(
+    useShallow((state) => ({
+      peLoadRoom: state.peLoadRoom,
+      peLoadDocuments: state.peLoadDocuments,
+      peRefreshDocuments: state.peRefreshDocuments,
+      peSetAnalysisJob: state.peSetAnalysisJob,
+      peClearAnalysisJob: state.peClearAnalysisJob,
+      peSetAnalysisWarnings: state.peSetAnalysisWarnings,
+      peMarkAnalysisCompleted: state.peMarkAnalysisCompleted,
+      peRefreshAnalysisStatus: state.peRefreshAnalysisStatus,
+      peClearRoom: state.peClearRoom,
     }))
   );
 

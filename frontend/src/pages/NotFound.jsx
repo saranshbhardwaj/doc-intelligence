@@ -1,9 +1,9 @@
 // src/components/NotFound.jsx
 import { Link } from "react-router-dom";
-import { useAuth } from "@clerk/clerk-react";
+import { useAppAuth } from "@/hooks/useAppAuth";
 
 export default function NotFound() {
-  const { isLoaded, userId } = useAuth();
+  const { isLoaded, userId } = useAppAuth();
 
   // Wait until Clerk loads so we don't flash the wrong CTA
   if (!isLoaded) return null;

@@ -1,25 +1,22 @@
 """API endpoints for workflow templates and workflow runs."""
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy.orm import Session
-from sqlalchemy import func, select
 from typing import List, Optional
 import json
 
 from app.database import get_db
 from app.repositories.workflow_repository import WorkflowRepository
-from app.db_models_workflows import Workflow, WorkflowRun
-from app.db_models_chat import CollectionDocument, DocumentChunk, Collection
-from app.db_models_documents import Document
-from app.auth import get_current_user
+from app.repositories.document_repository import DocumentRepository
+from app.auth import get_current_user, get_current_org_role, is_admin_role
 from app.db_models_users import User
+from app.services.beta_limits import enforce_workflow_limit, reserve_shadow_credits
 from app.utils.logging import logger
-from app.services.tasks.workflows import start_workflow_chain
+from app.verticals.private_equity.workflows.tasks import start_workflow_chain
 from app.schemas.workflows import (
     WorkflowTemplateListItem,
     WorkflowTemplateDetail,
     WorkflowVariableSchema,
     WorkflowRunListItem,
-    WorkflowRunDetail,
     DocumentSummary,
 )
 
@@ -27,7 +24,7 @@ router = APIRouter(prefix="/api/workflows", tags=["workflows"])
 
 
 # -------------------- Pydantic Schemas --------------------
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field  # noqa: E402
 
 
 class WorkflowTemplateOut(BaseModel):
@@ -169,13 +166,8 @@ def create_workflow_run(payload: CreateWorkflowRunRequest, user: User = Depends(
         doc_ids = payload.document_ids
     elif payload.collection_id:
         # Load completed documents from collection (query canonical Document table)
-        result = db.query(Document.id).join(
-            CollectionDocument, Document.id == CollectionDocument.document_id
-        ).filter(
-            CollectionDocument.collection_id == payload.collection_id,
-            Document.status == "completed"
-        ).all()
-        doc_ids = [r[0] for r in result]
+        doc_repo = DocumentRepository()
+        doc_ids = doc_repo.get_completed_document_ids_for_collection(payload.collection_id, user.org_id)
     else:
         raise HTTPException(status_code=400, detail="Either document_ids or collection_id must be provided")
 
@@ -186,15 +178,9 @@ def create_workflow_run(payload: CreateWorkflowRunRequest, user: User = Depends(
 
     # Validate documents exist and have embeddings
     if len(doc_ids) > 1:
-        from app.db_models_chat import DocumentChunk
         # Query canonical Document table and check for embeddings
-        docs_with_embeddings = db.query(Document.id).join(
-            DocumentChunk, Document.id == DocumentChunk.document_id
-        ).filter(
-            Document.id.in_(doc_ids),
-            DocumentChunk.embedding.isnot(None)
-        ).distinct().all()
-        docs_with_embeddings_ids = {r[0] for r in docs_with_embeddings}
+        doc_repo = DocumentRepository()
+        docs_with_embeddings_ids = set(doc_repo.get_document_ids_with_embeddings(doc_ids, user.org_id))
         missing_embeddings = set(doc_ids) - docs_with_embeddings_ids
         if missing_embeddings:
             raise HTTPException(
@@ -245,9 +231,12 @@ def create_workflow_run(payload: CreateWorkflowRunRequest, user: User = Depends(
     mode = "multi_doc"
     strategy = payload.strategy or ("retrieval")
 
+    enforce_workflow_limit(user)
+
     run = repo.create_run(
         workflow=workflow,
         user_id=user.id,
+        org_id=user.org_id,
         collection_id=payload.collection_id,
         document_ids=doc_ids,
         variables=payload.variables,
@@ -258,8 +247,15 @@ def create_workflow_run(payload: CreateWorkflowRunRequest, user: User = Depends(
     # Create JobState for progress streaming
     from app.repositories.job_repository import JobRepository
     job_repo = JobRepository()
-    job = job_repo.create_job(workflow_run_id=run.id, status="queued", current_stage="queued", message="Workflow queued")
+    job = job_repo.create_job(entity_type="workflow_run", entity_id=run.id, status="queued", current_stage="queued", message="Workflow queued")
     job_id = job.job_id if job else None  # FIXED: Use job.job_id instead of job.id
+
+    reserve_shadow_credits(
+        user=user,
+        operation_type="workflow_run",
+        reference_id=run.id,
+        metadata={"workflow_id": workflow.id, "document_count": len(doc_ids), "route": "create"},
+    )
 
     logger.info("Workflow run created", extra={"workflow_id": workflow.id, "run_id": run.id, "job_id": job_id, "user_id": user.id})
     try:
@@ -312,6 +308,10 @@ def get_workflow_run(run_id: str, user: User = Depends(get_current_user), db: Se
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
     if run.user_id != user.id:
+        raise HTTPException(status_code=403, detail="Not authorized to access this run")
+    if getattr(run, "org_id", None) != user.org_id:
+        raise HTTPException(status_code=403, detail="Not authorized to access this run")
+    if getattr(run, "org_id", None) != user.org_id:
         raise HTTPException(status_code=403, detail="Not authorized to access this run")
 
     # Lookup associated job for progress streaming (optional)
@@ -369,7 +369,7 @@ def list_workflow_runs(
     """List user's workflow runs (paginated)."""
     logger.info("Listing workflow runs", extra={"user_id": user.id, "limit": limit, "offset": offset})
     repo = WorkflowRepository(db)
-    runs = repo.list_runs_for_user(user.id, limit=limit, offset=offset)
+    runs = repo.list_runs_for_user(user.id, user.org_id, limit=limit, offset=offset)
 
     result = []
     for run in runs:
@@ -400,65 +400,34 @@ def list_workflow_runs(
 @router.get("/documents", response_model=List[DocumentSummary])
 def list_available_documents(
     user: User = Depends(get_current_user),
-    db: Session = Depends(get_db),
     collection_id: Optional[str] = None,
 ):
     """List documents available for workflows (from user's collections)."""
     logger.info("Listing available documents for workflows", extra={"user_id": user.id, "collection_id": collection_id})
-    # Query canonical Document table, joining through CollectionDocument to filter by user's collections
-    query = db.query(
-        Document.id,
-        Document.filename,
-        Document.page_count,
-        Document.status,
-        Document.created_at,
-        func.count(DocumentChunk.id.distinct()).label("chunk_count"),
-        func.count(DocumentChunk.embedding).label("embeddings_count")
-    ).join(
-        CollectionDocument, Document.id == CollectionDocument.document_id
-    ).join(
-        Collection, CollectionDocument.collection_id == Collection.id
-    ).outerjoin(
-        DocumentChunk, Document.id == DocumentChunk.document_id
-    ).filter(
-        Collection.user_id == user.id,
-        Document.status == "completed"
-    )
+    doc_repo = DocumentRepository()
+    results = doc_repo.list_available_documents_for_user(user.id, user.org_id, collection_id)
 
-    if collection_id:
-        query = query.filter(Collection.id == collection_id)
-
-    query = query.group_by(
-        Document.id,
-        Document.filename,
-        Document.page_count,
-        Document.status,
-        Document.created_at
-    ).order_by(Document.created_at.desc())
-
-    results = query.all()
-    
     for r in results:
         logger.info(
             "document chunk/embedding counts",
             extra={
                 "user_id": user.id,
                 "collection_id": collection_id,
-                "document_id": r.id,
-                "document_name": getattr(r, "filename", None),
-                "chunk_count": int(r.chunk_count or 0),
-                "embeddings_count": int(r.embeddings_count or 0),
+                "document_id": r["id"],
+                "document_name": r.get("filename"),
+                "chunk_count": r.get("chunk_count", 0),
+                "embeddings_count": r.get("embeddings_count", 0),
             },
         )
 
     return [
         DocumentSummary(
-            id=r.id,
-            filename=r.filename,
-            page_count=r.page_count,
-            status=r.status,
-            has_embeddings=r.chunk_count > 0 and r.embeddings_count > 0,
-            created_at=r.created_at,
+            id=r["id"],
+            filename=r.get("filename"),
+            page_count=r.get("page_count"),
+            status=r.get("status"),
+            has_embeddings=r.get("chunk_count", 0) > 0 and r.get("embeddings_count", 0) > 0,
+            created_at=r.get("created_at"),
         )
         for r in results
     ]
@@ -510,6 +479,7 @@ def get_workflow_artifact(
 def delete_workflow_run(
     run_id: str,
     user: User = Depends(get_current_user),
+    request: Request = None,
     db: Session = Depends(get_db),
 ):
     """Delete a workflow run and its associated job state."""
@@ -517,8 +487,12 @@ def delete_workflow_run(
     run = repo.get_run(run_id)
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
-    if run.user_id != user.id:
+    if getattr(run, "org_id", None) != user.org_id:
         raise HTTPException(status_code=403, detail="Not authorized to delete this run")
+    if run.user_id != user.id:
+        role = get_current_org_role(request)
+        if not is_admin_role(role):
+            raise HTTPException(status_code=403, detail="Not authorized to delete this run")
 
     logger.info("Deleting workflow run", extra={"run_id": run_id, "user_id": user.id})
 
@@ -568,7 +542,7 @@ def export_workflow_run(
         Data: Workflow artifact (Dict[str, Any])
         Output: bytes (Word/Excel/PDF) or URL
     """
-    from fastapi import Query, Response
+    from fastapi import Response
     from app.services.artifacts import load_artifact
     from app.utils.metrics import (
         EXPORT_GENERATION_SECONDS,
@@ -578,7 +552,7 @@ def export_workflow_run(
         EXPORT_BYTES_TOTAL,
     )
     from app.config import settings
-    from app.services.storage.cloudflare_r2 import get_r2_storage
+    from app.core.storage.cloudflare_r2 import get_r2_storage
 
     logger.info("Export workflow run", extra={
         "run_id": run_id,
@@ -593,6 +567,8 @@ def export_workflow_run(
     if not run:
         raise HTTPException(status_code=404, detail='Run not found')
     if run.user_id != user.id:
+        raise HTTPException(status_code=403, detail='Not authorized to access this run')
+    if getattr(run, "org_id", None) != user.org_id:
         raise HTTPException(status_code=403, detail='Not authorized to access this run')
     if not run.artifact:
         raise HTTPException(status_code=400, detail='No artifact available')
@@ -641,8 +617,16 @@ def export_workflow_run(
 
             b, filename, ctype = exporter.export_to_excel(full_artifact, run_metadata)
 
+        elif format in ['pdf']:
+            # PDF export is handled client-side (browser print).
+            # Reject server-side PDF requests with a clear error.
+            raise HTTPException(
+                status_code=501,
+                detail="PDF export is handled in the browser. Use the Export → PDF button in the UI."
+            )
+
         else:
-            # Use old exporter for PDF and MD
+            # Markdown and any other legacy formats
             from app.services.exporter import export_bytes
             b, filename, ctype = export_bytes(obj, fmt=format)
 
@@ -739,6 +723,8 @@ def rerun_workflow(
         raise HTTPException(status_code=404, detail="Original run not found")
     if original_run.user_id != user.id:
         raise HTTPException(status_code=403, detail="Not authorized to access this run")
+    if getattr(original_run, "org_id", None) != user.org_id:
+        raise HTTPException(status_code=403, detail="Not authorized to re-run this workflow")
 
     logger.info("Re-running workflow", extra={
         "original_run_id": run_id,
@@ -775,10 +761,13 @@ def rerun_workflow(
     mode = "single_doc" if len(doc_ids) == 1 else "multi_doc"
     strategy = payload.strategy or ("full_context" if mode == "single_doc" else "retrieval")
 
+    enforce_workflow_limit(user)
+
     # Create new run
     run = repo.create_run(
         workflow=workflow,
         user_id=user.id,
+        org_id=user.org_id,
         collection_id=collection_id,
         document_ids=doc_ids,
         variables=merged_variables,
@@ -790,7 +779,8 @@ def rerun_workflow(
     from app.repositories.job_repository import JobRepository
     job_repo = JobRepository()
     job = job_repo.create_job(
-        workflow_run_id=run.id,
+        entity_type="workflow_run",
+        entity_id=run.id,
         status="queued",
         current_stage="queued",
         progress_percent=0,
@@ -807,8 +797,15 @@ def rerun_workflow(
     })
 
     # Kick off workflow chain
-    from app.services.tasks.workflows import start_workflow_chain
+    from app.verticals.private_equity.workflows.tasks import start_workflow_chain
     start_workflow_chain(run.id, job_id, custom_prompt=payload.custom_prompt)
+
+    reserve_shadow_credits(
+        user=user,
+        operation_type="workflow_run",
+        reference_id=run.id,
+        metadata={"workflow_id": workflow.id, "document_count": len(doc_ids), "route": "rerun", "original_run_id": run_id},
+    )
 
     # Return response
     return WorkflowRunOut(
