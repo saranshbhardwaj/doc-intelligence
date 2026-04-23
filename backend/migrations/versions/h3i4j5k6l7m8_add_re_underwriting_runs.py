@@ -11,7 +11,7 @@ from sqlalchemy.dialects import postgresql
 
 # revision identifiers, used by Alembic.
 revision = 'h3i4j5k6l7m8'
-down_revision = '8af61ecfd7fa'
+down_revision = 'r5s6t7u8v9w0'
 branch_labels = None
 depends_on = None
 
@@ -76,26 +76,9 @@ def upgrade() -> None:
         ['extraction_job_id'],
     )
 
-    # Auto-update trigger for updated_at
-    op.execute("""
-        CREATE OR REPLACE FUNCTION update_re_underwriting_runs_updated_at()
-        RETURNS TRIGGER AS $$
-        BEGIN
-            NEW.updated_at = NOW();
-            RETURN NEW;
-        END;
-        $$ LANGUAGE plpgsql;
-    """)
-    op.execute("""
-        CREATE TRIGGER re_underwriting_runs_updated_at_trigger
-        BEFORE UPDATE ON re_underwriting_runs
-        FOR EACH ROW EXECUTE FUNCTION update_re_underwriting_runs_updated_at();
-    """)
 
 
 def downgrade() -> None:
-    op.execute("DROP TRIGGER IF EXISTS re_underwriting_runs_updated_at_trigger ON re_underwriting_runs")
-    op.execute("DROP FUNCTION IF EXISTS update_re_underwriting_runs_updated_at")
     op.drop_index('idx_re_uw_runs_extraction_job_id', table_name='re_underwriting_runs')
     op.drop_index('idx_re_uw_runs_verdict_status', table_name='re_underwriting_runs')
     op.drop_index('idx_re_uw_runs_user_id_created', table_name='re_underwriting_runs')

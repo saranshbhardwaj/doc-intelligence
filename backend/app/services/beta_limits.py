@@ -26,6 +26,7 @@ SHADOW_CREDIT_RATES: Dict[str, float] = {
     "extraction_run": 16.0,
     "template_fill_run": 14.0,
     "chat_message": 0.8,
+    "re_underwriting_run": 14.0,
 }
 
 

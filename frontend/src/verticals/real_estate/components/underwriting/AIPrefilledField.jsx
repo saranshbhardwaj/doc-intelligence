@@ -1,12 +1,5 @@
-/**
- * AIPrefilledField
- * Wraps inputs with AI citation highlighting.
- * Shows sparkles icon and source button if citation exists.
- * If onOpenSource is provided the caller owns the source panel; otherwise
- * falls back to the embedded CitationDrawer (sheet).
- */
 import { useState } from 'react';
-import { Sparkles } from 'lucide-react';
+import { ArrowUpRight } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import CitationDrawer from './CitationDrawer';
 
@@ -20,9 +13,13 @@ export default function AIPrefilledField({
 }) {
   const [isDrawerOpen, setIsDrawerOpen] = useState(false);
   const confidence = Number(citation?.confidence);
-  const confidenceLabel = Number.isFinite(confidence) && confidence > 0
-    ? `${Math.round(confidence * 100)}% confidence`
-    : null;
+  const confidenceTone = !Number.isFinite(confidence) || confidence <= 0
+    ? 'neutral'
+    : confidence >= 0.9
+      ? 'high'
+      : confidence >= 0.7
+        ? 'mid'
+        : 'low';
 
   const handleSourceClick = () => {
     if (onOpenSource) {
@@ -37,19 +34,14 @@ export default function AIPrefilledField({
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
-            <label htmlFor={inputId} className="text-sm font-medium text-foreground">
+            <label
+              htmlFor={inputId}
+              className="text-[11px] font-semibold uppercase tracking-[0.08em] text-slate-600"
+            >
               {label}
             </label>
-            {citation && (
-              <Sparkles className="h-3.5 w-3.5 text-uw-citation" />
-            )}
+            {citation ? <span className={`uw-confidence-dot uw-confidence-dot-${confidenceTone}`} /> : null}
           </div>
-          {citation ? (
-            <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] font-medium uppercase tracking-[0.16em] text-uw-citation">
-              <span>AI populated</span>
-              {confidenceLabel ? <span className="text-muted-foreground">{confidenceLabel}</span> : null}
-            </div>
-          ) : null}
         </div>
         {citation && (
           <Button
@@ -58,6 +50,7 @@ export default function AIPrefilledField({
             className="h-7 rounded-full px-3 text-[11px] font-semibold text-uw-citation hover:bg-background/70"
             onClick={handleSourceClick}
           >
+            <ArrowUpRight className="mr-1 h-3.5 w-3.5" />
             Source
           </Button>
         )}

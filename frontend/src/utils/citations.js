@@ -234,3 +234,50 @@ export function splitTextWithCitations(text) {
 
   return parts.length > 0 ? parts : [text];
 }
+
+export function normalizeCitationToken(token) {
+  if (!token) return null;
+  return String(token).trim().replace(/^\[/, "").replace(/\]$/, "");
+}
+
+export function parseCitationPageToken(token) {
+  const normalized = normalizeCitationToken(token);
+  if (!normalized) return null;
+
+  const match = normalized.match(/:p(\d+)$/i);
+  if (!match) return null;
+
+  const page = Number(match[1]);
+  return Number.isFinite(page) && page > 0 ? page : null;
+}
+
+export function buildTokenCitationLookup(citationContext) {
+  const lookup = new Map();
+  if (!citationContext || typeof citationContext !== "object") {
+    return lookup;
+  }
+
+  for (const [token, metadata] of Object.entries(citationContext)) {
+    const normalizedToken = normalizeCitationToken(token);
+    if (!normalizedToken || lookup.has(normalizedToken)) continue;
+    lookup.set(normalizedToken, metadata);
+  }
+
+  return lookup;
+}
+
+export function resolveCitationFromTokens(tokens, citationLookup) {
+  if (!Array.isArray(tokens) || !citationLookup) return null;
+
+  for (const token of tokens) {
+    const normalizedToken = normalizeCitationToken(token);
+    if (!normalizedToken) continue;
+
+    const resolved = citationLookup.get(normalizedToken);
+    if (resolved) {
+      return resolved;
+    }
+  }
+
+  return null;
+}

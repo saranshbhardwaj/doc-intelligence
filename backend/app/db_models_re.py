@@ -28,8 +28,11 @@ class UnderwritingRun(Base):
     # Wizard inputs after AI prefill + user edits (SelfStorageInputs Pydantic dump)
     inputs = Column(JSONB, nullable=True)
 
-    # Per-field citations: {field_path: [{doc_id, page, snippet, confidence}]}
+    # Per-field citations: {field_name: {doc_type, confidence, citations, source_text}}
     field_citations = Column(JSONB, nullable=True)
+
+    # Citation token lookup: {"S1:p5": {page, filename, document_id, source_index}}
+    citation_context = Column(JSONB, nullable=True)
 
     # Cross-doc discrepancies: [{field, sources:[{doc_id,value,page}], severity, note}]
     discrepancies = Column(JSONB, nullable=True)

@@ -447,11 +447,14 @@ async def download_document(
             try:
                 presigned_url = storage.generate_presigned_url(file_path, expiry_seconds=7200)
                 storage_type = storage.get_storage_type()
+                media_type = get_content_type_for_filename(document.filename)
 
                 return {
                     "url": presigned_url,
                     "expires_in": 7200,
-                    "storage_backend": storage_type
+                    "storage_backend": storage_type,
+                    "filename": document.filename,
+                    "content_type": media_type,
                 }
             except FileNotFoundError:
                 raise HTTPException(status_code=404, detail="Document file not found in storage")

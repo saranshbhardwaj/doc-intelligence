@@ -3,7 +3,7 @@
  * Gets the current user's vertical from context or URL
  */
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import {
   getVerticalConfig,
   isFeatureEnabled,
@@ -18,9 +18,10 @@ import {
  * /re/* -> real_estate
  */
 function extractVerticalFromPath(pathname) {
-  const match = pathname.match(/^\/(pe|re)\//);
-  if (match === 'pe') return 'private_equity';
-  if (match === 're') return 'real_estate';
+  const match = pathname.match(/^\/app\/(pe|re)(?:\/|$)/);
+  if (!match) return null;
+  if (match[1] === 'pe') return 'private_equity';
+  if (match[1] === 're') return 'real_estate';
   return null;
 }
 
@@ -39,6 +40,7 @@ function getVerticalPath(vertical) {
 
 export function useVertical() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [vertical, setVertical] = useState(() => {
     // Try to get from localStorage (user's selected vertical)
     const saved = localStorage.getItem('userVertical');
@@ -51,13 +53,12 @@ export function useVertical() {
 
   // Get vertical from URL if available
   useEffect(() => {
-    const pathname = window.location.pathname;
-    const pathVertical = extractVerticalFromPath(pathname);
+    const pathVertical = extractVerticalFromPath(location.pathname);
     if (pathVertical && pathVertical !== vertical) {
       setVertical(pathVertical);
       localStorage.setItem('userVertical', pathVertical);
     }
-  }, [window.location.pathname, vertical]);
+  }, [location.pathname, vertical]);
 
   const config = getVerticalConfig(vertical);
   const theme = getVerticalTheme(vertical);

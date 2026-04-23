@@ -17,7 +17,14 @@ import {
   RoomInvestigations,
   InvestigationDetail,
 } from '../verticals/private_equity/pages';
-import { REDashboard, TemplateFillPage, TemplatesPage } from '../verticals/real_estate/pages';
+import {
+  REDashboard,
+  TemplateFillPage,
+  TemplatesPage,
+  UnderwritingDashboard,
+  UnderwritingWizard,
+  UnderwritingResult,
+} from '../verticals/real_estate/pages';
 import PDFPopoutPage from '../verticals/real_estate/pages/PDFPopoutPage';
 import ExcelPopoutPage from '../verticals/real_estate/pages/ExcelPopoutPage';
 
@@ -54,6 +61,18 @@ export const reRoutes = [
   {
     path: '/re/fills/:fillRunId/excel-popout',
     element: <ExcelPopoutPage />,
+  },
+  {
+    path: '/re/underwriting',
+    element: <UnderwritingDashboard />,
+  },
+  {
+    path: '/re/underwriting/new',
+    element: <UnderwritingWizard />,
+  },
+  {
+    path: '/re/underwriting/:runId',
+    element: <UnderwritingResult />,
   },
 ];
 

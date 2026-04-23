@@ -1,7 +1,7 @@
 /**
  * PDF viewer actions
  */
-import { getDocumentDownloadUrl } from "../../../api/documents";
+import { clearDocumentPreviewCache, loadDocumentPreview } from "../../../utils/documentPreview";
 
 export const createChatPdfActions = (set, get) => ({
   highlightChunk: async (bbox, getToken) => {
@@ -67,10 +67,10 @@ export const createChatPdfActions = (set, get) => ({
     }));
 
     try {
-      const urlData = await getDocumentDownloadUrl(getToken, documentId);
+      const preview = await loadDocumentPreview(getToken, documentId);
 
-      if (urlData.url) {
-        const expiry = now + urlData.expires_in * 1000;
+      if (preview?.url) {
+        const expiry = preview.expiry;
 
         set((state) => ({
           chat: {
@@ -79,7 +79,7 @@ export const createChatPdfActions = (set, get) => ({
               ...state.chat.pdfViewer,
               urlCache: {
                 ...state.chat.pdfViewer.urlCache,
-                [documentId]: { url: urlData.url, expiry },
+                [documentId]: { url: preview.url, expiry },
               },
               isLoadingUrl: false,
             },
@@ -122,10 +122,10 @@ export const createChatPdfActions = (set, get) => ({
     }
 
     try {
-      const urlData = await getDocumentDownloadUrl(getToken, documentId);
+      const preview = await loadDocumentPreview(getToken, documentId);
 
-      if (urlData.url) {
-        const expiry = now + urlData.expires_in * 1000;
+      if (preview?.url) {
+        const expiry = preview.expiry;
 
         set((state) => ({
           chat: {
@@ -134,13 +134,13 @@ export const createChatPdfActions = (set, get) => ({
               ...state.chat.pdfViewer,
               urlCache: {
                 ...state.chat.pdfViewer.urlCache,
-                [documentId]: { url: urlData.url, expiry },
+                [documentId]: { url: preview.url, expiry },
               },
             },
           },
         }));
 
-        return urlData.url;
+        return preview.url;
       }
     } catch (error) {
       console.error(`Failed to load PDF URL for ${documentId}:`, error);
@@ -150,6 +150,7 @@ export const createChatPdfActions = (set, get) => ({
   },
 
   clearPdfUrlCache: () => {
+    clearDocumentPreviewCache();
     set((state) => ({
       chat: {
         ...state.chat,

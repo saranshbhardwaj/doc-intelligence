@@ -37,13 +37,12 @@ export default function StatsHeader({
   ];
 
   return (
-    <section className="library-shell mb-3 px-5 py-4 sm:mb-5 sm:px-6">
+    <section className="library-shell mb-3 px-4 py-3 sm:mb-4 sm:px-5">
       {/* Mobile: compact row with toggle */}
       <div className="flex items-center justify-between lg:hidden">
-        <div>
-          <p className="shell-eyebrow">Workspace</p>
-          <h1 className="shell-title text-xl sm:text-2xl">Library</h1>
-        </div>
+        <p className="pr-4 text-sm text-muted-foreground">
+          Review collections, upload source files, and track indexing status in one place.
+        </p>
         <button
           onClick={() => setExpanded((v) => !v)}
           className="flex items-center gap-1 rounded-full border border-border/70 px-3 py-1.5 text-xs font-medium text-muted-foreground transition-colors hover:bg-muted"
@@ -60,9 +59,6 @@ export default function StatsHeader({
       {/* Mobile: expandable content */}
       {expanded && (
         <div className="mt-3 lg:hidden">
-          <p className="shell-subtitle mb-3">
-            Review collections, upload source files, and track indexing status in one place.
-          </p>
           <div className="grid grid-cols-2 gap-x-5 gap-y-4 sm:grid-cols-4">
             {stats.map((stat) => {
               const Icon = stat.icon;
@@ -81,14 +77,10 @@ export default function StatsHeader({
       )}
 
       {/* Desktop: always visible */}
-      <div className="hidden lg:flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-        <div className="space-y-1">
-          <p className="shell-eyebrow">Workspace</p>
-          <h1 className="shell-title">Library</h1>
-          <p className="shell-subtitle">
-            Review collections, upload source files, and track indexing status in one place.
-          </p>
-        </div>
+      <div className="hidden lg:flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+        <p className="max-w-md text-sm leading-6 text-muted-foreground">
+          Review collections, upload source files, and track indexing status in one place.
+        </p>
 
         <div className="grid grid-cols-2 gap-x-5 gap-y-4 sm:grid-cols-4 lg:min-w-[32rem]">
           {stats.map((stat) => {

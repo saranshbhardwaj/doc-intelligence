@@ -1,9 +1,15 @@
 """Repository for Real Estate AI Underwriting runs."""
+from __future__ import annotations
+
+import logging
 from typing import Optional, List
 from datetime import datetime, timezone
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 from sqlalchemy import select, func
 from app.db_models_re import UnderwritingRun
+
+logger = logging.getLogger(__name__)
 
 
 class UnderwritingRunRepository:
@@ -31,8 +37,9 @@ class UnderwritingRunRepository:
             self.db.commit()
             self.db.refresh(run)
             return run
-        except Exception:
+        except SQLAlchemyError:
             self.db.rollback()
+            logger.exception("Failed to create underwriting run for user %s", user_id)
             raise
 
     def get(self, run_id: str, user_id: str) -> Optional[UnderwritingRun]:
@@ -44,12 +51,13 @@ class UnderwritingRunRepository:
         )
         return self.db.execute(stmt).scalar_one_or_none()
 
+    def get_by_id(self, run_id: str) -> Optional[UnderwritingRun]:
+        """Fetch by ID only — used for ownership resolution in SSE auth (no user filter)."""
+        stmt = select(UnderwritingRun).where(UnderwritingRun.id == run_id)
+        return self.db.execute(stmt).scalar_one_or_none()
+
     def list(self, user_id: str, limit: int = 20, offset: int = 0) -> List[UnderwritingRun]:
         """List runs for a user, newest first."""
-        if limit <= 0:
-            limit = 20
-        if offset < 0:
-            offset = 0
         stmt = (
             select(UnderwritingRun)
             .where(UnderwritingRun.user_id == user_id)
@@ -75,8 +83,9 @@ class UnderwritingRunRepository:
                 run.error_message = error_message
             self.db.commit()
             return True
-        except Exception:
+        except SQLAlchemyError:
             self.db.rollback()
+            logger.exception("Failed to update status for run %s", run_id)
             raise
 
     def update_extraction(
@@ -86,8 +95,9 @@ class UnderwritingRunRepository:
         field_citations: dict | None,
         discrepancies: list | None,
         extraction_job_id: str | None = None,
+        citation_context: dict | None = None,
     ) -> bool:
-        """Persist extracted inputs, citations, and discrepancies onto the run. Returns False if not found."""
+        """Persist extracted inputs, citations, discrepancies, and citation_context onto the run."""
         run = self.db.get(UnderwritingRun, run_id)
         if not run:
             return False
@@ -100,10 +110,13 @@ class UnderwritingRunRepository:
                 run.discrepancies = discrepancies
             if extraction_job_id is not None:
                 run.extraction_job_id = extraction_job_id
+            if citation_context is not None:
+                run.citation_context = citation_context
             self.db.commit()
             return True
-        except Exception:
+        except SQLAlchemyError:
             self.db.rollback()
+            logger.exception("Failed to update extraction for run %s", run_id)
             raise
 
     def update_result(self, run_id: str, result: dict, typed_metrics: dict) -> bool:
@@ -135,8 +148,9 @@ class UnderwritingRunRepository:
 
             self.db.commit()
             return True
-        except Exception:
+        except SQLAlchemyError:
             self.db.rollback()
+            logger.exception("Failed to update result for run %s", run_id)
             raise
 
     def update_inputs(self, run_id: str, user_id: str, inputs: dict) -> bool:
@@ -148,8 +162,9 @@ class UnderwritingRunRepository:
             run.inputs = inputs
             self.db.commit()
             return True
-        except Exception:
+        except SQLAlchemyError:
             self.db.rollback()
+            logger.exception("Failed to update inputs for run %s", run_id)
             raise
 
     def update_loi_inputs(self, run_id: str, user_id: str, loi_inputs: dict) -> bool:
@@ -161,8 +176,9 @@ class UnderwritingRunRepository:
             run.loi_inputs = loi_inputs
             self.db.commit()
             return True
-        except Exception:
+        except SQLAlchemyError:
             self.db.rollback()
+            logger.exception("Failed to update LOI inputs for run %s", run_id)
             raise
 
     def delete(self, run_id: str, user_id: str) -> bool:
@@ -174,8 +190,9 @@ class UnderwritingRunRepository:
             self.db.delete(run)
             self.db.commit()
             return True
-        except Exception:
+        except SQLAlchemyError:
             self.db.rollback()
+            logger.exception("Failed to delete run %s", run_id)
             raise
 
     def count(self, user_id: str) -> int:

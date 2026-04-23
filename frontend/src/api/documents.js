@@ -9,7 +9,7 @@ import { createAuthenticatedApi } from "./client";
  * Get presigned URL for document download/viewing
  * @param {Function} getToken - Auth token getter
  * @param {string} documentId - Document ID
- * @returns {Promise<{url: string, expires_in: number, storage_backend: string} | {missing: true}>}
+ * @returns {Promise<{url: string, expires_in: number, storage_backend: string, filename?: string, content_type?: string} | {missing: true}>}
  */
 export async function getDocumentDownloadUrl(getToken, documentId) {
   const api = createAuthenticatedApi(getToken);

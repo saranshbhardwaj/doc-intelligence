@@ -15,6 +15,7 @@ import { createWorkflowDraftSlice } from "./slices/workflowDraftSlice";
 import { createTemplateFillSlice } from "./slices/templateFillSlice";
 import { createFeedbackSlice } from "./slices/feedbackSlice";
 import { createPeDiligenceSlice } from "./slices/peDiligenceSlice";
+import { createUnderwritingSlice } from "./slices/underwritingSlice";
 
 /**
  * Main store combining all slices
@@ -29,6 +30,7 @@ export const useStore = create(
       ...createTemplateFillSlice(...args),
       ...createFeedbackSlice(...args),
       ...createPeDiligenceSlice(...args),
+      ...createUnderwritingSlice(...args),
     }),
     {
       name: "sand-cloud-storage", // localStorage key
@@ -82,6 +84,16 @@ export const useStore = create(
           roomId: state.peDiligence?.roomId ?? null,
           analysisJobId: state.peDiligence?.analysisJobId ?? null,
         },
+        // currentRun is NOT persisted — DB is the source of truth; wizard re-fetches via run_id in URL.
+        // Don't persist: extraction.cleanup, extraction.isProcessing (will be restored via reconnection)
+        underwriting: {
+          runs: state.underwriting?.runs ?? [],
+          wizardStep: state.underwriting?.wizardStep ?? 0,
+          extraction: {
+            jobId: state.underwriting?.extraction?.jobId ?? null,
+            // Don't persist: isProcessing, progress, stage, message, cleanup
+          },
+        },
       }),
       // Merge persisted slice keys into current state instead of overwriting
       // so that non-persisted defaults (e.g. progress structure) remain intact.
@@ -122,6 +134,14 @@ export const useStore = create(
             ...current.peDiligence,
             roomId: persisted.peDiligence?.roomId ?? null,
             analysisJobId: persisted.peDiligence?.analysisJobId ?? null,
+          },
+          underwriting: {
+            ...current.underwriting,
+            ...persisted.underwriting,
+            extraction: {
+              ...current.underwriting.extraction,
+              jobId: persisted.underwriting?.extraction?.jobId ?? null,
+            },
           },
         };
       },
@@ -320,6 +340,23 @@ export const usePeDiligenceActions = () =>
       peMarkAnalysisCompleted: state.peMarkAnalysisCompleted,
       peRefreshAnalysisStatus: state.peRefreshAnalysisStatus,
       peClearRoom: state.peClearRoom,
+    }))
+  );
+
+// Underwriting selectors
+export const useUnderwriting = () => useStore((state) => state.underwriting);
+
+export const useUnderwritingActions = () =>
+  useStore(
+    useShallow((state) => ({
+      loadRuns: state.loadRuns,
+      loadRun: state.loadRun,
+      setWizardStep: state.setWizardStep,
+      setCurrentRun: state.setCurrentRun,
+      startExtraction: state.startExtraction,
+      updateExtractionProgress: state.updateExtractionProgress,
+      completeExtraction: state.completeExtraction,
+      resetExtraction: state.resetExtraction,
     }))
   );
 

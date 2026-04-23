@@ -196,9 +196,8 @@ export default function ChatPage() {
     );
   }
 
-  const breadcrumbs = [{ label: "Chat" }];
   return (
-    <AppLayout breadcrumbs={breadcrumbs} lockViewport>
+    <AppLayout lockViewport suppressPageHeader>
       <div className="relative flex h-full min-h-0 gap-3 px-3 pb-3 pt-2 md:px-4 md:pb-4 md:pt-3">
         {/* Mobile sessions drawer trigger */}
         <div className="absolute left-3 top-3 z-40 md:hidden">
