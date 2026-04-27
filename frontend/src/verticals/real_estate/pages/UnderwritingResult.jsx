@@ -1,266 +1,70 @@
 /**
  * Deal Dashboard
  * Decision-oriented results view for underwriting output.
+ * Coordinates state and data derivation; delegates rendering to section components.
  */
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
   AlertTriangle,
-  Building2,
   CheckCircle2,
-  ChevronDown,
   ChevronLeft,
   Download,
-  Edit2,
   Loader2,
   MapPin,
-  RotateCcw,
   SlidersHorizontal,
-  TrendingUp,
+  Trash2,
   Warehouse,
   XCircle,
 } from 'lucide-react';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
 import {
   ResizableHandle,
   ResizablePanel,
   ResizablePanelGroup,
 } from '@/components/ui/resizable';
-import { Skeleton } from '@/components/ui/skeleton';
-import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  Legend,
-  Line,
-  LineChart,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from 'recharts';
+import { UnderwritingResultSkeleton } from '../../../components/skeletons/PageSkeletons';
 import AppLayout from '../../../components/layout/AppLayout';
 import { useAppAuth } from '../../../hooks/useAppAuth';
 import { useUnderwriting, useUnderwritingActions } from '../../../store';
-import { recalculateScenario, runSensitivityAnalysis } from '../../../api/re-underwriting';
+import { deleteUnderwritingRun, recalculateScenario, runSensitivityAnalysis } from '../../../api/re-underwriting';
 import {
-  RolloverRiskPanel,
+  DiscrepanciesSection,
+  EvidenceSection,
+  MarketSection,
+  ModelBasisPanel,
+  OperationsSection,
+  ReturnsSection,
+  ScenarioPanel,
   SourceDocumentPanel,
-  StressTestTable,
+  TrustPanel,
   UnderwritingMetricCard,
-  UnderwritingSection,
   UnderwritingStatusBadge,
+  buildDerivedMixedRevenueWarning,
+  formatCompactCurrency,
+  formatCurrency,
+  formatEvidenceValue,
+  formatMultiple,
+  formatPercent,
+  formatRatioPercent,
+  getFieldCitation,
+  getRentCompCoverage,
+  getRevenueBasis,
+  getUnitMixSource,
+  getUnitMixSummary,
+  pickUnitMix,
 } from '../components/underwriting';
-
-function formatCurrency(value) {
-  if (value == null) return '—';
-  return `$${value.toLocaleString('en-US', { maximumFractionDigits: 0 })}`;
-}
-
-function formatCurrencyPrecise(value) {
-  if (value == null) return '—';
-  return `$${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
-}
-
-function formatPercent(value) {
-  if (value == null) return '—';
-  return `${(value > 1 ? value : value * 100).toFixed(1)}%`;
-}
-
-function formatRatioPercent(value) {
-  if (value == null) return '—';
-  return `${(value * 100).toFixed(0)}%`;
-}
-
-function formatMultiple(value) {
-  if (value == null) return '—';
-  return `${value.toFixed(2)}×`;
-}
-
-function formatCompactCurrency(value) {
-  if (value == null) return '—';
-  if (Math.abs(value) >= 1_000_000) return `$${(value / 1_000_000).toFixed(1)}M`;
-  if (Math.abs(value) >= 1_000) return `$${(value / 1_000).toFixed(0)}K`;
-  return `$${value.toFixed(0)}`;
-}
-
-function pickUnitMix(artifact, persistedInputs) {
-  const candidates = [
-    artifact.rent_roll_data?.unit_mix,
-    artifact.unit_mix,
-    persistedInputs.unit_mix,
-    artifact.om_data?.unit_mix,
-  ];
-
-  for (const candidate of candidates) {
-    if (Array.isArray(candidate) && candidate.length > 0) {
-      return candidate;
-    }
-  }
-
-  return [];
-}
-
-function buildDerivedMixedRevenueWarning(unitMix) {
-  if (!Array.isArray(unitMix) || unitMix.length === 0) {
-    return null;
-  }
-
-  const nonStorageRows = unitMix.filter((row) => {
-    const section = row?.section || '';
-    const unitType = row?.unit_type || '';
-    const label = `${section} ${unitType}`.trim().toLowerCase();
-    return ['parking', 'residential', 'apartment', 'office'].some((keyword) => label.includes(keyword));
-  });
-
-  if (nonStorageRows.length === 0) {
-    return null;
-  }
-
-  const nonStorageUnits = nonStorageRows.reduce((sum, row) => sum + (row?.num_units || 0), 0);
-  const totalUnits = unitMix.reduce((sum, row) => sum + (row?.num_units || 0), 0);
-  const detail = nonStorageUnits > 0 && totalUnits > 0
-    ? `${nonStorageUnits} of ${totalUnits} units/spaces appear to be parking or residential`
-    : 'parking or residential rows appear in the extracted unit mix';
-
-  return {
-    key: 'mixed_revenue_unit_mix',
-    message: `Mixed revenue detected: ${detail}. The current underwriting model still applies blended self-storage assumptions, so per-door metrics and growth interpretations should be reviewed manually.`,
-  };
-}
-
-function parseCitationPage(citationToken) {
-  if (!citationToken) return null;
-  const match = String(citationToken).match(/:p(\d+)\]/i);
-  if (!match) return null;
-  const page = Number.parseInt(match[1], 10);
-  return Number.isFinite(page) && page > 0 ? page : null;
-}
-
-function normalizeCitation(fieldCitation, citationContext, citationToken) {
-  if (!citationToken) return null;
-  const contextEntry = citationContext?.[citationToken] || null;
-  return {
-    ...fieldCitation,
-    citation: citationToken,
-    page: contextEntry?.page ?? parseCitationPage(citationToken),
-    document_id: contextEntry?.document_id ?? fieldCitation?.document_id,
-    filename: contextEntry?.filename ?? fieldCitation?.filename,
-    bbox: contextEntry?.bbox ?? fieldCitation?.bbox ?? null,
-  };
-}
-
-function getFieldCitation(fieldCitations, citationContext, fieldKey) {
-  if (!fieldCitations) return null;
-  const rawCitation = fieldCitations[fieldKey]
-    ?? fieldCitations[`om.${fieldKey}`]
-    ?? fieldCitations[`t12.${fieldKey}`]
-    ?? fieldCitations[`rent_roll.${fieldKey}`]
-    ?? null;
-
-  if (!rawCitation || rawCitation.is_default) {
-    return null;
-  }
-
-  return {
-    ...rawCitation,
-    entries: (rawCitation.citations || [])
-      .map((citationToken) => normalizeCitation(rawCitation, citationContext, citationToken))
-      .filter(Boolean),
-  };
-}
-
-function formatEvidenceValue(formatter, value) {
-  return value == null ? '—' : formatter(value);
-}
-
-function flattenCitationEntries(citations) {
-  const uniqueEntries = new Map();
-
-  (citations || []).filter(Boolean).forEach((citation) => {
-    const docTypeLabel = DOC_TYPE_LABELS[citation.doc_type] || citation.doc_type || 'Document';
-    (citation.entries || []).forEach((entry, index) => {
-      const id = `${citation.doc_type || 'document'}-${entry.citation || entry.page || index}`;
-      if (!uniqueEntries.has(id)) {
-        uniqueEntries.set(id, {
-          id,
-          label: entry.page ? `${docTypeLabel} p${entry.page}` : `Open ${docTypeLabel}`,
-          title: citation.source_text || entry.filename || docTypeLabel,
-          entry,
-        });
-      }
-    });
-  });
-
-  return [...uniqueEntries.values()];
-}
-
-function SourceSupportActions({ citations, onOpenSource, title = 'Source support' }) {
-  const entries = flattenCitationEntries(citations).slice(0, 3);
-  if (entries.length === 0) return null;
-
-  return (
-    <div className="mt-4 border-t border-border/60 pt-3">
-      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">{title}</p>
-      <div className="mt-2 flex flex-wrap items-center gap-2">
-        {entries.map(({ id, label, title: buttonTitle, entry }) => (
-          <Button
-            key={id}
-            type="button"
-            variant="outline"
-            size="sm"
-            className="h-8 rounded-full px-3 text-xs"
-            title={buttonTitle}
-            onClick={() => onOpenSource(entry)}
-          >
-            {label}
-          </Button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-const DOC_TYPE_LABELS = {
-  om: 'Offering Memo',
-  rent_roll: 'Rent Roll',
-  t12: 'T-12',
-};
-
-function OccupancyBadge({ pct }) {
-  if (pct == null) return <span className="text-sm text-muted-foreground">—</span>;
-  const pctValue = pct > 1 ? pct : pct * 100;
-  const tone = pctValue >= 85 ? 'success' : pctValue >= 70 ? 'warning' : 'danger';
-  return <UnderwritingStatusBadge tone={tone}>{pctValue.toFixed(0)}% occupied</UnderwritingStatusBadge>;
-}
-
-function KeyValueList({ rows }) {
-  return (
-    <div className="space-y-3">
-      {rows.map((row) => (
-        <div key={row.label} className="underwriting-kv-row">
-          <div className="min-w-0">
-            <p className="underwriting-kv-label">{row.label}</p>
-            {row.help ? <p className="mt-1 text-xs leading-5 text-muted-foreground">{row.help}</p> : null}
-          </div>
-          <div className="underwriting-kv-value">{row.value}</div>
-        </div>
-      ))}
-    </div>
-  );
-}
-
-function getUnitTypeBadge(row) {
-  const label = `${row.section || ''} ${row.unit_type || ''}`.toLowerCase();
-  if (label.includes('parking')) return <UnderwritingStatusBadge tone="warning">Parking</UnderwritingStatusBadge>;
-  if (label.includes('residential')) return <UnderwritingStatusBadge tone="neutral">Residential</UnderwritingStatusBadge>;
-  // Check NC before CC — "non-climate" contains "climate"
-  if (label.includes('non-climate') || label.includes('non climate')) {
-    return <UnderwritingStatusBadge tone="neutral">NC</UnderwritingStatusBadge>;
-  }
-  if (label.includes('climate')) return <UnderwritingStatusBadge tone="active">CC</UnderwritingStatusBadge>;
-  return <UnderwritingStatusBadge tone="neutral">NC</UnderwritingStatusBadge>;
-}
 
 function WorkspaceMark() {
   return (
@@ -277,21 +81,18 @@ export default function UnderwritingResult() {
   const { currentRun } = useUnderwriting();
   const { loadRun } = useUnderwritingActions();
 
-  const [sensitivityPoints, setSensitivityPoints] = useState([]);
-  const [sensitivityPrice, setSensitivityPrice] = useState(null);
-  const [isSensitivityLoading, setIsSensitivityLoading] = useState(false);
   const [showSourcePanel, setShowSourcePanel] = useState(false);
   const [activeCitation, setActiveCitation] = useState(null);
   const [showScenario, setShowScenario] = useState(false);
-  const [showEvidence, setShowEvidence] = useState(false);
   const [showReturns, setShowReturns] = useState(true);
   const [showOperations, setShowOperations] = useState(false);
+  const [showEvidence, setShowEvidence] = useState(false);
   const [showMarket, setShowMarket] = useState(false);
-  const [showOtherOpex, setShowOtherOpex] = useState(false);
-  // Scenario override values stored as display units: rates as %, price as $
+  const [showTrustPanel, setShowTrustPanel] = useState(false);
   const [scenarioValues, setScenarioValues] = useState({});
   const [scenarioResult, setScenarioResult] = useState(null);
   const [isScenarioLoading, setIsScenarioLoading] = useState(false);
+  const [isDeleting, setIsDeleting] = useState(false);
   const scenarioDebounceRef = useRef(null);
 
   useEffect(() => {
@@ -301,11 +102,6 @@ export default function UnderwritingResult() {
   const handleOpenSource = (citation) => {
     setActiveCitation(citation);
     setShowSourcePanel(true);
-  };
-
-  const closeSourcePanel = () => {
-    setShowSourcePanel(false);
-    setActiveCitation(null);
   };
 
   const triggerScenarioRecalc = useCallback((values) => {
@@ -346,36 +142,49 @@ export default function UnderwritingResult() {
     setScenarioResult(null);
   }, []);
 
+  const handleDelete = useCallback(async () => {
+    if (!runId || isDeleting) return;
+    setIsDeleting(true);
+    try {
+      await deleteUnderwritingRun(getToken, runId);
+      navigate('/app/re/underwriting');
+    } catch (err) {
+      console.error('Delete failed:', err);
+    } finally {
+      setIsDeleting(false);
+    }
+  }, [getToken, isDeleting, navigate, runId]);
+
+  // ── Derived data ──────────────────────────────────────────────────────────
+
   const artifact = currentRun?.result_artifact || {};
   const persistedInputs = currentRun?.inputs || {};
   const verdict = artifact.verdict;
   const verdictStatus = verdict?.status;
-  const verdictTone = verdictStatus === 'worth_pursuing'
-    ? 'success'
-    : verdictStatus === 'needs_review'
-      ? 'warning'
-      : verdictStatus
-        ? 'danger'
-        : 'neutral';
-  const verdictLabel = verdictStatus === 'worth_pursuing'
-    ? 'Worth Pursuing'
-    : verdictStatus === 'needs_review'
-      ? 'Needs Review'
-      : verdictStatus
-        ? 'Below Standards'
-        : 'In Review';
+  const verdictTone = verdictStatus === 'worth_pursuing' ? 'success'
+    : verdictStatus === 'needs_review' ? 'warning'
+    : verdictStatus ? 'danger' : 'neutral';
+  const verdictLabel = verdictStatus === 'worth_pursuing' ? 'Passes Screen'
+    : verdictStatus === 'needs_review' ? 'Review Needed'
+    : verdictStatus ? 'Below Screen' : 'In Review';
 
   const projections = artifact.projections || [];
   const stressTests = artifact.stress_tests || [];
   const rolloverRisk = artifact.rollover_risk;
   const unitMix = pickUnitMix(artifact, persistedInputs);
-  const demographics = artifact.demographics || (persistedInputs.project?.population_3mi != null || persistedInputs.project?.avg_household_income_3mi != null || persistedInputs.project?.storage_sqft_per_capita_3mi != null
-    ? {
-        population: persistedInputs.project?.population_3mi,
-        avg_household_income: persistedInputs.project?.avg_household_income_3mi,
-        sqft_per_capita: persistedInputs.project?.storage_sqft_per_capita_3mi,
-      }
-    : null);
+
+  const demographics = artifact.demographics || (
+    persistedInputs.project?.population_3mi != null ||
+    persistedInputs.project?.avg_household_income_3mi != null ||
+    persistedInputs.project?.storage_sqft_per_capita_3mi != null
+      ? {
+          population: persistedInputs.project?.population_3mi,
+          avg_household_income: persistedInputs.project?.avg_household_income_3mi,
+          sqft_per_capita: persistedInputs.project?.storage_sqft_per_capita_3mi,
+        }
+      : null
+  );
+
   const rentComps = (persistedInputs.rent_comps?.length ? persistedInputs.rent_comps : artifact.rent_comps) || [];
   const marketData = {
     ...(artifact.market_data || {}),
@@ -387,11 +196,13 @@ export default function UnderwritingResult() {
   const discrepancies = currentRun?.discrepancies || [];
   const fieldCitations = currentRun?.field_citations || {};
   const citationContext = currentRun?.citation_context || {};
+
   const storedVerdictWarnings = verdict?.warnings || [];
   const derivedMixedRevenueWarning = buildDerivedMixedRevenueWarning(unitMix);
-  const verdictWarnings = derivedMixedRevenueWarning && !storedVerdictWarnings.some((warning) => warning.key === derivedMixedRevenueWarning.key)
+  const verdictWarnings = derivedMixedRevenueWarning && !storedVerdictWarnings.some((w) => w.key === derivedMixedRevenueWarning.key)
     ? [...storedVerdictWarnings, derivedMixedRevenueWarning]
     : storedVerdictWarnings;
+
   const sourceCitations = {
     purchase_price: getFieldCitation(fieldCitations, citationContext, 'purchase_price'),
     num_units: getFieldCitation(fieldCitations, citationContext, 'num_units'),
@@ -437,17 +248,19 @@ export default function UnderwritingResult() {
       ? `${verdict.rationale} Warning: ${derivedMixedRevenueWarning.message}`
       : verdict.rationale)
     : derivedMixedRevenueWarning?.message || null;
+
+  const criticalWarningCount = verdictWarnings.filter((w) => w.severity === 'critical').length;
   const prioritizedWarnings = [
-    ...verdictWarnings.filter((warning) => warning.severity === 'critical'),
-    ...verdictWarnings.filter((warning) => warning.severity !== 'critical'),
+    ...verdictWarnings.filter((w) => w.severity === 'critical'),
+    ...verdictWarnings.filter((w) => w.severity !== 'critical'),
   ];
-  const criticalWarningCount = prioritizedWarnings.filter((warning) => warning.severity === 'critical').length;
   const watchItems = [
     ...(verdict?.failures || []).slice(0, 3).map((failure) => ({
       id: `failure-${failure.metric}`,
       kind: 'failure',
       label: failure.metric.replaceAll('_', ' '),
       citations: verdictFailureSupportByMetric[failure.metric] || [],
+      gap: failure.gap,
     })),
     ...prioritizedWarnings.map((warning) => ({
       id: `warning-${warning.key}`,
@@ -458,43 +271,29 @@ export default function UnderwritingResult() {
     })),
   ].slice(0, Math.max(criticalWarningCount + 3, 3));
 
-  const failedSet = new Set((verdict?.failures || []).map((failure) => failure.metric));
-  const metrics = [
-    {
-      label: 'IRR',
-      value: formatPercent(currentRun?.irr),
-      tone: failedSet.has('irr') ? 'danger' : verdictStatus === 'worth_pursuing' ? 'success' : 'default',
-      detail: failedSet.has('irr') ? 'Below target threshold' : 'Projected internal rate of return',
-      formula: 'Discount rate that makes NPV of all cash flows (including exit proceeds) equal zero over the hold period.',
-    },
-    {
-      label: 'Cash-on-Cash',
-      value: formatPercent(currentRun?.cash_on_cash),
-      tone: failedSet.has('cash_on_cash') ? 'warning' : 'default',
-      detail: 'Year-one cash yield',
-      formula: 'Year 1 cash flow after debt service ÷ total equity invested.',
-    },
-    {
-      label: 'Equity Multiple',
-      value: formatMultiple(currentRun?.equity_multiple),
-      tone: failedSet.has('equity_multiple') ? 'warning' : 'default',
-      detail: 'Total return multiple',
-      formula: 'Total cash received (distributions + exit proceeds) ÷ total equity invested.',
-    },
-    {
-      label: 'DSCR Year 1',
-      value: formatMultiple(currentRun?.dscr_year_one),
-      tone: currentRun?.dscr_year_one != null && currentRun.dscr_year_one < 1.25 ? 'warning' : 'default',
-      detail: currentRun?.dscr_year_one != null && currentRun.dscr_year_one < 1.25 ? 'Below 1.25× minimum' : 'Debt coverage cushion',
-      formula: 'Year 1 NOI ÷ annual debt service. Below 1.25× is the typical lender minimum.',
-    },
-  ];
+  const failedSet = new Set((verdict?.failures || []).map((f) => f.metric));
+
+  const fm = artifact.formula_metadata || {};
+  function buildTooltip(key, valueFn, fallbackFn = null) {
+    const meta = fm[key];
+    if (meta) {
+      const cv = meta.computed_values || {};
+      const computed = valueFn ? valueFn(cv) : null;
+      return computed ? `${meta.description}\n\n${computed}` : meta.description;
+    }
+    const fallback = fallbackFn ? fallbackFn() : null;
+    return fallback || null;
+  }
 
   const capitalStructure = artifact.capital_structure || {};
   const purchasePrice = capitalStructure.purchase_price || 0;
   const loanAmount = capitalStructure.loan_amount || 0;
+  const equityInvested = capitalStructure.total_equity_invested || Math.max(purchasePrice - loanAmount, 0);
+  const equityPct = purchasePrice > 0 ? equityInvested / purchasePrice : 0;
+  const ltvPct = purchasePrice > 0 ? loanAmount / purchasePrice : 0;
+  const equityRaiseTone = equityPct >= 0.5 ? 'warning' : equityPct >= 0.4 ? 'active' : 'neutral';
+  const equityRaiseLabel = equityPct >= 0.5 ? 'Large equity raise' : equityPct >= 0.4 ? 'Meaningful equity raise' : 'Moderate equity raise';
 
-  // Scenario base values (display units: rates as %, price as $)
   const baseScenario = {
     exit_cap_rate: persistedInputs.exit?.exit_cap_rate != null ? persistedInputs.exit.exit_cap_rate * 100 : null,
     vacancy_credit_loss_pct: persistedInputs.operational?.vacancy_credit_loss_pct != null ? persistedInputs.operational.vacancy_credit_loss_pct * 100 : null,
@@ -502,19 +301,26 @@ export default function UnderwritingResult() {
     interest_rate_pct: persistedInputs.financing?.interest_rate_pct != null ? persistedInputs.financing.interest_rate_pct * 100 : null,
     purchase_price: persistedInputs.acquisition?.purchase_price || purchasePrice || null,
   };
-  const equityInvested = capitalStructure.total_equity_invested || Math.max(purchasePrice - loanAmount, 0);
-  const equityPct = purchasePrice > 0 ? equityInvested / purchasePrice : 0;
-  const ltvPct = purchasePrice > 0 ? loanAmount / purchasePrice : 0;
-  const equityRaiseTone = equityPct >= 0.5 ? 'warning' : equityPct >= 0.4 ? 'active' : 'neutral';
-  const equityRaiseLabel = equityPct >= 0.5
-    ? 'Large equity raise'
-    : equityPct >= 0.4
-      ? 'Meaningful equity raise'
-      : 'Moderate equity raise';
 
   const totalUnits = artifact.rent_roll_data?.summary?.total_units || persistedInputs.project?.num_units;
   const gpr = persistedInputs.operational?.gross_potential_rent_annual;
   const derivedCurrentRentPerDoor = totalUnits && gpr ? gpr / totalUnits / 12 : null;
+
+  const computedAvgInPlaceRent = useMemo(() => {
+    const rows = unitMix?.filter((r) => r.current_rent != null && r.occupied_units > 0) ?? [];
+    const weightedSum = rows.reduce((s, r) => s + r.current_rent * r.occupied_units, 0);
+    const totalOccupied = rows.reduce((s, r) => s + r.occupied_units, 0);
+    return totalOccupied > 0 ? Math.round((weightedSum / totalOccupied) * 100) / 100 : null;
+  }, [unitMix]);
+
+  const omStatedAvgRent = persistedInputs.operational?.avg_in_place_rent_per_unit_monthly
+    ?? artifact.om_data?.avg_in_place_rent_per_unit_monthly
+    ?? null;
+  const rentGapPct = omStatedAvgRent && computedAvgInPlaceRent
+    ? Math.abs(omStatedAvgRent - computedAvgInPlaceRent) / computedAvgInPlaceRent
+    : 0;
+  const showAvgRentGap = rentGapPct > 0.05;
+
   const currentRentPerDoor = persistedInputs.operational?.avg_in_place_rent_per_unit_monthly
     ?? artifact.rent_roll_data?.summary?.avg_in_place_rent_per_unit_monthly
     ?? artifact.om_data?.avg_in_place_rent_per_unit_monthly
@@ -527,27 +333,54 @@ export default function UnderwritingResult() {
   const occupancy = artifact.rent_roll_data?.summary?.occupancy_pct;
   const t12OpexRatio = artifact.t12_data?.summary?.opex_ratio;
   const omOpexPct = artifact.om_data?.opex_pct;
-  const currentExpenseRatio = persistedInputs.operational?.expense_ratio_current
-    ?? artifact.t12_data?.summary?.expense_ratio_actual
-    ?? t12OpexRatio;
+  const hasT12Data = !!(artifact.t12_data?.summary &&
+    (artifact.t12_data.summary.expense_ratio_actual != null || artifact.t12_data.summary.opex_ratio != null));
+  const currentExpenseRatio = hasT12Data
+    ? (artifact.t12_data.summary.expense_ratio_actual ?? t12OpexRatio)
+    : null;
   const proFormaExpenseRatio = persistedInputs.operational?.expense_ratio_pro_forma
     ?? artifact.om_data?.expense_ratio_pro_forma
     ?? omOpexPct;
-  const propertyTaxAnnual = persistedInputs.operational?.property_tax_annual;
-  const propertyTaxGrowthPct = persistedInputs.operational?.property_tax_growth_pct
-    ?? artifact.om_data?.property_tax_growth_pct;
-  const milRate = persistedInputs.operational?.mil_rate ?? artifact.om_data?.mil_rate;
-  const badDebtAnnual = persistedInputs.operational?.bad_debt_annual
-    ?? artifact.t12_data?.summary?.bad_debt_annual;
-  const correctionsCollectionsAnnual = persistedInputs.operational?.corrections_collections_annual
-    ?? artifact.t12_data?.summary?.corrections_collections_annual;
-  const missingExpenseFields = artifact.t12_data?.summary?.missing_expense_fields || [];
-  const nearbyStorageCount1Mi = marketData.nearby_storage_count_1mi;
-  const nearbyStorageCount3Mi = marketData.nearby_storage_count_3mi;
-  const nearbyStorageCount5Mi = marketData.nearby_storage_count_5mi;
+  const expenseBasis = artifact.expense_basis || null;
+  const expenseBasisFormula = buildTooltip('expense_basis',
+    (cv) => {
+      const lines = [];
+      if (cv.year1_line_item_opex != null) lines.push(`Line-item OpEx: ${formatCompactCurrency(cv.year1_line_item_opex)}`);
+      if (cv.year1_ratio_opex != null) lines.push(`Ratio-implied OpEx: ${formatCompactCurrency(cv.year1_ratio_opex)}`);
+      if (cv.ratio != null && cv.year1_egi != null) lines.push(`${formatPercent(cv.ratio)} × ${formatCompactCurrency(cv.year1_egi)} Year-1 EGI`);
+      return lines.length ? lines.join('\n') : null;
+    },
+  );
   const rentSpreadPerDoor = marketRentPerDoor != null && currentRentPerDoor != null
-    ? marketRentPerDoor - currentRentPerDoor
-    : null;
+    ? marketRentPerDoor - currentRentPerDoor : null;
+  const breakEvenOccupancyPct = artifact.break_even_occupancy_pct;
+  const rentPositionAnalysis = artifact.rent_position_analysis || [];
+  const revenueBasis = getRevenueBasis(artifact, persistedInputs, sourceCitations);
+  const unitMixSource = getUnitMixSource(artifact, persistedInputs);
+  const unitMixSummary = getUnitMixSummary(unitMix);
+  const rentCompCoverage = getRentCompCoverage(unitMix, rentComps, rentPositionAnalysis);
+
+  const omStatedNoi = persistedInputs.operational?.noi_year_one_stated
+    ?? artifact.om_data?.noi_year_one_stated
+    ?? artifact.om_data?.noi_projected
+    ?? persistedInputs.operational?.noi_current_stated
+    ?? artifact.om_data?.noi_current_stated
+    ?? null;
+  const modeledNoi = currentRun?.noi_year_one ?? artifact.noi_year_one ?? null;
+  const noiBridgeDelta = omStatedNoi != null && modeledNoi != null ? modeledNoi - omStatedNoi : null;
+  const noiBridgeDeltaPct = omStatedNoi ? noiBridgeDelta / omStatedNoi : null;
+  const noiBridgeAlert = noiBridgeDeltaPct != null && Math.abs(noiBridgeDeltaPct) > 0.05;
+
+  const capRateSubmarket = marketData.submarket_avg_cap_rate;
+  const capRatePurchase = persistedInputs.acquisition?.market_cap_rate_purchase
+    || artifact.om_data?.market_cap_rate_purchase
+    || marketData.market_cap_rate_purchase
+    || impliedCapRate;
+  const capRateSale = persistedInputs.exit?.market_cap_rate_sale
+    || artifact.om_data?.market_cap_rate_sale
+    || marketData.market_cap_rate_sale;
+  const bpsDelta = capRateSubmarket && impliedCapRate
+    ? Math.round((impliedCapRate - capRateSubmarket) * 10000) : null;
 
   const address = currentRun?.address || '';
   const mapsKey = import.meta.env.VITE_GOOGLE_MAPS_KEY;
@@ -555,32 +388,127 @@ export default function UnderwritingResult() {
     ? `https://maps.googleapis.com/maps/api/staticmap?center=${encodeURIComponent(address)}&zoom=13&size=500x260&markers=color:red%7C${encodeURIComponent(address)}&key=${mapsKey}`
     : null;
 
-  const capRateSubmarket = marketData.submarket_avg_cap_rate;
-  const capRatePurchase = persistedInputs.acquisition?.market_cap_rate_purchase || artifact.om_data?.market_cap_rate_purchase || marketData.market_cap_rate_purchase || impliedCapRate;
-  const capRateSale = persistedInputs.exit?.market_cap_rate_sale || artifact.om_data?.market_cap_rate_sale || marketData.market_cap_rate_sale;
-  const breakEvenOccupancyPct = artifact.break_even_occupancy_pct;
-  const rentPositionAnalysis = artifact.rent_position_analysis || [];
-  const omStatedNoi = artifact.om_data?.noi_year_one_stated
-    ?? artifact.om_data?.noi_projected
-    ?? artifact.om_data?.noi_current_stated
-    ?? null;
-  const modeledNoi = currentRun?.noi_year_one ?? artifact.noi_year_one ?? null;
-  const noiBridgeDelta = omStatedNoi != null && modeledNoi != null ? modeledNoi - omStatedNoi : null;
-  const noiBridgeDeltaPct = omStatedNoi ? noiBridgeDelta / omStatedNoi : null;
-  const noiBridgeAlert = noiBridgeDeltaPct != null && Math.abs(noiBridgeDeltaPct) > 0.05;
-  const bpsDelta = capRateSubmarket && impliedCapRate
-    ? Math.round((impliedCapRate - capRateSubmarket) * 10000)
-    : null;
+  const basePurchasePrice = purchasePrice || 5_000_000;
 
-  const proformaData = projections.slice(0, 5).map((point) => ({
-    year: `Y${point.year}`,
-    NOI: Math.round(point.noi),
-    CFADS: Math.round(point.cash_flow),
+  const proformaData = projections.slice(0, 5).map((p) => ({
+    year: `Y${p.year}`,
+    NOI: Math.round(p.noi),
+    CFADS: Math.round(p.cash_flow),
   }));
 
-  const basePurchasePrice = purchasePrice || 5_000_000;
-  const minPrice = Math.round(basePurchasePrice * 0.7);
-  const maxPrice = Math.round(basePurchasePrice * 1.3);
+  const metrics = [
+    {
+      label: 'IRR',
+      value: formatPercent(currentRun?.irr),
+      tone: failedSet.has('irr') ? 'danger' : verdictStatus === 'worth_pursuing' ? 'success' : 'default',
+      detail: failedSet.has('irr') ? 'Below target threshold' : 'Projected internal rate of return',
+      formula: buildTooltip('irr',
+        (cv) => {
+          if (cv.entry_equity == null || cv.total_distributions == null || cv.exit_proceeds == null) return null;
+          const total = cv.total_distributions + cv.exit_proceeds;
+          const em = cv.entry_equity > 0 ? total / cv.entry_equity : null;
+          const lines = [
+            `Equity in:         −${formatCompactCurrency(cv.entry_equity)}`,
+            `Distributions:      ${formatCompactCurrency(cv.total_distributions)}${cv.hold_years ? ` (${cv.hold_years} yrs)` : ''}`,
+          ];
+          if (cv.loan_balance_at_exit != null) {
+            lines.push(`Gross sale:         ${formatCompactCurrency(cv.exit_proceeds + cv.loan_balance_at_exit)}`);
+            lines.push(`  Loan payoff:     −${formatCompactCurrency(cv.loan_balance_at_exit)}`);
+            lines.push(`  Equity from sale: ${formatCompactCurrency(cv.exit_proceeds)}`);
+          } else {
+            lines.push(`Net exit:           ${formatCompactCurrency(cv.exit_proceeds)}`);
+          }
+          lines.push(`─────────────────────────`);
+          lines.push(`Total out:          ${formatCompactCurrency(total)}${em != null ? ` = ${em.toFixed(2)}× equity` : ''}`);
+          return lines.join('\n');
+        },
+        () => {
+          const eq = capitalStructure.total_equity_invested;
+          const em = currentRun?.equity_multiple;
+          if (!eq) return null;
+          return em
+            ? `Equity in: −${formatCompactCurrency(eq)}\nTotal out: ${formatCompactCurrency(em * eq)} = ${em.toFixed(2)}× equity`
+            : `Equity in: −${formatCompactCurrency(eq)}`;
+        },
+      ),
+    },
+    {
+      label: 'Cash-on-Cash',
+      value: formatPercent(currentRun?.cash_on_cash),
+      tone: failedSet.has('cash_on_cash') ? 'warning' : 'default',
+      detail: 'Year-one cash yield',
+      formula: buildTooltip('cash_on_cash',
+        (cv) => {
+          if (cv.year1_cash_flow == null || cv.total_equity == null) return null;
+          const lines = [`Year-1 cash flow:  ${formatCompactCurrency(cv.year1_cash_flow)}`, `Equity invested:   ${formatCompactCurrency(cv.total_equity)}`];
+          if (cv.annual_debt_service != null) lines.splice(1, 0, `Debt service:      −${formatCompactCurrency(cv.annual_debt_service)}`);
+          return lines.join('\n');
+        },
+        () => {
+          const eq = capitalStructure.total_equity_invested;
+          const coc = currentRun?.cash_on_cash;
+          if (!eq || !coc) return null;
+          return `Year-1 cash flow: ${formatCompactCurrency(coc * eq)}\nEquity invested:  ${formatCompactCurrency(eq)}`;
+        },
+      ),
+    },
+    {
+      label: 'Equity Multiple',
+      value: formatMultiple(currentRun?.equity_multiple),
+      tone: failedSet.has('equity_multiple') ? 'warning' : 'default',
+      detail: 'Total return multiple',
+      formula: buildTooltip('equity_multiple',
+        (cv) => {
+          const equityFromSale = cv.equity_from_sale ?? cv.net_sale_price;
+          if (cv.total_cash_flows == null || equityFromSale == null || cv.total_equity == null) return null;
+          const total = cv.total_cash_flows + equityFromSale;
+          const lines = [`Distributions: ${formatCompactCurrency(cv.total_cash_flows)}${cv.hold_years ? ` (${cv.hold_years} yrs)` : ''}`];
+          if (cv.net_sale_price != null && cv.loan_balance_at_exit != null) {
+            lines.push(`Gross sale:     ${formatCompactCurrency(cv.net_sale_price)}`);
+            lines.push(`  Loan payoff: −${formatCompactCurrency(cv.loan_balance_at_exit)}`);
+            lines.push(`  Equity:       ${formatCompactCurrency(equityFromSale)}`);
+          } else {
+            lines.push(`Net exit:       ${formatCompactCurrency(equityFromSale)}`);
+          }
+          lines.push(`─────────────────────────`);
+          lines.push(`Total ÷ equity: ${formatCompactCurrency(total)} ÷ ${formatCompactCurrency(cv.total_equity)}`);
+          return lines.join('\n');
+        },
+        () => {
+          const eq = capitalStructure.total_equity_invested;
+          const em = currentRun?.equity_multiple;
+          if (!eq || !em) return null;
+          return `Total return: ${formatCompactCurrency(em * eq)} ÷ ${formatCompactCurrency(eq)} equity`;
+        },
+      ),
+    },
+    {
+      label: 'DSCR Year 1',
+      value: formatMultiple(currentRun?.dscr_year_one),
+      tone: currentRun?.dscr_year_one != null && currentRun.dscr_year_one < 1.25 ? 'warning' : 'default',
+      detail: currentRun?.dscr_year_one != null && currentRun.dscr_year_one < 1.25 ? 'Below 1.25× minimum' : 'Debt coverage cushion',
+      formula: buildTooltip('dscr_year_one',
+        (cv) => {
+          if (cv.year1_noi == null || cv.annual_debt_service == null) return null;
+          const cushion = cv.year1_noi - cv.annual_debt_service;
+          return [
+            `Year-1 NOI:     ${formatCompactCurrency(cv.year1_noi)}`,
+            `Debt service:   ${formatCompactCurrency(cv.annual_debt_service)}`,
+            `─────────────────────────`,
+            `Cash cushion:   ${formatCompactCurrency(cushion)}/yr above breakeven`,
+            `Lender min:     1.25×`,
+          ].join('\n');
+        },
+        () => {
+          const noi = currentRun?.noi_year_one;
+          const dscr = currentRun?.dscr_year_one;
+          if (!noi || !dscr) return null;
+          const ds = noi / dscr;
+          return `Year-1 NOI: ${formatCompactCurrency(noi)}\nDebt service: ${formatCompactCurrency(ds)}\nCushion: ${formatCompactCurrency(noi - ds)}/yr\nLender min: 1.25×`;
+        },
+      ),
+    },
+  ];
 
   const evidenceItems = [
     {
@@ -609,9 +537,16 @@ export default function UnderwritingResult() {
     },
     {
       key: 'avg_in_place_rent_per_unit_monthly',
-      label: 'Avg current rent / door',
-      value: formatEvidenceValue(formatCurrency, persistedInputs.operational?.avg_in_place_rent_per_unit_monthly),
-      citation: getFieldCitation(fieldCitations, citationContext, 'avg_in_place_rent_per_unit_monthly'),
+      label: 'Avg in-place rent / door',
+      value: computedAvgInPlaceRent != null
+        ? formatCurrency(computedAvgInPlaceRent)
+        : formatEvidenceValue(formatCurrency, omStatedAvgRent),
+      note: showAvgRentGap
+        ? `OM states ${formatCurrency(omStatedAvgRent)} — unit mix implies ${formatCurrency(computedAvgInPlaceRent)}`
+        : computedAvgInPlaceRent != null ? 'Weighted avg from unit mix' : null,
+      citation: computedAvgInPlaceRent != null
+        ? { doc_type: 'derived', is_derived: true, formula: null, entries: [] }
+        : null,
     },
     {
       key: 'avg_market_rent_per_unit_monthly',
@@ -652,7 +587,8 @@ export default function UnderwritingResult() {
     {
       key: 'mil_rate',
       label: 'Mil rate',
-      value: persistedInputs.operational?.mil_rate != null ? `${persistedInputs.operational.mil_rate.toFixed(1)} mills` : '—',
+      value: persistedInputs.operational?.mil_rate != null
+        ? `${persistedInputs.operational.mil_rate.toFixed(1)} mills` : '—',
       citation: getFieldCitation(fieldCitations, citationContext, 'mil_rate'),
     },
     {
@@ -681,42 +617,13 @@ export default function UnderwritingResult() {
     },
   ].filter((item) => item.citation);
 
-  useEffect(() => {
-    if (!sensitivityPrice || !runId) return;
-
-    const timer = setTimeout(async () => {
-      setIsSensitivityLoading(true);
-      try {
-        const prices = [minPrice, sensitivityPrice, maxPrice].sort((a, b) => a - b);
-        const result = await runSensitivityAnalysis(getToken, runId, prices);
-        setSensitivityPoints(result.sensitivity_points || []);
-      } catch (err) {
-        console.error('Sensitivity error:', err);
-      } finally {
-        setIsSensitivityLoading(false);
-      }
-    }, 300);
-
-    return () => clearTimeout(timer);
-  }, [getToken, maxPrice, minPrice, runId, sensitivityPrice]);
+  // ── Render ────────────────────────────────────────────────────────────────
 
   if (!currentRun) {
     return (
       <AppLayout>
         <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 sm:py-8">
-          <div className="underwriting-shell page-enter p-5 sm:p-6">
-            <Skeleton className="h-10 w-72" />
-            <Skeleton className="mt-3 h-5 w-96" />
-            <div className="mt-6 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-              {[...Array(4)].map((_, index) => (
-                <Skeleton key={index} className="h-32 rounded-3xl" />
-              ))}
-            </div>
-            <div className="mt-6 grid gap-4 xl:grid-cols-[1.7fr,1fr]">
-              <Skeleton className="h-80 rounded-3xl" />
-              <Skeleton className="h-80 rounded-3xl" />
-            </div>
-          </div>
+          <UnderwritingResultSkeleton />
         </div>
       </AppLayout>
     );
@@ -744,1017 +651,419 @@ export default function UnderwritingResult() {
           <div className="h-full overflow-y-auto">
             <div className="mx-auto max-w-7xl px-4 py-5 sm:px-6 sm:py-8">
               <div className="underwriting-shell page-enter">
-                {/* Verdict accent strip — instant visual signal at top of shell */}
                 <div
                   className="uw-verdict-strip"
                   data-tone={verdictTone === 'success' ? 'success' : verdictTone === 'warning' ? 'warning' : verdictTone === 'danger' ? 'danger' : undefined}
                 />
                 <div className="p-4 sm:p-6">
-                <div className="underwriting-topbar -m-4 mb-4 sm:-m-6 sm:mb-6">
-                  <div className="underwriting-topbar-row">
-                    <div className="underwriting-topbar-main">
-                      <WorkspaceMark />
-                      <div className="underwriting-topbar-identity">
-                        <p className="underwriting-kicker">Underwriting analysis</p>
-                        <p className="underwriting-topbar-deal mt-0.5">{currentRun.name}</p>
-                        <p className="underwriting-topbar-address mt-0.5">{address || 'Address not provided'}</p>
+
+                  {/* Top bar */}
+                  <div className="underwriting-topbar -m-4 mb-4 sm:-m-6 sm:mb-6">
+                    <div className="underwriting-topbar-row">
+                      <div className="underwriting-topbar-main">
+                        <WorkspaceMark />
+                        <div className="underwriting-topbar-identity">
+                          <p className="underwriting-kicker">Underwriting analysis</p>
+                          <p className="underwriting-topbar-deal mt-0.5">{currentRun.name}</p>
+                          <p className="underwriting-topbar-address mt-0.5">{address || 'Address not provided'}</p>
+                        </div>
+                      </div>
+                      <div className="uw-mode-switch justify-self-center">
+                        <button type="button" className="uw-mode-btn" onClick={() => navigate(`/app/re/underwriting/new?run_id=${runId}`)}>
+                          Input
+                        </button>
+                        <button type="button" className="uw-mode-btn uw-mode-btn-active">Analysis</button>
+                      </div>
+                      <div className="underwriting-topbar-actions">
+                        <UnderwritingStatusBadge tone={verdictTone}>{verdictLabel}</UnderwritingStatusBadge>
+                        {currentRun.status ? (
+                          <UnderwritingStatusBadge tone={currentRun.status === 'completed' ? 'success' : 'neutral'}>
+                            {currentRun.status}
+                          </UnderwritingStatusBadge>
+                        ) : null}
+                        <AlertDialog>
+                          <AlertDialogTrigger asChild>
+                            <Button
+                              variant="ghost"
+                              size="icon"
+                              className="h-9 w-9 rounded-full text-destructive hover:bg-destructive/10 hover:text-destructive"
+                              disabled={isDeleting}
+                              title="Delete this analysis"
+                            >
+                              <Trash2 className="h-4 w-4" />
+                            </Button>
+                          </AlertDialogTrigger>
+                          <AlertDialogContent>
+                            <AlertDialogHeader>
+                              <AlertDialogTitle>Delete analysis?</AlertDialogTitle>
+                              <AlertDialogDescription>
+                                "{currentRun?.name || 'Untitled analysis'}" will be permanently deleted. This action cannot be undone.
+                              </AlertDialogDescription>
+                            </AlertDialogHeader>
+                            <AlertDialogFooter>
+                              <AlertDialogCancel>Cancel</AlertDialogCancel>
+                              <AlertDialogAction onClick={handleDelete} className="bg-destructive hover:bg-destructive/90" disabled={isDeleting}>
+                                {isDeleting ? 'Deleting...' : 'Delete'}
+                              </AlertDialogAction>
+                            </AlertDialogFooter>
+                          </AlertDialogContent>
+                        </AlertDialog>
+                        <Button variant="outline" size="sm" disabled title="Underwriting export is not available yet.">
+                          <Download className="mr-1.5 h-4 w-4" />
+                          Export
+                        </Button>
                       </div>
                     </div>
+                  </div>
 
-                    <div className="uw-mode-switch justify-self-center">
-                      <button
-                        type="button"
-                        className="uw-mode-btn"
-                        onClick={() => navigate(`/app/re/underwriting/new?run_id=${runId}`)}
-                      >
-                        Input
-                      </button>
-                      <button type="button" className="uw-mode-btn uw-mode-btn-active">
-                        Analysis
-                      </button>
+                  <TrustPanel
+                    expanded={showTrustPanel}
+                    onToggle={() => setShowTrustPanel(v => !v)}
+                    verdictTone={verdictTone}
+                    verdictLabel={verdictLabel}
+                    revenueBasis={revenueBasis}
+                    warningCount={prioritizedWarnings.length}
+                    persistedInputs={persistedInputs}
+                    artifact={artifact}
+                    currentRentPerDoor={currentRentPerDoor}
+                    currentExpenseRatio={currentExpenseRatio}
+                    proFormaExpenseRatio={proFormaExpenseRatio}
+                    expenseBasis={expenseBasis}
+                    capitalStructure={capitalStructure}
+                    omStatedNoi={omStatedNoi}
+                    sourceCitations={sourceCitations}
+                    rentCompCoverage={rentCompCoverage}
+                    currentRun={currentRun}
+                    noiBridgeDeltaPct={noiBridgeDeltaPct}
+                    noiBridgeAlert={noiBridgeAlert}
+                    breakEvenOccupancyPct={breakEvenOccupancyPct}
+                    prioritizedWarnings={prioritizedWarnings}
+                  />
+
+                  {/* Verdict hero banner */}
+                  <div
+                    className="underwriting-hero-banner"
+                    data-tone={verdictTone === 'success' ? 'success' : verdictTone === 'warning' ? 'warning' : verdictTone === 'danger' ? 'danger' : undefined}
+                  >
+                    <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center gap-3">
+                          {verdictTone === 'success' ? <CheckCircle2 className="h-7 w-7 text-uw-success shrink-0" />
+                            : verdictTone === 'warning' ? <AlertTriangle className="h-7 w-7 text-uw-risk shrink-0" />
+                            : verdictTone === 'danger' ? <XCircle className="h-7 w-7 text-uw-danger shrink-0" />
+                            : <Loader2 className="h-7 w-7 text-primary shrink-0" />}
+                          <div>
+                            <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-muted-foreground">Lead verdict</p>
+                            <p className="mt-0.5 font-display text-3xl font-semibold tracking-tight text-foreground leading-none">{verdictLabel}</p>
+                          </div>
+                        </div>
+                        <div className="mt-3 flex flex-wrap items-center gap-1.5 text-sm text-muted-foreground">
+                          <MapPin className="h-3.5 w-3.5 shrink-0" />
+                          <span>{address || 'Address not provided'}</span>
+                        </div>
+                        {verdictRationale ? (
+                          <p className="mt-3 max-w-3xl text-sm leading-6 text-muted-foreground">{verdictRationale}</p>
+                        ) : null}
+                      </div>
+
+                      {watchItems.length > 0 && (
+                        <div className="flex flex-col gap-3 xl:items-end xl:min-w-[260px]">
+                          <div className="underwriting-data-card w-full xl:max-w-sm">
+                            <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-muted-foreground">
+                              {criticalWarningCount > 0 ? 'Critical items' : 'Watch items'}
+                            </p>
+                            <div className="mt-2.5">
+                              {watchItems.map((item) => (
+                                <div key={item.id} className="uw-watch-item">
+                                  <span
+                                    className="uw-watch-item-dot"
+                                    style={{
+                                      background: item.kind === 'failure' || item.severity === 'critical'
+                                        ? 'hsl(var(--uw-danger))'
+                                        : 'hsl(var(--uw-risk))',
+                                    }}
+                                  />
+                                  <span className="min-w-0 capitalize">{item.label}</span>
+                                  {item.kind === 'failure' && item.gap != null ? (
+                                    <span
+                                      className="ml-auto shrink-0 rounded px-1.5 py-0.5 text-[10px] font-bold tabular-nums"
+                                      style={{
+                                        background: Math.abs(item.gap) > 0.01 ? 'hsl(var(--uw-danger) / 0.12)' : 'hsl(var(--uw-risk) / 0.15)',
+                                        color: Math.abs(item.gap) > 0.01 ? 'hsl(var(--uw-danger))' : 'hsl(var(--uw-risk))',
+                                      }}
+                                    >
+                                      {item.gap > 0 ? '+' : ''}
+                                      {Math.abs(item.gap) < 0.1
+                                        ? `${(item.gap * 10000).toFixed(0)} bps`
+                                        : `${(item.gap * 100).toFixed(1)}%`}
+                                    </span>
+                                  ) : item.citations.length > 0 ? (
+                                    <button
+                                      type="button"
+                                      className="ml-auto shrink-0 text-[9px] font-bold uppercase tracking-wider text-uw-citation hover:underline"
+                                      onClick={() => handleOpenSource(item.citations[0])}
+                                    >
+                                      Source
+                                    </button>
+                                  ) : null}
+                                </div>
+                              ))}
+                            </div>
+                          </div>
+                        </div>
+                      )}
                     </div>
+                  </div>
 
-                    <div className="underwriting-topbar-actions">
-                      <UnderwritingStatusBadge tone={verdictTone}>{verdictLabel}</UnderwritingStatusBadge>
-                      {currentRun.status ? (
-                        <UnderwritingStatusBadge tone={currentRun.status === 'completed' ? 'success' : 'neutral'}>
-                          {currentRun.status}
-                        </UnderwritingStatusBadge>
+                  <ModelBasisPanel
+                    revenueBasis={revenueBasis}
+                    expenseBasis={expenseBasis}
+                    noiBasis={{ modeledNoi, omStatedNoi, noiBridgeDeltaPct }}
+                    unitMixSource={unitMixSource}
+                    rentCompCoverage={rentCompCoverage}
+                  />
+
+                  {/* Below-market upside banner */}
+                  {artifact.om_data?.below_market_annual_upside ? (
+                    <div className="uw-upside-banner mt-4">
+                      <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-uw-risk">Upside not in model</p>
+                      <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                        {artifact.om_data.below_market_tenant_pct
+                          ? `${(artifact.om_data.below_market_tenant_pct * 100).toFixed(0)}% of tenants are below street rate. ` : ''}
+                        Raising them to current rates could add{' '}
+                        <span className="font-semibold text-foreground">{formatCompactCurrency(artifact.om_data.below_market_annual_upside)}/year</span>
+                        {' '}in revenue — not reflected in the modeled returns.
+                      </p>
+                      {artifact.om_data.value_add_notes ? (
+                        <p className="mt-2 text-sm leading-6 text-muted-foreground">{artifact.om_data.value_add_notes}</p>
                       ) : null}
+                    </div>
+                  ) : null}
+
+                  {/* What-if scenario panel */}
+                  {showScenario && (
+                    <ScenarioPanel
+                      baseScenario={baseScenario}
+                      scenarioValues={scenarioValues}
+                      onValueChange={handleScenarioChange}
+                      onReset={resetScenario}
+                      scenarioResult={scenarioResult}
+                      isScenarioLoading={isScenarioLoading}
+                      currentRun={currentRun}
+                    />
+                  )}
+
+                  {/* Key returns metrics */}
+                  <div className="mt-5">
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="field-section-label">Key Returns</div>
                       <Button
-                        variant="outline"
+                        variant={showScenario ? 'default' : 'outline'}
                         size="sm"
-                        disabled
-                        title="Underwriting export is not available yet."
+                        onClick={() => setShowScenario((v) => !v)}
+                        className="gap-1.5 h-7 px-3 text-xs"
                       >
-                        <Download className="mr-1.5 h-4 w-4" />
-                        Export
+                        <SlidersHorizontal className="h-3.5 w-3.5" />
+                        What-if
                       </Button>
                     </div>
+                    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                      {metrics.map((metric) => (
+                        <UnderwritingMetricCard key={metric.label} {...metric} />
+                      ))}
+                    </div>
                   </div>
-                </div>
 
-                <div
-                  className="underwriting-hero-banner"
-                  data-tone={verdictTone === 'success' ? 'success' : verdictTone === 'warning' ? 'warning' : verdictTone === 'danger' ? 'danger' : undefined}
-                >
-                  <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-center gap-3">
-                        {verdictTone === 'success' ? (
-                          <CheckCircle2 className="h-7 w-7 text-uw-success shrink-0" />
-                        ) : verdictTone === 'warning' ? (
-                          <AlertTriangle className="h-7 w-7 text-uw-risk shrink-0" />
-                        ) : verdictTone === 'danger' ? (
-                          <XCircle className="h-7 w-7 text-uw-danger shrink-0" />
-                        ) : (
-                          <Loader2 className="h-7 w-7 text-primary shrink-0" />
+                  {/* Operating benchmarks */}
+                  <div className="mt-4">
+                    <div className="field-section-label mb-3">Operating Benchmarks</div>
+                    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+                      <UnderwritingMetricCard
+                        label="Avg Current Rent / Door"
+                        value={formatCurrency(currentRentPerDoor ? Math.round(currentRentPerDoor) : null)}
+                        detail="Monthly in-place rent basis"
+                        formula={buildTooltip('avg_current_rent_per_door',
+                          (cv) => cv.gpr != null && cv.num_units != null ? `${formatCompactCurrency(cv.gpr)} ÷ ${cv.num_units} units ÷ 12` : null,
+                          () => gpr != null && totalUnits ? `${formatCompactCurrency(gpr)} ÷ ${totalUnits} units ÷ 12` : null,
                         )}
-                        <div>
-                          <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-muted-foreground">Lead verdict</p>
-                          <p className="mt-0.5 font-display text-3xl font-semibold tracking-tight text-foreground leading-none">{verdictLabel}</p>
-                        </div>
-                      </div>
-                      <div className="mt-3 flex flex-wrap items-center gap-1.5 text-sm text-muted-foreground">
-                        <MapPin className="h-3.5 w-3.5 shrink-0" />
-                        <span>{address || 'Address not provided'}</span>
-                      </div>
-                      {verdictRationale ? (
-                        <p className="mt-3 max-w-3xl text-sm leading-6 text-muted-foreground">{verdictRationale}</p>
-                      ) : null}
-                    </div>
-
-                    <div className="flex flex-col gap-3 xl:items-end xl:min-w-[260px]">
-                      {watchItems.length > 0 ? (
-                        <div className="underwriting-data-card w-full xl:max-w-sm">
-                          <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-muted-foreground">
-                            {criticalWarningCount > 0 ? 'Critical items' : 'Watch items'}
-                          </p>
-                          <div className="mt-2.5">
-                            {watchItems.map((item) => (
-                              <div key={item.id} className="uw-watch-item">
-                                <span
-                                  className="uw-watch-item-dot"
-                                  style={{
-                                    background: item.kind === 'failure' || item.severity === 'critical'
-                                      ? 'hsl(var(--uw-danger))'
-                                      : 'hsl(var(--uw-risk))',
-                                  }}
-                                />
-                                <span className="min-w-0 capitalize">{item.label}</span>
-                                {item.citations.length > 0 ? (
-                                  <button
-                                    type="button"
-                                    className="ml-auto shrink-0 text-[9px] font-bold uppercase tracking-wider text-uw-citation hover:underline"
-                                    onClick={() => handleOpenSource(item.citations[0])}
-                                  >
-                                    Source
-                                  </button>
-                                ) : null}
-                              </div>
-                            ))}
-                          </div>
-                        </div>
-                      ) : null}
-                    </div>
-                  </div>
-                </div>
-
-                {artifact.om_data?.below_market_annual_upside ? (
-                  <div className="uw-upside-banner mt-4">
-                    <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-uw-risk">
-                      Upside not in model
-                    </p>
-                    <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                      {artifact.om_data.below_market_tenant_pct
-                        ? `${(artifact.om_data.below_market_tenant_pct * 100).toFixed(0)}% of tenants are below street rate. `
-                        : ''}
-                      Raising them to current rates could add{' '}
-                      <span className="font-semibold text-foreground">
-                        {formatCompactCurrency(artifact.om_data.below_market_annual_upside)}/year
-                      </span>
-                      {' '}in revenue — not reflected in the modeled returns.
-                    </p>
-                    {artifact.om_data.value_add_notes ? (
-                      <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                        {artifact.om_data.value_add_notes}
-                      </p>
-                    ) : null}
-                  </div>
-                ) : null}
-
-          {showScenario ? (
-            <div className="mt-4 underwriting-panel p-4 sm:p-5">
-              <div className="mb-4 flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">What-if scenario</p>
-                  <p className="mt-1 text-sm text-muted-foreground">Adjust assumptions to preview updated returns. Changes are not saved.</p>
-                </div>
-                <div className="flex items-center gap-2">
-                  {isScenarioLoading ? <Loader2 className="h-4 w-4 animate-spin text-primary" /> : null}
-                  <Button variant="ghost" size="sm" onClick={resetScenario} disabled={Object.keys(scenarioValues).length === 0}>
-                    <RotateCcw className="mr-1.5 h-4 w-4" />
-                    Reset
-                  </Button>
-                </div>
-              </div>
-              <div className="grid gap-5 xl:grid-cols-[1.4fr,1fr]">
-                <div className="space-y-4">
-                  {[
-                    { field: 'exit_cap_rate', label: 'Exit cap rate', unit: '%', min: 1, max: 15, step: 0.1 },
-                    { field: 'vacancy_credit_loss_pct', label: 'Vacancy & credit loss', unit: '%', min: 0, max: 40, step: 0.5 },
-                    { field: 'rent_growth_pct', label: 'Rent growth / yr', unit: '%', min: -5, max: 15, step: 0.25 },
-                    { field: 'interest_rate_pct', label: 'Interest rate', unit: '%', min: 2, max: 12, step: 0.1 },
-                    { field: 'purchase_price', label: 'Purchase price', unit: '$', min: Math.round((baseScenario.purchase_price || 1_000_000) * 0.5), max: Math.round((baseScenario.purchase_price || 10_000_000) * 1.5), step: 50000 },
-                  ].map(({ field, label, unit, min, max, step }) => {
-                    const baseVal = baseScenario[field];
-                    const currentVal = scenarioValues[field] ?? baseVal ?? (min + max) / 2;
-                    const isOverridden = scenarioValues[field] != null;
-                    return (
-                      <div key={field}>
-                        <div className="mb-1.5 flex items-center justify-between gap-3">
-                          <label className="text-sm text-muted-foreground">
-                            {label}
-                            {isOverridden ? <span className="ml-2 text-xs font-medium text-primary">modified</span> : null}
-                          </label>
-                          <div className="flex items-center gap-1.5">
-                            <input
-                              type="number"
-                              value={currentVal}
-                              step={step}
-                              min={min}
-                              max={max}
-                              onChange={(e) => {
-                                const v = parseFloat(e.target.value);
-                                if (!Number.isNaN(v)) handleScenarioChange(field, v);
-                              }}
-                              className="w-24 rounded-lg border border-border bg-background px-2 py-1 text-right text-sm font-semibold text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
-                            />
-                            <span className="text-sm text-muted-foreground">{unit}</span>
-                          </div>
-                        </div>
-                        <input
-                          type="range"
-                          min={min}
-                          max={max}
-                          step={step}
-                          value={currentVal}
-                          onChange={(e) => handleScenarioChange(field, parseFloat(e.target.value))}
-                          className="underwriting-range"
-                        />
-                        <div className="mt-0.5 flex justify-between text-[11px] text-muted-foreground">
-                          <span>{unit === '$' ? `$${(min / 1_000_000).toFixed(1)}M` : `${min}%`}</span>
-                          {baseVal != null ? <span className="text-primary">base: {unit === '$' ? `$${(baseVal / 1_000_000).toFixed(1)}M` : `${baseVal.toFixed(1)}%`}</span> : null}
-                          <span>{unit === '$' ? `$${(max / 1_000_000).toFixed(1)}M` : `${max}%`}</span>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-
-                <div className="space-y-3">
-                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-                    {scenarioResult ? 'Scenario vs base' : 'Adjust sliders to preview'}
-                  </p>
-                  {[
-                    { label: 'IRR', base: currentRun?.irr, scenario: scenarioResult?.irr, fmt: (v) => `${(v * 100).toFixed(1)}%`, unit: 'pp', scale: 100 },
-                    { label: 'Cash-on-Cash', base: currentRun?.cash_on_cash, scenario: scenarioResult?.cash_on_cash, fmt: (v) => `${(v * 100).toFixed(1)}%`, unit: 'pp', scale: 100 },
-                    { label: 'Equity Multiple', base: currentRun?.equity_multiple, scenario: scenarioResult?.equity_multiple, fmt: (v) => `${v.toFixed(2)}×`, unit: 'x', scale: 1 },
-                    { label: 'DSCR Year 1', base: currentRun?.dscr_year_one, scenario: scenarioResult?.dscr_year_one, fmt: (v) => `${v.toFixed(2)}×`, unit: 'x', scale: 1 },
-                    { label: 'NOI Year 1', base: currentRun?.noi_year_one, scenario: scenarioResult?.noi_year_one, fmt: (v) => `$${(v / 1000).toFixed(0)}K`, unit: '$', scale: 1 },
-                  ].map(({ label, base, scenario, fmt, unit, scale }) => {
-                    const hasScenario = scenarioResult != null;
-                    const delta = hasScenario && base != null && scenario != null ? (scenario - base) * scale : null;
-                    const deltaStr = delta != null ? `${delta >= 0 ? '▲' : '▼'}${Math.abs(delta).toFixed(unit === '$' ? 0 : 2)}${unit === 'pp' ? 'pp' : unit === 'x' ? '' : ''}` : null;
-                    const deltaTone = delta == null ? '' : delta > 0 ? 'text-success' : delta < 0 ? 'text-destructive' : 'text-muted-foreground';
-                    return (
-                      <div key={label} className="flex items-center justify-between gap-3 rounded-2xl border border-border/60 bg-background/60 px-4 py-3">
-                        <span className="text-sm text-muted-foreground">{label}</span>
-                        <div className="text-right">
-                          <span className="font-semibold text-foreground">
-                            {hasScenario && scenario != null ? fmt(scenario) : base != null ? fmt(base) : '—'}
-                          </span>
-                          {deltaStr ? (
-                            <span className={`ml-2 text-xs font-medium ${deltaTone}`}>{deltaStr}</span>
-                          ) : null}
-                        </div>
-                      </div>
-                    );
-                  })}
-                  {scenarioResult?.verdict_status ? (
-                    <div className={`rounded-2xl border px-4 py-3 text-sm font-semibold ${
-                      scenarioResult.verdict_status === 'worth_pursuing'
-                        ? 'border-success/25 bg-success/10 text-success'
-                        : scenarioResult.verdict_status === 'needs_review'
-                          ? 'border-amber-500/25 bg-amber-500/10 text-amber-700 dark:text-amber-300'
-                        : 'border-destructive/25 bg-destructive/10 text-destructive'
-                    }`}>
-                      Scenario verdict: {scenarioResult.verdict_status === 'worth_pursuing' ? 'Worth Pursuing' : scenarioResult.verdict_status === 'needs_review' ? 'Needs Review' : 'Below Standards'}
-                    </div>
-                  ) : null}
-                </div>
-              </div>
-            </div>
-          ) : null}
-
-          <div className="mt-5">
-            <div className="flex items-center justify-between mb-3">
-              <div className="field-section-label">Key Returns</div>
-              <Button
-                variant={showScenario ? 'default' : 'outline'}
-                size="sm"
-                onClick={() => setShowScenario((v) => !v)}
-                className="gap-1.5 h-7 px-3 text-xs"
-              >
-                <SlidersHorizontal className="h-3.5 w-3.5" />
-                What-if
-              </Button>
-            </div>
-            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-              {metrics.map((metric) => (
-                <UnderwritingMetricCard
-                  key={metric.label}
-                  label={metric.label}
-                  value={metric.value}
-                  detail={metric.detail}
-                  tone={metric.tone}
-                  formula={metric.formula}
-                />
-              ))}
-            </div>
-          </div>
-
-          <div className="mt-4">
-            <div className="field-section-label mb-3">Operating Benchmarks</div>
-            <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
-            <UnderwritingMetricCard
-              label="Avg Current Rent / Door"
-              value={formatCurrency(currentRentPerDoor ? Math.round(currentRentPerDoor) : null)}
-              detail="Monthly in-place rent basis"
-              formula="Total gross potential rent ÷ total units ÷ 12. Represents the average monthly rent currently charged across all occupied and vacant units."
-            />
-            <UnderwritingMetricCard
-              label="Avg Market Rent / Door"
-              value={formatCurrency(marketRentPerDoor ? Math.round(marketRentPerDoor) : null)}
-              detail="Monthly market rent basis"
-              formula="OM-stated or rent-comp-derived average asking rate per unit per month at current market conditions."
-            />
-            <UnderwritingMetricCard
-              label="Current Expense Ratio"
-              value={formatPercent(currentExpenseRatio)}
-              detail="T-12 actual operating ratio"
-              tone={currentExpenseRatio != null && currentExpenseRatio > 0.45 ? 'warning' : 'default'}
-              formula="Total operating expenses ÷ effective gross income from the trailing 12-month income statement."
-            />
-            <UnderwritingMetricCard
-              label="Pro Forma Expense Ratio"
-              value={formatPercent(proFormaExpenseRatio)}
-              detail="OM / underwritten expense ratio"
-              tone={proFormaExpenseRatio != null && currentExpenseRatio != null && proFormaExpenseRatio < currentExpenseRatio - 0.05 ? 'active' : 'default'}
-              formula="Broker-projected or underwritten total operating expenses ÷ pro forma EGI. A ratio materially below the T-12 actual warrants scrutiny."
-            />
-            <UnderwritingMetricCard
-              label="Break-Even Occupancy"
-              value={formatRatioPercent(breakEvenOccupancyPct)}
-              detail="Occupancy needed to cover year-one debt service"
-              tone={
-                breakEvenOccupancyPct == null
-                  ? 'default'
-                  : occupancy == null
-                    ? 'default'
-                    : breakEvenOccupancyPct > occupancy
-                      ? 'danger'
-                      : breakEvenOccupancyPct > occupancy - 0.1
-                        ? 'warning'
-                        : 'default'
-              }
-              formula="(Total operating expenses + annual debt service) ÷ gross potential rent. The occupancy level at which cash flow after debt service equals zero."
-            />
-          </div>
-          </div>{/* end Operating Benchmarks */}
-
-          <div className="mt-6 grid gap-5">
-            <UnderwritingSection
-              eyebrow="Returns"
-              title="Returns and capital structure"
-              className="underwriting-panel-strong"
-              action={
-                <Button variant="ghost" size="sm" onClick={() => setShowReturns((v) => !v)} className="gap-1.5 h-7 px-3 text-xs text-muted-foreground">
-                  <ChevronDown className={`h-3.5 w-3.5 transition-transform ${showReturns ? '' : '-rotate-90'}`} />
-                  {showReturns ? 'Collapse' : 'Expand'}
-                </Button>
-              }
-            >
-              {showReturns && <div className="grid gap-4 xl:grid-cols-[1.7fr,1fr]">
-                <div className="underwriting-panel p-4 sm:p-5">
-                  <div className="mb-4">
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">5-year pro forma</p>
-                    <p className="mt-1 text-sm text-muted-foreground">NOI and cash flow after debt service.</p>
-                  </div>
-                  {proformaData.length > 0 ? (
-                    <ResponsiveContainer width="100%" height={280}>
-                      <BarChart data={proformaData} barGap={6}>
-                        <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
-                        <XAxis dataKey="year" tick={{ fontSize: 11 }} stroke="hsl(var(--muted-foreground))" />
-                        <YAxis tickFormatter={(value) => `$${(value / 1000).toFixed(0)}K`} tick={{ fontSize: 11 }} stroke="hsl(var(--muted-foreground))" />
-                        <Tooltip formatter={(value) => formatCompactCurrency(value)} />
-                        <Legend />
-                        <Bar dataKey="NOI" fill="hsl(var(--primary))" radius={[4, 4, 0, 0]} />
-                        <Bar dataKey="CFADS" fill="hsl(var(--accent))" radius={[4, 4, 0, 0]} />
-                      </BarChart>
-                    </ResponsiveContainer>
-                  ) : (
-                    <div className="underwriting-empty py-16 text-sm text-muted-foreground">No projection data available.</div>
-                  )}
-                </div>
-
-                <div className="space-y-4">
-                  <div className="underwriting-panel p-4 sm:p-5">
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Capital stack</p>
-                    <div className="mt-4 space-y-3">
-                      <div className="rounded-2xl border border-border/60 bg-background/60 p-4">
-                        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">Senior debt</p>
-                        <p className="mt-2 font-display text-2xl font-semibold text-foreground">{formatCompactCurrency(loanAmount)}</p>
-                        <p className="mt-1 text-sm text-muted-foreground">{formatPercent(ltvPct)} LTV</p>
-                      </div>
-                      <div className={`rounded-2xl border p-4 ${
-                        equityPct > 0.4 ? 'border-warning/25 bg-warning/10' : 'border-border/60 bg-background/60'
-                      }`}>
-                        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">Equity</p>
-                        <p className="mt-2 font-display text-2xl font-semibold text-foreground">{formatCompactCurrency(equityInvested)}</p>
-                        <p className="mt-1 text-sm text-muted-foreground">{formatPercent(equityPct)} of purchase price</p>
-                      </div>
-                    </div>
-                    <div className={`mt-4 rounded-2xl border p-4 ${
-                      equityPct >= 0.5
-                        ? 'border-warning/25 bg-warning/10'
-                        : equityPct >= 0.4
-                          ? 'border-primary/20 bg-primary/5'
-                          : 'border-border/60 bg-background/60'
-                    }`}>
-                      <div className="flex items-center justify-between gap-3">
-                        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">Equity raise read</p>
-                        <UnderwritingStatusBadge tone={equityRaiseTone}>{equityRaiseLabel}</UnderwritingStatusBadge>
-                      </div>
-                      <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                        {equityPct >= 0.5
-                          ? 'This deal is funding more than half of the purchase basis with equity. That is a heavy raise and should be intentional.'
-                          : equityPct >= 0.4
-                            ? 'This deal needs a meaningful equity check. Make sure the basis and return profile justify the raise.'
-                            : 'The equity requirement is within a more typical range for this model.'}
-                      </p>
-                    </div>
-                    <KeyValueList
-                      rows={[
-                        { label: 'Total purchase price', value: formatCompactCurrency(purchasePrice) },
-                        { label: 'NOI year 1', value: formatCompactCurrency(currentRun.noi_year_one) },
-                        { label: 'Cap rate year 1', value: formatPercent(currentRun.cap_rate_year_one) },
-                        { label: 'Equity raise', value: formatCompactCurrency(equityInvested) },
-                      ]}
-                    />
-                    <SourceSupportActions
-                      citations={[sourceCitations.purchase_price, sourceCitations.market_cap_rate_purchase, sourceCitations.interest_rate_pct]}
-                      onOpenSource={handleOpenSource}
-                      title="Purchase basis"
-                    />
-                  </div>
-
-                  <div className="underwriting-panel p-4 sm:p-5">
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Sanity checks</p>
-                    <div className="mt-4 space-y-3">
-                      <div className="flex items-center justify-between gap-3">
-                        <span className="text-sm text-muted-foreground">Avg rent / door / month</span>
-                        <span className="font-semibold text-foreground">{formatCurrency(currentRentPerDoor ? Math.round(currentRentPerDoor) : null)}</span>
-                      </div>
-                      <div className="flex items-center justify-between gap-3">
-                        <span className="text-sm text-muted-foreground">Avg market rent / door / month</span>
-                        <span className="font-semibold text-foreground">{formatCurrency(marketRentPerDoor ? Math.round(marketRentPerDoor) : null)}</span>
-                      </div>
-                      <div className="flex items-center justify-between gap-3">
-                        <span className="text-sm text-muted-foreground">Rent spread / door / month</span>
-                        <span className="font-semibold text-foreground">{formatCurrency(rentSpreadPerDoor ? Math.round(rentSpreadPerDoor) : null)}</span>
-                      </div>
-                      <div className="flex items-center justify-between gap-3">
-                        <span className="text-sm text-muted-foreground">Portfolio occupancy</span>
-                        <OccupancyBadge pct={occupancy} />
-                      </div>
-                      <div className="flex items-center justify-between gap-3">
-                        <span className="text-sm text-muted-foreground">Implied cap rate</span>
-                        <span className="font-semibold text-foreground">{formatPercent(impliedCapRate)}</span>
-                      </div>
-                      <div className="flex items-center justify-between gap-3">
-                        <span className="text-sm text-muted-foreground">Break-even occupancy</span>
-                        <span className="font-semibold text-foreground">{formatRatioPercent(breakEvenOccupancyPct)}</span>
-                      </div>
-                      {totalUnits != null ? (
-                        <div className="flex items-center justify-between gap-3">
-                          <span className="text-sm text-muted-foreground">Total units</span>
-                          <span className="font-semibold text-foreground">{totalUnits}</span>
-                        </div>
-                      ) : null}
-                    </div>
-                    <SourceSupportActions
-                      citations={[sourceCitations.num_units, sourceCitations.gross_potential_rent_annual, sourceCitations.avg_in_place_rent_per_unit_monthly, sourceCitations.avg_market_rent_per_unit_monthly]}
-                      onOpenSource={handleOpenSource}
-                      title="Portfolio support"
-                    />
-
-                    {omStatedNoi != null && modeledNoi != null ? (
-                      <div className={`rounded-2xl border p-4 ${noiBridgeAlert ? 'border-amber-500/30 bg-amber-500/5' : 'border-border/60 bg-background/60'}`}>
-                        <div className="flex items-start justify-between gap-3">
-                          <div>
-                            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">NOI bridge</p>
-                            <p className="mt-1 text-sm text-muted-foreground">OM stated NOI compared with modeled year-one NOI.</p>
-                          </div>
-                          <span className={`text-sm font-semibold ${noiBridgeAlert ? 'text-amber-700 dark:text-amber-300' : 'text-foreground'}`}>
-                            {formatPercent(noiBridgeDeltaPct)}
-                          </span>
-                        </div>
-                        <div className="mt-3 grid gap-3 sm:grid-cols-3">
-                          <div className="rounded-2xl border border-border/60 bg-background/70 px-3 py-3">
-                            <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">OM stated NOI</p>
-                            <p className="mt-1 font-semibold text-foreground">{formatCompactCurrency(omStatedNoi)}</p>
-                          </div>
-                          <div className="rounded-2xl border border-border/60 bg-background/70 px-3 py-3">
-                            <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Modeled NOI</p>
-                            <p className="mt-1 font-semibold text-foreground">{formatCompactCurrency(modeledNoi)}</p>
-                          </div>
-                          <div className="rounded-2xl border border-border/60 bg-background/70 px-3 py-3">
-                            <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Delta</p>
-                            <p className={`mt-1 font-semibold ${noiBridgeAlert ? 'text-amber-700 dark:text-amber-300' : 'text-foreground'}`}>
-                              {noiBridgeDelta == null ? '—' : `${noiBridgeDelta >= 0 ? '+' : ''}${formatCompactCurrency(noiBridgeDelta)}`}
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-                    ) : null}
-                  </div>
-                </div>
-              </div>}
-            </UnderwritingSection>
-
-            <UnderwritingSection
-              eyebrow="Operations"
-              title="Operating evidence and model support"
-              className="underwriting-panel-strong"
-              action={
-                <Button variant="ghost" size="sm" onClick={() => setShowOperations((v) => !v)} className="gap-1.5 h-7 px-3 text-xs text-muted-foreground">
-                  <ChevronDown className={`h-3.5 w-3.5 transition-transform ${showOperations ? '' : '-rotate-90'}`} />
-                  {showOperations ? 'Collapse' : 'Expand'}
-                </Button>
-              }
-            >
-              {showOperations && <div className="grid gap-4 xl:grid-cols-[1.35fr,1fr]">
-                <div className="underwriting-panel p-4 sm:p-5">
-                  <div className="mb-4 flex items-center justify-between gap-3">
-                    <div>
-                      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Unit mix</p>
-                      <p className="mt-1 text-sm text-muted-foreground">Occupancy and rent by unit type.</p>
-                    </div>
-                    <OccupancyBadge pct={occupancy} />
-                  </div>
-                  {unitMix.length > 0 ? (
-                    <div className="overflow-x-auto">
-                      <table className="underwriting-table min-w-[620px]">
-                        <thead>
-                          <tr className="border-b border-border/70 text-left text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-                            <th className="pb-3">Type</th>
-                            <th className="pb-3">Size</th>
-                            <th className="pb-3 text-right">Units</th>
-                            <th className="pb-3 text-right">Occupancy</th>
-                            <th className="pb-3 text-right">Current rent</th>
-                            <th className="pb-3 text-right">Market rent</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {unitMix.map((row, index) => (
-                            <tr key={index} className="border-b border-border/50 last:border-b-0">
-                              <td className="py-3">
-                                {getUnitTypeBadge(row)}
-                              </td>
-                              <td className="py-3 font-medium text-foreground">{row.size || '—'}</td>
-                              <td className="py-3 text-right">{row.num_units ?? '—'}</td>
-                              <td className="py-3 text-right">{formatPercent(row.occupancy_pct)}</td>
-                              <td className="py-3 text-right">{formatCurrency(row.current_rent)}</td>
-                              <td className="py-3 text-right">{formatCurrency(row.market_rent)}</td>
-                            </tr>
-                          ))}
-                        </tbody>
-                      </table>
-                    </div>
-                  ) : (
-                    <div className="underwriting-empty py-12">
-                      <Building2 className="h-6 w-6 text-primary" />
-                      <p className="mt-3 text-sm text-muted-foreground">Unit mix was not extracted. Add a rent roll to populate this evidence layer.</p>
-                    </div>
-                  )}
-                </div>
-
-                <div className="space-y-4">
-                  <div className="underwriting-panel p-4 sm:p-5">
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Expense detail</p>
-                    <div className="mt-4">
-                      <KeyValueList
-                        rows={[
-                          { label: 'Expense ratio (T-12 actual)', value: formatPercent(currentExpenseRatio) },
-                          { label: 'Expense ratio (OM pro forma)', value: formatPercent(proFormaExpenseRatio) },
-                          {
-                            label: 'Expense ratio delta',
-                            value: currentExpenseRatio != null && proFormaExpenseRatio != null ? `${((currentExpenseRatio - proFormaExpenseRatio) * 100).toFixed(1)} pp` : '—',
-                          },
-                          { label: 'Property tax (year 1)', value: formatCurrency(propertyTaxAnnual) },
-                          { label: 'Property tax growth', value: formatPercent(propertyTaxGrowthPct) },
-                          { label: 'Mil rate', value: milRate != null ? `${milRate.toFixed(5)} mills` : '—' },
-                          { label: 'Bad debt', value: formatCurrency(badDebtAnnual) },
-                          { label: 'Corrections / collections', value: formatCurrency(correctionsCollectionsAnnual) },
-                          {
-                            label: 'Price / unit',
-                            value: purchasePrice && totalUnits 
-                              ? formatCurrency(Math.round(purchasePrice / totalUnits)) 
-                              : '—',
-                          },
-                          {
-                            label: 'Price / rentable sqft',
-                            value: purchasePrice && persistedInputs.project?.rentable_sqft
-                              ? `$${(purchasePrice / persistedInputs.project.rentable_sqft).toFixed(2)}`
-                              : '—',
-                          }
-                        ]}
                       />
-                      {(() => {
-                        const op = persistedInputs.operational || {};
-                        const subItems = [
-                          { label: 'Office & Admin', value: op.expense_office_admin_annual },
-                          { label: 'Bank Fees', value: op.expense_bank_fees_annual },
-                          { label: 'Contract Services', value: op.expense_contract_services_annual },
-                          { label: 'Miscellaneous', value: op.expense_miscellaneous_annual },
-                          { label: 'Telephone', value: op.expense_telephone_annual },
-                        ];
-                        const hasAny = subItems.some((item) => item.value != null);
-                        if (!hasAny) return null;
-                        return (
-                          <div className="mt-3">
-                            <button
-                              type="button"
-                              onClick={() => setShowOtherOpex((v) => !v)}
-                              className="flex w-full items-center justify-between gap-2 rounded-xl border border-border/60 bg-background/60 px-3 py-2 text-sm text-muted-foreground hover:bg-muted/40"
-                            >
-                              <span>Other OpEx breakdown</span>
-                              <ChevronDown className={`h-4 w-4 shrink-0 transition-transform ${showOtherOpex ? 'rotate-180' : ''}`} />
-                            </button>
-                            {showOtherOpex ? (
-                              <div className="mt-2 space-y-2 rounded-xl border border-border/60 bg-background/40 px-3 py-3">
-                                {subItems.map(({ label, value }) => (
-                                  <div key={label} className="flex items-center justify-between gap-3 text-sm">
-                                    <span className="text-muted-foreground">{label}</span>
-                                    <span className="font-medium text-foreground">{formatCurrency(value)}</span>
-                                  </div>
-                                ))}
-                                <div className="mt-2 flex items-center justify-between gap-3 border-t border-border/60 pt-2 text-sm">
-                                  <span className="font-medium text-muted-foreground">Total other OpEx</span>
-                                  <span className="font-semibold text-foreground">
-                                    {formatCurrency(subItems.reduce((sum, item) => sum + (item.value || 0), 0))}
-                                  </span>
-                                </div>
-                              </div>
-                            ) : null}
-                          </div>
-                        );
-                      })()}
-                      {missingExpenseFields.length > 0 ? (
-                        <div className="mt-4 rounded-2xl border border-warning/25 bg-warning/10 p-3 text-sm text-muted-foreground">
-                          <span className="font-medium text-foreground">Missing from extracted expense table:</span> {missingExpenseFields.join(', ')}
-                        </div>
-                      ) : null}
-                      <SourceSupportActions
-                        citations={[
-                          sourceCitations.expense_ratio_current,
-                          sourceCitations.expense_ratio_pro_forma,
-                          sourceCitations.property_tax_annual,
-                          sourceCitations.property_tax_growth_pct,
-                          sourceCitations.mil_rate,
-                          sourceCitations.bad_debt_annual,
-                          sourceCitations.corrections_collections_annual,
-                        ]}
-                        onOpenSource={handleOpenSource}
-                        title="Expense support"
+                      <UnderwritingMetricCard
+                        label="Avg Market Rent / Door"
+                        value={formatCurrency(marketRentPerDoor ? Math.round(marketRentPerDoor) : null)}
+                        detail="Monthly market rent basis"
+                        formula={buildTooltip('avg_market_rent_per_door',
+                          (cv) => cv.market_rate != null ? `Market rate: ${formatCurrency(Math.round(cv.market_rate))}/month` : null,
+                          () => marketRentPerDoor != null ? `Market rate: ${formatCurrency(Math.round(marketRentPerDoor))}/month` : null,
+                        )}
                       />
-                    </div>
-                  </div>
-
-                  <div className="underwriting-panel p-4 sm:p-5">
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Revenue quality</p>
-                    <div className="mt-4">
-                      <KeyValueList
-                        rows={[
-                          { label: 'Vacancy & credit loss', value: formatPercent(persistedInputs.operational?.vacancy_credit_loss_pct) },
-                          { label: 'Bad debt', value: formatCurrency(badDebtAnnual), help: 'Historical charge-offs or delinquent losses from the T-12.' },
-                          { label: 'Corrections / collections', value: formatCurrency(correctionsCollectionsAnnual), help: 'Adjustments, write-downs, or collection-related offsets.' },
-                        ]}
-                      />
-                      <SourceSupportActions
-                        citations={[
-                          sourceCitations.vacancy_credit_loss_pct,
-                          sourceCitations.bad_debt_annual,
-                          sourceCitations.corrections_collections_annual,
-                        ]}
-                        onOpenSource={handleOpenSource}
-                        title="Revenue support"
-                      />
-
-                      {artifact.om_data?.income_basis_months === 6 ? (
-                        <div className="mt-4 rounded-2xl border border-warning/25 bg-warning/10 p-3 text-sm text-muted-foreground">
-                          <span className="font-medium text-foreground">Income basis: </span>
-                          Current EGI is based on trailing 6-month revenue, annualized by the broker. 
-                          This may mask seasonal low periods and should be validated against a full T-12.
-                        </div>
-                      ) : null}
-                    </div>
-                  </div>
-
-                  {stressTests.length > 0 ? (
-                    <div className="underwriting-panel p-4 sm:p-5">
-                      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Stress tests</p>
-                      <div className="mt-4">
-                        <StressTestTable stressTests={stressTests} />
-                      </div>
-                    </div>
-                  ) : null}
-
-                  {rolloverRisk ? (
-                    <div className="underwriting-panel p-4 sm:p-5">
-                      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Rollover risk</p>
-                      <div className="mt-4">
-                        <RolloverRiskPanel rolloverRisk={rolloverRisk} />
-                      </div>
-                    </div>
-                  ) : null}
-                </div>
-              </div>}
-            </UnderwritingSection>
-
-            <UnderwritingSection
-              eyebrow="Source evidence"
-              title="Key assumptions and source support"
-              className="underwriting-panel-strong"
-              action={
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => setShowEvidence((v) => !v)}
-                  className="gap-1.5 h-7 px-3 text-xs text-muted-foreground"
-                >
-                  {showEvidence ? <ChevronDown className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5 -rotate-90" />}
-                  {showEvidence ? 'Collapse' : 'Expand'}
-                </Button>
-              }
-            >
-              {showEvidence && evidenceItems.length > 0 ? (
-                <div className="grid gap-3 lg:grid-cols-2">
-                  {evidenceItems.map((item) => {
-                    const confidence = Number(item.citation?.confidence);
-                    const confidenceLabel = Number.isFinite(confidence) && confidence > 0
-                      ? `${Math.round(confidence * 100)}% confidence`
-                      : 'Cited input';
-                    const docTypeLabel = DOC_TYPE_LABELS[item.citation?.doc_type] || item.citation?.doc_type || 'Document';
-
-                    return (
-                      <div key={item.key} className="underwriting-quote-card">
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="min-w-0">
-                            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">{item.label}</p>
-                            <p className="mt-2 font-display text-2xl font-semibold tracking-tight text-foreground">{item.value}</p>
-                          </div>
-                          <UnderwritingStatusBadge tone="active">{docTypeLabel}</UnderwritingStatusBadge>
-                        </div>
-
-                        <p className="mt-3 text-xs font-medium uppercase tracking-[0.16em] text-uw-citation">{confidenceLabel}</p>
-                        {item.citation?.source_text ? (
-                          <p className="mt-2 text-sm leading-6 text-muted-foreground">“{item.citation.source_text}”</p>
-                        ) : null}
-
-                        <div className="mt-4 flex flex-wrap items-center gap-2">
-                          {item.citation.entries?.map((entry, index) => (
-                            <Button
-                              key={`${item.key}-${entry.citation}-${index}`}
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              className="h-8 rounded-full px-3 text-xs"
-                              onClick={() => handleOpenSource(entry)}
-                            >
-                              {entry.page ? `Open page ${entry.page}` : 'Open source'}
-                            </Button>
-                          ))}
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              ) : showEvidence ? (
-                <div className="underwriting-empty py-12">
-                  <AlertTriangle className="h-6 w-6 text-primary" />
-                  <p className="mt-3 text-sm text-muted-foreground">This run does not have extracted field citations yet. Run AI extraction on an OM, rent roll, or T-12 to populate source-backed assumptions.</p>
-                </div>
-              ) : null}
-            </UnderwritingSection>
-
-            <UnderwritingSection
-              eyebrow="Market context"
-              title="Location, comps, and pricing sensitivity"
-              className="underwriting-panel-strong"
-              action={
-                <Button variant="ghost" size="sm" onClick={() => setShowMarket((v) => !v)} className="gap-1.5 h-7 px-3 text-xs text-muted-foreground">
-                  <ChevronDown className={`h-3.5 w-3.5 transition-transform ${showMarket ? '' : '-rotate-90'}`} />
-                  {showMarket ? 'Collapse' : 'Expand'}
-                </Button>
-              }
-            >
-              {showMarket && <div className="grid gap-4 xl:grid-cols-[1fr,1fr]">
-                <div className="space-y-4">
-                  <div className="underwriting-panel p-4 sm:p-5">
-                    <div className="mb-4">
-                      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Location</p>
-                      <p className="mt-1 text-sm text-muted-foreground">{address || 'Add an address to see the map context.'}</p>
-                    </div>
-                    {mapUrl ? (
-                      <div className="overflow-hidden rounded-2xl border border-border/60">
-                        <img src={mapUrl} alt="Property location map" className="h-[240px] w-full object-cover" />
-                      </div>
-                    ) : (
-                      <div className="underwriting-empty py-12">
-                        <MapPin className="h-6 w-6 text-primary" />
-                        <p className="mt-3 text-sm text-muted-foreground">
-                          {!address ? 'No address provided yet.' : 'Map unavailable because the Google Maps key is not configured.'}
-                        </p>
-                      </div>
-                    )}
-                    {(nearbyStorageCount1Mi != null || nearbyStorageCount3Mi != null || nearbyStorageCount5Mi != null) ? (
-                      <div className="mt-4 rounded-2xl border border-border/60 bg-background/60 p-4">
-                        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">Nearby storage overview</p>
-                        <div className="mt-3 grid gap-3 sm:grid-cols-3">
-                          <div>
-                            <p className="text-xs text-muted-foreground">1 mile</p>
-                            <p className="mt-1 font-display text-xl font-semibold text-foreground">{nearbyStorageCount1Mi ?? '—'}</p>
-                          </div>
-                          <div>
-                            <p className="text-xs text-muted-foreground">3 miles</p>
-                            <p className="mt-1 font-display text-xl font-semibold text-foreground">{nearbyStorageCount3Mi ?? '—'}</p>
-                          </div>
-                          <div>
-                            <p className="text-xs text-muted-foreground">5 miles</p>
-                            <p className="mt-1 font-display text-xl font-semibold text-foreground">{nearbyStorageCount5Mi ?? '—'}</p>
-                          </div>
-                        </div>
-                      </div>
-                    ) : null}
-                  </div>
-
-                  <div className="underwriting-panel p-4 sm:p-5">
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Market demographics</p>
-                    <div className="mt-4">
-                      {demographics ? (
-                        <KeyValueList
-                          rows={[
-                            { label: 'Population (3-mile radius)', value: demographics.population?.toLocaleString() ?? '—' },
-                            { label: 'Avg household income', value: formatCurrency(demographics.avg_household_income) },
-                            { label: 'Storage sqft / capita', value: demographics.sqft_per_capita != null ? `${demographics.sqft_per_capita.toFixed(1)} sqft` : '—' },
-                            { label: 'Median age', value: demographics.median_age ?? '—' },
-                          ]}
-                        />
-                      ) : (
-                        <div className="underwriting-empty py-12">
-                          <TrendingUp className="h-6 w-6 text-primary" />
-                          <p className="mt-3 text-sm text-muted-foreground">Demographics were not extracted from the source package.</p>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                </div>
-
-                <div className="space-y-4">
-                  <div className="underwriting-panel p-4 sm:p-5">
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Cap rate context</p>
-                    <div className="mt-4 space-y-3">
-                      <div className="rounded-2xl border border-border/60 bg-background/60 p-4">
-                        <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">Subject implied</p>
-                        <p className="mt-2 font-display text-2xl font-semibold text-primary">{formatPercent(impliedCapRate)}</p>
-                        <p className="mt-1 text-sm text-muted-foreground">Based on {formatCompactCurrency(purchasePrice)} purchase price.</p>
-                      </div>
-                      <KeyValueList
-                        rows={[
-                          { label: 'Submarket average cap rate', value: formatPercent(capRateSubmarket) },
-                          { label: 'Purchase cap rate basis', value: formatPercent(capRatePurchase) },
-                          { label: 'Sale cap rate assumption', value: formatPercent(capRateSale) },
-                          {
-                            label: 'Spread vs submarket',
-                            value: bpsDelta != null ? `${Math.abs(bpsDelta)} bps ${bpsDelta > 0 ? 'premium' : 'discount'}` : '—',
-                          },
-                        ]}
-                      />
-                    </div>
-                  </div>
-
-                  <div className="underwriting-panel p-4 sm:p-5">
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Rent position</p>
-                    <div className="mt-4">
-                      {rentPositionAnalysis.length > 0 ? (
-                        <div className="overflow-x-auto">
-                          <table className="underwriting-table min-w-[760px]">
-                            <thead>
-                              <tr className="border-b border-border/70 text-left text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-                                <th className="pb-3">Size</th>
-                                <th className="pb-3">Type</th>
-                                <th className="pb-3 text-right">Subject current</th>
-                                <th className="pb-3 text-right">Subject market</th>
-                                <th className="pb-3 text-right">Comp avg</th>
-                                <th className="pb-3 text-right">Current vs comp</th>
-                                <th className="pb-3 text-right">Market vs comp</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {rentPositionAnalysis.map((row, index) => (
-                                <tr key={index} className="border-b border-border/50 last:border-b-0">
-                                  <td className="py-3 font-medium text-foreground">{row.size || '—'}</td>
-                                  <td className="py-3 text-muted-foreground">{row.climate_type}</td>
-                                  <td className="py-3 text-right">{formatCurrency(row.subject_current_rent)}</td>
-                                  <td className="py-3 text-right">{formatCurrency(row.subject_market_rent)}</td>
-                                  <td className="py-3 text-right">{formatCurrency(row.comp_average_rent)}</td>
-                                  <td className="py-3 text-right font-medium text-foreground">{formatRatioPercent(row.current_vs_comp_ratio)}</td>
-                                  <td className="py-3 text-right font-medium text-foreground">{formatRatioPercent(row.market_vs_comp_ratio)}</td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                        </div>
-                      ) : rentComps.length > 0 ? (
-                        <div className="overflow-x-auto">
-                          <table className="underwriting-table min-w-[560px]">
-                            <thead>
-                              <tr className="border-b border-border/70 text-left text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-                                <th className="pb-3">Size</th>
-                                <th className="pb-3">Facility</th>
-                                <th className="pb-3 text-right">Rent/Unit</th>
-                                <th className="pb-3 text-right">Rent/Sq Ft</th>
-                                <th className="pb-3 text-right">Distance</th>
-                              </tr>
-                            </thead>
-                            <tbody>
-                              {rentComps.map((row, index) => (
-                                <tr key={index} className="border-b border-border/50 last:border-b-0">
-                                  <td className="py-3 font-medium text-foreground">{row.size || '—'}</td>
-                                  <td className="py-3 text-muted-foreground">{row.facility || '—'}</td>
-                                  <td className="py-3 text-right">{row.asking_rent != null ? formatCurrency(row.asking_rent) : '—'}</td>
-                                  <td className="py-3 text-right">{row.rent_per_sqft != null ? formatCurrencyPrecise(row.rent_per_sqft) : '—'}</td>
-                                  <td className="py-3 text-right text-muted-foreground">{row.distance_mi ? `${row.distance_mi} mi` : '—'}</td>
-                                </tr>
-                              ))}
-                            </tbody>
-                          </table>
-                          <p className="mt-3 text-sm text-muted-foreground">Comp rows exist, but the subject unit mix did not line up cleanly enough to compute a rent-position view yet.</p>
-                        </div>
-                      ) : (
-                        <div className="underwriting-empty py-12">
-                          <Building2 className="h-6 w-6 text-primary" />
-                          <p className="mt-3 text-sm text-muted-foreground">No rent comps have been entered yet. This screen still avoids third-party market data, but you can add a tight comp set manually or extract one from an OM competitive-set table.</p>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-
-                  <div className="underwriting-panel p-4 sm:p-5">
-                    <div className="flex flex-wrap items-center justify-between gap-3">
-                      <div>
-                        <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Sensitivity</p>
-                        <p className="mt-1 text-sm text-muted-foreground">IRR and cash-on-cash versus purchase price.</p>
-                      </div>
-                      {isSensitivityLoading ? <UnderwritingStatusBadge tone="active">Updating</UnderwritingStatusBadge> : null}
-                    </div>
-                    <div className="mt-4">
-                      <div className="flex items-center justify-between text-sm text-muted-foreground">
-                        <span>{formatCompactCurrency(minPrice)}</span>
-                        <span className="font-semibold text-foreground">{formatCompactCurrency(sensitivityPrice || basePurchasePrice)}</span>
-                        <span>{formatCompactCurrency(maxPrice)}</span>
-                      </div>
-                      <input
-                        type="range"
-                        min={minPrice}
-                        max={maxPrice}
-                        step={50000}
-                        value={sensitivityPrice || basePurchasePrice}
-                        onChange={(e) => setSensitivityPrice(parseFloat(e.target.value))}
-                        className="underwriting-range mt-4"
-                      />
-                      {sensitivityPoints.length > 0 ? (
-                        <div className="mt-4">
-                          <ResponsiveContainer width="100%" height={240}>
-                            <LineChart data={sensitivityPoints}>
-                              <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
-                              <XAxis dataKey="purchase_price" tickFormatter={(value) => `$${(value / 1_000_000).toFixed(1)}M`} tick={{ fontSize: 11 }} />
-                              <YAxis tickFormatter={(value) => `${(value * 100).toFixed(1)}%`} tick={{ fontSize: 11 }} />
-                              <Tooltip
-                                labelFormatter={(value) => formatCompactCurrency(value)}
-                                formatter={(value, name) => [`${(value * 100).toFixed(1)}%`, name]}
-                              />
-                              <Legend />
-                              <Line type="monotone" dataKey="irr" stroke="hsl(var(--primary))" name="IRR" dot={false} strokeWidth={2.4} />
-                              <Line type="monotone" dataKey="cash_on_cash" stroke="hsl(var(--accent))" name="Cash-on-Cash" dot={false} strokeWidth={2.4} />
-                            </LineChart>
-                          </ResponsiveContainer>
-                        </div>
-                      ) : null}
-                    </div>
-                  </div>
-                </div>
-              </div>}
-            </UnderwritingSection>
-
-            {discrepancies.length > 0 ? (
-              <UnderwritingSection
-                eyebrow="Review flags"
-                title="Cross-document discrepancies"
-                description="These mismatches do not change the verdict directly, but they are worth reconciling before final approval."
-                className="underwriting-panel-strong"
-              >
-                <div className="grid gap-3 md:grid-cols-2">
-                  {discrepancies.map((discrepancy) => (
-                    <div
-                      key={discrepancy.field}
-                      className={`underwriting-panel p-4 ${
-                        discrepancy.severity === 'error'
-                          ? 'border-destructive/25 bg-destructive/10'
-                          : discrepancy.severity === 'warning'
-                            ? 'border-warning/25 bg-warning/10'
-                            : ''
-                      }`}
-                    >
-                      <div className="flex items-start gap-3">
-                        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-uw-risk" />
-                        <div className="min-w-0">
-                          <p className="text-sm font-semibold text-foreground">{discrepancy.field}</p>
-                          <p className="mt-1 text-sm leading-6 text-muted-foreground">{discrepancy.note}</p>
-                          <SourceSupportActions
-                            citations={discrepancySupportByField[discrepancy.field] || []}
-                            onOpenSource={handleOpenSource}
-                            title="Trace to source"
+                      {hasT12Data ? (
+                        <>
+                          <UnderwritingMetricCard
+                            label="Current Expense Ratio"
+                            value={formatPercent(currentExpenseRatio)}
+                            detail="T-12 actual operating ratio"
+                            tone={currentExpenseRatio != null && currentExpenseRatio > 0.45 ? 'warning' : 'default'}
+                            formula={buildTooltip('current_expense_ratio', () =>
+                              artifact.t12_data?.summary?.total_opex != null && artifact.t12_data?.summary?.egi != null
+                                ? `${formatCompactCurrency(artifact.t12_data.summary.total_opex)} ÷ ${formatCompactCurrency(artifact.t12_data.summary.egi)}`
+                                : null
+                            )}
                           />
-                        </div>
-                      </div>
+                          <UnderwritingMetricCard
+                            label="Pro Forma Expense Ratio"
+                            value={formatPercent(proFormaExpenseRatio)}
+                            detail="OM / underwritten expense ratio"
+                            tone={proFormaExpenseRatio != null && currentExpenseRatio != null && proFormaExpenseRatio < currentExpenseRatio - 0.05 ? 'active' : 'default'}
+                            formula={buildTooltip('pro_forma_expense_ratio',
+                              (cv) => cv.pro_forma_expense_pct != null && cv.gpr != null ? `${formatPercent(cv.pro_forma_expense_pct)} × ${formatCompactCurrency(cv.gpr)}` : null,
+                              () => proFormaExpenseRatio != null && gpr != null ? `${formatPercent(proFormaExpenseRatio)} × ${formatCompactCurrency(gpr)}` : null,
+                            )}
+                          />
+                        </>
+                      ) : proFormaExpenseRatio != null ? (
+                        <UnderwritingMetricCard
+                          label="Stated Expense Ratio"
+                          value={formatPercent(proFormaExpenseRatio)}
+                          detail="Source: OM / broker pro forma"
+                          formula={buildTooltip('pro_forma_expense_ratio',
+                            (cv) => cv.pro_forma_expense_pct != null && cv.gpr != null ? `${formatPercent(cv.pro_forma_expense_pct)} × ${formatCompactCurrency(cv.gpr)}` : null,
+                            () => proFormaExpenseRatio != null && gpr != null ? `${formatPercent(proFormaExpenseRatio)} × ${formatCompactCurrency(gpr)}` : null,
+                          )}
+                        />
+                      ) : null}
+                      <UnderwritingMetricCard
+                        label="Break-Even Occupancy"
+                        value={formatRatioPercent(breakEvenOccupancyPct)}
+                        detail="Occupancy needed to cover year-one debt service"
+                        tone={
+                          breakEvenOccupancyPct == null ? 'default'
+                          : occupancy == null ? 'default'
+                          : breakEvenOccupancyPct > occupancy ? 'danger'
+                          : breakEvenOccupancyPct > occupancy - 0.1 ? 'warning'
+                          : 'default'
+                        }
+                        formula={buildTooltip('break_even_occupancy',
+                          (cv) => cv.debt_service != null && cv.fixed_opex != null && cv.gpr_adj != null
+                            ? `(${formatCompactCurrency(cv.debt_service)} + ${formatCompactCurrency(cv.fixed_opex)} − ${formatCompactCurrency(cv.other_income_adj ?? 0)}) ÷ ${formatCompactCurrency(cv.gpr_adj)}`
+                            : null,
+                          () => {
+                            const noi = currentRun?.noi_year_one;
+                            const dscr = currentRun?.dscr_year_one;
+                            if (!noi || !dscr || !gpr) return null;
+                            const ds = noi / dscr;
+                            return `Debt service: ${formatCompactCurrency(ds)} | GPR: ${formatCompactCurrency(gpr)}`;
+                          },
+                        )}
+                      />
                     </div>
-                  ))}
+                  </div>
+
+                  {/* Sections */}
+                  <div className="mt-6 grid gap-5">
+                    <ReturnsSection
+                      show={showReturns}
+                      onToggle={() => setShowReturns((v) => !v)}
+                      projections={projections}
+                      proformaData={proformaData}
+                      incomeBasisMonths={artifact.income_basis_months}
+                      capitalStructure={capitalStructure}
+                      loanAmount={loanAmount}
+                      purchasePrice={purchasePrice}
+                      equityInvested={equityInvested}
+                      equityPct={equityPct}
+                      ltvPct={ltvPct}
+                      equityRaiseTone={equityRaiseTone}
+                      equityRaiseLabel={equityRaiseLabel}
+                      currentRun={currentRun}
+                      currentRentPerDoor={currentRentPerDoor}
+                      marketRentPerDoor={marketRentPerDoor}
+                      rentSpreadPerDoor={rentSpreadPerDoor}
+                      occupancy={occupancy}
+                      impliedCapRate={impliedCapRate}
+                      breakEvenOccupancyPct={breakEvenOccupancyPct}
+                      totalUnits={totalUnits}
+                      sourceCitations={sourceCitations}
+                      omStatedNoi={omStatedNoi}
+                      modeledNoi={modeledNoi}
+                      noiBridgeDelta={noiBridgeDelta}
+                      noiBridgeDeltaPct={noiBridgeDeltaPct}
+                      noiBridgeAlert={noiBridgeAlert}
+                      onOpenSource={handleOpenSource}
+                    />
+
+                    <OperationsSection
+                      show={showOperations}
+                      onToggle={() => setShowOperations((v) => !v)}
+                      unitMix={unitMix}
+                      unitMixSummary={unitMixSummary}
+                      occupancy={occupancy}
+                      currentExpenseRatio={currentExpenseRatio}
+                      proFormaExpenseRatio={proFormaExpenseRatio}
+                      propertyTaxAnnual={persistedInputs.operational?.property_tax_annual}
+                      propertyTaxGrowthPct={persistedInputs.operational?.property_tax_growth_pct ?? artifact.om_data?.property_tax_growth_pct}
+                      milRate={persistedInputs.operational?.mil_rate ?? artifact.om_data?.mil_rate}
+                      badDebtAnnual={persistedInputs.operational?.bad_debt_annual ?? artifact.t12_data?.summary?.bad_debt_annual}
+                      correctionsCollectionsAnnual={persistedInputs.operational?.corrections_collections_annual ?? artifact.t12_data?.summary?.corrections_collections_annual}
+                      purchasePrice={purchasePrice}
+                      totalUnits={totalUnits}
+                      rentableSqft={persistedInputs.project?.rentable_sqft}
+                      operational={persistedInputs.operational}
+                      expenseBasis={expenseBasis}
+                      expenseBasisFormula={expenseBasisFormula}
+                      sourceCitations={sourceCitations}
+                      stressTests={stressTests}
+                      rolloverRisk={rolloverRisk}
+                      missingExpenseFields={artifact.t12_data?.summary?.missing_expense_fields || []}
+                      onOpenSource={handleOpenSource}
+                    />
+
+                    <EvidenceSection
+                      show={showEvidence}
+                      onToggle={() => setShowEvidence((v) => !v)}
+                      evidenceItems={evidenceItems}
+                      onOpenSource={handleOpenSource}
+                    />
+
+                    <MarketSection
+                      show={showMarket}
+                      onToggle={() => setShowMarket((v) => !v)}
+                      address={address}
+                      mapUrl={mapUrl}
+                      nearbyStorageCount1Mi={marketData.nearby_storage_count_1mi}
+                      nearbyStorageCount3Mi={marketData.nearby_storage_count_3mi}
+                      nearbyStorageCount5Mi={marketData.nearby_storage_count_5mi}
+                      demographics={demographics}
+                      impliedCapRate={impliedCapRate}
+                      purchasePrice={purchasePrice}
+                      capRateSubmarket={capRateSubmarket}
+                      capRatePurchase={capRatePurchase}
+                      capRateSale={capRateSale}
+                      bpsDelta={bpsDelta}
+                      rentPositionAnalysis={rentPositionAnalysis}
+                      rentComps={rentComps}
+                      rentCompCoverage={rentCompCoverage}
+                      getToken={getToken}
+                      runId={runId}
+                      runSensitivityAnalysis={runSensitivityAnalysis}
+                      basePurchasePrice={basePurchasePrice}
+                    />
+
+                    <DiscrepanciesSection
+                      discrepancies={discrepancies}
+                      discrepancySupportByField={discrepancySupportByField}
+                      onOpenSource={handleOpenSource}
+                    />
+                  </div>
+
                 </div>
-              </UnderwritingSection>
-            ) : null}
               </div>
             </div>
-            </div>
-            </div>
-            </div>
+          </div>
         </ResizablePanel>
         {showSourcePanel ? <ResizableHandle withHandle /> : null}
         {showSourcePanel ? (
           <ResizablePanel id="uw-result-source" order={2} defaultSize={42} minSize={28}>
-            <SourceDocumentPanel citation={activeCitation} isOpen={showSourcePanel} onClose={closeSourcePanel} />
+            <SourceDocumentPanel citation={activeCitation} isOpen={showSourcePanel} onClose={() => { setShowSourcePanel(false); setActiveCitation(null); }} />
           </ResizablePanel>
         ) : null}
       </ResizablePanelGroup>
