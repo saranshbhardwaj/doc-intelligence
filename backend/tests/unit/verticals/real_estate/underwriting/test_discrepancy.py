@@ -167,6 +167,17 @@ class TestDiscrepancyRule4OpEx:
 
         assert len(discrepancies) == 0
 
+    def test_opex_delta_uses_expense_ratio_pro_forma_key(self):
+        """Current extraction schema uses expense_ratio_pro_forma, not legacy opex_pct."""
+        om_data = {"expense_ratio_pro_forma": 0.42}
+        rent_roll_data = {}
+        t12_data = {"summary": {"opex_ratio": 0.36}}
+
+        discrepancies = detect_discrepancies(om_data, rent_roll_data, t12_data)
+
+        assert len(discrepancies) == 1
+        assert discrepancies[0]["field"] == "opex_ratio"
+
 
 class TestDiscrepancyRule5SqFt:
     """Rule 5: SqFt delta > 1% relative triggers info-level discrepancy."""

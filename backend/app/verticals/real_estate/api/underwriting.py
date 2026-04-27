@@ -1,8 +1,8 @@
 """Real Estate Underwriting API endpoints."""
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
-from typing import List, Optional
-from pydantic import BaseModel
+from typing import Any, List, Optional
+from pydantic import BaseModel, ValidationError
 from app.database import get_db
 from app.repositories.re_underwriting_repo import UnderwritingRunRepository
 from app.repositories.job_repository import JobRepository
@@ -18,6 +18,10 @@ from app.verticals.real_estate.underwriting.verdict import evaluate
 from app.verticals.real_estate.underwriting.result_artifact import (
     get_preserved_unit_mix,
     merge_preserved_result_artifact,
+)
+from app.verticals.real_estate.underwriting.schemas.self_storage import (
+    FormulaMetadata,
+    FormulaComputedValues,
 )
 
 router = APIRouter(prefix="/underwriting", tags=["re_underwriting"])
@@ -43,6 +47,36 @@ class ScenarioOverrides(BaseModel):
     purchase_price: Optional[float] = None
 
 
+def _normalize_empty_strings(payload: Any) -> Any:
+    """Convert blank form strings to None so optional numeric fields validate cleanly."""
+    if isinstance(payload, dict):
+        return {key: _normalize_empty_strings(value) for key, value in payload.items()}
+    if isinstance(payload, list):
+        return [_normalize_empty_strings(item) for item in payload]
+    if isinstance(payload, str) and payload.strip() == "":
+        return None
+    return payload
+
+
+def _safe_validation_error_detail(exc: ValidationError) -> dict:
+    """Return user-safe validation details without leaking backend internals."""
+    invalid_fields: list[str] = []
+    for item in exc.errors():
+        loc = item.get("loc") or ()
+        if isinstance(loc, tuple):
+            field_path = ".".join(str(part) for part in loc if part != "inputs")
+            if field_path:
+                invalid_fields.append(field_path)
+
+    deduped_fields = list(dict.fromkeys(invalid_fields))
+    detail: dict[str, Any] = {
+        "message": "Some underwriting inputs are invalid. Please review highlighted fields and try again.",
+    }
+    if deduped_fields:
+        detail["fields"] = deduped_fields
+    return detail
+
+
 def _get_t12_period_months_from_artifact(existing_artifact: dict | None) -> int | None:
     if not existing_artifact:
         return None
@@ -58,6 +92,15 @@ def _calculate_and_store_result(repo: UnderwritingRunRepository, run_id: str, in
 
     inputs = SelfStorageInputs(**inputs_payload)
     result = calculate(inputs)
+    result.income_basis_months = inputs.operational.income_basis_months
+    result.income_basis_note = inputs.operational.income_basis_note
+
+    # Add current_expense_ratio metadata (not produced by the calculator)
+    op = inputs.operational
+    result.formula_metadata["current_expense_ratio"] = FormulaMetadata(
+        description="Total operating expenses ÷ effective gross income from the trailing 12-month income statement.",
+    )
+
     stress_tests = run_stress_tests(inputs)
     result.stress_tests = stress_tests
     effective_unit_mix = inputs.unit_mix or [
@@ -142,10 +185,16 @@ def update_underwriting_inputs(run_id: str, payload: UpdateInputsRequest, user: 
     run = repo.get(run_id, user.id)
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
+    normalized_inputs = _normalize_empty_strings(payload.inputs)
+
     try:
-        validated_inputs = SelfStorageInputs(**payload.inputs)
-    except Exception as e:
-        raise HTTPException(status_code=422, detail=f"Invalid underwriting inputs: {e}")
+        validated_inputs = SelfStorageInputs(**normalized_inputs)
+    except ValidationError as exc:
+        logger.warning(
+            "Underwriting input validation failed",
+            extra={"run_id": run_id, "user_id": user.id, "errors": exc.errors()},
+        )
+        raise HTTPException(status_code=422, detail=_safe_validation_error_detail(exc))
 
     success = repo.update_inputs(run_id, user.id, validated_inputs.model_dump())
     if not success:

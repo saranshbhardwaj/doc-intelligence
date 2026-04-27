@@ -126,6 +126,27 @@ class TestCalculatorHappyPath:
         assert result.break_even_occupancy_pct is not None
         assert result.break_even_occupancy_pct == pytest.approx(expected_break_even)
 
+    def test_uses_expense_ratio_when_line_items_are_missing(self):
+        """Expense ratio fallback prevents overstated NOI when line items are absent."""
+        inputs = VALID_INPUTS.model_copy(deep=True)
+        inputs.operational.property_tax_annual = 0
+        inputs.operational.insurance_annual = 0
+        inputs.operational.payroll_annual = 0
+        inputs.operational.repairs_maintenance_annual = 0
+        inputs.operational.utilities_annual = 0
+        inputs.operational.marketing_annual = 0
+        inputs.operational.other_opex_annual = 0
+        inputs.operational.mgmt_fee_pct = 0
+        inputs.operational.expense_ratio_current = 0.40
+
+        result = calculate(inputs)
+
+        year_one = result.projections[0]
+        assert result.expense_basis.source == "expense_ratio_current"
+        assert year_one.egi == pytest.approx(540_000)
+        assert year_one.opex == pytest.approx(216_000)
+        assert year_one.noi == pytest.approx(324_000)
+
     def test_rent_position_analysis_matches_unit_mix_to_comps(self):
         inputs = VALID_INPUTS.model_copy(deep=True)
         inputs.unit_mix = [
@@ -177,17 +198,13 @@ class TestCalculatorEdgeCases:
         assert result.capital_structure.capex_reserve_initial == 0
         # Should not crash
 
-    def test_exit_cap_rate_zero_no_division_error(self):
-        """exit_cap_rate=0 → prop_value=0.0, no ZeroDivisionError."""
+    def test_exit_cap_rate_zero_raises(self):
+        """exit_cap_rate=0 → ValueError with a clear message."""
         inputs = VALID_INPUTS.model_copy(deep=True)
         inputs.exit.exit_cap_rate = 0.0
 
-        result = calculate(inputs)
-
-        # All projections should have prop_value = 0 or close to it
-        assert all(p.property_value == 0.0 for p in result.projections)
-        # IRR should still be computed (may be None)
-        # No crash is the assertion
+        with pytest.raises(ValueError, match="exit_cap_rate must be > 0"):
+            calculate(inputs)
 
     def test_very_small_equity_invested(self):
         """Very small equity → shouldn't crash, ratios still computed."""

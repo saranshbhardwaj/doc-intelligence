@@ -22,7 +22,7 @@ from .prompts import (
     create_phase2_rent_roll_prompt,
 )
 from .rent_comp_repair import repair_om_rent_comp_rows
-from .schemas import OMExtraction, T12Extraction, RentRollExtraction, CondensedBatchExtraction
+from .schemas import OMExtraction, T12Extraction, RentRollExtraction, CondensedBatchExtraction, _OM_REGISTRY
 
 
 class REExtractionLLMService:
@@ -93,64 +93,13 @@ class REExtractionLLMService:
             schema_cls=T12Extraction,
         )
     
-    _OM_CITED_SCALAR_FIELDS = [
-    "purchase_price", "market_cap_rate_purchase", "num_units", "rentable_sqft",
-    "gpr_annual_projected", "avg_in_place_rent_per_unit_monthly",
-    "avg_market_rent_per_unit_monthly", "vacancy_pct_projected",
-    "expense_ratio_pro_forma", "other_income_annual", "rent_growth_pct",
-    "expense_property_tax_annual", "property_tax_growth_pct", "mil_rate",
-    "expense_insurance_annual", "mgmt_fee_pct", "expense_payroll_annual",
-    "expense_repairs_maintenance_annual", "expense_utilities_annual",
-    "expense_marketing_annual", "other_opex_annual", "opex_growth_pct",
-    "nearby_storage_count_1mi", "nearby_storage_count_3mi",
-    "population_3mi", "avg_household_income_3mi", "storage_sqft_per_capita_3mi",
-    "interest_rate_pct", "ltv_pct", "amortization_years",
-    "exit_cap_rate", "hold_period_years", "selling_cost_pct",
-    "income_basis_months", "physical_occupancy_pct",
-    "below_market_tenant_pct", "below_market_annual_upside",
-    "noi_projected",
-]
+    # Derived from OMExtraction field metadata — do not edit manually.
+    # To add/remove a cited field: toggle cite=True/False on the Field() in schemas.py.
+    _OM_CITED_SCALAR_FIELDS: list[str] = _OM_REGISTRY["cited_scalar_fields"]
 
-    # Flat tool schemas — no anyOf/null unions (Anthropic 16-union limit).
-    # Each scalar field has three companion properties for first-class citations:
-    #   {field}_confidence: float 0-1
-    #   {field}_citations:  list of page tokens e.g. ["S1:p5"]
-    #   {field}_source:     brief verbatim snippet
-    # All fields non-required — model omits what it can't find.
-    _OM_SCALAR_FIELDS = [
-        "name", "address", "purchase_price", "closing_cost_pct", "capex_reserve_per_unit",
-        "market_cap_rate_purchase", "num_units", "rentable_sqft", "year_built",
-        "nearby_storage_count_1mi", "nearby_storage_count_3mi", "nearby_storage_count_5mi",
-        "population_3mi", "avg_household_income_3mi", "storage_sqft_per_capita_3mi",
-        "gpr_annual_projected", "avg_in_place_rent_per_unit_monthly",
-        "avg_market_rent_per_unit_monthly", "vacancy_pct_projected", "expense_ratio_pro_forma",
-        "other_income_annual", "rent_growth_pct", "noi_projected", "mgmt_fee_pct",
-        "opex_growth_pct", "property_tax_growth_pct", "mil_rate", "exit_cap_rate",
-        "market_cap_rate_sale", "hold_period_years", "selling_cost_pct", "target_irr",
-        "target_cash_on_cash", "target_equity_multiple", "ltv_pct", "interest_rate_pct",
-        "amortization_years", "loan_term_years",
-        "income_basis_months", "income_basis_note",
-        "physical_occupancy_pct", "price_per_rentable_sqft",
-        "below_market_tenant_pct", "below_market_monthly_variance",
-        "below_market_annual_upside", "value_add_notes", "noi_projected", "unit_mix", "rent_comps",
-        # Individual expense line items — Year 1 column preferred
-        "expense_office_admin_annual",
-        "expense_bank_fees_annual",
-        "expense_contract_services_annual",
-        "expense_miscellaneous_annual",
-        "expense_utilities_annual",
-        "expense_telephone_annual",
-        "expense_marketing_annual",
-        "expense_repairs_maintenance_annual",
-        "expense_insurance_annual",
-        "expense_payroll_annual",
-        "expense_property_tax_annual",
-        "expense_mgmt_fee_annual",
-        "expense_total_annual",
-        "noi_year_one_stated",
-        "noi_current_stated",
-
-    ]
+    # Derived from OMExtraction field metadata — do not edit manually.
+    # Includes all scalar field names plus the two complex collection names.
+    _OM_SCALAR_FIELDS: list[str] = _OM_REGISTRY["scalar_fields"] + ["unit_mix", "rent_comps"]
     _T12_SCALAR_FIELDS = [
         "gpr_annual_actual", "vacancy_credit_loss_pct_actual", "expense_ratio_actual",
         "other_income_annual", "bad_debt_annual", "corrections_collections_annual",
@@ -176,109 +125,47 @@ class REExtractionLLMService:
 
     @classmethod
     def _build_om_schema(cls) -> dict:
-        base = {
-            "name":                   {"type": "string"},
-            "address":                {"type": "string"},
-            "purchase_price":         {"type": "number"},
-            "closing_cost_pct":       {"type": "number", "description": "decimal e.g. 0.02"},
-            "capex_reserve_per_unit": {"type": "number"},
-            "market_cap_rate_purchase": {"type": "number", "description": "decimal e.g. 0.0625"},
-            "num_units":              {"type": "integer"},
-            "rentable_sqft":          {"type": "number"},
-            "year_built":             {"type": "integer"},
-            "nearby_storage_count_1mi": {"type": "integer"},
-            "nearby_storage_count_3mi": {"type": "integer"},
-            "nearby_storage_count_5mi": {"type": "integer"},
-            "population_3mi":         {"type": "integer"},
-            "avg_household_income_3mi": {"type": "number"},
-            "storage_sqft_per_capita_3mi": {"type": "number"},
-            "gpr_annual_projected":   {"type": "number", "description": "annual gross potential rent"},
-            "avg_in_place_rent_per_unit_monthly": {"type": "number"},
-            "avg_market_rent_per_unit_monthly": {"type": "number"},
-            "vacancy_pct_projected":  {"type": "number", "description": "decimal e.g. 0.08"},
-            "expense_ratio_pro_forma": {"type": "number", "description": "decimal e.g. 0.35"},
-            "other_income_annual":    {"type": "number"},
-            "rent_growth_pct":        {"type": "number", "description": "decimal e.g. 0.03"},
-            "noi_projected":          {"type": "number"},
-            "mgmt_fee_pct":           {"type": "number", "description": "decimal e.g. 0.08"},
-            "opex_growth_pct":        {"type": "number", "description": "decimal e.g. 0.02"},
-            "property_tax_growth_pct": {"type": "number", "description": "decimal e.g. 0.04"},
-            "mil_rate":               {"type": "number"},
-            "exit_cap_rate":          {"type": "number", "description": "decimal e.g. 0.065"},
-            "market_cap_rate_sale":   {"type": "number", "description": "decimal e.g. 0.0675"},
-            "hold_period_years":      {"type": "integer"},
-            "selling_cost_pct":       {"type": "number", "description": "decimal e.g. 0.03"},
-            "target_irr":             {"type": "number", "description": "decimal e.g. 0.15"},
-            "target_cash_on_cash":    {"type": "number", "description": "decimal"},
-            "target_equity_multiple": {"type": "number"},
-            "ltv_pct":                {"type": "number", "description": "decimal e.g. 0.70"},
-            "interest_rate_pct":      {"type": "number", "description": "decimal e.g. 0.065"},
-            "amortization_years":     {"type": "integer"},
-            "loan_term_years":        {"type": "integer"},
-            "unit_mix": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "section":          {"type": "string"},
-                        "unit_type":        {"type": "string"},
-                        "size":             {"type": "string"},
-                        "standard_sqft":    {"type": "number"},
-                        "num_units":        {"type": "integer"},
-                        "occupied_units":   {"type": "integer"},
-                        "occupancy_pct":    {"type": "number", "description": "decimal"},
-                        "current_rent":     {"type": "number"},
-                        "market_rent":      {"type": "number"},
-                        "rent_per_sqft":    {"type": "number"},
-                        "potential_rent":   {"type": "number"},
-                        "occupied_sqft":    {"type": "number"},
-                        "total_sqft":       {"type": "number"},
-                        "pct_of_total_sqft": {"type": "number", "description": "decimal"},
-                        "climate_type":     {"type": "string", "description": '"CC" | "NC" | "UNKNOWN"'},
-                        "unit_category":    {"type": "string", "description": '"storage" | "parking" | "residential" | "office" | "other"'},
-                    },
-                },
-            },
-            "rent_comps": {
-                "type": "array",
-                "items": {
-                    "type": "object",
-                    "properties": {
-                        "facility": {"type": "string"},
-                        "size": {"type": "string"},
-                        "asking_rent": {"type": "number"},
-                        "rent_per_sqft": {"type": "number"},
-                        "distance_mi": {"type": "number"},
-                        "notes": {"type": "string"},
-                    },
-                },
-            },
-            "income_basis_months":          {"type": "integer", "description": "6 or 12, when income period is stated"},
-            "income_basis_note":            {"type": "string"},
-            "physical_occupancy_pct":       {"type": "number", "description": "decimal, stated occupancy e.g. 0.91"},
-            "price_per_rentable_sqft":      {"type": "number", "description": "stated price per sqft if present"},
-            "below_market_tenant_pct":      {"type": "number", "description": "decimal, e.g. 0.36 for 36%"},
-            "below_market_monthly_variance":{"type": "number", "description": "total monthly rent gap in dollars"},
-            "below_market_annual_upside":   {"type": "number", "description": "annual dollar upside from below-market tenants"},
-            "value_add_notes":              {"type": "string", "description": "free text expansion or value-add narrative"},
-            "noi_projected":                {"type": "number", "description": "projected net operating income"},
+        # Scalar fields derived from OMExtraction metadata — no manual maintenance needed.
+        base: dict = dict(_OM_REGISTRY["om_schema_for_tool"])
 
-            # Individual expense line items
-            "expense_office_admin_annual":        {"type": "number", "description": "Office & Admin annual, Year 1 column preferred"},
-            "expense_bank_fees_annual":           {"type": "number", "description": "Bank & Credit Card Fees annual"},
-            "expense_contract_services_annual":   {"type": "number", "description": "Contract Services annual"},
-            "expense_miscellaneous_annual":       {"type": "number", "description": "Miscellaneous annual"},
-            "expense_utilities_annual":           {"type": "number", "description": "Utilities & Trash annual"},
-            "expense_telephone_annual":           {"type": "number", "description": "Telephone & Communications annual"},
-            "expense_marketing_annual":           {"type": "number", "description": "Marketing & Promotion annual"},
-            "expense_repairs_maintenance_annual": {"type": "number", "description": "Repairs, Maintenance & Reserves annual"},
-            "expense_insurance_annual":           {"type": "number", "description": "Property Insurance annual"},
-            "expense_payroll_annual":             {"type": "number", "description": "Salaries, Taxes & Benefits annual"},
-            "expense_property_tax_annual":        {"type": "number", "description": "Property Taxes annual"},
-            "expense_mgmt_fee_annual":            {"type": "number", "description": "Third Party Management annual"},
-            "expense_total_annual":               {"type": "number", "description": "Total Operating Expenses annual"},
-            "noi_year_one_stated":                {"type": "number", "description": "NOI from Year 1 column"},
-            "noi_current_stated":                 {"type": "number", "description": "NOI from Current column"},
+        # Complex array types stay hand-written (structural, not metadata-derivable).
+        base["unit_mix"] = {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "section":          {"type": "string"},
+                    "unit_type":        {"type": "string"},
+                    "size":             {"type": "string"},
+                    "standard_sqft":    {"type": "number"},
+                    "num_units":        {"type": "integer"},
+                    "occupied_units":   {"type": "integer"},
+                    "occupancy_pct":    {"type": "number", "description": "decimal"},
+                    "current_rent":     {"type": "number"},
+                    "market_rent":      {"type": "number"},
+                    "rent_per_sqft":    {"type": "number"},
+                    "potential_rent":   {"type": "number"},
+                    "occupied_sqft":    {"type": "number"},
+                    "total_sqft":       {"type": "number"},
+                    "pct_of_total_sqft": {"type": "number", "description": "decimal"},
+                    "climate_type":     {"type": "string", "description": '"CC" | "NC" | "UNKNOWN"'},
+                    "unit_category":    {"type": "string", "description": '"storage" | "parking" | "residential" | "office" | "other"'},
+                },
+            },
+        }
+        base["rent_comps"] = {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "facility": {"type": "string"},
+                    "size": {"type": "string"},
+                    "asking_rent": {"type": "number"},
+                    "rent_per_sqft": {"type": "number"},
+                    "distance_mi": {"type": "number"},
+                    "notes": {"type": "string"},
+                },
+            },
         }
         for f in cls._OM_CITED_SCALAR_FIELDS + cls._OM_CITED_COLLECTION_FIELDS:
             base.update(cls._citation_props(f))

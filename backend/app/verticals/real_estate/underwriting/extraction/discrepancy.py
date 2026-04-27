@@ -113,7 +113,7 @@ def detect_discrepancies(om_data: dict, rent_roll_data: dict, t12_data: dict) ->
             })
 
     # Rule 4: OpEx ratio (OM pro forma vs T12 actual; threshold: 200 bps)
-    om_opex_pct = om_data.get("opex_pct")
+    om_opex_pct = om_data.get("expense_ratio_pro_forma", om_data.get("opex_pct"))
     t12_opex_ratio = t12_data.get("summary", {}).get("opex_ratio")
     if om_opex_pct is not None and t12_opex_ratio is not None:
         delta = abs(om_opex_pct - t12_opex_ratio)
@@ -222,7 +222,8 @@ def detect_discrepancies_from_results(results: list) -> list[dict]:
             # Convert vacancy_pct_projected to occupancy_pct
             if "vacancy_pct_projected" in om_dict and om_dict["vacancy_pct_projected"] is not None:
                 om_data["occupancy_pct"] = 1.0 - om_dict["vacancy_pct_projected"]
-            # opex_pct not available from OM extraction schema
+            if om_dict.get("expense_ratio_pro_forma") is not None:
+                om_data["expense_ratio_pro_forma"] = om_dict.get("expense_ratio_pro_forma")
 
         elif r.doc_type == "t12" and r.t12 and not r.error:
             t12 = r.t12

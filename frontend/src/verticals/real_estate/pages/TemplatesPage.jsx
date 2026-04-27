@@ -37,6 +37,7 @@ import {
   ArrowUpDown,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { TemplatesPageSkeleton } from '../../../components/skeletons/PageSkeletons';
 import {
   listRETemplates,
   uploadRETemplate,
@@ -362,6 +363,14 @@ export default function TemplatesPage() {
       Upload Template
     </Button>
   );
+
+  if (loading) {
+    return (
+      <AppLayout headerLeft={breadcrumb} headerRight={uploadButton}>
+        <TemplatesPageSkeleton />
+      </AppLayout>
+    );
+  }
 
   return (
     <AppLayout headerLeft={breadcrumb} headerRight={uploadButton}>

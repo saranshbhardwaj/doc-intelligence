@@ -64,62 +64,46 @@ def _select_best_unit_mix(doc_results: list[ExtractedDocResult]) -> list[UnitMix
     return []
 
 
+# OM attribute names that differ from their artifact output key
+_OM_FIELD_RENAMES: dict[str, str] = {
+    "gpr_annual_projected": "gross_potential_rent_annual",
+}
+# OM attribute name that produces an additional aliased output key
+_OM_FIELD_ALIASES: dict[str, str] = {
+    "expense_ratio_pro_forma": "opex_pct",
+}
+
+
 def _build_om_source_data(doc_results: list[ExtractedDocResult]) -> dict | None:
     for result in doc_results:
         if result.doc_type != "om" or not result.om or result.error:
             continue
         om = result.om
-        data = {
-            "num_units": om.num_units,
-            "rentable_sqft": om.rentable_sqft,
-            "gross_potential_rent_annual": om.gpr_annual_projected,
-            "avg_in_place_rent_per_unit_monthly": om.avg_in_place_rent_per_unit_monthly,
-            "avg_market_rent_per_unit_monthly": om.avg_market_rent_per_unit_monthly,
-            "expense_ratio_pro_forma": om.expense_ratio_pro_forma,
-            "opex_pct": om.expense_ratio_pro_forma,
-            "market_cap_rate_purchase": om.market_cap_rate_purchase,
-            "market_cap_rate_sale": om.market_cap_rate_sale,
-            "property_tax_growth_pct": om.property_tax_growth_pct,
-            "mil_rate": om.mil_rate,
-            "nearby_storage_count_1mi": om.nearby_storage_count_1mi,
-            "nearby_storage_count_3mi": om.nearby_storage_count_3mi,
-            "nearby_storage_count_5mi": om.nearby_storage_count_5mi,
-            "population_3mi": om.population_3mi,
-            "avg_household_income_3mi": om.avg_household_income_3mi,
-            "storage_sqft_per_capita_3mi": om.storage_sqft_per_capita_3mi,
-            "unit_mix": [row.model_dump() for row in om.unit_mix],
-            "rent_comps": [row.model_dump() for row in om.rent_comps],
 
-            "income_basis_months": om.income_basis_months,
-            "income_basis_note": om.income_basis_note,
-            "physical_occupancy_pct": om.physical_occupancy_pct,
-            "price_per_rentable_sqft": om.price_per_rentable_sqft,
-            "below_market_tenant_pct": om.below_market_tenant_pct,
-            "below_market_monthly_variance": om.below_market_monthly_variance,
-            "below_market_annual_upside": om.below_market_annual_upside,
-            "value_add_notes": om.value_add_notes,
-            "noi_projected": om.noi_projected,
+        # All scalar fields for free — new fields added to OMExtraction appear automatically
+        data: dict = om.model_dump(exclude_none=True, exclude={"unit_mix", "rent_comps"})
 
-            # Individual expense line items
-            "expense_office_admin_annual":        om.expense_office_admin_annual,
-            "expense_bank_fees_annual":           om.expense_bank_fees_annual,
-            "expense_contract_services_annual":   om.expense_contract_services_annual,
-            "expense_miscellaneous_annual":       om.expense_miscellaneous_annual,
-            "expense_utilities_annual":           om.expense_utilities_annual,
-            "expense_telephone_annual":           om.expense_telephone_annual,
-            "expense_marketing_annual":           om.expense_marketing_annual,
-            "expense_repairs_maintenance_annual": om.expense_repairs_maintenance_annual,
-            "expense_insurance_annual":           om.expense_insurance_annual,
-            "expense_payroll_annual":             om.expense_payroll_annual,
-            "expense_property_tax_annual":        om.expense_property_tax_annual,
-            "expense_mgmt_fee_annual":            om.expense_mgmt_fee_annual,
-            "expense_total_annual":               om.expense_total_annual,
-            "noi_year_one_stated":                om.noi_year_one_stated,
-            "noi_current_stated":                 om.noi_current_stated,
-        }
+        # Apply renames (output key differs from OM attribute name)
+        for src, dst in _OM_FIELD_RENAMES.items():
+            if src in data:
+                data[dst] = data.pop(src)
+
+        # Apply aliases (extra output key alongside the original)
+        for src, alias in _OM_FIELD_ALIASES.items():
+            if src in data:
+                data[alias] = data[src]
+
+        # Computed fields
         if om.vacancy_pct_projected is not None:
             data["occupancy_pct"] = 1.0 - om.vacancy_pct_projected
-        return {key: value for key, value in data.items() if value not in (None, [], {})}
+
+        # Complex types (serialised separately)
+        if om.unit_mix:
+            data["unit_mix"] = [row.model_dump() for row in om.unit_mix]
+        if om.rent_comps:
+            data["rent_comps"] = [row.model_dump() for row in om.rent_comps]
+
+        return {k: v for k, v in data.items() if v not in (None, [], {})}
     return None
 
 
@@ -461,6 +445,8 @@ def re_calculate_underwriting_task(self, payload: dict) -> dict:
         inputs = SelfStorageInputs(**payload.get("merged_inputs", {}))
         doc_results = [ExtractedDocResult(**d) for d in payload.get("doc_results", [])]
         result = calculate(inputs)
+        result.income_basis_months = inputs.operational.income_basis_months
+        result.income_basis_note = inputs.operational.income_basis_note
         stress = run_stress_tests(inputs)
         result.stress_tests = stress
         result.unit_mix = _select_best_unit_mix(doc_results)

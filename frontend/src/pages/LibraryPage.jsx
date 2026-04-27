@@ -24,6 +24,7 @@ import DocumentsTable from "../components/library/DocumentsTable";
 import UploadModal from "../components/library/UploadModal";
 import { Button } from "../components/ui/button";
 import { Sheet, SheetContent, SheetTitle, SheetDescription } from "../components/ui/sheet";
+import { LibraryPageSkeleton } from "../components/skeletons/PageSkeletons";
 import {
   listCollections,
   createCollection as apiCreateCollection,
@@ -511,6 +512,14 @@ export default function LibraryPage() {
       setDeletingDocId(null);
     }
   };
+
+  if (loadingCollections) {
+    return (
+      <AppLayout lockViewport pageHeader={pageHeader}>
+        <LibraryPageSkeleton />
+      </AppLayout>
+    );
+  }
 
   return (
     <AppLayout lockViewport pageHeader={pageHeader}>

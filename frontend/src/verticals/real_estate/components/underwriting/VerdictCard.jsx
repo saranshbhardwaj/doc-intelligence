@@ -8,7 +8,7 @@ export default function VerdictCard({ verdict }) {
   if (!verdict) return null;
 
   const tone = verdict.status === 'worth_pursuing' ? 'success' : verdict.status === 'needs_review' ? 'warning' : 'danger';
-  const verdictLabel = verdict.status === 'worth_pursuing' ? 'Worth Pursuing' : verdict.status === 'needs_review' ? 'Needs Review' : 'Below Standards';
+  const verdictLabel = verdict.status === 'worth_pursuing' ? 'Passes Screen' : verdict.status === 'needs_review' ? 'Review Needed' : 'Below Screen';
 
   const formatMetric = (metric) => {
     switch (metric) {

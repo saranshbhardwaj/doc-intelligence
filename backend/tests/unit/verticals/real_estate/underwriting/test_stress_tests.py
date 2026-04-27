@@ -54,13 +54,13 @@ class TestStressTests:
     """Test stress scenario generation."""
 
     def test_returns_five_scenarios(self):
-        """run_stress_tests() returns exactly 5 scenarios."""
+        """run_stress_tests() returns exactly 6 scenarios."""
         scenarios = run_stress_tests(VALID_INPUTS)
 
-        assert len(scenarios) == 5
+        assert len(scenarios) == 6
 
     def test_all_five_keys_present(self):
-        """All 5 scenario keys are present: base, vacancy, rent, opex, exit_cap."""
+        """All senior-analyst stress scenario keys are present."""
         scenarios = run_stress_tests(VALID_INPUTS)
         keys = {s.scenario_key for s in scenarios}
 
@@ -68,7 +68,8 @@ class TestStressTests:
         assert "vacancy_plus_500bps" in keys
         assert "rent_growth_zero" in keys
         assert "opex_plus_10pct" in keys
-        assert "exit_cap_plus_25bps" in keys
+        assert "exit_cap_plus_50bps" in keys
+        assert "interest_rate_plus_100bps" in keys
 
     def test_base_scenario_matches_calculate(self):
         """Base scenario IRR matches standalone calculate()."""
@@ -130,13 +131,22 @@ class TestStressTests:
             assert opex_scenario.irr < base.irr
 
     def test_exit_cap_plus_25bps_scenario(self):
-        """Exit cap +25bps scenario affects exit value."""
+        """Exit cap +50bps scenario affects exit value."""
         scenarios = run_stress_tests(VALID_INPUTS)
-        exit_cap = next(s for s in scenarios if s.scenario_key == "exit_cap_plus_25bps")
+        exit_cap = next(s for s in scenarios if s.scenario_key == "exit_cap_plus_50bps")
 
         # Higher exit cap → lower exit proceeds → lower overall return
         # May still have reasonable IRR but lower than base
         assert exit_cap.irr is not None
+
+    def test_interest_rate_plus_100bps_scenario(self):
+        """Interest rate +100bps should reduce levered cash flow metrics."""
+        scenarios = run_stress_tests(VALID_INPUTS)
+        rate_stress = next(s for s in scenarios if s.scenario_key == "interest_rate_plus_100bps")
+        base = next(s for s in scenarios if s.scenario_key == "base")
+
+        if rate_stress.cash_on_cash is not None and base.cash_on_cash is not None:
+            assert rate_stress.cash_on_cash < base.cash_on_cash
 
     def test_extreme_inputs_no_exception(self):
         """Even extreme inputs shouldn't crash."""
@@ -145,5 +155,5 @@ class TestStressTests:
 
         scenarios = run_stress_tests(extreme_inputs)
 
-        # Should return 5 scenarios without crashing
-        assert len(scenarios) == 5
+        # Should return all scenarios without crashing
+        assert len(scenarios) == 6

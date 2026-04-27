@@ -80,7 +80,7 @@ class TestCRUDOperations:
         assert response.status_code == 200
         data = response.json()
         assert data["runs"] == []
-        assert data["total"] == 0
+        assert "total" not in data
 
     def test_get_runs_lists_all_runs(self, api_client, run_factory):
         """GET /runs → returns all user's runs, ordered by newest first."""
@@ -147,7 +147,14 @@ class TestCRUDOperations:
         assert response.json()["status"] == "completed"
         # Verify DB was updated
         response = api_client.get(f"/api/v1/re/underwriting/runs/{run.id}")
-        assert response.json()["inputs"] == new_inputs
+        saved_inputs = response.json()["inputs"]
+        assert saved_inputs["project"]["name"] == new_inputs["project"]["name"]
+        assert saved_inputs["project"]["asset_type"] == new_inputs["project"]["asset_type"]
+        assert saved_inputs["acquisition"]["purchase_price"] == new_inputs["acquisition"]["purchase_price"]
+        assert saved_inputs["operational"]["gross_potential_rent_annual"] == new_inputs["operational"]["gross_potential_rent_annual"]
+        assert saved_inputs["financing"]["ltv_pct"] == new_inputs["financing"]["ltv_pct"]
+        assert saved_inputs["exit"]["exit_cap_rate"] == new_inputs["exit"]["exit_cap_rate"]
+        assert saved_inputs["criteria"]["target_irr"] == new_inputs["criteria"]["target_irr"]
         assert response.json()["result_artifact"]["verdict"]
 
     def test_delete_run(self, api_client, run_factory):
@@ -278,3 +285,86 @@ class TestInputValidation:
 
         # Either 422 or accepted (depends on schema validation)
         assert response.status_code in [200, 422]
+
+    def test_patch_blank_optional_numeric_fields_are_normalized(self, api_client, run_factory):
+        """PATCH should treat blank optional numeric strings as null and succeed."""
+        run = run_factory(name="Blank Optional Inputs", status="needs_review")
+        new_inputs = {
+            "project": {
+                "name": "Blank Optional Inputs",
+                "asset_type": "self_storage",
+                "nearby_storage_count_3mi": "",
+                "nearby_storage_count_5mi": "",
+            },
+            "acquisition": {"purchase_price": 5000000, "closing_cost_pct": 0.02, "capex_reserve_per_unit": 0},
+            "operational": {
+                "gross_potential_rent_annual": 600000,
+                "vacancy_credit_loss_pct": 0.10,
+                "other_income_annual": 0,
+                "rent_growth_pct": 0.03,
+                "property_tax_annual": 30000,
+                "insurance_annual": 15000,
+                "mgmt_fee_pct": 0.08,
+                "payroll_annual": 40000,
+                "repairs_maintenance_annual": 20000,
+                "utilities_annual": 12000,
+                "marketing_annual": 5000,
+                "other_opex_annual": 10000,
+                "opex_growth_pct": 0.02,
+            },
+            "financing": {"ltv_pct": 0.70, "interest_rate_pct": 0.065, "amortization_years": 25, "loan_term_years": 10},
+            "exit": {"hold_period_years": 10, "exit_cap_rate": 0.065, "selling_cost_pct": 0.03},
+            "criteria": {"target_irr": 0.15, "target_cash_on_cash": 0.08, "target_equity_multiple": 2.0, "max_ltv": 0.80},
+            "lease_records": [],
+            "unit_mix": [],
+        }
+
+        response = api_client.patch(
+            f"/api/v1/re/underwriting/runs/{run.id}/inputs",
+            json={"inputs": new_inputs},
+        )
+
+        assert response.status_code == 200
+        saved = api_client.get(f"/api/v1/re/underwriting/runs/{run.id}").json()
+        assert saved["inputs"]["project"]["nearby_storage_count_3mi"] is None
+        assert saved["inputs"]["project"]["nearby_storage_count_5mi"] is None
+
+    def test_patch_validation_error_payload_is_sanitized(self, api_client, run_factory):
+        """PATCH validation failures should not leak raw pydantic/internal traceback text."""
+        run = run_factory(name="Bad Inputs", status="needs_review")
+        bad_inputs = {
+            "project": {"name": "Bad Inputs", "asset_type": "self_storage"},
+            "acquisition": {"purchase_price": 5000000, "closing_cost_pct": 0.02, "capex_reserve_per_unit": 0},
+            "operational": {
+                "gross_potential_rent_annual": "not-a-number",
+                "vacancy_credit_loss_pct": 0.10,
+                "other_income_annual": 0,
+                "rent_growth_pct": 0.03,
+                "property_tax_annual": 30000,
+                "insurance_annual": 15000,
+                "mgmt_fee_pct": 0.08,
+                "payroll_annual": 40000,
+                "repairs_maintenance_annual": 20000,
+                "utilities_annual": 12000,
+                "marketing_annual": 5000,
+                "other_opex_annual": 10000,
+                "opex_growth_pct": 0.02,
+            },
+            "financing": {"ltv_pct": 0.70, "interest_rate_pct": 0.065, "amortization_years": 25, "loan_term_years": 10},
+            "exit": {"hold_period_years": 10, "exit_cap_rate": 0.065, "selling_cost_pct": 0.03},
+            "criteria": {"target_irr": 0.15, "target_cash_on_cash": 0.08, "target_equity_multiple": 2.0, "max_ltv": 0.80},
+            "lease_records": [],
+            "unit_mix": [],
+        }
+
+        response = api_client.patch(
+            f"/api/v1/re/underwriting/runs/{run.id}/inputs",
+            json={"inputs": bad_inputs},
+        )
+
+        assert response.status_code == 422
+        detail = response.json().get("detail")
+        assert isinstance(detail, dict)
+        assert "message" in detail
+        assert "pydantic" not in str(detail).lower()
+        assert "int_parsing" not in str(detail)

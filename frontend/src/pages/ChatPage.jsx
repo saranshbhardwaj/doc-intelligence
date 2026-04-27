@@ -23,6 +23,7 @@ import DocumentManagerDialog from "../components/chat/DocumentManagerDialog";
 import Spinner from "../components/common/Spinner";
 import { exportAsMarkdown, exportAsWord } from "../utils/exportChat";
 import { Sheet, SheetContent, SheetTitle, SheetDescription } from "../components/ui/sheet";
+import { ChatPageSkeleton } from "../components/skeletons/PageSkeletons";
 
 export default function ChatPage() {
   const { getToken, isLoaded } = useAppAuth();
@@ -192,6 +193,14 @@ export default function ChatPage() {
         <div className="flex items-center justify-center min-h-screen">
           <Spinner />
         </div>
+      </AppLayout>
+    );
+  }
+
+  if (isInitializing) {
+    return (
+      <AppLayout lockViewport suppressPageHeader>
+        <ChatPageSkeleton />
       </AppLayout>
     );
   }

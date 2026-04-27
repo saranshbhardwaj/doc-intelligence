@@ -1,5 +1,5 @@
 import { HelpCircle } from 'lucide-react';
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { Tooltip, TooltipContent, TooltipPortal, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
 
 export function UnderwritingStatusBadge({ tone = 'neutral', className, children }) {
@@ -80,9 +80,11 @@ export function UnderwritingMetricCard({
                       <HelpCircle className="h-3.5 w-3.5" />
                     </button>
                   </TooltipTrigger>
-                  <TooltipContent side="top" className="max-w-[280px] text-xs leading-5">
-                    {formula}
-                  </TooltipContent>
+                  <TooltipPortal>
+                    <TooltipContent side="top" collisionPadding={16} className="max-w-[280px] text-xs leading-5 whitespace-pre-line">
+                      {formula}
+                    </TooltipContent>
+                  </TooltipPortal>
                 </Tooltip>
               </TooltipProvider>
             ) : null}

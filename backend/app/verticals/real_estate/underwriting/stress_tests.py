@@ -9,6 +9,38 @@ from __future__ import annotations
 from .calculator import calculate
 from .schemas.self_storage import SelfStorageInputs, StressScenario
 
+
+def _increase_operating_expenses(inputs: SelfStorageInputs, multiplier: float) -> SelfStorageInputs:
+    """Stress total operating expense load without changing revenue assumptions."""
+
+    op = inputs.operational
+    return inputs.model_copy(
+        update={
+            "operational": op.model_copy(
+                update={
+                    "property_tax_annual": op.property_tax_annual * multiplier,
+                    "insurance_annual": op.insurance_annual * multiplier,
+                    "payroll_annual": op.payroll_annual * multiplier,
+                    "repairs_maintenance_annual": op.repairs_maintenance_annual * multiplier,
+                    "utilities_annual": op.utilities_annual * multiplier,
+                    "marketing_annual": op.marketing_annual * multiplier,
+                    "other_opex_annual": op.other_opex_annual * multiplier,
+                    "mgmt_fee_pct": min(op.mgmt_fee_pct * multiplier, 1.0),
+                    "expense_ratio_current": (
+                        min(op.expense_ratio_current * multiplier, 1.0)
+                        if op.expense_ratio_current is not None
+                        else None
+                    ),
+                    "expense_ratio_pro_forma": (
+                        min(op.expense_ratio_pro_forma * multiplier, 1.0)
+                        if op.expense_ratio_pro_forma is not None
+                        else None
+                    ),
+                }
+            )
+        }
+    )
+
 # Each entry: scenario_key -> (label, modifier function)
 SCENARIOS: dict[str, tuple[str, object]] = {
     "base": (
@@ -39,23 +71,27 @@ SCENARIOS: dict[str, tuple[str, object]] = {
     ),
     "opex_plus_10pct": (
         "OpEx +10%",
+        lambda i: _increase_operating_expenses(i, 1.10),
+    ),
+    "exit_cap_plus_50bps": (
+        "Exit Cap +0.50%",
         lambda i: i.model_copy(
             update={
-                "operational": i.operational.model_copy(
+                "exit": i.exit.model_copy(
                     update={
-                        "opex_growth_pct": i.operational.opex_growth_pct + 0.10
+                        "exit_cap_rate": i.exit.exit_cap_rate + 0.0050
                     }
                 )
             }
         ),
     ),
-    "exit_cap_plus_25bps": (
-        "Exit Cap +0.25%",
+    "interest_rate_plus_100bps": (
+        "Interest Rate +1.00%",
         lambda i: i.model_copy(
             update={
-                "exit": i.exit.model_copy(
+                "financing": i.financing.model_copy(
                     update={
-                        "exit_cap_rate": i.exit.exit_cap_rate + 0.0025
+                        "interest_rate_pct": i.financing.interest_rate_pct + 0.0100
                     }
                 )
             }

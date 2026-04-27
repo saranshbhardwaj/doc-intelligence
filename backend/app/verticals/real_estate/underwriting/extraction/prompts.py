@@ -34,9 +34,36 @@ EXTRACT (as JSON):
     - value_add_notes: free-text summary of any explicitly stated expansion or value-add opportunities
       such as unit conversions, remote management, or rent growth initiatives. ≤200 chars.
     - noi_projected: projected net operating income if explicitly stated
-- Market context / demographics when explicitly stated: nearby_storage_count_1mi, nearby_storage_count_3mi, nearby_storage_count_5mi, population_3mi, avg_household_income_3mi, storage_sqft_per_capita_3mi
+- Market context / demographics (extract from any demographics, market overview, or competition section of the OM — these often appear on a separate page):
+    - nearby_storage_count_1mi: integer count of competing facilities within 1 mile. "No Competitors within 1-Mile" → 0
+    - nearby_storage_count_3mi: integer count of competing facilities within 3 miles. Count distinct facilities listed in any rent-comp or competition table if an explicit count is not stated
+    - nearby_storage_count_5mi: integer count within 5 miles if explicitly stated
+    - population_3mi: total population within 3-mile radius as stated (e.g. "population in your selected geography is 153,689" → 153689)
+    - avg_household_income_3mi: average household income within 3 miles as a float (e.g. "average household income … is $65,499" → 65499.0)
+    - storage_sqft_per_capita_3mi: square feet of storage per capita within 3 miles if stated
 - Acquisition: purchase_price (asking), closing_cost_pct if stated, capex_reserve_per_unit if stated, market_cap_rate_purchase if stated
-- Income: gross_potential_rent_annual (stated), avg_in_place_rent_per_unit_monthly, avg_market_rent_per_unit_monthly, stated occupancy_pct, other_income_annual if stated, rent_growth_pct if stated
+- Income (extract from the YEAR 1 column when a multi-column operating statement is present;
+  fall back to Current column only when Year 1 is absent):
+    - gross_potential_rent_annual: Year 1 Gross Potential Rent (annualised)
+    - avg_in_place_rent_per_unit_monthly: average monthly in-place rent per unit ONLY if the OM
+      states it as a single explicit aggregate figure (e.g. "Average In-Place Rent: $125/unit/mo"
+      or "Avg Monthly Rent Per Unit: $114"). Do NOT compute or derive this from individual unit-mix
+      rows — return null if not explicitly stated as an aggregate
+    - avg_market_rent_per_unit_monthly: average market rent per unit if explicitly stated; null otherwise
+    - vacancy_pct_projected: Year 1 total economic vacancy as a decimal. Economic vacancy combines
+      physical vacancy AND rent concessions/bad debt. Look in the YEAR 1 column for a row labeled
+      "(Economic Vacancy)", "(Vacancy)", or "(Physical Vacancy) + (Rent Concessions/Bad Debt)".
+      If shown as "12.78% / ($36,530)", return 0.1278. Return null if not found — never default.
+    - other_income_annual: Sum of ALL non-rental income items in the Year 1 column. In self-storage
+      OMs this typically includes: Administrative Fees, Late/Lien/NSF Fees, Tenant Insurance Net
+      Commissions, and Miscellaneous Income. This equals the difference between "Effective Gross
+      Income" and "Effective Gross Rental Income" in the operating statement. Extract the aggregate
+      AND the individual components when present:
+        - other_income_admin_fees_annual: "Administrative Fees" Year 1
+        - other_income_late_fees_annual: "Late, Lien, NSF Fees" (or "Late Fees") Year 1
+        - other_income_insurance_annual: "Tenant Insurance Net Commissions" Year 1
+        - other_income_misc_annual: "Miscellaneous Income" Year 1
+    - rent_growth_pct: annual rent growth assumption if stated
 - Expenses (extract from the operating statement table when present):
     Prefer the "Year 1" or "Year-One" column for all line items.
     Use "Current" column only when Year 1 is absent.
@@ -58,6 +85,14 @@ EXTRACT (as JSON):
     - noi_year_one_stated: "Net Operating Income" from Year 1 column
     - noi_current_stated: "Net Operating Income" from Current column
     - expense_ratio_pro_forma: "Expenses % EGI" — prefer Year 1 value
+    - mgmt_fee_pct: if the OM explicitly states the management fee as a percentage in text
+      (e.g. "Third Party Management: 5% of GPR" or "Management Fee: 8%"), extract as decimal
+      (0.05). Do NOT compute from expense_mgmt_fee_annual ÷ revenue. Only extract when a
+      percentage is explicitly stated in text.
+    - property_tax_growth_pct: ONLY when the OM states a property-tax-specific annual growth
+      rate separate from general opex growth (e.g. "property taxes grow 4% annually, other
+      expenses grow 2%"). If only one blended opex growth rate applies to all expenses,
+      return null here — do not copy opex_growth_pct into this field.
 - Financing: loan_amount, interest_rate, loan_term_years, amortization_years, loan_type if stated
 - Exit: hold_period_years, exit_cap_rate, selling_cost_pct, market_cap_rate_sale if stated
 - Broker metrics: broker_cap_rate, broker_noi if stated
@@ -184,74 +219,26 @@ def _schema_json(fields: list[dict]) -> str:
     return _json.dumps({f["name"]: f.get("type", "float | null") for f in fields}, indent=2)
 
 
-_OM_FIELDS = [
-    {"name": "name", "type": "str | null"},
-    {"name": "address", "type": "str | null"},
-    {"name": "purchase_price", "type": "float | null"},
-    {"name": "closing_cost_pct", "type": "float | null (decimal, e.g. 0.02)"},
-    {"name": "market_cap_rate_purchase", "type": "float | null (decimal, e.g. 0.0625)"},
-    {"name": "capex_reserve_per_unit", "type": "float | null"},
-    {"name": "num_units", "type": "int | null"},
-    {"name": "rentable_sqft", "type": "float | null"},
-    {"name": "year_built", "type": "int | null"},
-    {"name": "nearby_storage_count_1mi", "type": "int | null"},
-    {"name": "nearby_storage_count_3mi", "type": "int | null"},
-    {"name": "nearby_storage_count_5mi", "type": "int | null"},
-    {"name": "population_3mi", "type": "int | null"},
-    {"name": "avg_household_income_3mi", "type": "float | null"},
-    {"name": "storage_sqft_per_capita_3mi", "type": "float | null"},
-    {"name": "gpr_annual_projected", "type": "float | null (annual)"},
-    {"name": "avg_in_place_rent_per_unit_monthly", "type": "float | null (monthly)"},
-    {"name": "avg_market_rent_per_unit_monthly", "type": "float | null (monthly)"},
-    {"name": "vacancy_pct_projected", "type": "float | null (decimal, e.g. 0.08)"},
-    {"name": "expense_ratio_pro_forma", "type": "float | null (decimal)"},
-    {"name": "other_income_annual", "type": "float | null (annual)"},
-    {"name": "rent_growth_pct", "type": "float | null (decimal)"},
-    {"name": "noi_projected", "type": "float | null (annual)"},
-    {"name": "mgmt_fee_pct", "type": "float | null (decimal)"},
-    {"name": "opex_growth_pct", "type": "float | null (decimal)"},
-    {"name": "property_tax_growth_pct", "type": "float | null (decimal)"},
-    {"name": "mil_rate", "type": "float | null"},
-    {"name": "exit_cap_rate", "type": "float | null (decimal, e.g. 0.065)"},
-    {"name": "market_cap_rate_sale", "type": "float | null (decimal, e.g. 0.0675)"},
-    {"name": "hold_period_years", "type": "int | null"},
-    {"name": "selling_cost_pct", "type": "float | null (decimal)"},
-    {"name": "target_irr", "type": "float | null (decimal)"},
-    {"name": "target_cash_on_cash", "type": "float | null (decimal)"},
-    {"name": "target_equity_multiple", "type": "float | null"},
-    {"name": "ltv_pct", "type": "float | null (decimal, e.g. 0.70)"},
-    {"name": "interest_rate_pct", "type": "float | null (decimal, e.g. 0.065)"},
-    {"name": "amortization_years", "type": "int | null"},
-    {"name": "loan_term_years", "type": "int | null"},
-    {"name": "unit_mix", "type": "array of {section, unit_type, size, standard_sqft, num_units, occupied_units, occupancy_pct, current_rent, market_rent, rent_per_sqft, potential_rent, occupied_sqft, total_sqft, pct_of_total_sqft, climate_type (\"CC\"|\"NC\"|\"UNKNOWN\"), unit_category (\"storage\"|\"parking\"|\"residential\"|\"office\"|\"other\")}"},
-    {"name": "rent_comps", "type": "array of {facility, size, asking_rent, rent_per_sqft, distance_mi, notes}"},
+# Derived from OMExtraction field metadata — do not edit manually.
+# To add a new scalar field: add it to OMExtraction in schemas.py with
+# Field(description=..., json_schema_extra={"cite": bool}).
+from .schemas import _OM_REGISTRY as _om_reg  # noqa: E402
 
-    {"name": "income_basis_months", "type": "int | null (6 or 12, when stated)"},
-    {"name": "income_basis_note", "type": "str | null"},
-
-    {"name": "physical_occupancy_pct", "type": "float | null (decimal, stated in OM)"},
-    {"name": "price_per_rentable_sqft", "type": "float | null (stated in OM if present)"},
-    {"name": "below_market_tenant_pct", "type": "float | null (decimal, e.g. 0.36)"},
-    {"name": "below_market_monthly_variance", "type": "float | null (monthly dollar gap)"},
-    {"name": "below_market_annual_upside", "type": "float | null (annual dollar upside)"},
-    {"name": "value_add_notes", "type": "str | null (free text expansion/upside narrative)"},
-
-    # Individual OM expense line items (Year 1 column preferred per scenario rule)
-    {"name": "expense_office_admin_annual",       "type": "float | null"},
-    {"name": "expense_bank_fees_annual",          "type": "float | null"},
-    {"name": "expense_contract_services_annual",  "type": "float | null"},
-    {"name": "expense_miscellaneous_annual",      "type": "float | null"},
-    {"name": "expense_utilities_annual",          "type": "float | null"},
-    {"name": "expense_telephone_annual",          "type": "float | null"},
-    {"name": "expense_marketing_annual",          "type": "float | null"},
-    {"name": "expense_repairs_maintenance_annual","type": "float | null"},
-    {"name": "expense_insurance_annual",          "type": "float | null"},
-    {"name": "expense_payroll_annual",            "type": "float | null"},
-    {"name": "expense_property_tax_annual",       "type": "float | null"},
-    {"name": "expense_mgmt_fee_annual",           "type": "float | null"},
-    {"name": "expense_total_annual",              "type": "float | null"},
-    {"name": "noi_year_one_stated",               "type": "float | null (Year 1 column NOI)"},
-    {"name": "noi_current_stated",                "type": "float | null (Current column NOI)"}
+_OM_FIELDS = _om_reg["om_fields_for_prompt"] + [
+    {
+        "name": "unit_mix",
+        "type": (
+            'array of {section, unit_type, size, standard_sqft, num_units, occupied_units, '
+            'occupancy_pct, current_rent, market_rent, rent_per_sqft, potential_rent, '
+            'occupied_sqft, total_sqft, pct_of_total_sqft, '
+            'climate_type ("CC"|"NC"|"UNKNOWN"), '
+            'unit_category ("storage"|"parking"|"residential"|"office"|"other")}'
+        ),
+    },
+    {
+        "name": "rent_comps",
+        "type": "array of {facility, size, asking_rent, rent_per_sqft, distance_mi, notes}",
+    },
 ]
 
 _T12_FIELDS = [
@@ -298,8 +285,8 @@ Map field values to the schema. Rules:
 - "gross potential rent", "GPR", "scheduled rent" → gpr_annual_projected (annualised)
 - "hold period", "investment horizon" → hold_period_years
 - Do not map annual property tax expense or property tax growth into mil_rate
-- Nearby competitor / facility counts can map into nearby_storage_count_1mi, nearby_storage_count_3mi, nearby_storage_count_5mi
-- Market demographics can map into population_3mi, avg_household_income_3mi, and storage_sqft_per_capita_3mi when explicitly tied to the property market area
+- Nearby competitor / facility counts → nearby_storage_count_1mi, nearby_storage_count_3mi, nearby_storage_count_5mi. "No Competitors within 1-Mile" → nearby_storage_count_1mi = 0. Count distinct facilities in rent-comp tables for nearby_storage_count_3mi if not explicitly stated
+- Population within 3 miles → population_3mi (integer). Average household income within 3 miles → avg_household_income_3mi (float). Square feet per capita → storage_sqft_per_capita_3mi. Extract these even when they appear on a demographics or market overview page separate from the operating statement
 - For OM unit-mix tables, preserve one row per bucket. Use the section header (for example NON-CLIMATE or COVERED PARKING) in both section and unit_type when no more specific type label exists.
 - For OM competitive-set rent tables, preserve one row per facility and size bucket in rent_comps. Use asking_rent for Rent/Unit, rent_per_sqft for Rent/Sq.Ft., and keep notes for address, year built, square footage, blanks like "no data", or specials.
 - Never collapse multiple size buckets into one rent_comps row. Repeat facility, distance, and notes across separate rows when a facility lists multiple sizes.
@@ -312,9 +299,10 @@ Map field values to the schema. Rules:
   vacancy_pct_projected, noi_projected, and expense line items.
   Use the "Current" column only when Year-One is absent.
   Never use the "Pro Forma" column for base-case inputs.
-- When multiple "other income" sub-categories are present (admin fees, late fees,
-  tenant insurance, miscellaneous), sum them into other_income_annual rather than
-  picking one. Cite all contributing source tokens.
+- When other income sub-categories are present (Administrative Fees, Late/Lien/NSF Fees,
+  Tenant Insurance Net Commissions, Miscellaneous Income), populate BOTH other_income_annual
+  (the aggregate sum) AND each individual other_income_*_annual field. Cite all contributing
+  source tokens in other_income_annual.
 - For OM expense line items, always prefer the Year 1 column dollar amounts.
   Map ALL operating expenses to one of the 7 primary fields: expense_property_tax_annual,
   expense_insurance_annual, expense_payroll_annual, expense_repairs_maintenance_annual,
@@ -333,6 +321,12 @@ Map field values to the schema. Rules:
   Set unit_category to "storage" for standard storage units, "parking" for parking spaces
   (covered or uncovered), "residential" for apartments or dwelling units, "office" for
   office space, and "other" for anything else.
+- avg_in_place_rent_per_unit_monthly: only when the OM explicitly states it as a single per-door
+  aggregate figure. Do NOT derive or compute from unit-mix rows.
+- mgmt_fee_pct: only when an explicit management fee percentage is stated in OM text; do not
+  compute from the annual dollar amount.
+- property_tax_growth_pct: only when a property-tax-specific growth rate is stated separately
+  from opex_growth_pct; do not copy opex_growth_pct into this field.
 - If a value genuinely cannot be found, return null
 
 CITATIONS: For every SCALAR field you populate (not arrays like unit_mix, rent_comps, or lease_records), also emit the companion citation fields:

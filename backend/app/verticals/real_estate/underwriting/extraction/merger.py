@@ -189,6 +189,22 @@ def _derived_t12_expense_ratio(t12: Optional[T12Extraction], factor: float) -> O
     return total_opex / total_revenue if total_opex > 0 else None
 
 
+def _om_other_income_total(om: Optional[OMExtraction]) -> Optional[float]:
+    if not om:
+        return None
+    if om.other_income_annual is not None:
+        return om.other_income_annual
+    # Fallback: sum individual components if any were extracted
+    components = [
+        om.other_income_admin_fees_annual,
+        om.other_income_late_fees_annual,
+        om.other_income_insurance_annual,
+        om.other_income_misc_annual,
+    ]
+    present = [v for v in components if v is not None]
+    return sum(present) if present else None
+
+
 def _om_other_opex_total(om: Optional[OMExtraction]) -> Optional[float]:
     if not om:
         return None
@@ -284,9 +300,23 @@ def _cited(
     per_doc_citations: dict,
     doc_type: str,
     field: str,
-    output_field: str | None = None,
+    formula: str | None = None,
 ) -> dict:
-    """Build a citation entry for the winning field from the given doc_type."""
+    """Build a citation entry for the winning field from the given doc_type.
+
+    When doc_type == "derived", the value was computed from other extracted fields.
+    formula (optional) carries the human-readable computation e.g. "$14,174 ÷ $320,018 EGI".
+    """
+    if doc_type == "derived":
+        return {
+            "doc_type": "derived",
+            "confidence": 1.0,
+            "citations": [],
+            "source_text": None,
+            "is_default": False,
+            "is_derived": True,
+            "formula": formula,
+        }
     cdata = per_doc_citations.get(doc_type, {}).get(field, {})
     return {
         "doc_type": doc_type,
@@ -325,13 +355,49 @@ def _build_merged_inputs(
         return val * t12_factor if val is not None else None
 
     def pick(output_field: str, *candidates: tuple) -> Any:
-        """Pick first non-None candidate. Each candidate is (value, doc_type, src_field).
+        """Pick first non-None candidate.
+        Each candidate is (value, doc_type, src_field) or (value, doc_type, src_field, formula).
         Records citation for the winning candidate."""
-        for val, doc_type, src_field in candidates:
+        for candidate in candidates:
+            val, doc_type, src_field = candidate[0], candidate[1], candidate[2]
+            formula = candidate[3] if len(candidate) > 3 else None
             if val is not None:
-                citations[output_field] = _cited(per_doc_citations, doc_type, src_field)
+                citations[output_field] = _cited(per_doc_citations, doc_type, src_field, formula)
                 return val
         return None
+
+    # Pre-compute derived values and their formula strings before the merged dict
+    _mgmt_derived = _derived_om_mgmt_fee_pct(om)
+    _mgmt_total_rev = _om_total_revenue(om)
+    _mgmt_formula = (
+        f"${om.expense_mgmt_fee_annual:,.0f} ÷ ${_mgmt_total_rev:,.0f} (GPR + Other Income)"
+    ) if _mgmt_derived is not None and om and om.expense_mgmt_fee_annual and _mgmt_total_rev else None
+
+    _opex_derived = _derived_om_expense_ratio(om)
+    _opex_rev = _om_total_revenue(om) or 0
+    _opex_line_total = sum(v for v in [
+        om.expense_property_tax_annual if om else None,
+        om.expense_insurance_annual if om else None,
+        om.expense_payroll_annual if om else None,
+        om.expense_repairs_maintenance_annual if om else None,
+        om.expense_utilities_annual if om else None,
+        om.expense_marketing_annual if om else None,
+        om.expense_mgmt_fee_annual if om else None,
+        _om_other_opex_total(om),
+    ] if v is not None)
+    _opex_formula = (
+        f"${_opex_line_total:,.0f} total expenses ÷ ${_opex_rev:,.0f} EGI"
+    ) if _opex_derived is not None and _opex_rev > 0 else None
+
+    _other_inc = _om_other_income_total(om)
+    _other_formula: str | None = None
+    if om and om.other_income_annual is None and _other_inc is not None:
+        parts = []
+        if om.other_income_admin_fees_annual:  parts.append(f"${om.other_income_admin_fees_annual:,.0f} admin")
+        if om.other_income_late_fees_annual:   parts.append(f"${om.other_income_late_fees_annual:,.0f} late fees")
+        if om.other_income_insurance_annual:   parts.append(f"${om.other_income_insurance_annual:,.0f} insurance")
+        if om.other_income_misc_annual:        parts.append(f"${om.other_income_misc_annual:,.0f} misc")
+        _other_formula = " + ".join(parts) if parts else None
 
     merged = {
         "project": {
@@ -409,14 +475,29 @@ def _build_merged_inputs(
             ),
             "expense_ratio_current": pick("expense_ratio_current",
                 (_derived_t12_expense_ratio(t12, t12_factor), "t12", "expense_ratio_actual"),
-                (_derived_om_expense_ratio(om), "om", "expense_ratio_pro_forma"),
+                (_opex_derived, "derived", "expense_ratio_pro_forma", _opex_formula),
             ),
             "expense_ratio_pro_forma": pick("expense_ratio_pro_forma",
                 (om.expense_ratio_pro_forma if om else None, "om", "expense_ratio_pro_forma"),
             ),
+            "noi_year_one_stated": pick("noi_year_one_stated",
+                (om.noi_year_one_stated if om else None, "om", "noi_year_one_stated"),
+            ),
+            "noi_current_stated": pick("noi_current_stated",
+                (om.noi_current_stated if om else None, "om", "noi_current_stated"),
+            ),
+            # T-12 period_months wins (authoritative); OM income_basis_months is fallback
+            "income_basis_months": pick("income_basis_months",
+                (t12.period_months if t12 else None, "t12", "period_months"),
+                (om.income_basis_months if om else None, "om", "income_basis_months"),
+            ),
+            "income_basis_note": pick("income_basis_note",
+                (om.income_basis_note if om else None, "om", "income_basis_note"),
+            ),
             "other_income_annual": pick("other_income_annual",
                 (ann(t12.other_income_annual) if t12 else None, "t12", "other_income_annual"),
                 (om.other_income_annual if om else None, "om", "other_income_annual"),
+                (_other_inc, "derived", "other_income_annual", _other_formula),
                 (0.0, "t12", "other_income_annual"),
             ),
             "bad_debt_annual": pick("bad_debt_annual",
@@ -443,7 +524,7 @@ def _build_merged_inputs(
             "mgmt_fee_pct": pick("mgmt_fee_pct",
                 (t12.mgmt_fee_pct_actual if t12 else None, "t12", "mgmt_fee_pct_actual"),
                 (om.mgmt_fee_pct if om else None, "om", "mgmt_fee_pct"),
-                (_derived_om_mgmt_fee_pct(om), "om", "expense_mgmt_fee_annual"),
+                (_mgmt_derived, "derived", "expense_mgmt_fee_annual", _mgmt_formula),
                 (0.08, "om", "mgmt_fee_pct"),
             ),
             "payroll_annual": pick("payroll_annual",

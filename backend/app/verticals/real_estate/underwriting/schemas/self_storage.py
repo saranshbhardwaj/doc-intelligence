@@ -106,6 +106,22 @@ class OperationalInputs(BaseModel):
     other_income_annual: float = Field(
         default=0.0, description="Late fees, admin, retail, etc."
     )
+    noi_year_one_stated: Optional[float] = Field(
+        default=None,
+        description="Stated Year-1 NOI from OM operating statement — used for source vs computed reconciliation.",
+    )
+    noi_current_stated: Optional[float] = Field(
+        default=None,
+        description="Stated current NOI from OM operating statement — used for source vs computed reconciliation.",
+    )
+    income_basis_months: Optional[int] = Field(
+        default=None,
+        description="Period of the income statement used as the source (12 = T-12, 6 = T-6 annualized).",
+    )
+    income_basis_note: Optional[str] = Field(
+        default=None,
+        description="Analyst-facing note about income statement basis from the source document.",
+    )
     bad_debt_annual: Optional[float] = Field(
         default=None,
         description="Annual bad debt or charge-offs when stated.",
@@ -322,6 +338,22 @@ class AnnualProjection(BaseModel):
     )
 
 
+class ExpenseBasis(BaseModel):
+    """How operating expenses were modeled for the projection."""
+
+    source: Literal[
+        "line_items",
+        "expense_ratio_current",
+        "expense_ratio_pro_forma",
+        "missing",
+    ]
+    label: str
+    ratio: Optional[float] = None
+    year1_line_item_opex: Optional[float] = None
+    year1_ratio_opex: Optional[float] = None
+    reason: str
+
+
 class CapitalStructure(BaseModel):
     """Summary of the deal's capital stack at acquisition."""
 
@@ -422,8 +454,42 @@ class RentPositionRow(BaseModel):
     comp_count: int
 
 
+class FormulaComputedValues(BaseModel):
+    """Numeric values that went into producing a metric — for tooltip display."""
+
+    model_config = ConfigDict(extra="allow")
+
+
+class FormulaMetadata(BaseModel):
+    """Formula description and computed inputs for a single metric."""
+
+    description: str = Field(
+        description="Human-readable formula definition and explanation."
+    )
+    computed_values: FormulaComputedValues = Field(
+        default_factory=FormulaComputedValues,
+        description="Key numeric values used to compute this metric (e.g., entry_equity, annual_debt_service).",
+    )
+
+
 class SelfStorageResult(BaseModel):
     """Full output from the underwriting calculator."""
+
+    # Income basis provenance — populated from merged inputs, used by UI for T-6 badge
+    income_basis_months: Optional[int] = Field(
+        default=None,
+        description="Period of the income statement used (12 = T-12, 6 = T-6 annualized).",
+    )
+    income_basis_note: Optional[str] = Field(
+        default=None,
+        description="Analyst-facing note about income statement basis, e.g. from the OM.",
+    )
+
+    # Formula metadata — backend-driven tooltips
+    formula_metadata: dict[str, FormulaMetadata] = Field(
+        default_factory=dict,
+        description="Per-metric formula descriptions and computed inputs, keyed by metric name.",
+    )
 
     # Top-line metrics
     irr: Optional[float] = None
@@ -446,6 +512,14 @@ class SelfStorageResult(BaseModel):
     noi_year_one: Optional[float] = None
     monthly_cashflow: Optional[float] = Field(
         default=None, description="Year-1 cash_flow / 12."
+    )
+    expense_basis: ExpenseBasis = Field(
+        default_factory=lambda: ExpenseBasis(
+            source="missing",
+            label="Missing expense support",
+            reason="No operating expense basis was available.",
+        ),
+        description="Explains whether OpEx came from line items or an expense-ratio fallback.",
     )
 
     # Detailed outputs

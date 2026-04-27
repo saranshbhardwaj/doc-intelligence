@@ -2,13 +2,31 @@
  * Real Estate Dashboard
  * Main entry point for RE vertical
  */
+import { useEffect, useState } from 'react';
 import { useVertical } from '../../../core/hooks/useVertical';
 import { Link } from 'react-router-dom';
 import AppLayout from '../../../components/layout/AppLayout';
+import { REHomePageSkeleton } from '../../../components/skeletons/PageSkeletons';
 
 export default function REDashboard() {
   const { config } = useVertical();
+  const [isLoading, setIsLoading] = useState(true);
   const sharedSearch = '?vertical=re';
+
+  // Simulate config loading
+  useEffect(() => {
+    if (config) {
+      setIsLoading(false);
+    }
+  }, [config]);
+
+  if (isLoading) {
+    return (
+      <AppLayout suppressPageHeader>
+        <REHomePageSkeleton />
+      </AppLayout>
+    );
+  }
 
   return (
     <AppLayout suppressPageHeader>

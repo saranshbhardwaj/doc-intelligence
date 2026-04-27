@@ -4,6 +4,7 @@
  */
 
 import { createAuthenticatedApi } from "./client";
+import { streamJobProgress } from "./sse-utils";
 
 export async function createUnderwritingRun(getToken, payload) {
   const api = createAuthenticatedApi(getToken);
@@ -59,4 +60,29 @@ export async function deleteUnderwritingRun(getToken, runId) {
   const api = createAuthenticatedApi(getToken);
   const response = await api.delete(`/api/v1/re/underwriting/runs/${runId}`);
   return response.data;
+}
+
+/**
+ * Stream underwriting extraction job progress via Server-Sent Events (SSE).
+ * Fetches current job state first so UI can recover after refresh/navigation.
+ */
+export async function streamUnderwritingExtractionProgress(
+  jobId,
+  getToken,
+  { onProgress, onComplete, onError, onEnd }
+) {
+  const getJobStatus = async (activeJobId, activeGetToken) => {
+    const api = createAuthenticatedApi(activeGetToken);
+    const response = await api.get(`/api/jobs/${activeJobId}/status`);
+    return response.data;
+  };
+
+  return streamJobProgress(jobId, getToken, {
+    onProgress,
+    onComplete,
+    onError,
+    onEnd,
+    fetchInitialState: true,
+    getJobStatus,
+  });
 }

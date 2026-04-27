@@ -13,6 +13,7 @@ import numpy_financial as npf
 from .schemas.self_storage import (
     AnnualProjection,
     CapitalStructure,
+    ExpenseBasis,
     RentCompRow,
     RentPositionRow,
     SelfStorageInputs,
@@ -124,6 +125,76 @@ def _build_rent_position_analysis(
     return analysis
 
 
+def _positive_ratio(value: float | None) -> bool:
+    return value is not None and value > 0
+
+
+def _resolve_expense_basis(
+    inputs: SelfStorageInputs,
+    year1_egi: float,
+    year1_line_item_opex: float,
+) -> ExpenseBasis:
+    """Choose the safest available OpEx basis and expose it for analyst review."""
+
+    op = inputs.operational
+    ratio_source = None
+    ratio_label = None
+    ratio = None
+    if _positive_ratio(op.expense_ratio_current):
+        ratio_source = "expense_ratio_current"
+        ratio_label = "Current / T-12 expense ratio"
+        ratio = op.expense_ratio_current
+    elif _positive_ratio(op.expense_ratio_pro_forma):
+        ratio_source = "expense_ratio_pro_forma"
+        ratio_label = "OM pro forma expense ratio"
+        ratio = op.expense_ratio_pro_forma
+
+    ratio_opex = year1_egi * ratio if ratio is not None and year1_egi > 0 else None
+    has_line_items = year1_line_item_opex > 0
+
+    if ratio_source and ratio_opex is not None:
+        if not has_line_items:
+            return ExpenseBasis(
+                source=ratio_source,
+                label=ratio_label,
+                ratio=ratio,
+                year1_line_item_opex=year1_line_item_opex,
+                year1_ratio_opex=ratio_opex,
+                reason="Detailed expense line items were missing, so the model used the stated expense ratio.",
+            )
+        if year1_line_item_opex < ratio_opex * 0.75:
+            return ExpenseBasis(
+                source=ratio_source,
+                label=ratio_label,
+                ratio=ratio,
+                year1_line_item_opex=year1_line_item_opex,
+                year1_ratio_opex=ratio_opex,
+                reason=(
+                    "Detailed expense line items were materially below the ratio-implied expense load, "
+                    "so the model used the more conservative expense ratio."
+                ),
+            )
+
+    if has_line_items:
+        return ExpenseBasis(
+            source="line_items",
+            label="Detailed expense line items",
+            year1_line_item_opex=year1_line_item_opex,
+            year1_ratio_opex=ratio_opex,
+            ratio=ratio,
+            reason="Operating expenses were modeled from extracted or manually entered line items.",
+        )
+
+    return ExpenseBasis(
+        source="missing",
+        label="Missing expense support",
+        ratio=ratio,
+        year1_line_item_opex=year1_line_item_opex,
+        year1_ratio_opex=ratio_opex,
+        reason="No detailed expense line items or usable expense ratio were available.",
+    )
+
+
 def calculate(inputs: SelfStorageInputs) -> SelfStorageResult:
     """Run the full underwriting model and return a SelfStorageResult."""
 
@@ -213,6 +284,13 @@ def calculate(inputs: SelfStorageInputs) -> SelfStorageResult:
         if op.property_tax_growth_pct is not None
         else op.opex_growth_pct
     )
+    year1_gpr = op.gross_potential_rent_annual
+    year1_vacancy_loss = year1_gpr * op.vacancy_credit_loss_pct
+    year1_other_income = op.other_income_annual
+    year1_egi = year1_gpr - year1_vacancy_loss + year1_other_income
+    year1_fixed_opex = op.property_tax_annual + base_non_tax_opex
+    year1_line_item_opex = year1_fixed_opex + (year1_egi * op.mgmt_fee_pct)
+    expense_basis = _resolve_expense_basis(inputs, year1_egi, year1_line_item_opex)
 
     projections: list[AnnualProjection] = []
     prev_prop_value = purchase_price if exit_cap > 0 else 0.0
@@ -225,11 +303,14 @@ def calculate(inputs: SelfStorageInputs) -> SelfStorageResult:
         other_income = op.other_income_annual * (1 + op.rent_growth_pct) ** (n - 1)
         egi = gpr - vacancy_loss + other_income
 
-        property_tax = op.property_tax_annual * (1 + property_tax_growth) ** (n - 1)
-        other_fixed_opex = base_non_tax_opex * (1 + op.opex_growth_pct) ** (n - 1)
-        fixed_opex = property_tax + other_fixed_opex
-        mgmt_fee = egi * op.mgmt_fee_pct
-        opex = fixed_opex + mgmt_fee
+        if expense_basis.source in ("expense_ratio_current", "expense_ratio_pro_forma"):
+            opex = (expense_basis.year1_ratio_opex or 0.0) * (1 + op.opex_growth_pct) ** (n - 1)
+        else:
+            property_tax = op.property_tax_annual * (1 + property_tax_growth) ** (n - 1)
+            other_fixed_opex = base_non_tax_opex * (1 + op.opex_growth_pct) ** (n - 1)
+            fixed_opex = property_tax + other_fixed_opex
+            mgmt_fee = egi * op.mgmt_fee_pct
+            opex = fixed_opex + mgmt_fee
 
         noi = egi - opex
 
@@ -283,7 +364,9 @@ def calculate(inputs: SelfStorageInputs) -> SelfStorageResult:
 
     cash_flows = [p.cash_flow for p in projections]
     annual_cash_flows_sum = sum(cash_flows)
-    total_cash_received = annual_cash_flows_sum + net_sale_price
+    # Equity extracted from sale = net sale price after paying off remaining loan
+    equity_from_sale = max(net_sale_price - loan_balance_at_exit, 0.0)
+    total_cash_received = annual_cash_flows_sum + equity_from_sale
     total_cash_invested = -total_equity
     total_profit = total_cash_received + total_cash_invested
 
@@ -302,7 +385,7 @@ def calculate(inputs: SelfStorageInputs) -> SelfStorageResult:
         cf_for_irr = (
             [-total_equity]
             + cash_flows[:-1]
-            + [cash_flows[-1] + net_sale_price]
+            + [cash_flows[-1] + equity_from_sale]
         )
         raw_irr = npf.irr(cf_for_irr)
         # npf.irr returns nan when it fails to converge
@@ -314,33 +397,35 @@ def calculate(inputs: SelfStorageInputs) -> SelfStorageResult:
     equity_multiple: float | None = None
     if total_equity > 0:
         cash_on_cash = projections[0].cash_flow / total_equity
-        equity_multiple = (annual_cash_flows_sum + net_sale_price) / total_equity
+        equity_multiple = (annual_cash_flows_sum + equity_from_sale) / total_equity
 
     dscr_year_one: float | None = None
     if annual_debt_service > 0:
         dscr_year_one = projections[0].noi / annual_debt_service
 
-    # Break-even occupancy: what vacancy rate makes NOI = debt service
-    # Rearranging: GPR_yr1 * (1 - vacancy) + other_income - opex = debt_service
-    # Solve for vacancy at year-1 rent and expense levels
-    # Break-even occupancy: occupancy needed so NOI = debt service at Year 1 levels.
-    # NOI = EGI - opex, EGI = GPR*(1-v) + other_income
-    # opex = fixed_opex + mgmt_fee*EGI
-    # Solve for v: GPR*(1-v)*(1-mgmt_fee) + other_income*(1-mgmt_fee) - fixed_opex = debt_service
-    # other_income is revenue, NOT part of fixed_opex — kept only in the denominator.
+    # Break-even occupancy: minimum occupancy so Year-1 NOI covers debt service.
     break_even_occupancy_pct: float | None = None
     if annual_debt_service > 0 and op.gross_potential_rent_annual > 0:
-        fixed_opex_yr1 = op.property_tax_annual + base_non_tax_opex
-        numerator = annual_debt_service + fixed_opex_yr1
-        denominator = (
-            op.gross_potential_rent_annual * (1 - op.mgmt_fee_pct)
-            + op.other_income_annual * (1 - op.mgmt_fee_pct)
-        )
-        if denominator > 0:
-            break_even_vacancy = 1 - (numerator / denominator)
-            break_even_occupancy_pct = max(0.0, min(1.0, 1 - break_even_vacancy))
+        if expense_basis.source in ("expense_ratio_current", "expense_ratio_pro_forma") and expense_basis.ratio is not None:
+            noi_margin = 1 - expense_basis.ratio
+            if noi_margin > 0:
+                required_egi = annual_debt_service / noi_margin
+                break_even_occupancy_pct = max(
+                    0.0,
+                    min(1.0, (required_egi - op.other_income_annual) / op.gross_potential_rent_annual),
+                )
         else:
-            break_even_occupancy_pct = None
+            fixed_opex_yr1 = op.property_tax_annual + base_non_tax_opex
+            mgmt_factor = 1 - op.mgmt_fee_pct
+            adjusted_numerator = (
+                annual_debt_service + fixed_opex_yr1
+                - op.other_income_annual * mgmt_factor
+            )
+            denominator = op.gross_potential_rent_annual * mgmt_factor
+            if denominator > 0:
+                break_even_occupancy_pct = max(0.0, min(1.0, adjusted_numerator / denominator))
+            else:
+                break_even_occupancy_pct = None
     else:
         break_even_occupancy_pct = None
 
@@ -348,6 +433,97 @@ def calculate(inputs: SelfStorageInputs) -> SelfStorageResult:
     cap_rate_pro_forma = projections[-1].noi / purchase_price if purchase_price > 0 else None
     ltv = loan_amount / purchase_price if purchase_price > 0 else None
     rent_position_analysis = _build_rent_position_analysis(inputs.unit_mix, inputs.rent_comps)
+
+    # Build formula metadata — backend is the authority
+    from .schemas.self_storage import FormulaMetadata, FormulaComputedValues
+
+    fixed_opex_yr1 = op.property_tax_annual + base_non_tax_opex
+    mgmt_factor_yr1 = 1 - op.mgmt_fee_pct
+    break_even_description = (
+        "Debt service ÷ (1 − expense ratio), adjusted for other income, then divided by GPR. "
+        "Used when operating expenses are modeled from an expense-ratio fallback."
+        if expense_basis.source in ("expense_ratio_current", "expense_ratio_pro_forma")
+        else "(Debt service + fixed opex − other income × (1 − mgmt fee)) ÷ (GPR × (1 − mgmt fee)). Minimum occupancy so Year-1 cash flow after debt service equals zero."
+    )
+
+    formula_metadata = {
+        "irr": FormulaMetadata(
+            description="Annualized return on equity across the full hold, accounting for timing of every cash flow in and out.",
+            computed_values=FormulaComputedValues(
+                entry_equity=float(total_equity),
+                total_distributions=float(annual_cash_flows_sum),
+                exit_proceeds=float(equity_from_sale),
+                loan_balance_at_exit=float(loan_balance_at_exit),
+                hold_years=float(hold_years),
+            ),
+        ),
+        "cash_on_cash": FormulaMetadata(
+            description="Year 1 cash flow after debt service ÷ total equity invested. Income yield only — excludes appreciation and principal paydown.",
+            computed_values=FormulaComputedValues(
+                year1_cash_flow=float(projections[0].cash_flow) if projections else None,
+                total_equity=float(total_equity),
+                annual_debt_service=float(annual_debt_service) if annual_debt_service > 0 else None,
+            ),
+        ),
+        "equity_multiple": FormulaMetadata(
+            description="Total cash received by equity investor (operating distributions + net sale proceeds after debt repayment) ÷ equity invested.",
+            computed_values=FormulaComputedValues(
+                total_cash_flows=float(annual_cash_flows_sum),
+                equity_from_sale=float(equity_from_sale),
+                loan_balance_at_exit=float(loan_balance_at_exit),
+                net_sale_price=float(net_sale_price),
+                total_equity=float(total_equity),
+                hold_years=float(hold_years),
+            ),
+        ),
+        "dscr_year_one": FormulaMetadata(
+            description="Year 1 NOI ÷ annual debt service. Below 1.25× lenders typically won't fund; below 1.0× the property can't pay its own mortgage.",
+            computed_values=FormulaComputedValues(
+                year1_noi=float(projections[0].noi) if projections else None,
+                annual_debt_service=float(annual_debt_service) if annual_debt_service > 0 else None,
+            ),
+        ),
+        "break_even_occupancy": FormulaMetadata(
+            description=break_even_description,
+            computed_values=FormulaComputedValues(
+                debt_service=float(annual_debt_service) if annual_debt_service > 0 else None,
+                fixed_opex=float(fixed_opex_yr1),
+                expense_ratio=float(expense_basis.ratio) if expense_basis.ratio is not None else None,
+                other_income_adj=float(op.other_income_annual * mgmt_factor_yr1),
+                gpr_adj=float(op.gross_potential_rent_annual * mgmt_factor_yr1),
+            ),
+        ),
+        "expense_basis": FormulaMetadata(
+            description=expense_basis.reason,
+            computed_values=FormulaComputedValues(
+                source=expense_basis.source,
+                ratio=float(expense_basis.ratio) if expense_basis.ratio is not None else None,
+                year1_line_item_opex=float(expense_basis.year1_line_item_opex) if expense_basis.year1_line_item_opex is not None else None,
+                year1_ratio_opex=float(expense_basis.year1_ratio_opex) if expense_basis.year1_ratio_opex is not None else None,
+                year1_egi=float(year1_egi),
+            ),
+        ),
+        "avg_current_rent_per_door": FormulaMetadata(
+            description="Gross potential rent ÷ total units ÷ 12. Monthly in-place rent per unit.",
+            computed_values=FormulaComputedValues(
+                gpr=float(op.gross_potential_rent_annual),
+                num_units=float(proj.num_units) if proj.num_units is not None else None,
+            ),
+        ),
+        "avg_market_rent_per_door": FormulaMetadata(
+            description="Average market-rate asking rent per unit per month, sourced from the OM or rent roll.",
+            computed_values=FormulaComputedValues(
+                market_rate=float(op.avg_market_rent_per_unit_monthly) if op.avg_market_rent_per_unit_monthly else None,
+            ),
+        ),
+        "pro_forma_expense_ratio": FormulaMetadata(
+            description="Total operating expenses as a % of effective gross income, per OM or broker underwriting. Verify against T-12 actuals.",
+            computed_values=FormulaComputedValues(
+                pro_forma_expense_pct=float(op.expense_ratio_pro_forma) if op.expense_ratio_pro_forma else None,
+                gpr=float(op.gross_potential_rent_annual),
+            ),
+        ),
+    }
 
     return SelfStorageResult(
         irr=irr,
@@ -361,10 +537,12 @@ def calculate(inputs: SelfStorageInputs) -> SelfStorageResult:
         ltv=ltv,
         noi_year_one=projections[0].noi,
         monthly_cashflow=projections[0].cash_flow / 12,
+        expense_basis=expense_basis,
         capital_structure=capital_structure,
         total_return=total_return,
         projections=projections,
         rent_position_analysis=rent_position_analysis,
+        formula_metadata=formula_metadata,
     )
 
 

@@ -11,6 +11,7 @@ import DocumentViewer from '../../../components/pdf/DocumentViewer';
 import FieldsList from '../components/FieldsList';
 import ExcelGridView from '../components/ExcelGridView';
 import { useTemplateFill, useTemplateFillActions, useUser } from '../../../store';
+import { TemplateFillRunPageSkeleton } from '../../../components/skeletons/PageSkeletons';
 import { Loader2, AlertCircle, FileText, Table, List, Download, CheckCircle2, ExternalLink, X, Search, GitMerge, FileSpreadsheet, PartyPopper } from 'lucide-react';
 import { Badge } from '../../../components/ui/badge';
 import { Button } from '../../../components/ui/button';
@@ -566,8 +567,8 @@ export default function TemplateFillPage() {
   if (!fillRun) {
     return (
       <AppLayout>
-        <div className="flex items-center justify-center flex-1">
-          <p className="text-muted-foreground text-sm">Fill run not found</p>
+        <div className="h-full">
+          <TemplateFillRunPageSkeleton />
         </div>
       </AppLayout>
     );

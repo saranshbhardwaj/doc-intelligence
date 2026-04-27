@@ -161,6 +161,32 @@ def evaluate(
     )
 
 
+def _build_unit_mix_gpr_warning(inputs) -> VerdictWarning | None:
+    if not inputs or not inputs.unit_mix:
+        return None
+    model_gpr = inputs.operational.gross_potential_rent_annual
+    if not model_gpr or model_gpr <= 0:
+        return None
+    implied_gpr = sum(
+        (row.current_rent or 0) * (row.num_units or 0) * 12
+        for row in inputs.unit_mix
+        if row.current_rent and row.num_units
+    )
+    if implied_gpr <= 0:
+        return None
+    delta_pct = abs(implied_gpr - model_gpr) / model_gpr
+    if delta_pct < 0.05:
+        return None
+    return VerdictWarning(
+        key="unit_mix_gpr_mismatch",
+        message=(
+            f"Unit-mix implied GPR ${implied_gpr:,.0f} differs from model GPR ${model_gpr:,.0f} "
+            f"by {delta_pct:.1%}. Review unit mix or income inputs."
+        ),
+        severity="warning",
+    )
+
+
 def _build_warnings(
     result: SelfStorageResult,
     income_statement_period_months: int | None = None,
@@ -203,8 +229,43 @@ def _build_warnings(
             )
         )
 
-    # Expense completeness (reads from inputs.operational when inputs is provided)
-    if inputs is not None:
+    # Expense completeness and basis transparency.
+    expense_basis = getattr(result, "expense_basis", None)
+    if inputs is not None and expense_basis is not None:
+        if expense_basis.source == "missing":
+            warnings.append(
+                VerdictWarning(
+                    key="expenses_missing",
+                    message=(
+                        "Operating expense support is missing. The model cannot reliably assess NOI "
+                        "until expense line items or a credible expense ratio are provided."
+                    ),
+                    severity="critical",
+                )
+            )
+        elif expense_basis.source == "expense_ratio_pro_forma":
+            warnings.append(
+                VerdictWarning(
+                    key="expenses_ratio_fallback",
+                    message=(
+                        "Operating expenses are modeled from the OM pro forma expense ratio because "
+                        "detailed expense line items were missing or incomplete. Verify against a T-12."
+                    ),
+                    severity="warning",
+                )
+            )
+        elif expense_basis.source == "expense_ratio_current":
+            warnings.append(
+                VerdictWarning(
+                    key="expenses_ratio_fallback",
+                    message=(
+                        "Operating expenses are modeled from the current/T-12 expense ratio because "
+                        "detailed expense line items were missing or incomplete."
+                    ),
+                    severity="info",
+                )
+            )
+    elif inputs is not None:
         op = inputs.operational
         individual_expense_sum = (
             op.property_tax_annual
@@ -219,16 +280,43 @@ def _build_warnings(
                     key="expenses_incomplete",
                     message=(
                         "Individual expense line items appear to be zero or missing. "
-                        "The model may be running on expense ratio only — NOI and returns "
-                        "may be significantly overstated. Verify all operating expenses are captured."
+                        "Verify all operating expenses are captured."
                     ),
                     severity="critical",
                 )
             )
 
+    # NOI reconciliation: compare computed Year 1 NOI against OM-stated NOI
+    if inputs is not None and result.projections:
+        noi_computed = result.projections[0].noi
+        noi_stated = inputs.operational.noi_year_one_stated
+        if (
+            noi_computed is not None
+            and noi_stated is not None
+            and noi_stated > 0
+        ):
+            deviation = abs(noi_computed - noi_stated) / noi_stated
+            if deviation > 0.10:
+                warnings.append(
+                    VerdictWarning(
+                        key="noi_reconciliation_gap",
+                        severity="critical",
+                        message=(
+                            f"Computed Year 1 NOI (${noi_computed:,.0f}) deviates "
+                            f"{deviation:.0%} from OM-stated NOI (${noi_stated:,.0f}). "
+                            "Key income fields (other income, vacancy) may not have been fully "
+                            "extracted. Review the NOI bridge and re-run if results seem off."
+                        ),
+                    )
+                )
+
     mixed_revenue_warning = _build_mixed_revenue_warning(result)
     if mixed_revenue_warning:
         warnings.append(mixed_revenue_warning)
+
+    unit_mix_gpr_warning = _build_unit_mix_gpr_warning(inputs)
+    if unit_mix_gpr_warning:
+        warnings.append(unit_mix_gpr_warning)
 
     if (
         result.rollover_risk
@@ -310,7 +398,7 @@ def _build_rationale(
         Human-readable rationale string
     """
     if status == "worth_pursuing":
-        rationale = "All investment criteria met."
+        rationale = "Passes the initial screen based on current assumptions."
     elif status == "needs_review":
         rationale = (
             "Investment criteria are currently met, but analyst review is required before relying on this result."

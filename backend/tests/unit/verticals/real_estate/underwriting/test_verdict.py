@@ -66,7 +66,7 @@ class TestVerdictWorthPursuing:
 
         assert verdict.status == "worth_pursuing"
         assert verdict.failures == []
-        assert "All investment criteria met" in verdict.rationale
+        assert "Passes the initial screen" in verdict.rationale
 
 
 class TestVerdictSingleFailures:
@@ -302,7 +302,7 @@ class TestVerdictEvidenceQualityWarning:
         verdict = evaluate(passing_result, default_criteria, inputs=inputs)
 
         assert verdict.status == "needs_review"
-        expense_warning = next(w for w in verdict.warnings if w.key == "expenses_incomplete")
+        expense_warning = next(w for w in verdict.warnings if w.key == "expenses_missing")
         assert expense_warning.severity == "critical"
         assert "analyst review is required" in verdict.rationale
 
