@@ -1,4 +1,4 @@
-import { ChevronDown, ChevronUp } from 'lucide-react';
+import { AlertCircle, AlertTriangle, Info } from 'lucide-react';
 import { UnderwritingStatusBadge } from './UnderwritingUI';
 import {
   formatCompactCurrency,
@@ -21,6 +21,12 @@ function docLabel(docType) {
   return null;
 }
 
+function revenueBasisTone(source) {
+  if (source === 't12' || source === 'rent_roll') return 'success';
+  if (source === 'om') return 'warning';
+  return 'active';
+}
+
 function SourceRow({ label, value, docType }) {
   const badge = docLabel(docType);
   return (
@@ -30,7 +36,7 @@ function SourceRow({ label, value, docType }) {
         <span className="text-xs font-medium text-foreground tabular-nums">
           {value != null && value !== '—'
             ? value
-            : <span className="italic text-muted-foreground/60">not stated</span>}
+            : <span className="text-muted-foreground">not stated</span>}
         </span>
         {badge ? (
           <UnderwritingStatusBadge tone={docTone(docType)} className="px-1.5 py-0.5 text-[9px]">
@@ -48,7 +54,7 @@ function MetricRow({ label, value, alert = false }) {
       <span className="truncate text-xs text-muted-foreground">{label}</span>
       <span
         className={`text-xs font-semibold tabular-nums ${
-          alert ? 'text-uw-risk' : 'text-foreground'
+          alert ? 'text-amber-500' : 'text-foreground'
         }`}
       >
         {value ?? '—'}
@@ -61,13 +67,19 @@ function WarningPill({ warning }) {
   const tone = warning.severity === 'critical'
     ? 'border-destructive/30 bg-destructive/5 text-destructive'
     : warning.severity === 'warning'
-    ? 'border-uw-risk/30 bg-uw-risk/5 text-uw-risk'
+    ? 'border-amber-500/30 bg-amber-500/5 text-amber-500'
     : 'border-border/50 bg-muted/40 text-muted-foreground';
+  const icon = warning.severity === 'critical'
+    ? <AlertCircle className="h-3 w-3 shrink-0 text-destructive" />
+    : warning.severity === 'warning'
+    ? <AlertTriangle className="h-3 w-3 shrink-0 text-amber-500" />
+    : <Info className="h-3 w-3 shrink-0 text-muted-foreground" />;
   const text = warning.message.length > 100
     ? `${warning.message.slice(0, 97)}…`
     : warning.message;
   return (
-    <div className={`rounded-lg border px-2.5 py-2 text-xs leading-5 ${tone}`}>
+    <div className={`flex items-start gap-1 rounded-lg border px-2.5 py-2 text-xs leading-5 ${tone}`}>
+      {icon}
       {text}
     </div>
   );
@@ -127,24 +139,19 @@ export default function TrustPanel({
       <div className="flex flex-wrap items-center gap-2 px-4 py-2 sm:px-6">
         <UnderwritingStatusBadge tone={verdictTone}>{verdictLabel}</UnderwritingStatusBadge>
         {revenueBasis ? (
-          <UnderwritingStatusBadge tone={revenueBasis.tone}>
+          <UnderwritingStatusBadge tone={revenueBasisTone(revenueBasis.source)}>
             {revenueBasis.label}
           </UnderwritingStatusBadge>
         ) : null}
         <UnderwritingStatusBadge tone={warningCount > 0 ? 'warning' : 'neutral'}>
-          {warningCount > 0
-            ? `⚠ ${warningCount} warning${warningCount === 1 ? '' : 's'}`
-            : 'No warnings'}
+          {`${warningCount} ${warningCount === 1 ? 'warning' : 'warnings'}`}
         </UnderwritingStatusBadge>
         <button
           type="button"
           onClick={onToggle}
           className="ml-auto flex items-center gap-1 text-xs font-medium text-primary transition-colors hover:text-primary/80"
         >
-          Trust summary
-          {expanded
-            ? <ChevronUp className="h-3.5 w-3.5" />
-            : <ChevronDown className="h-3.5 w-3.5" />}
+          {expanded ? 'Trust summary ▲' : 'Trust summary ▼'}
         </button>
       </div>
 
@@ -204,15 +211,12 @@ export default function TrustPanel({
               value={formatCompactCurrency(omStatedNoi)}
               docType={omStatedNoi != null ? 'om' : null}
             />
-            <SourceRow
-              label="Rent comp coverage"
-              value={rentCompCoverage?.label ?? null}
-              docType={
-                rentCompCoverage?.tone === 'success' ? 't12'
-                : rentCompCoverage?.tone === 'warning' ? 'om'
-                : null
-              }
-            />
+            <div className="flex items-center justify-between gap-2 border-b border-border/30 py-1.5 last:border-0">
+              <span className="truncate text-xs text-muted-foreground">Rent comp coverage</span>
+              <UnderwritingStatusBadge tone={rentCompCoverage?.tone || 'neutral'}>
+                {rentCompCoverage?.label || 'not stated'}
+              </UnderwritingStatusBadge>
+            </div>
           </div>
 
           {/* Col 2: What the model used */}
