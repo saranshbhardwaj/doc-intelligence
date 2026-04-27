@@ -3,10 +3,11 @@ import asyncio
 import os
 import time
 from contextlib import asynccontextmanager
+from datetime import datetime, timedelta, timezone
 from app.config import settings
 from app.utils.logging import logger
 from app.api.dependencies import cache
-from app.database import get_db, async_engine
+from app.database import get_db, async_engine, SessionLocal
 from app.verticals.private_equity.workflows.seeding import seed_workflows
 from app.verticals.private_equity.diligence.playbook_seeds import seed_system_playbooks
 from app.core.embeddings.factory import get_embedding_provider
@@ -128,6 +129,34 @@ async def periodic_cleanup():
                 )
             else:
                 logger.debug("Shared upload root does not exist yet", extra={"path": SHARED_UPLOAD_ROOT})
+
+            # Stale underwriting run sweep
+            try:
+                from app.db_models_re import UnderwritingRun
+                from sqlalchemy import update as sa_update
+
+                cutoff = datetime.now(timezone.utc) - timedelta(minutes=settings.re_uw_stale_job_timeout_minutes)
+                with SessionLocal() as sweep_db:
+                    result = sweep_db.execute(
+                        sa_update(UnderwritingRun)
+                        .where(UnderwritingRun.status == "extracting")
+                        .where(UnderwritingRun.created_at < cutoff)
+                        .values(
+                            status="failed",
+                            error_message="Job timed out — worker may have crashed",
+                        )
+                        .returning(UnderwritingRun.id)
+                    )
+                    swept = result.fetchall()
+                    sweep_db.commit()
+                if swept:
+                    logger.warning(
+                        "Swept stale underwriting runs",
+                        extra={"count": len(swept), "run_ids": [r[0] for r in swept]},
+                    )
+            except Exception as sweep_err:
+                logger.error(f"Stale underwriting sweep failed: {sweep_err}", exc_info=True)
+
         except asyncio.CancelledError:
             logger.info("Cleanup task cancelled")
             break

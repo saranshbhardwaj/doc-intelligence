@@ -2,30 +2,49 @@
  * Real Estate Dashboard
  * Main entry point for RE vertical
  */
+import { useEffect, useState } from 'react';
 import { useVertical } from '../../../core/hooks/useVertical';
 import { Link } from 'react-router-dom';
 import AppLayout from '../../../components/layout/AppLayout';
+import { REHomePageSkeleton } from '../../../components/skeletons/PageSkeletons';
 
 export default function REDashboard() {
   const { config } = useVertical();
+  const [isLoading, setIsLoading] = useState(true);
+  const sharedSearch = '?vertical=re';
+
+  // Simulate config loading
+  useEffect(() => {
+    if (config) {
+      setIsLoading(false);
+    }
+  }, [config]);
+
+  if (isLoading) {
+    return (
+      <AppLayout suppressPageHeader>
+        <REHomePageSkeleton />
+      </AppLayout>
+    );
+  }
 
   return (
-    <AppLayout>
+    <AppLayout suppressPageHeader>
       <div className="max-w-7xl mx-auto px-6 py-8">
         {/* Header */}
         <div className="mb-8">
           <h1 className="text-3xl font-semibold text-foreground">
-            {config?.name} Dashboard
+            {config?.name} Workspace
           </h1>
           <p className="text-muted-foreground mt-2">
-            {config?.description}
+            Navigate your real-estate workflows, shared research tools, and active deal work from one place.
           </p>
         </div>
 
         {/* Quick Actions */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 mb-8">
           <Link
-            to="/app/library"
+            to={`/app/library${sharedSearch}`}
             className="p-6 bg-card rounded-lg border border-border hover:border-primary/50 hover:bg-accent/5 transition-all"
           >
             <div className="flex items-center gap-4">
@@ -46,7 +65,7 @@ export default function REDashboard() {
           </Link>
 
           <Link
-            to="/app/chat"
+            to={`/app/chat${sharedSearch}`}
             className="p-6 bg-card rounded-lg border border-border hover:border-primary/50 hover:bg-accent/5 transition-all"
           >
             <div className="flex items-center gap-4">
@@ -57,7 +76,7 @@ export default function REDashboard() {
               </div>
               <div>
                 <h3 className="font-semibold text-foreground">
-                  Chat Mode
+                  Chat
                 </h3>
                 <p className="text-sm text-muted-foreground">
                   Ask questions about docs
@@ -82,6 +101,27 @@ export default function REDashboard() {
                 </h3>
                 <p className="text-sm text-muted-foreground">
                   Upload and manage templates
+                </p>
+              </div>
+            </div>
+          </Link>
+
+          <Link
+            to="/app/re/underwriting"
+            className="p-6 bg-card rounded-lg border border-border hover:border-primary/50 hover:bg-primary/5 transition-all"
+          >
+            <div className="flex items-center gap-4">
+              <div className="p-3 bg-primary/10 rounded-lg">
+                <svg className="w-6 h-6 text-primary" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 7h6m0 10v-3m-3 3v-3m-3 3v-3m-3 3V7a2 2 0 012-2h6a2 2 0 012 2v10a2 2 0 01-2 2H7a2 2 0 01-2-2z" />
+                </svg>
+              </div>
+              <div>
+                <h3 className="font-semibold text-foreground">
+                  Underwriting Analysis
+                </h3>
+                <p className="text-sm text-muted-foreground">
+                  Analyze deals with AI extraction
                 </p>
               </div>
             </div>

@@ -8,6 +8,7 @@ from app.auth import require_vertical
 
 # Import routers from sub-modules
 from .templates import router as templates_router
+from .underwriting import router as underwriting_router
 
 router = APIRouter(
     prefix="/re",
@@ -17,6 +18,7 @@ router = APIRouter(
 
 # Include sub-routers
 router.include_router(templates_router)
+router.include_router(underwriting_router)
 
 
 @router.get("/health")

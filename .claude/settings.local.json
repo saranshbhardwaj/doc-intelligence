@@ -3,7 +3,8 @@
     "allow": [
       "Bash(npm install:*)",
       "Bash(docker exec docint-api python -c:*)",
-      "Bash(docker exec:*)"
+      "Bash(docker exec:*)",
+      "Bash(python -c ' *)"
     ],
     "deny": [],
     "ask": []

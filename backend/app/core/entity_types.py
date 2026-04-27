@@ -13,6 +13,7 @@ ENTITY_RESPONSE_FIELD_NAMES = {
     "document": "document_id",
     "analysis_run": "analysis_run_id",
     "investigation_run": "investigation_run_id",
+    "underwriting_run": "run_id",
 }
 
 
@@ -69,6 +70,18 @@ def resolve_entity_owner(entity_type: str, entity_id: str, org_id: str) -> Tuple
         if not run:
             raise HTTPException(status_code=404, detail="Investigation run not found")
         return run.user_id, run.org_id
+
+    elif entity_type == "underwriting_run":
+        from app.repositories.re_underwriting_repo import UnderwritingRunRepository
+        from app.database import SessionLocal
+        db = SessionLocal()
+        try:
+            run = UnderwritingRunRepository(db).get_by_id(entity_id)
+        finally:
+            db.close()
+        if not run:
+            raise HTTPException(status_code=404, detail="Underwriting run not found")
+        return run.user_id, None
 
     else:
         raise HTTPException(status_code=404, detail=f"Unknown job entity type: {entity_type}")

@@ -24,6 +24,7 @@ import DocumentsTable from "../components/library/DocumentsTable";
 import UploadModal from "../components/library/UploadModal";
 import { Button } from "../components/ui/button";
 import { Sheet, SheetContent, SheetTitle, SheetDescription } from "../components/ui/sheet";
+import { LibraryPageSkeleton } from "../components/skeletons/PageSkeletons";
 import {
   listCollections,
   createCollection as apiCreateCollection,
@@ -109,6 +110,11 @@ export default function LibraryPage() {
       ).length,
     };
   }, [totalDocs, documents, collections]);
+
+  const pageHeader = {
+    eyebrow: "Workspace",
+    title: "Library",
+  };
 
   // Fetch collections
   const fetchCollections = useCallback(async () => {
@@ -507,9 +513,17 @@ export default function LibraryPage() {
     }
   };
 
+  if (loadingCollections) {
+    return (
+      <AppLayout lockViewport pageHeader={pageHeader}>
+        <LibraryPageSkeleton />
+      </AppLayout>
+    );
+  }
+
   return (
-    <AppLayout breadcrumbs={[{ label: "Library" }]} lockViewport>
-      <div className="flex h-full min-h-0 flex-col px-3 pb-6 pt-4 sm:px-6">
+    <AppLayout lockViewport pageHeader={pageHeader}>
+      <div className="flex h-full min-h-0 flex-col px-3 pb-6 pt-3 sm:px-6">
         <StatsHeader
           totalDocuments={stats.totalDocuments}
           totalCollections={stats.totalCollections}

@@ -38,13 +38,6 @@ def _build_database_urls(raw_url: str) -> tuple[str, str]:
     sync_url  = base.replace("postgresql://", "postgresql+psycopg://",  1)
     async_url = base.replace("postgresql://", "postgresql+asyncpg://", 1)
 
-    # Append prepare_threshold=0 to the sync URL query string so psycopg3
-    # disables prepared statements even when connect_args is ignored (e.g. when
-    # the URL is passed through an external pool or middleware on Railway).
-    separator = "&" if "?" in sync_url else "?"
-    if "prepare_threshold" not in sync_url:
-        sync_url = f"{sync_url}{separator}prepare_threshold=0"
-
     return sync_url, async_url
 
 
@@ -79,12 +72,6 @@ pool_config = {}
 if DATABASE_URL.startswith("sqlite"):
     connect_args = {"check_same_thread": False}
 else:
-    # prepare_threshold=0: disable server-side prepared statements.
-    # Required for Supabase PgBouncer (transaction mode, port 6543) — PgBouncer
-    # does not support prepared statements across pooled connections. Without this,
-    # concurrent workers collide on statement names (DuplicatePreparedStatement).
-    # See: https://www.psycopg.org/psycopg3/docs/advanced/prepare.html
-    connect_args = {"prepare_threshold": None}
     # PostgreSQL connection pool configuration.
     # PgBouncer (port 6543, transaction mode) handles physical connection multiplexing,
     # so SQLAlchemy's pool only needs to hold a small number of client-side slots per

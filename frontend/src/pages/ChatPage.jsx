@@ -23,6 +23,7 @@ import DocumentManagerDialog from "../components/chat/DocumentManagerDialog";
 import Spinner from "../components/common/Spinner";
 import { exportAsMarkdown, exportAsWord } from "../utils/exportChat";
 import { Sheet, SheetContent, SheetTitle, SheetDescription } from "../components/ui/sheet";
+import { ChatPageSkeleton } from "../components/skeletons/PageSkeletons";
 
 export default function ChatPage() {
   const { getToken, isLoaded } = useAppAuth();
@@ -196,9 +197,16 @@ export default function ChatPage() {
     );
   }
 
-  const breadcrumbs = [{ label: "Chat" }];
+  if (isInitializing) {
+    return (
+      <AppLayout lockViewport suppressPageHeader>
+        <ChatPageSkeleton />
+      </AppLayout>
+    );
+  }
+
   return (
-    <AppLayout breadcrumbs={breadcrumbs} lockViewport>
+    <AppLayout lockViewport suppressPageHeader>
       <div className="relative flex h-full min-h-0 gap-3 px-3 pb-3 pt-2 md:px-4 md:pb-4 md:pt-3">
         {/* Mobile sessions drawer trigger */}
         <div className="absolute left-3 top-3 z-40 md:hidden">

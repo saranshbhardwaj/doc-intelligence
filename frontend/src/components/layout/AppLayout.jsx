@@ -1,17 +1,17 @@
 /**
- * AppLayout - Shared layout for all authenticated app pages
+ * AppLayout - Shared layout for all authenticated app pages.
  *
  * Provides:
- * - Consistent header navigation
- * - Logo/home link
- * - Dark mode toggle
- * - User menu
- * - Breadcrumb support
+ * - Consistent branded top bar
+ * - Shared navigation and vertical switcher
+ * - Optional page identity bar with actions
+ * - User menu and network status
  */
 
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import { useAppAuth } from "@/hooks/useAppAuth";
-import { Library, MessageSquare, Play, Zap, FileSpreadsheet, LayoutDashboard, Menu, LogOut, Sun, Moon, BarChart2, ChevronRight } from "lucide-react";
+import { cn } from "@/lib/utils";
+import { Library, MessageSquare, Play, Zap, FileSpreadsheet, LayoutDashboard, Menu, LogOut, Sun, Moon, BarChart2, ChevronRight, Calculator, ArrowLeft, Briefcase } from "lucide-react";
 import { useUser, useUserActions } from "../../store";
 import { useState, useEffect } from "react";
 import NetworkStatus from "../common/NetworkStatus";
@@ -20,6 +20,7 @@ import VerticalDropdown from "../navigation/VerticalDropdown";
 import { getVerticalNavigation } from "../../config/verticals";
 import { Sheet, SheetContent, SheetTitle, SheetDescription } from "../ui/sheet";
 import { Badge } from "../ui/badge";
+import { Button } from "../ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -27,8 +28,17 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
   DropdownMenuGroup,
-  DropdownMenuLabel,
 } from "../ui/dropdown-menu";
+
+const ROUTE_VERTICAL_TO_KEY = {
+  re: "real_estate",
+  pe: "private_equity",
+};
+
+const VERTICAL_LABELS = {
+  real_estate: "Real Estate",
+  private_equity: "Private Equity",
+};
 
 // Icon mapping for vertical navigation
 const ICON_MAP = {
@@ -39,7 +49,74 @@ const ICON_MAP = {
   'file-spreadsheet': FileSpreadsheet,
   'table': FileSpreadsheet,
   'dashboard': LayoutDashboard,
+  'calculator': Calculator,
+  'briefcase': Briefcase,
 };
+
+function getCurrentVerticalSlug(pathname, queryVertical) {
+  if (queryVertical === 're' || queryVertical === 'pe') return queryVertical;
+  if (pathname.startsWith('/app/re')) return 're';
+  if (pathname.startsWith('/app/pe')) return 'pe';
+  return null;
+}
+
+function buildContextualTarget(path, currentVerticalSlug) {
+  if (!currentVerticalSlug) return path;
+  if (path === '/app/library' || path === '/app/chat') {
+    return {
+      pathname: path,
+      search: `?vertical=${currentVerticalSlug}`,
+    };
+  }
+  return path;
+}
+
+function formatSegment(segment) {
+  return segment
+    .split(/[-_]/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(' ');
+}
+
+function derivePageHeader(pathname, currentVerticalKey, navLinks) {
+  const eyebrow = currentVerticalKey ? VERTICAL_LABELS[currentVerticalKey] : 'Workspace';
+  const explicitMatches = [
+    { match: /^\/app\/dashboard(?:\/.*)?$/, title: 'Overview', eyebrow: 'Workspace' },
+    { match: /^\/app(?:\/)?$/, title: 'Library', eyebrow: 'Workspace' },
+    { match: /^\/app\/library(?:\/.*)?$/, title: 'Library', eyebrow: 'Workspace' },
+    { match: /^\/app\/re\/fills\/[^/]+(?:\/.*)?$/, title: 'Template Fill', eyebrow: 'Real Estate' },
+    { match: /^\/app\/re\/underwriting\/new(?:\/.*)?$/, title: 'New Analysis', eyebrow: 'Real Estate' },
+    { match: /^\/app\/re\/underwriting\/[^/]+(?:\/.*)?$/, title: 'Underwriting Analysis', eyebrow: 'Real Estate' },
+    { match: /^\/app\/re(?:\/)?$/, title: 'Home', eyebrow: 'Real Estate' },
+    { match: /^\/app\/pe(?:\/)?$/, title: 'Deal Rooms', eyebrow: 'Private Equity' },
+  ];
+
+  const explicitHeader = explicitMatches.find((item) => item.match.test(pathname));
+  if (explicitHeader) {
+    return {
+      eyebrow: explicitHeader.eyebrow,
+      title: explicitHeader.title,
+    };
+  }
+
+  const matchedLink = [...navLinks]
+    .sort((left, right) => right.path.length - left.path.length)
+    .find((link) => pathname === link.path || pathname.startsWith(`${link.path}/`));
+
+  if (matchedLink) {
+    return {
+      eyebrow,
+      title: matchedLink.label,
+    };
+  }
+
+  const segments = pathname.replace(/^\/app\/?/, '').split('/').filter(Boolean);
+  return {
+    eyebrow,
+    title: formatSegment(segments.at(-1) || 'library'),
+  };
+}
 
 function UsageBar({ label, used, limit }) {
   if (!limit) return null;
@@ -75,7 +152,15 @@ function TierBadge({ tier }) {
   );
 }
 
-export default function AppLayout({ children, lockViewport = false, headerLeft = null, headerRight = null, hideNav = false }) {
+export default function AppLayout({
+  children,
+  lockViewport = false,
+  headerLeft = null,
+  headerRight = null,
+  hideNav = false,
+  pageHeader = null,
+  suppressPageHeader = false,
+}) {
   const location = useLocation();
   const { isDark, toggle } = useDarkMode();
   const { user, signOut, getToken } = useAppAuth();
@@ -92,20 +177,29 @@ export default function AppLayout({ children, lockViewport = false, headerLeft =
   const navigate = useNavigate();
   const [mobileNavOpen, setMobileNavOpen] = useState(false);
 
-  // Detect current vertical from URL
-  const currentVertical = (() => {
-    if (location.pathname.startsWith('/app/re')) return 're';
-    if (location.pathname.startsWith('/app/pe')) return 'pe';
-    return null;
-  })();
+  const searchParams = new URLSearchParams(location.search);
+  const currentVerticalSlug = getCurrentVerticalSlug(location.pathname, searchParams.get('vertical'));
+  const currentVerticalKey = currentVerticalSlug ? ROUTE_VERTICAL_TO_KEY[currentVerticalSlug] : null;
 
   const isActive = (path) => {
+    if (path === "/app/re") {
+      return location.pathname === "/app/re";
+    }
+    if (path === "/app/pe") {
+      return location.pathname === "/app/pe";
+    }
     if (path === "/app/library") {
       return (
         location.pathname === "/app/library" || location.pathname === "/app"
       );
     }
-    return location.pathname.startsWith(path);
+    if (path === "/app/re/templates") {
+      return (
+        location.pathname.startsWith("/app/re/templates") ||
+        location.pathname.startsWith("/app/re/fills/")
+      );
+    }
+    return location.pathname === path || location.pathname.startsWith(`${path}/`);
   };
 
   const hasPE = allowedVerticals.includes('private_equity');
@@ -118,12 +212,12 @@ export default function AppLayout({ children, lockViewport = false, headerLeft =
       { path: "/app/workflows", label: "Workflows", icon: Play },
       { path: "/app/extract", label: "Extract", icon: Zap },
     ] : []),
-    { path: "/app/dashboard", label: "Dashboard", icon: LayoutDashboard },
+    { path: "/app/dashboard", label: "Overview", icon: LayoutDashboard },
   ];
 
   // Get vertical-specific navigation
-  const verticalNavItems = currentVertical
-    ? getVerticalNavigation(currentVertical).map(item => ({
+  const verticalNavItems = currentVerticalKey
+    ? getVerticalNavigation(currentVerticalKey).map(item => ({
         path: `/app${item.path}`,
         label: item.label,
         icon: ICON_MAP[item.icon] || LayoutDashboard,
@@ -132,48 +226,45 @@ export default function AppLayout({ children, lockViewport = false, headerLeft =
     : [];
 
   // Determine which navigation to show
-  const navLinks = currentVertical ? verticalNavItems : coreNavLinks;
+  const navLinks = currentVerticalKey ? verticalNavItems : coreNavLinks;
+  const derivedPageHeader = !suppressPageHeader && !pageHeader && !headerLeft
+    ? derivePageHeader(location.pathname, currentVerticalKey, navLinks)
+    : null;
+  const resolvedPageHeader = pageHeader ?? derivedPageHeader;
+  const resolvedHeaderRight = pageHeader?.actions ?? headerRight;
+  const isCompactPageHeader = Boolean(resolvedPageHeader?.compact);
+  const shouldShowPageBar = !suppressPageHeader && Boolean(resolvedPageHeader || headerLeft || resolvedHeaderRight);
 
   return (
     <div className={`${lockViewport ? "h-[100dvh] overflow-hidden" : "min-h-screen"} bg-background flex flex-col`}>
       {/* Header */}
-      <header className="bg-card/80 backdrop-blur-md sticky top-0 z-40 after:absolute after:bottom-0 after:left-0 after:right-0 after:h-px after:bg-gradient-to-r after:from-transparent after:via-primary/25 after:to-transparent relative">
-        <div className="w-full px-4 md:px-6 py-1.5">
-          <div className="flex items-center justify-between">
+      <header className="app-topbar">
+        <div className="app-topbar-inner">
+          <div className="app-topbar-row">
             {/* Logo / Home Link */}
             <Link
-              to="/app/library"
-              className="flex items-center gap-2.5 hover:opacity-80 transition-opacity"
+              to={buildContextualTarget('/app/library', currentVerticalSlug)}
+              className="app-brand"
             >
-              <span className="relative h-7 w-7 shrink-0 overflow-hidden rounded-md">
+              <span className="app-brand-mark">
                 <img
                   src="/Freara%20ai%20logo.png"
                   alt="Basilfy"
                   className="absolute inset-0 h-full w-full scale-[1.78] object-cover"
                 />
               </span>
-              <span className="text-xl font-extrabold tracking-tight bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent" style={{letterSpacing: '-0.02em'}}>
-                Basilfy
-              </span>
+              <span className="app-brand-wordmark">Basilfy</span>
             </Link>
-
-            {/* Page-level left slot (detail pages: back + title) */}
-            {headerLeft && (
-              <div className="hidden md:flex items-center gap-2 ml-2">
-                <div className="h-5 w-px bg-border" />
-                {headerLeft}
-              </div>
-            )}
 
             {/* Navigation */}
             {!hideNav && (
-              <nav className="hidden md:flex items-center gap-1">
+              <nav className="app-topbar-nav">
                 {/* Vertical Dropdown - shown first */}
-                <VerticalDropdown currentVertical={currentVertical} allowedVerticals={allowedVerticals} />
+                <VerticalDropdown currentVertical={currentVerticalSlug} allowedVerticals={allowedVerticals} />
 
                 {/* Separator if in vertical */}
-                {currentVertical && (
-                  <div className="h-6 w-px bg-border mx-2" />
+                {currentVerticalKey && (
+                  <div className="mx-1 h-6 w-px bg-border/70" />
                 )}
 
                 {/* Navigation Links */}
@@ -185,19 +276,17 @@ export default function AppLayout({ children, lockViewport = false, headerLeft =
                   return (
                     <Link
                       key={link.path}
-                      to={link.path}
+                      to={buildContextualTarget(link.path, currentVerticalSlug)}
                       onClick={(e) => {
                         if (isComingSoon) {
                           e.preventDefault();
                         }
                       }}
-                      className={`flex items-center gap-2 px-3 py-1.5 rounded-lg text-sm font-medium transition-all duration-200 ${
-                        isComingSoon
-                          ? "text-muted-foreground/50 cursor-not-allowed"
-                          : active
-                          ? "bg-primary/10 text-primary shadow-sm"
-                          : "text-muted-foreground hover:bg-primary/10 hover:text-foreground hover:-translate-y-px"
-                      }`}
+                      className={cn(
+                        "topbar-nav-button",
+                        active && !isComingSoon && "topbar-nav-button-active",
+                        isComingSoon && "cursor-not-allowed text-muted-foreground/50"
+                      )}
                       aria-current={active ? "page" : undefined}
                       aria-disabled={isComingSoon}
                     >
@@ -219,16 +308,11 @@ export default function AppLayout({ children, lockViewport = false, headerLeft =
               <button
                 type="button"
                 onClick={() => setMobileNavOpen(true)}
-                className="md:hidden p-2 rounded-lg border border-border bg-card text-foreground"
+                className="rounded-xl border border-border/70 bg-card/80 p-2 text-foreground shadow-sm md:hidden"
                 aria-label="Open navigation menu"
               >
                 <Menu className="w-5 h-5" />
               </button>
-              {headerRight && (
-                <div className="hidden md:flex items-center gap-2">
-                  {headerRight}
-                </div>
-              )}
               {/* User avatar / menu */}
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
@@ -296,16 +380,15 @@ export default function AppLayout({ children, lockViewport = false, headerLeft =
                     </>
                   )}
 
-                  {/* Navigation */}
                   <DropdownMenuGroup className="p-1">
                     <DropdownMenuItem asChild>
                       <Link to="/app/dashboard" className="flex items-center gap-2.5 cursor-pointer">
                         <LayoutDashboard className="w-4 h-4 text-muted-foreground" />
-                        <span>Dashboard</span>
+                        <span>Overview</span>
                       </Link>
                     </DropdownMenuItem>
                     <DropdownMenuItem asChild>
-                      <Link to="/app/library" className="flex items-center gap-2.5 cursor-pointer">
+                      <Link to={buildContextualTarget('/app/library', currentVerticalSlug)} className="flex items-center gap-2.5 cursor-pointer">
                         <Library className="w-4 h-4 text-muted-foreground" />
                         <span>Library</span>
                       </Link>
@@ -338,6 +421,61 @@ export default function AppLayout({ children, lockViewport = false, headerLeft =
               </DropdownMenu>
             </div>
           </div>
+
+          {shouldShowPageBar && (
+            <div className={cn("app-pagebar", isCompactPageHeader && "app-pagebar-compact")}>
+              <div className="min-w-0 flex-1">
+                {resolvedPageHeader ? (
+                  <div className={cn("app-pagebar-main", isCompactPageHeader && "app-pagebar-main-compact")}>
+                    {resolvedPageHeader.backTo ? (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => navigate(resolvedPageHeader.backTo)}
+                        className={cn("app-pagebar-back", isCompactPageHeader && "app-pagebar-back-compact")}
+                      >
+                        <ArrowLeft className="h-4 w-4" />
+                        <span className="hidden sm:inline">{resolvedPageHeader.backLabel || 'Back'}</span>
+                      </Button>
+                    ) : null}
+
+                    <div className={cn("min-w-0 flex-1", isCompactPageHeader && "app-pagebar-content-compact")}>
+                      {!isCompactPageHeader ? (
+                        <p className="app-pagebar-eyebrow">
+                          {resolvedPageHeader.eyebrow || (currentVerticalKey ? VERTICAL_LABELS[currentVerticalKey] : 'Workspace')}
+                        </p>
+                      ) : null}
+                      <div className={cn("app-pagebar-title-row", isCompactPageHeader && "app-pagebar-title-row-compact")}>
+                        {isCompactPageHeader ? (
+                          <p className={cn("app-pagebar-eyebrow", "app-pagebar-eyebrow-inline", "app-pagebar-eyebrow-compact")}>
+                            {resolvedPageHeader.eyebrow || (currentVerticalKey ? VERTICAL_LABELS[currentVerticalKey] : 'Workspace')}
+                          </p>
+                        ) : null}
+                        <h1 className={cn("app-pagebar-title", isCompactPageHeader && "app-pagebar-title-compact")}>
+                          {resolvedPageHeader.title}
+                        </h1>
+                        {resolvedPageHeader.meta ? (
+                          <div className={cn("app-pagebar-meta", isCompactPageHeader && "app-pagebar-meta-compact")}>
+                            {resolvedPageHeader.meta}
+                          </div>
+                        ) : null}
+                      </div>
+                      {resolvedPageHeader.subtitle && !isCompactPageHeader ? (
+                        <p className="app-pagebar-subtitle">{resolvedPageHeader.subtitle}</p>
+                      ) : null}
+                    </div>
+                  </div>
+                ) : headerLeft ? (
+                  <div className="app-pagebar-legacy">{headerLeft}</div>
+                ) : null}
+              </div>
+
+              {resolvedHeaderRight ? (
+                <div className={cn("app-pagebar-actions", isCompactPageHeader && "app-pagebar-actions-compact")}>{resolvedHeaderRight}</div>
+              ) : null}
+            </div>
+          )}
         </div>
       </header>
 
@@ -353,7 +491,7 @@ export default function AppLayout({ children, lockViewport = false, headerLeft =
             </div>
 
             <div className="space-y-1">
-              {coreNavLinks.map((link) => {
+              {navLinks.map((link) => {
                 const Icon = link.icon;
                 const active = isActive(link.path);
                 const isComingSoon = link.comingSoon;
@@ -361,7 +499,7 @@ export default function AppLayout({ children, lockViewport = false, headerLeft =
                 return (
                   <Link
                     key={link.path}
-                    to={link.path}
+                    to={buildContextualTarget(link.path, currentVerticalSlug)}
                     onClick={(e) => {
                       if (isComingSoon) {
                         e.preventDefault();
@@ -396,7 +534,7 @@ export default function AppLayout({ children, lockViewport = false, headerLeft =
                 Verticals
               </div>
               <div className="space-y-1">
-                {currentVertical && (
+                {currentVerticalKey && (
                   <Link
                     to="/app/library"
                     onClick={() => setMobileNavOpen(false)}
@@ -409,7 +547,7 @@ export default function AppLayout({ children, lockViewport = false, headerLeft =
                   to="/app/re"
                   onClick={() => setMobileNavOpen(false)}
                   className={`block px-3 py-2 rounded-lg text-sm transition-colors ${
-                    currentVertical === "re"
+                    currentVerticalSlug === "re"
                       ? "bg-primary/10 text-primary"
                       : "text-muted-foreground hover:bg-popover"
                   }`}
@@ -421,7 +559,7 @@ export default function AppLayout({ children, lockViewport = false, headerLeft =
                     to="/app/pe"
                     onClick={() => setMobileNavOpen(false)}
                     className={`block px-3 py-2 rounded-lg text-sm transition-colors ${
-                      currentVertical === "pe"
+                      currentVerticalSlug === "pe"
                         ? "bg-primary/10 text-primary"
                         : "text-muted-foreground hover:bg-popover"
                     }`}

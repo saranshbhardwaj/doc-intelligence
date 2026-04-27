@@ -5,7 +5,7 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { useAppAuth } from "@/hooks/useAppAuth";
-import { useNavigate, useSearchParams } from 'react-router-dom';
+import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { toast } from 'sonner';
 import AppLayout from '../../../components/layout/AppLayout';
 import { Button } from '../../../components/ui/button';
@@ -37,6 +37,7 @@ import {
   ArrowUpDown,
 } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { TemplatesPageSkeleton } from '../../../components/skeletons/PageSkeletons';
 import {
   listRETemplates,
   uploadRETemplate,
@@ -340,6 +341,16 @@ export default function TemplatesPage() {
     return items;
   }, [filteredFillRuns, fillSortBy, fillSortOrder]);
 
+  const breadcrumb = (
+    <div className="flex items-center gap-1.5 text-sm">
+      <Link to="/app/re" className="text-muted-foreground hover:text-foreground transition-colors">
+        Real Estate
+      </Link>
+      <ChevronRight className="h-3.5 w-3.5 text-muted-foreground/50" />
+      <span className="font-medium text-foreground">Templates</span>
+    </div>
+  );
+
   const uploadButton = (
     <Button
       onClick={() => setShowUploadModal(true)}
@@ -353,8 +364,16 @@ export default function TemplatesPage() {
     </Button>
   );
 
+  if (loading) {
+    return (
+      <AppLayout headerLeft={breadcrumb} headerRight={uploadButton}>
+        <TemplatesPageSkeleton />
+      </AppLayout>
+    );
+  }
+
   return (
-    <AppLayout headerRight={uploadButton}>
+    <AppLayout headerLeft={breadcrumb} headerRight={uploadButton}>
       <div className="h-full flex flex-col bg-background">
         {/* Tabs */}
         <div className="px-4 sm:px-6 border-b">

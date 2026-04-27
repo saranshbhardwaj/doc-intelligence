@@ -86,6 +86,27 @@ export default {
           border: "hsl(var(--shell-border))",
         },
         glow: "hsl(var(--glow))",
+        uw: {
+          shell: "hsl(var(--uw-shell))",
+          "shell-strong": "hsl(var(--uw-shell-strong))",
+          tint: "hsl(var(--uw-tint))",
+          citation: {
+            DEFAULT: "hsl(var(--uw-citation))",
+            soft: "hsl(var(--uw-citation-soft))",
+          },
+          risk: {
+            DEFAULT: "hsl(var(--uw-risk))",
+            soft: "hsl(var(--uw-risk-soft))",
+          },
+          danger: {
+            DEFAULT: "hsl(var(--uw-danger))",
+            soft: "hsl(var(--uw-danger-soft))",
+          },
+          success: {
+            DEFAULT: "hsl(var(--uw-success))",
+            soft: "hsl(var(--uw-success-soft))",
+          },
+        },
         // Document type badge tokens — bg-dt-X / text-dt-X-foreground
         dt: {
           spa:          { DEFAULT: "hsl(var(--dt-spa))",          foreground: "hsl(var(--dt-spa-fg))" },

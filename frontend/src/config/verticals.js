@@ -36,10 +36,12 @@ export const VERTICAL_CONFIGS = {
       'free_form_chat',
       'excel_templates',
       'template_filling',
+      'underwriting',
     ],
     navigationItems: [
-      { label: 'Dashboard', path: '/re', icon: 'dashboard' },
+      { label: 'Home', path: '/re', icon: 'dashboard' },
       { label: 'Templates', path: '/re/templates', icon: 'file-spreadsheet' },
+      { label: 'Underwriting', path: '/re/underwriting', icon: 'calculator' },
       { label: 'Library', path: '/library', icon: 'book' },
       { label: 'Chat', path: '/chat', icon: 'message-circle' },
     ],

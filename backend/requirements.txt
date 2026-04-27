@@ -47,3 +47,5 @@ boto3==1.35.54
 pytz==2024.2
 debugpy==1.8.19  # For VS Code debugging
 workos>=5.0.0    # WorkOS Python SDK for org management
+
+numpy-financial==1.0.0  # IRR/PMT calculations for CRE underwriting

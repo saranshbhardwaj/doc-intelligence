@@ -37,6 +37,13 @@ class Settings(BaseSettings):
     # Full extraction scalability limits
     max_pages_per_extraction: int = 150  # Max document size for full extraction (larger docs should use workflows)
 
+    # ===== RE UNDERWRITING EXTRACTION =====
+    re_uw_full_text_max_chars: int = 80_000  # below → direct single LLM call per doc
+    re_uw_map_reduce_max_chars_per_batch: int = 20_000  # hard char cap per Phase 1 batch
+    re_uw_discrepancy_threshold_pct: float = 0.10  # flag if sources differ by > 10%
+    re_uw_task_soft_time_limit_seconds: int = 600  # 10 min → SoftTimeLimitExceeded → mark_error
+    re_uw_stale_job_timeout_minutes: int = 20  # periodic_cleanup sweeps runs stuck here
+
     # ===== EXCEL TEMPLATE MAPPING CONFIGURATION =====
     # Schema-based mapping system for known Excel templates
     excel_schema_only: bool = True  # If True, only use schema (skip generic analyzer)

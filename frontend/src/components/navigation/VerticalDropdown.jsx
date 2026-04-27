@@ -61,11 +61,10 @@ export default function VerticalDropdown({ currentVertical, allowedVerticals, cl
       <button
         type="button"
         onClick={handleToggle}
+        aria-expanded={isOpen}
         className={cn(
-          'flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-all',
-          currentVertical
-            ? 'bg-primary/10 text-primary'
-            : 'text-muted-foreground hover:bg-popover'
+          'topbar-nav-button',
+          currentVertical && 'topbar-nav-button-active'
         )}
       >
         <span>{getCurrentLabel()}</span>
@@ -79,10 +78,10 @@ export default function VerticalDropdown({ currentVertical, allowedVerticals, cl
 
       {/* Dropdown Menu */}
       {isOpen && (
-        <div className="absolute top-full left-0 mt-2 w-64 bg-popover border border-border rounded-lg shadow-lg animate-fade-in z-50">
+        <div className="topbar-nav-popover animate-fade-in">
           <div className="py-2">
             {/* Header */}
-            <div className="px-4 py-2 border-b border-border">
+            <div className="topbar-nav-popover-header">
               <p className="text-xs font-medium text-muted-foreground">
                 Select Vertical
               </p>
@@ -100,16 +99,14 @@ export default function VerticalDropdown({ currentVertical, allowedVerticals, cl
                     to={vertical.path}
                     onClick={() => setIsOpen(false)}
                     className={cn(
-                      'flex items-start gap-3 px-4 py-3 transition-colors',
-                      isActive
-                        ? 'bg-accent text-accent-foreground'
-                        : 'hover:bg-accent/50'
+                      'topbar-nav-popover-item',
+                      isActive && 'topbar-nav-popover-item-active'
                     )}
                   >
                     <div
                       className={cn(
-                        'flex-shrink-0 p-2 rounded-md',
-                        isActive ? 'bg-primary/10' : 'bg-muted'
+                        'topbar-nav-popover-icon',
+                        isActive && 'topbar-nav-popover-icon-active'
                       )}
                     >
                       <Icon
@@ -144,7 +141,7 @@ export default function VerticalDropdown({ currentVertical, allowedVerticals, cl
                 <Link
                   to="/app/library"
                   onClick={() => setIsOpen(false)}
-                  className="flex items-center gap-2 px-4 py-2 text-sm text-muted-foreground hover:bg-accent/50 hover:text-foreground transition-colors"
+                  className="topbar-nav-popover-back"
                 >
                   <span>← Back to Core Features</span>
                 </Link>

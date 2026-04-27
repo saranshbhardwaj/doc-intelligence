@@ -13,6 +13,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { FileText, MessageSquare, FileSpreadsheet, Database, Play, Users, AlertCircle } from "lucide-react";
+import { DashboardOverviewSkeleton } from "../skeletons/PageSkeletons";
 
 import { getDashboardOverview, getDashboardActivity, getTemplateFillStats } from "../../api/dashboard";
 import StatCard from "./StatCard";
@@ -76,6 +77,10 @@ export default function DashboardOverview() {
   const allowedVerticals = userInfo?.allowed_verticals || ['real_estate'];
   const hasPE = allowedVerticals.includes('private_equity');
   const hasRE = allowedVerticals.includes('real_estate');
+
+  if (anyLoading) {
+    return <DashboardOverviewSkeleton />;
+  }
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 py-4 sm:py-8 space-y-5 sm:space-y-8">

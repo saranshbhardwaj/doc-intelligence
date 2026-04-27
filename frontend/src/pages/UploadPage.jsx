@@ -14,6 +14,7 @@ import FileUploader from "../components/upload/FileUploader";
 import ResultsView from "../components/results/ResultViews";
 import DarkModeToggle from "../components/common/DarkModeToggle";
 import { useDarkMode } from "../hooks/useDarkMode";
+import { UploadPageSkeleton } from "../components/skeletons/PageSkeletons";
 
 export default function UploadPage() {
   const { isDark, toggle } = useDarkMode();
@@ -22,6 +23,7 @@ export default function UploadPage() {
   const { getToken, isSignedIn } = useAppAuth();
 
   const [isDemo, setIsDemo] = useState(false);
+  const [isInitializing, setIsInitializing] = useState(true);
 
   // Get state from Zustand store
   const { result, error, isProcessing } = useExtraction();
@@ -112,6 +114,11 @@ export default function UploadPage() {
     }
   }, [searchParams, isProcessing, setResult, setError]);
 
+  // Mark initialization complete after component mounts
+  useEffect(() => {
+    setIsInitializing(false);
+  }, []);
+
   const handleResult = () => {
     // Refresh user info after successful extraction to update page count
     if (getToken) {
@@ -126,6 +133,10 @@ export default function UploadPage() {
       loadUserInfo(getToken);
     }
   };
+
+  if (isInitializing) {
+    return <UploadPageSkeleton />;
+  }
 
   return (
     <div className="min-h-screen bg-background dark:bg-[#1a1a1a] transition-colors duration-200">
