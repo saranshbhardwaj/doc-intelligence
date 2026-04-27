@@ -213,9 +213,13 @@ export default function TrustPanel({
             />
             <div className="flex items-center justify-between gap-2 border-b border-border/30 py-1.5 last:border-0">
               <span className="truncate text-xs text-muted-foreground">Rent comp coverage</span>
-              <UnderwritingStatusBadge tone={rentCompCoverage?.tone || 'neutral'}>
-                {rentCompCoverage?.label || 'not stated'}
-              </UnderwritingStatusBadge>
+              {rentCompCoverage?.label ? (
+                <UnderwritingStatusBadge tone={rentCompCoverage.tone || 'neutral'}>
+                  {rentCompCoverage.label}
+                </UnderwritingStatusBadge>
+              ) : (
+                <span className="text-muted-foreground">not stated</span>
+              )}
             </div>
           </div>
 
