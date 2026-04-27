@@ -54,7 +54,7 @@ function MetricRow({ label, value, alert = false }) {
       <span className="truncate text-xs text-muted-foreground">{label}</span>
       <span
         className={`text-xs font-semibold tabular-nums ${
-          alert ? 'text-amber-500' : 'text-foreground'
+          alert ? 'text-warning' : 'text-foreground'
         }`}
       >
         {value ?? '—'}
@@ -67,12 +67,12 @@ function WarningPill({ warning }) {
   const tone = warning.severity === 'critical'
     ? 'border-destructive/30 bg-destructive/5 text-destructive'
     : warning.severity === 'warning'
-    ? 'border-amber-500/30 bg-amber-500/5 text-amber-500'
+    ? 'border-warning/30 bg-warning/5 text-warning'
     : 'border-border/50 bg-muted/40 text-muted-foreground';
   const icon = warning.severity === 'critical'
     ? <AlertCircle className="h-3 w-3 shrink-0 text-destructive" />
     : warning.severity === 'warning'
-    ? <AlertTriangle className="h-3 w-3 shrink-0 text-amber-500" />
+    ? <AlertTriangle className="h-3 w-3 shrink-0 text-warning" />
     : <Info className="h-3 w-3 shrink-0 text-muted-foreground" />;
   const text = warning.message.length > 100
     ? `${warning.message.slice(0, 97)}…`
@@ -90,7 +90,7 @@ export default function TrustPanel({
   verdictTone,
   verdictLabel,
   revenueBasis,
-  warningCount,
+  warningCount = 0,
   // Col 1 — source data
   persistedInputs,
   artifact,
@@ -108,7 +108,7 @@ export default function TrustPanel({
   noiBridgeAlert,
   breakEvenOccupancyPct,
   // Col 3 — warnings
-  prioritizedWarnings,
+  prioritizedWarnings = [],
   // Toggle state
   expanded,
   onToggle,
@@ -116,6 +116,7 @@ export default function TrustPanel({
   const occupancy = artifact?.rent_roll_data?.summary?.occupancy_pct;
 
   const expenseRatioValue = currentExpenseRatio ?? proFormaExpenseRatio;
+  // T-12/line items = actuals source; pro forma only = derived; no basis = unknown
   const expenseRatioDocType =
     currentExpenseRatio != null
       ? expenseBasis?.source === 'expense_ratio_current' || expenseBasis?.source === 'line_items'
@@ -149,6 +150,7 @@ export default function TrustPanel({
         <button
           type="button"
           onClick={onToggle}
+          aria-expanded={expanded}
           className="ml-auto flex items-center gap-1 text-xs font-medium text-primary transition-colors hover:text-primary/80"
         >
           {expanded ? 'Trust summary ▲' : 'Trust summary ▼'}

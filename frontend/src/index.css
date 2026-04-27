@@ -1500,10 +1500,116 @@
   }
   .doc-rail-footer {
     display: flex;
+    justify-content: space-between;
     gap: 16px;
     padding: 10px 14px;
     border-top: 1px solid hsl(var(--border) / 0.6);
     flex-shrink: 0;
+    background: hsl(var(--card) / 0.72);
+  }
+
+  .rail-extraction-panel {
+    margin: 12px;
+    padding: 14px;
+    border-radius: 18px;
+    border: 1px solid hsl(var(--shell-border) / 0.62);
+    background:
+      linear-gradient(180deg, hsl(var(--card) / 0.98), hsl(var(--surface-soft) / 0.88));
+    box-shadow:
+      inset 0 1px 0 hsl(var(--border) / 0.2),
+      0 14px 24px -24px hsl(var(--foreground) / 0.38);
+    flex-shrink: 0;
+  }
+
+  .rail-extraction-panel[data-state="processing"] {
+    border-color: hsl(var(--primary) / 0.3);
+    background:
+      radial-gradient(circle at top right, hsl(var(--primary) / 0.12), transparent 42%),
+      linear-gradient(180deg, hsl(var(--card)), hsl(var(--surface-soft) / 0.92));
+  }
+
+  .rail-extraction-panel[data-state="complete"] {
+    border-color: hsl(var(--uw-success) / 0.28);
+    background:
+      radial-gradient(circle at top right, hsl(var(--uw-success) / 0.12), transparent 42%),
+      linear-gradient(180deg, hsl(var(--card)), hsl(var(--uw-success-soft) / 0.54));
+  }
+
+  .rail-extraction-head {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+  }
+
+  .rail-extraction-eyebrow {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: hsl(var(--uw-tint));
+  }
+
+  .rail-extraction-title {
+    margin-top: 3px;
+    font-family: "Space Grotesk", "Instrument Sans", ui-sans-serif, sans-serif;
+    font-size: 1rem;
+    font-weight: 600;
+    line-height: 1.2;
+    color: hsl(var(--foreground));
+  }
+
+  .rail-extraction-copy {
+    margin-top: 9px;
+    font-size: 12px;
+    line-height: 1.55;
+    color: hsl(var(--muted-foreground));
+  }
+
+  .rail-extraction-percent {
+    flex-shrink: 0;
+    font-family: "Space Grotesk", "Instrument Sans", ui-sans-serif, sans-serif;
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: hsl(var(--primary));
+  }
+
+  .rail-extraction-progress {
+    margin-top: 12px;
+  }
+
+  .rail-extraction-button {
+    width: 100%;
+    margin-top: 12px;
+    gap: 8px;
+    border-radius: 12px;
+  }
+
+  .rail-extraction-hint {
+    margin-top: 8px;
+    font-size: 11px;
+    line-height: 1.4;
+    color: hsl(var(--muted-foreground));
+  }
+
+  .rail-docs-scroll {
+    min-height: 0;
+    flex: 1;
+    overflow-y: auto;
+    padding: 0 12px 12px;
+  }
+
+  .rail-section-label {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 2px 2px 8px;
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.16em;
+    text-transform: uppercase;
+    color: hsl(var(--muted-foreground));
   }
   .doc-rail-stat-val {
     font-size: 16px;
@@ -1629,6 +1735,41 @@
 
   .cite-btn:hover {
     background: hsl(167 70% 95%);
+  }
+
+  .cite-default-badge {
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: hsl(var(--muted-foreground));
+    padding: 1px 6px;
+    border-radius: 999px;
+    border: 1px solid hsl(var(--border));
+    background: hsl(var(--muted) / 0.5);
+    line-height: 1.6;
+    flex-shrink: 0;
+  }
+
+  .cite-derived-badge {
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: hsl(38 92% 38%);
+    padding: 1px 6px;
+    border-radius: 999px;
+    border: 1px solid hsl(38 92% 70% / 0.4);
+    background: hsl(38 92% 95% / 0.6);
+    line-height: 1.6;
+    flex-shrink: 0;
+    cursor: default;
+  }
+
+  .dark .cite-derived-badge {
+    color: hsl(38 92% 70%);
+    border-color: hsl(38 92% 40% / 0.4);
+    background: hsl(38 92% 20% / 0.4);
   }
 
   .field-section {
