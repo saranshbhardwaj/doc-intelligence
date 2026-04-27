@@ -9,7 +9,6 @@
  */
 
 import { listUnderwritingRuns, getUnderwritingRun } from "../../api/re-underwriting";
-import { streamJobProgress } from "../../api/sse-utils";
 
 export const createUnderwritingSlice = (set, get) => ({
   // ========== State ==========

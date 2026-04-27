@@ -6,6 +6,8 @@ Three system prompts (100% static, cacheable with Anthropic ephemeral cache):
 3. T12_EXTRACTION_SYSTEM_PROMPT — Trailing-12-Month operating statement extraction
 """
 
+import json as _json
+
 OM_EXTRACTION_SYSTEM_PROMPT = """You are an expert CRE analyst extracting structured financial data from an Offering Memorandum (OM).
 
 CRITICAL RULES:
@@ -211,9 +213,6 @@ Return JSON only."""
 
 
 # ── Phase 2: Schema-fitting (reduce step) per doc type ───────────────────────
-
-import json as _json
-
 
 def _schema_json(fields: list[dict]) -> str:
     return _json.dumps({f["name"]: f.get("type", "float | null") for f in fields}, indent=2)

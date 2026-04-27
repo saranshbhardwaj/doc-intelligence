@@ -9,7 +9,6 @@ import {
   SheetHeader,
   SheetTitle,
 } from '@/components/ui/sheet';
-import { Badge } from '@/components/ui/badge';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import DocumentViewer from '@/components/pdf/DocumentViewer';
 import { AlertCircle, Loader2 } from 'lucide-react';
@@ -51,11 +50,6 @@ export default function CitationDrawer({ isOpen, onClose, citation }) {
 
   const activeCitation = citation ?? null;
 
-  const docTypeLabel = {
-    om: 'Offering Memo',
-    rent_roll: 'Rent Roll',
-    t12: 'T12',
-  }[activeCitation?.doc_type] || activeCitation?.doc_type || 'Document';
   const highlightPayload = useMemo(() => buildHighlightPayload(activeCitation), [activeCitation]);
   const defaultPage = Number(activeCitation?.page);
 

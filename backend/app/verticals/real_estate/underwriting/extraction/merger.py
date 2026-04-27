@@ -12,8 +12,6 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
-from app.utils.logging import logger
-
 from .schemas import (
     ExtractedDocResult,
     OMExtraction,
@@ -393,10 +391,14 @@ def _build_merged_inputs(
     _other_formula: str | None = None
     if om and om.other_income_annual is None and _other_inc is not None:
         parts = []
-        if om.other_income_admin_fees_annual:  parts.append(f"${om.other_income_admin_fees_annual:,.0f} admin")
-        if om.other_income_late_fees_annual:   parts.append(f"${om.other_income_late_fees_annual:,.0f} late fees")
-        if om.other_income_insurance_annual:   parts.append(f"${om.other_income_insurance_annual:,.0f} insurance")
-        if om.other_income_misc_annual:        parts.append(f"${om.other_income_misc_annual:,.0f} misc")
+        if om.other_income_admin_fees_annual:
+            parts.append(f"${om.other_income_admin_fees_annual:,.0f} admin")
+        if om.other_income_late_fees_annual:
+            parts.append(f"${om.other_income_late_fees_annual:,.0f} late fees")
+        if om.other_income_insurance_annual:
+            parts.append(f"${om.other_income_insurance_annual:,.0f} insurance")
+        if om.other_income_misc_annual:
+            parts.append(f"${om.other_income_misc_annual:,.0f} misc")
         _other_formula = " + ".join(parts) if parts else None
 
     merged = {

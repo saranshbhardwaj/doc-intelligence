@@ -11,7 +11,7 @@ derived automatically via `_OM_REGISTRY`.
 
 from __future__ import annotations
 
-from typing import Optional, get_args, get_origin
+from typing import Optional, get_args
 from pydantic import BaseModel, Field
 
 from ..schemas.self_storage import LeaseRecord, RentCompRow, UnitMixRow

@@ -21,7 +21,6 @@ from app.verticals.real_estate.underwriting.result_artifact import (
 )
 from app.verticals.real_estate.underwriting.schemas.self_storage import (
     FormulaMetadata,
-    FormulaComputedValues,
 )
 
 router = APIRouter(prefix="/underwriting", tags=["re_underwriting"])
@@ -96,7 +95,6 @@ def _calculate_and_store_result(repo: UnderwritingRunRepository, run_id: str, in
     result.income_basis_note = inputs.operational.income_basis_note
 
     # Add current_expense_ratio metadata (not produced by the calculator)
-    op = inputs.operational
     result.formula_metadata["current_expense_ratio"] = FormulaMetadata(
         description="Total operating expenses ÷ effective gross income from the trailing 12-month income statement.",
     )

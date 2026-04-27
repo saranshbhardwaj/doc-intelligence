@@ -323,9 +323,6 @@ def calculate(inputs: SelfStorageInputs) -> SelfStorageResult:
         # Per-year debt data from amortization schedule
         year_months = slice((yr - 1) * 12, yr * 12)
         principal_paydown = sum(monthly_principal[year_months])
-        loan_balance = outstanding if yr == hold_years else (
-            loan_amount - sum(monthly_principal[: yr * 12])
-        )
 
         cash_flow = noi - annual_debt_service
         appreciation = prop_value - prev_prop_value
