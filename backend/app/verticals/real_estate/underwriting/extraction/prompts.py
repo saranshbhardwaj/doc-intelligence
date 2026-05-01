@@ -51,7 +51,11 @@ EXTRACT (as JSON):
         • Single-radius tables (e.g. "3-Mile Radius" header) → use that value directly.
       Always match by column header, not by picking the largest or middle value.
       Do not use Population Age 25+, Housing Units, or Occupied Units rows for population_3mi.
-    - avg_household_income_3mi: average household income within 3 miles as a float (e.g. "average household income … is $65,499" → 65,499.0). Apply the same radius-column matching rules above.
+    - avg_household_income_3mi: average household income within the 3-mile trade area as a float
+      (e.g. "average household income … is $65,499" → 65,499.0). Apply the same radius-column
+      matching rules above. Use the 3-mile figure ONLY — do NOT use metro, MSA, submarket, or
+      city-level income figures even if they appear nearby. If the OM shows a demographics table
+      with multiple radii (1/3/5 mi), always pick the 3-mile column for this field.
     - storage_sqft_per_capita_3mi: square feet of storage per capita within 3 miles if stated. Apply the same radius-column matching rules above.
 - Acquisition: purchase_price (asking), closing_cost_pct if stated, capex_reserve_per_unit if stated, market_cap_rate_purchase if stated
 - Income (extract from the YEAR 1 column when a multi-column operating statement is present;
@@ -91,7 +95,9 @@ EXTRACT (as JSON):
     - expense_repairs_maintenance_annual: "Repairs, Maintenance & Reserves"
     - expense_insurance_annual: "Property Insurance"
     - expense_payroll_annual: "Salaries, Taxes & Benefits (On-Site)"
-    - expense_property_tax_annual: "Property Taxes"
+    - expense_property_tax_annual: "Property Taxes" from the Year 1 column. Property taxes are
+      often reassessed post-acquisition (sometimes 2–3× the current assessed value) — the Year 1
+      column reflects this reassessment. Use it even if it is materially higher than the Current column.
     - expense_mgmt_fee_annual: "Third Party Management (Off-Site)"
     - expense_total_annual: "Total Operating Expenses"
     - noi_year_one_stated: "Net Operating Income" from Year 1 column

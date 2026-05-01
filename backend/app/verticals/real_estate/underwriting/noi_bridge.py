@@ -41,9 +41,8 @@ def _row(
 ) -> dict[str, Any]:
     """Create one bridge row.
 
-    `delta_to_prior` uses the analyst convention that positive means the prior
-    source row is higher than the current row. For example, if OM NOI is above
-    T-12 NOI, the T-12 row shows a positive delta because the OM overstated NOI.
+    `delta_to_prior` follows standard analyst convention: positive means the
+    current row is HIGHER than the prior row (i.e. value increased).
     """
     payload: dict[str, Any] = {
         "label": label,
@@ -52,7 +51,7 @@ def _row(
         "source_field": source_field,
     }
     if prior_value is not None:
-        delta = prior_value - value
+        delta = value - prior_value
         payload["delta_to_prior"] = {
             "amount": delta,
             "pct": delta / prior_value if prior_value else None,

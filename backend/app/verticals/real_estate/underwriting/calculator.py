@@ -99,16 +99,17 @@ def _build_rent_position_analysis(
         sqft = comp.standard_sqft or _parse_standard_sqft(comp.size)
         if sqft is None or sqft <= 0:
             continue
-        # Treat both None (extractor didn't classify) and "UNKNOWN" (explicitly unclear) as
-        # unclassifiable — exclude from matching and surface the count to the UI.
         climate = comp.climate_type or "UNKNOWN"
         if climate == "UNKNOWN":
             unknown_count += 1
-            continue
         rate = comp.asking_rent
         if rate is None or rate <= 0:
             continue
         comp_data.append(_CompEntry(_size_bucket(sqft), climate, rate))
+
+    # When all comps lack climate classification, fall back to bucket-only matching
+    # by treating every comp as "MIXED" so position rows are still produced.
+    all_unknown = all(e.climate == "UNKNOWN" for e in comp_data) and bool(comp_data)
 
     def _weighted_avg(rows: list[UnitMixRow], field: str) -> float | None:
         def weight(r: UnitMixRow) -> int:
@@ -127,14 +128,23 @@ def _build_rent_position_analysis(
         if sqft is None or sqft <= 0:
             continue
         bucket = _size_bucket(sqft)
-        climate = row.climate_type if row.climate_type in ("CC", "NC") else (
-            "CC" if _is_climate_control_row(row) else "NC"
-        )
+        if all_unknown:
+            climate = "MIXED"
+        else:
+            climate = row.climate_type if row.climate_type in ("CC", "NC") else (
+                "CC" if _is_climate_control_row(row) else "NC"
+            )
         cell_rows[(bucket, climate)].append(row)
 
     analysis: list[RentPositionRow] = []
     for (bucket, climate), rows in cell_rows.items():
-        matched_rates = [e.rate for e in comp_data if e.bucket == bucket and e.climate == climate]
+        if all_unknown:
+            matched_rates = [e.rate for e in comp_data if e.bucket == bucket]
+        else:
+            matched_rates = [
+                e.rate for e in comp_data
+                if e.bucket == bucket and e.climate == climate
+            ]
         if not matched_rates:
             continue
 
@@ -152,10 +162,11 @@ def _build_rent_position_analysis(
             else None
         )
 
+        display_climate = "Mixed" if all_unknown else climate
         analysis.append(
             RentPositionRow(
                 size=rows[0].size or bucket,
-                climate_type=climate,
+                climate_type=display_climate,
                 subject_current_rent=subject_current,
                 subject_market_rent=subject_market,
                 comp_average_rent=comp_average_rent,

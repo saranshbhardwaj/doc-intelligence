@@ -60,7 +60,7 @@ def test_build_noi_bridge_om_and_t12():
     assert _labels(bridge) == ["OM Year-1 NOI", "T-12 actual NOI", "Model Year-1 NOI"]
     assert bridge["has_t12"] is True
     assert bridge["rows"][1]["source_field"] == "noi_actual"
-    assert bridge["rows"][1]["delta_to_prior"]["amount"] == 50_000
+    assert bridge["rows"][1]["delta_to_prior"]["amount"] == -50_000  # T-12 is $50K below OM Year-1
 
 
 def test_build_noi_bridge_annualizes_t6_t12_noi():
