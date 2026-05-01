@@ -357,6 +357,7 @@ export const useUnderwritingActions = () =>
       updateExtractionProgress: state.updateExtractionProgress,
       completeExtraction: state.completeExtraction,
       resetExtraction: state.resetExtraction,
+      updateRunInList: state.updateRunInList,
     }))
   );
 
