@@ -107,7 +107,7 @@ export default function UnderwritingWizard() {
   } = useUnderwritingActions();
 
   const [projectData, setProjectData] = useState(INITIAL_PROJECT_DATA);
-  const savedMeta = useRef({ name: "", address: "" });
+  const savedMeta = useRef({ name: "", address: null });
   const [selectedDocs, setSelectedDocs] = useState(EMPTY_SELECTED_DOCS);
   const [docPickerOpen, setDocPickerOpen] = useState(null);
   const [activeTab, setActiveTab] = useState(TAB_CONFIG[0].id);
@@ -141,7 +141,7 @@ export default function UnderwritingWizard() {
     setLeftCollapsed(false);
     setShowSourcePanel(false);
     setActiveCitation(null);
-    savedMeta.current = { name: "", address: "" };
+    savedMeta.current = { name: "", address: null };
   };
 
   // On mount: re-hydrate from DB if run_id is in URL; otherwise start fresh.
@@ -268,7 +268,7 @@ export default function UnderwritingWizard() {
       }));
       savedMeta.current = {
         name: currentRun.name || "",
-        address: currentRun.address || projectInputs.address || "",
+        address: currentRun.address || projectInputs.address || null,
       };
     }
     setInputs((prev) => {
@@ -286,7 +286,8 @@ export default function UnderwritingWizard() {
     if (Object.values(hydratedDocs).some(Boolean)) {
       setSelectedDocs(hydratedDocs);
     }
-  }, [runIdFromUrl, currentRun]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [runIdFromUrl, currentRun?.id ?? currentRun?.run_id]);
 
   // Consider docs "attached" if user selected any in the UI OR the run already has documents from a prior extraction.
   const anyDocSelected = Object.values(selectedDocs).some(Boolean)
@@ -447,7 +448,7 @@ export default function UnderwritingWizard() {
         });
         savedMeta.current = {
           name: projectData.name?.trim() || "",
-          address: projectData.address?.trim() || "",
+          address: projectData.address?.trim() || null,
         };
         await updateUnderwritingInputs(getToken, existingRunId, inputPayload);
         navigate(`/app/re/underwriting/${existingRunId}`);
@@ -478,7 +479,7 @@ export default function UnderwritingWizard() {
       });
       savedMeta.current = {
         name: projectData.name.trim(),
-        address: projectData.address?.trim() || "",
+        address: projectData.address?.trim() || null,
       };
       toast.success("Saved");
     } catch {
