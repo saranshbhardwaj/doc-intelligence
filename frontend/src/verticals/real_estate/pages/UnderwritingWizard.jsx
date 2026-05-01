@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   AlertCircle,
@@ -34,6 +34,7 @@ import {
   deleteUnderwritingRun,
   streamUnderwritingExtractionProgress,
   updateUnderwritingInputs,
+  updateUnderwritingRunMetadata,
 } from '../../../api/re-underwriting';
 import { fromApiInputs, toApiInputs } from '../utils/underwritingInputs';
 import { streamJobProgress } from '../../../api/sse-utils';
@@ -43,12 +44,15 @@ import {
   INITIAL_PROJECT_DATA,
   SourceDocumentPanel,
   TAB_CONFIG,
+  UnderwritingDefaultsModal,
   WorkflowRail,
   WizardInputStage,
   countVisibleCitations,
   createDefaultInputs,
   computeTabProgress,
 } from '../components/underwriting';
+import { getMyThresholds } from '../../../api/users';
+import { toast } from 'sonner';
 
 function WorkspaceMark() {
   return (
@@ -56,6 +60,34 @@ function WorkspaceMark() {
       <Warehouse className="h-4 w-4" aria-hidden="true" />
     </div>
   );
+}
+
+const UNDERWRITING_SOURCE_EXTENSIONS = {
+  om: ['pdf', 'docx', 'pptx', 'jpg', 'jpeg', 'png', 'bmp', 'tif', 'tiff', 'heif', 'heic'],
+  t12: ['pdf', 'docx', 'pptx', 'xlsx', 'xlsm', 'csv', 'jpg', 'jpeg', 'png', 'bmp', 'tif', 'tiff', 'heif', 'heic'],
+  rent_roll: ['pdf', 'docx', 'pptx', 'xlsx', 'xlsm', 'csv', 'jpg', 'jpeg', 'png', 'bmp', 'tif', 'tiff', 'heif', 'heic'],
+};
+
+const EMPTY_SELECTED_DOCS = { om: null, t12: null, rent_roll: null };
+
+function buildSelectedDocsFromRun(run) {
+  const docs = Array.isArray(run?.source_documents) && run.source_documents.length
+    ? run.source_documents
+    : run?.document_ids || [];
+  const slotLabels = Object.fromEntries(DOC_SLOTS.map((slot) => [slot.key, slot.label]));
+
+  return docs.reduce((acc, doc) => {
+    const docType = doc?.doc_type;
+    const documentId = doc?.document_id || doc?.id;
+    if (!docType || !documentId || !(docType in acc)) return acc;
+
+    acc[docType] = {
+      document_id: documentId,
+      doc_type: docType,
+      name: doc.name || doc.filename || slotLabels[docType] || 'Document',
+    };
+    return acc;
+  }, { ...EMPTY_SELECTED_DOCS });
 }
 
 export default function UnderwritingWizard() {
@@ -75,7 +107,8 @@ export default function UnderwritingWizard() {
   } = useUnderwritingActions();
 
   const [projectData, setProjectData] = useState(INITIAL_PROJECT_DATA);
-  const [selectedDocs, setSelectedDocs] = useState({ om: null, t12: null, rent_roll: null });
+  const savedMeta = useRef({ name: "", address: "" });
+  const [selectedDocs, setSelectedDocs] = useState(EMPTY_SELECTED_DOCS);
   const [docPickerOpen, setDocPickerOpen] = useState(null);
   const [activeTab, setActiveTab] = useState(TAB_CONFIG[0].id);
 
@@ -98,7 +131,7 @@ export default function UnderwritingWizard() {
   const resetWizardState = () => {
     setProjectData(INITIAL_PROJECT_DATA);
     setInputs(createDefaultInputs());
-    setSelectedDocs({ om: null, t12: null, rent_roll: null });
+    setSelectedDocs(EMPTY_SELECTED_DOCS);
     setDocPickerOpen(null);
     setActiveTab(TAB_CONFIG[0].id);
     setIsExtracting(false);
@@ -122,6 +155,25 @@ export default function UnderwritingWizard() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [runIdFromUrl]);
 
+  // For new runs only: prefill criteria from saved user defaults.
+  useEffect(() => {
+    if (runIdFromUrl) return;
+    getMyThresholds(getToken).then(saved => {
+      if (!saved || !Object.keys(saved).length) return;
+      setInputs(prev => ({
+        ...prev,
+        criteria: {
+          ...prev.criteria,
+          ...(saved.target_irr != null && { target_irr: saved.target_irr * 100 }),
+          ...(saved.target_cash_on_cash != null && { target_cash_on_cash: saved.target_cash_on_cash * 100 }),
+          ...(saved.target_equity_multiple != null && { target_equity_multiple: saved.target_equity_multiple }),
+          ...(saved.max_ltv != null && { max_ltv: saved.max_ltv * 100 }),
+        },
+      }));
+    }).catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   // Reconnect extraction stream after refresh/navigation if this run is still processing.
   // job_id === run_id in the backend, so runIdFromUrl is always the correct job ID.
   useEffect(() => {
@@ -133,6 +185,10 @@ export default function UnderwritingWizard() {
 
     const reconnect = async () => {
       setIsExtracting(true);
+      // Guard: set to true when onComplete/onError fires during fetchInitialState,
+      // before startExtraction is called. Without this, startExtraction re-sets
+      // isProcessing=true after completeExtraction() already cleared it.
+      let alreadyTerminated = false;
       try {
         const cleanup = await streamUnderwritingExtractionProgress(runIdFromUrl, getToken, {
           onProgress: (data) => {
@@ -144,6 +200,7 @@ export default function UnderwritingWizard() {
           },
           onComplete: async () => {
             if (cancelled) return;
+            alreadyTerminated = true;
             completeExtraction();
             await loadRun(getToken, runIdFromUrl);
             setWizardStep(2);
@@ -151,6 +208,7 @@ export default function UnderwritingWizard() {
           },
           onError: (err) => {
             if (cancelled) return;
+            alreadyTerminated = true;
             setError(err?.message || 'Extraction failed');
             setIsExtracting(false);
           },
@@ -161,7 +219,11 @@ export default function UnderwritingWizard() {
           return;
         }
 
-        startExtraction(runIdFromUrl, cleanup);
+        // Only register the ongoing stream if the job wasn't already resolved
+        // during fetchInitialState (avoids overwriting completeExtraction's work).
+        if (!alreadyTerminated) {
+          startExtraction(runIdFromUrl, cleanup);
+        }
       } catch (err) {
         if (cancelled) return;
         setError(err?.message || 'Failed to reconnect extraction');
@@ -200,8 +262,12 @@ export default function UnderwritingWizard() {
         ...prev,
         ...projectInputs,
         name: currentRun.name || prev.name,
-        address: currentRun.address || prev.address,
+        address: currentRun.address || projectInputs.address || prev.address,
       }));
+      savedMeta.current = {
+        name: currentRun.name || "",
+        address: currentRun.address || projectInputs.address || "",
+      };
     }
     setInputs((prev) => {
       const converted = fromApiInputs(currentRun.inputs);
@@ -214,7 +280,11 @@ export default function UnderwritingWizard() {
         rent_comps: Array.isArray(converted.rent_comps) ? converted.rent_comps : prev.rent_comps,
       };
     });
-  }, [runIdFromUrl, currentRun?.address, currentRun?.id, currentRun?.inputs, currentRun?.name, currentRun?.run_id]);
+    const hydratedDocs = buildSelectedDocsFromRun(currentRun);
+    if (Object.values(hydratedDocs).some(Boolean)) {
+      setSelectedDocs(hydratedDocs);
+    }
+  }, [runIdFromUrl, currentRun]);
 
   // Consider docs "attached" if user selected any in the UI OR the run already has documents from a prior extraction.
   const anyDocSelected = Object.values(selectedDocs).some(Boolean)
@@ -246,6 +316,9 @@ export default function UnderwritingWizard() {
     if (!raw) return null;
     if (raw.is_default) return { is_default: true };
     if (raw.is_derived) return { is_derived: true, formula: raw.formula ?? null };
+    if (raw.is_uncited_extraction || !raw.citations?.length) {
+      return { is_uncited_extraction: true, doc_type: raw.doc_type };
+    }
     const token = raw.citations?.[0];
     const ctx = token && citCtx ? citCtx[token] : null;
     return {
@@ -366,6 +439,14 @@ export default function UnderwritingWizard() {
       });
       const existingRunId = currentRun?.run_id || currentRun?.id || runIdFromUrl;
       if (existingRunId) {
+        await updateUnderwritingRunMetadata(getToken, existingRunId, {
+          name: projectData.name,
+          address: projectData.address,
+        });
+        savedMeta.current = {
+          name: projectData.name?.trim() || "",
+          address: projectData.address?.trim() || "",
+        };
         await updateUnderwritingInputs(getToken, existingRunId, inputPayload);
         navigate(`/app/re/underwriting/${existingRunId}`);
       } else {
@@ -384,6 +465,28 @@ export default function UnderwritingWizard() {
       setIsSubmitting(false);
     }
   };
+
+  const [savingMeta, setSavingMeta] = useState(false);
+
+  async function handleSaveMeta() {
+    if (!analysisRunId || !projectData.name?.trim()) return;
+    setSavingMeta(true);
+    try {
+      await updateUnderwritingRunMetadata(getToken, analysisRunId, {
+        name: projectData.name.trim(),
+        address: projectData.address?.trim() || null,
+      });
+      savedMeta.current = {
+        name: projectData.name.trim(),
+        address: projectData.address?.trim() || "",
+      };
+      toast.success("Saved");
+    } catch {
+      toast.error("Failed to save — try again");
+    } finally {
+      setSavingMeta(false);
+    }
+  }
 
   const createPatcher = (section) => (key, value) =>
     setInputs((prev) => ({ ...prev, [section]: { ...prev[section], [key]: value } }));
@@ -427,6 +530,11 @@ export default function UnderwritingWizard() {
   const navigateToResults = () => {
     navigate(`/app/re/underwriting/${currentRun?.id || currentRun?.run_id || runIdFromUrl}`);
   };
+
+  const isMetaDirty =
+    !!analysisRunId &&
+    (projectData.name !== savedMeta.current.name ||
+      (projectData.address || "") !== (savedMeta.current.address || ""));
 
   // Show skeleton while loading run data from URL
   if (runIdFromUrl && !currentRun) {
@@ -480,6 +588,19 @@ export default function UnderwritingWizard() {
                         onChange={(e) => setProjectData({ ...projectData, address: e.target.value })}
                         className="uw-wizard-header-address"
                       />
+                      {isMetaDirty && (
+                        <div className="mt-1.5">
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            onClick={handleSaveMeta}
+                            disabled={savingMeta || !projectData.name?.trim()}
+                          >
+                            {savingMeta && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
+                            Save name & address
+                          </Button>
+                        </div>
+                      )}
                     </div>
                   </div>
 
@@ -569,7 +690,19 @@ export default function UnderwritingWizard() {
                       <AlertDescription>{error}</AlertDescription>
                     </Alert>
                   ) : null}
-                  <div className="mx-auto max-w-[980px]">
+                  <div className={`mx-auto ${activeTab === 'market' ? 'max-w-[1280px]' : 'max-w-[980px]'}`}>
+                    {activeTab === 'criteria' && (
+                      <div className="mb-3 flex justify-end">
+                        <UnderwritingDefaultsModal
+                          getToken={getToken}
+                          trigger={
+                            <button type="button" className="text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground transition-colors">
+                              Edit my defaults
+                            </button>
+                          }
+                        />
+                      </div>
+                    )}
                     <WizardInputStage
                       activeTab={activeTab}
                       setActiveTab={setActiveTab}
@@ -626,6 +759,12 @@ export default function UnderwritingWizard() {
           onOpenChange={(open) => !open && setDocPickerOpen(null)}
           onSelect={({ document }) => handleDocumentSelect(slot.key, document)}
           templateName={slot.label}
+          allowedExtensions={UNDERWRITING_SOURCE_EXTENSIONS[slot.key] || null}
+          dialogDescription={`Choose a source document for ${slot.label}.`}
+          emptyStateLabel={`No ready ${slot.label} documents in this collection`}
+          emptyStateDescription="Upload the source document to your library first"
+          submitLabel="Select source"
+          showFillName={false}
         />
       ))}
     </AppLayout>
