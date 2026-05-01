@@ -70,11 +70,12 @@ const UNDERWRITING_SOURCE_EXTENSIONS = {
 
 const EMPTY_SELECTED_DOCS = { om: null, t12: null, rent_roll: null };
 
+const SLOT_LABELS = Object.fromEntries(DOC_SLOTS.map((slot) => [slot.key, slot.label]));
+
 function buildSelectedDocsFromRun(run) {
   const docs = Array.isArray(run?.source_documents) && run.source_documents.length
     ? run.source_documents
     : run?.document_ids || [];
-  const slotLabels = Object.fromEntries(DOC_SLOTS.map((slot) => [slot.key, slot.label]));
 
   return docs.reduce((acc, doc) => {
     const docType = doc?.doc_type;
@@ -84,7 +85,7 @@ function buildSelectedDocsFromRun(run) {
     acc[docType] = {
       document_id: documentId,
       doc_type: docType,
-      name: doc.name || doc.filename || slotLabels[docType] || 'Document',
+      name: doc.name || doc.filename || SLOT_LABELS[docType] || 'Document',
     };
     return acc;
   }, { ...EMPTY_SELECTED_DOCS });
@@ -160,8 +161,9 @@ export default function UnderwritingWizard() {
   // For new runs only: prefill criteria from saved user defaults.
   useEffect(() => {
     if (runIdFromUrl) return;
+    let active = true;
     getMyThresholds(getToken).then(saved => {
-      if (!saved || !Object.keys(saved).length) return;
+      if (!active || !saved || !Object.keys(saved).length) return;
       setInputs(prev => ({
         ...prev,
         criteria: {
@@ -173,6 +175,7 @@ export default function UnderwritingWizard() {
         },
       }));
     }).catch(() => {});
+    return () => { active = false; };
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
@@ -286,6 +289,8 @@ export default function UnderwritingWizard() {
     if (Object.values(hydratedDocs).some(Boolean)) {
       setSelectedDocs(hydratedDocs);
     }
+  // Dep is run id only — the guard `String(currentRunId) !== String(runIdFromUrl)` already
+  // prevents re-hydration when other currentRun properties change mid-session.
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [runIdFromUrl, currentRun?.id ?? currentRun?.run_id]);
 
@@ -442,15 +447,10 @@ export default function UnderwritingWizard() {
       });
       const existingRunId = currentRun?.run_id || currentRun?.id || runIdFromUrl;
       if (existingRunId) {
-        await updateUnderwritingRunMetadata(getToken, existingRunId, {
-          name: projectData.name?.trim() || "",
-          address: projectData.address?.trim() || null,
-        });
-        savedMeta.current = {
-          name: projectData.name?.trim() || "",
-          address: projectData.address?.trim() || null,
-        };
-        await updateUnderwritingInputs(getToken, existingRunId, inputPayload);
+        await Promise.all([
+          persistMeta(existingRunId, projectData.name?.trim() || "", projectData.address?.trim() || null),
+          updateUnderwritingInputs(getToken, existingRunId, inputPayload),
+        ]);
         navigate(`/app/re/underwriting/${existingRunId}`);
       } else {
         const run = await createUnderwritingRun(getToken, {
@@ -469,18 +469,16 @@ export default function UnderwritingWizard() {
     }
   };
 
+  async function persistMeta(runId, name, address) {
+    await updateUnderwritingRunMetadata(getToken, runId, { name, address: address || null });
+    savedMeta.current = { name, address: address || null };
+  }
+
   async function handleSaveMeta() {
     if (!analysisRunId || !projectData.name?.trim()) return;
     setSavingMeta(true);
     try {
-      await updateUnderwritingRunMetadata(getToken, analysisRunId, {
-        name: projectData.name.trim(),
-        address: projectData.address?.trim() || null,
-      });
-      savedMeta.current = {
-        name: projectData.name.trim(),
-        address: projectData.address?.trim() || null,
-      };
+      await persistMeta(analysisRunId, projectData.name.trim(), projectData.address?.trim() || null);
       toast.success("Saved");
     } catch {
       toast.error("Failed to save — try again");

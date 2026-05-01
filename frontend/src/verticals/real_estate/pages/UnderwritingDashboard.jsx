@@ -69,11 +69,14 @@ function EditNameAddressForm({ initialName, initialAddress, onSave, onCancel, sa
   const [name, setName] = useState(initialName || '');
   const [address, setAddress] = useState(initialAddress || '');
 
+  const trimmedName = name.trim();
+  const trimmedAddress = address.trim();
+
   function handleKeyDown(e) {
     if (e.key === 'Escape') onCancel();
     if (e.key === 'Enter') {
       e.preventDefault();
-      if (name.trim()) onSave(name.trim(), address.trim());
+      if (trimmedName) onSave(trimmedName, trimmedAddress);
     }
   }
 
@@ -98,8 +101,8 @@ function EditNameAddressForm({ initialName, initialAddress, onSave, onCancel, sa
       <div className="flex items-center gap-2 pt-0.5">
         <Button
           size="sm"
-          onClick={() => { if (name.trim()) onSave(name.trim(), address.trim()); }}
-          disabled={saving || !name.trim()}
+          onClick={() => { if (trimmedName) onSave(trimmedName, trimmedAddress); }}
+          disabled={saving || !trimmedName}
         >
           {saving && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
           Save
