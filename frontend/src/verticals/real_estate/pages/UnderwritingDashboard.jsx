@@ -25,7 +25,6 @@ import { useAppAuth } from '../../../hooks/useAppAuth';
 import { useUnderwriting, useUnderwritingActions } from '../../../store';
 import { deleteUnderwritingRun, updateUnderwritingRunMetadata } from '../../../api/re-underwriting';
 import {
-  UnderwritingDefaultsModal,
   UnderwritingEmptyState,
   UnderwritingMetricCard,
   UnderwritingStatusBadge,
@@ -101,7 +100,6 @@ function EditNameAddressForm({ initialName, initialAddress, onSave, onCancel, sa
           size="sm"
           onClick={() => { if (name.trim()) onSave(name.trim(), address.trim()); }}
           disabled={saving || !name.trim()}
-          className={!name.trim() ? 'cursor-not-allowed' : ''}
         >
           {saving && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
           Save
@@ -176,7 +174,7 @@ function RunRow({ run, onOpen, onDelete }) {
                   type="button"
                   onClick={enterEditMode}
                   aria-label="Edit deal name"
-                  className="rounded-sm p-0.5 text-muted-foreground opacity-0 transition-opacity hover:bg-muted hover:text-foreground group-hover:opacity-100"
+                  className="rounded-sm p-0.5 text-muted-foreground opacity-0 transition-opacity hover:bg-muted hover:text-foreground group-hover:opacity-100 focus:opacity-100"
                 >
                   <Pencil className="h-3.5 w-3.5" />
                 </button>
@@ -306,13 +304,10 @@ export default function UnderwritingDashboard() {
   };
 
   const newAnalysisBtn = (
-    <div className="flex items-center gap-2">
-      <UnderwritingDefaultsModal getToken={getToken} />
-      <Button onClick={() => navigate('/app/re/underwriting/new')}>
-        <Plus className="mr-1.5 h-4 w-4" />
-        New Analysis
-      </Button>
-    </div>
+    <Button onClick={() => navigate('/app/re/underwriting/new')}>
+      <Plus className="mr-1.5 h-4 w-4" />
+      New Analysis
+    </Button>
   );
 
   const pageHeader = {
