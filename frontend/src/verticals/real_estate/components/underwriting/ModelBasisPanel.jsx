@@ -20,7 +20,7 @@ function BasisCard({ label, value, tone = 'neutral', detail, children }) {
 function getExpenseTone(expenseBasis) {
   if (!expenseBasis) return 'danger';
   if (expenseBasis.source === 'line_items' || expenseBasis.source === 'expense_ratio_current') return 'success';
-  if (expenseBasis.source === 'expense_ratio_pro_forma') return 'warning';
+  if (expenseBasis.source === 'expense_ratio_pro_forma' || expenseBasis.source === 'om_noi') return 'warning';
   return 'danger';
 }
 
@@ -28,6 +28,7 @@ export default function ModelBasisPanel({
   revenueBasis,
   expenseBasis,
   noiBasis,
+  isOmNoiMode = false,
   unitMixSource,
   rentCompCoverage,
 }) {
@@ -63,17 +64,19 @@ export default function ModelBasisPanel({
       </BasisCard>
       <BasisCard
         label="NOI hierarchy"
-        value="Modeled NOI"
-        tone="success"
-        detail="Modeled NOI is used for valuation. OM-stated NOI is a reference benchmark only."
+        value={isOmNoiMode ? 'OM-stated NOI' : 'Modeled NOI'}
+        tone={isOmNoiMode ? 'warning' : 'success'}
+        detail={isOmNoiMode
+          ? 'OM-stated NOI is used for valuation in quick-screen mode. Upload a T-12 for income and expense support.'
+          : 'Modeled NOI is used for valuation. OM-stated NOI is a reference benchmark only.'}
       >
         <div className="grid grid-cols-2 gap-2 text-xs">
           <div>
-            <p className="text-muted-foreground">Modeled</p>
+            <p className="text-muted-foreground">{isOmNoiMode ? 'OM basis' : 'Modeled'}</p>
             <p className="mt-1 font-semibold text-foreground">{formatCompactCurrency(noiBasis?.modeledNoi)}</p>
           </div>
           <div>
-            <p className="text-muted-foreground">OM reference</p>
+            <p className="text-muted-foreground">{isOmNoiMode ? 'OM stated' : 'OM reference'}</p>
             <p className="mt-1 font-semibold text-foreground">{formatCompactCurrency(noiBasis?.omStatedNoi)}</p>
           </div>
         </div>

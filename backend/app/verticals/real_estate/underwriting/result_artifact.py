@@ -13,6 +13,7 @@ PRESERVED_RESULT_ARTIFACT_KEYS = (
     "discrepancies",
     "stress_tests",
     "plausibility_flags",
+    "noi_bridge",
 )
 
 

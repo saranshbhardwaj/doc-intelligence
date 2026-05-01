@@ -89,7 +89,11 @@ export default function LibraryPage() {
     if (Object.keys(indexingJobs).length === 0) return documents;
     return documents.map((doc) => {
       const job = indexingJobs[doc.id];
-      if (!job || !job.isProcessing) return doc;
+      const isTerminal =
+        doc.status === "completed" ||
+        doc.status === "failed" ||
+        doc.status === "error";
+      if (!job || !job.isProcessing || isTerminal) return doc;
       return {
         ...doc,
         status: "processing",
@@ -366,6 +370,9 @@ export default function LibraryPage() {
                     : doc
                 )
               );
+
+              fetchDocuments(targetCollectionId);
+              fetchCollections();
 
               toast.error(`Failed to index ${file.name}`, { description: error.message });
             },

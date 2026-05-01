@@ -1,10 +1,21 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Building2, ChevronDown, MapPin, TrendingUp } from 'lucide-react';
 import { CartesianGrid, Legend, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { Button } from '@/components/ui/button';
 import { UnderwritingSection, UnderwritingStatusBadge } from './UnderwritingUI';
 import KeyValueList from './KeyValueList';
 import { formatCompactCurrency, formatCurrency, formatCurrencyPrecise, formatPercent, formatRatioPercent } from './formatters';
+
+const BUCKET_ORDER = ['locker', 'small', 'medium', 'large', 'xlarge'];
+const CLIMATE_ORDER = ['CC', 'NC'];
+const CLIMATE_LABEL = { CC: 'Climate-Controlled', NC: 'Non-Climate' };
+
+function deltaTone(ratio) {
+  if (ratio == null) return null;
+  if (ratio > 1.10) return 'danger';
+  if (ratio > 1.05) return 'warning';
+  return 'success';
+}
 
 export default function MarketSection({
   show,
@@ -24,6 +35,7 @@ export default function MarketSection({
   rentPositionAnalysis,
   rentComps,
   rentCompCoverage,
+  unknownClimateCompCount,
   getToken,
   runId,
   runSensitivityAnalysis,
@@ -35,6 +47,16 @@ export default function MarketSection({
   const [sensitivityPrice, setSensitivityPrice] = useState(null);
   const [sensitivityPoints, setSensitivityPoints] = useState([]);
   const [isSensitivityLoading, setIsSensitivityLoading] = useState(false);
+
+  const { hasBuckets, matrixBuckets, matrixClimates } = useMemo(() => {
+    const bucketSet = new Set(rentPositionAnalysis.map(r => r.bucket).filter(Boolean));
+    const climateSet = new Set(rentPositionAnalysis.map(r => r.climate_type).filter(Boolean));
+    return {
+      hasBuckets: bucketSet.size > 0,
+      matrixBuckets: BUCKET_ORDER.filter(b => bucketSet.has(b)),
+      matrixClimates: CLIMATE_ORDER.filter(c => climateSet.has(c)),
+    };
+  }, [rentPositionAnalysis]);
 
   useEffect(() => {
     if (!sensitivityPrice || !runId) return;
@@ -181,33 +203,153 @@ export default function MarketSection({
                   </div>
                 ) : null}
                 {rentPositionAnalysis.length > 0 ? (
-                  <div className="overflow-x-auto">
-                    <table className="underwriting-table min-w-[760px]">
-                      <thead>
-                        <tr className="border-b border-border/70 text-left text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
-                          <th className="pb-3">Size</th>
-                          <th className="pb-3">Type</th>
-                          <th className="pb-3 text-right">Subject current</th>
-                          <th className="pb-3 text-right">Subject market</th>
-                          <th className="pb-3 text-right">Comp avg</th>
-                          <th className="pb-3 text-right">Current vs comp</th>
-                          <th className="pb-3 text-right">Market vs comp</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {rentPositionAnalysis.map((row, index) => (
-                          <tr key={index} className="border-b border-border/50 last:border-b-0">
-                            <td className="py-3 font-medium text-foreground">{row.size || '—'}</td>
-                            <td className="py-3 text-muted-foreground">{row.climate_type}</td>
-                            <td className="py-3 text-right">{formatCurrency(row.subject_current_rent)}</td>
-                            <td className="py-3 text-right">{formatCurrency(row.subject_market_rent)}</td>
-                            <td className="py-3 text-right">{formatCurrency(row.comp_average_rent)}</td>
-                            <td className="py-3 text-right font-medium text-foreground">{formatRatioPercent(row.current_vs_comp_ratio)}</td>
-                            <td className="py-3 text-right font-medium text-foreground">{formatRatioPercent(row.market_vs_comp_ratio)}</td>
-                          </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                  <div>
+                    {/* Matrix table */}
+                    {!hasBuckets ? (
+                      <div className="overflow-x-auto">
+                        <table className="underwriting-table min-w-[760px]">
+                          <thead>
+                            <tr className="border-b border-border/70 text-left text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                              <th className="pb-3">Size</th>
+                              <th className="pb-3">Type</th>
+                              <th className="pb-3 text-right">Subject current</th>
+                              <th className="pb-3 text-right">Subject market</th>
+                              <th className="pb-3 text-right">Comp avg</th>
+                              <th className="pb-3 text-right">Current vs comp</th>
+                              <th className="pb-3 text-right">Market vs comp</th>
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {rentPositionAnalysis.map((row, index) => (
+                              <tr key={index} className="border-b border-border/50 last:border-b-0">
+                                <td className="py-3 font-medium text-foreground">{row.size || '—'}</td>
+                                <td className="py-3 text-muted-foreground">{row.climate_type}</td>
+                                <td className="py-3 text-right">{formatCurrency(row.subject_current_rent)}</td>
+                                <td className="py-3 text-right">{formatCurrency(row.subject_market_rent)}</td>
+                                <td className="py-3 text-right">{formatCurrency(row.comp_average_rent)}</td>
+                                <td className="py-3 text-right font-medium text-foreground">{formatRatioPercent(row.current_vs_comp_ratio)}</td>
+                                <td className="py-3 text-right font-medium text-foreground">{formatRatioPercent(row.market_vs_comp_ratio)}</td>
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    ) : (
+                      <div className="overflow-x-auto">
+                        <table className="underwriting-table min-w-[480px]">
+                          <thead>
+                            <tr className="border-b border-border/70 text-left text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                              <th className="pb-3 pr-4">Bucket</th>
+                              {matrixClimates.map(c => (
+                                <th key={c} className="pb-3 px-3 text-left">
+                                  <div>{CLIMATE_LABEL[c] ?? c}</div>
+                                  <div className="text-[9px] font-normal normal-case tracking-normal text-muted-foreground/70 mt-0.5">asking avg</div>
+                                </th>
+                              ))}
+                            </tr>
+                          </thead>
+                          <tbody>
+                            {matrixBuckets.map(bucket => (
+                              <tr key={bucket} className="border-b border-border/50 last:border-b-0">
+                                <td className="py-3 pr-4 font-medium text-foreground capitalize">{bucket}</td>
+                                {matrixClimates.map(climate => {
+                                  const cell = rentPositionAnalysis.find(r => r.bucket === bucket && r.climate_type === climate);
+                                  if (!cell) {
+                                    return <td key={climate} className="py-3 px-3 text-muted-foreground">—</td>;
+                                  }
+                                  const ratio = cell.current_vs_comp_ratio ?? cell.market_vs_comp_ratio;
+                                  const tone = deltaTone(ratio);
+                                  const pct = ratio != null ? `${ratio > 1 ? '+' : ''}${((ratio - 1) * 100).toFixed(0)}%` : null;
+                                  return (
+                                    <td key={climate} className="py-3 px-3">
+                                      <div className="flex flex-col gap-0.5">
+                                        <span className="text-xs font-medium text-foreground tabular-nums">
+                                          {formatCurrency(cell.comp_average_rent)}
+                                          {cell.comp_count != null && (
+                                            <span className="ml-1 text-muted-foreground font-normal">
+                                              ({cell.comp_count} {cell.comp_count === 1 ? 'comp' : 'comps'})
+                                            </span>
+                                          )}
+                                        </span>
+                                        {cell.subject_current_rent != null && (
+                                          <span className="text-xs text-muted-foreground tabular-nums">
+                                            Subject: {formatCurrency(cell.subject_current_rent)}
+                                            {pct && tone && cell.comp_count > 1 && (
+                                              <UnderwritingStatusBadge tone={tone} className="ml-1 px-1.5 py-0 text-[9px]">
+                                                {pct}
+                                              </UnderwritingStatusBadge>
+                                            )}
+                                            {pct && cell.comp_count === 1 && (
+                                              <span className="ml-1 text-muted-foreground/70 text-[9px]">{pct}*</span>
+                                            )}
+                                          </span>
+                                        )}
+                                      </div>
+                                    </td>
+                                  );
+                                })}
+                              </tr>
+                            ))}
+                          </tbody>
+                        </table>
+                      </div>
+                    )}
+
+                    {unknownClimateCompCount > 0 && (
+                      <p className="mt-2 text-[11px] text-muted-foreground/70">
+                        {unknownClimateCompCount} comp{unknownClimateCompCount !== 1 ? 's' : ''} not matched — climate type unclear
+                      </p>
+                    )}
+
+                    {/* Collapsible raw comp list */}
+                    {rentComps.length > 0 && (
+                      <details className="mt-3">
+                        <summary className="cursor-pointer select-none text-xs font-medium text-primary hover:text-primary/80">
+                          Show all comps ({rentComps.length})
+                        </summary>
+                        <div className="mt-2 overflow-x-auto">
+                          <table className="underwriting-table min-w-[560px]">
+                            <thead>
+                              <tr className="border-b border-border/70 text-left text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                                <th className="pb-3">Facility</th>
+                                <th className="pb-3">Size</th>
+                                <th className="pb-3">Climate</th>
+                                <th className="pb-3 text-right">Rent/mo</th>
+                                <th className="pb-3 text-right">Rent/sqft</th>
+                                <th className="pb-3 text-right">Distance</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {rentComps.map((c, i) => (
+                                <tr key={i} className="border-b border-border/50 last:border-b-0">
+                                  <td className="py-2 text-muted-foreground">{c.facility ?? '—'}</td>
+                                  <td className="py-2 tabular-nums text-muted-foreground">{c.size ?? '—'}</td>
+                                  <td className="py-2">
+                                    {c.climate_type ? (
+                                      <UnderwritingStatusBadge
+                                        tone={c.climate_type === 'CC' ? 'success' : c.climate_type === 'NC' ? 'active' : 'neutral'}
+                                        className="px-1.5 py-0 text-[9px]"
+                                      >
+                                        {c.climate_type}
+                                      </UnderwritingStatusBadge>
+                                    ) : <span className="text-muted-foreground">—</span>}
+                                  </td>
+                                  <td className="py-2 text-right tabular-nums text-foreground">
+                                    {c.asking_rent != null ? formatCurrency(c.asking_rent) : '—'}
+                                  </td>
+                                  <td className="py-2 text-right tabular-nums text-muted-foreground">
+                                    {c.rent_per_sqft != null ? formatCurrencyPrecise(c.rent_per_sqft) : '—'}
+                                  </td>
+                                  <td className="py-2 text-right tabular-nums text-muted-foreground">
+                                    {c.distance_mi != null ? `${c.distance_mi} mi` : '—'}
+                                  </td>
+                                </tr>
+                              ))}
+                            </tbody>
+                          </table>
+                        </div>
+                      </details>
+                    )}
                   </div>
                 ) : rentComps.length > 0 ? (
                   <div className="overflow-x-auto">

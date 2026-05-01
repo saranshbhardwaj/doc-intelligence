@@ -94,6 +94,15 @@ function hasRows(rows) {
 }
 
 export function getRevenueBasis(artifact = {}, persistedInputs = {}, sourceCitations = {}) {
+  if (artifact.expense_basis?.source === 'om_noi') {
+    return {
+      label: 'OM-stated NOI quick screen',
+      tone: 'warning',
+      source: 'om_noi',
+      detail: 'Returns are driven by OM-stated NOI. Upload a T-12 to verify actual revenue and expenses.',
+    };
+  }
+
   const months = persistedInputs.operational?.income_basis_months
     ?? artifact.income_basis_months
     ?? artifact.om_data?.income_basis_months
@@ -158,13 +167,21 @@ export function getRevenueBasis(artifact = {}, persistedInputs = {}, sourceCitat
   };
 }
 
-export function getUnitMixSource(artifact = {}, persistedInputs = {}) {
+export function getUnitMixSource(artifact = {}, persistedInputs = {}, coverage = null) {
   if (hasRows(artifact.rent_roll_data?.unit_mix)) {
     return {
       label: 'Rent roll',
       tone: 'success',
       source: 'rent_roll',
       detail: 'Unit mix is sourced from rent roll rows.',
+    };
+  }
+  if (coverage?.isPartial) {
+    return {
+      label: 'Partial OM unit schedule',
+      tone: 'warning',
+      source: 'om_partial',
+      detail: `${coverage.extractedUnits} of ${coverage.propertyUnits} property units are represented in extracted OM unit rows.`,
     };
   }
   if (hasRows(artifact.unit_mix)) {
@@ -318,6 +335,11 @@ export function normalizeCitation(fieldCitation, citationContext, citationToken)
     document_id: contextEntry?.document_id ?? fieldCitation?.document_id,
     filename: contextEntry?.filename ?? fieldCitation?.filename,
     bbox: contextEntry?.bbox ?? fieldCitation?.bbox ?? null,
+    source_kind: contextEntry?.source_kind ?? fieldCitation?.source_kind,
+    sheet_name: contextEntry?.sheet_name ?? fieldCitation?.sheet_name,
+    row_start: contextEntry?.row_start ?? fieldCitation?.row_start,
+    row_end: contextEntry?.row_end ?? fieldCitation?.row_end,
+    source_text: contextEntry?.source_text ?? fieldCitation?.source_text,
   };
 }
 
@@ -357,7 +379,9 @@ export function flattenCitationEntries(citations) {
       if (!uniqueEntries.has(id)) {
         uniqueEntries.set(id, {
           id,
-          label: entry.page ? `${docTypeLabel} p${entry.page}` : `Open ${docTypeLabel}`,
+          label: entry.source_kind === 'spreadsheet' && entry.sheet_name
+            ? `${docTypeLabel} ${entry.sheet_name}${entry.row_start ? ` rows ${entry.row_start}-${entry.row_end}` : ''}`
+            : entry.page ? `${docTypeLabel} p${entry.page}` : `Open ${docTypeLabel}`,
           title: citation.source_text || entry.filename || docTypeLabel,
           entry,
         });

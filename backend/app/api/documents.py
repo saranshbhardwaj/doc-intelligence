@@ -10,6 +10,7 @@ from typing import Optional
 from fastapi import APIRouter, UploadFile, File, HTTPException, Depends, Request, Query
 
 from app.auth import get_current_user, get_current_org_role, is_admin_role
+from app.config import settings
 from app.db_models_users import User
 from app.services.tasks import start_document_indexing_chain
 from app.repositories.collection_repository import CollectionRepository
@@ -26,7 +27,6 @@ from app.utils.logging import logger
 router = APIRouter()
 
 # Constants
-MAX_FILE_SIZE_MB = 50  # Maximum PDF file size
 MAX_FILENAME_LENGTH = 255  # Maximum filename length
 
 
@@ -100,10 +100,13 @@ async def upload_document(
         raise HTTPException(status_code=400, detail="Uploaded file is empty")
 
     file_size_mb = len(file_bytes) / (1024 * 1024)
-    if file_size_mb > MAX_FILE_SIZE_MB:
+    max_file_size_mb = settings.library_max_file_size_mb
+    if file_size_mb > max_file_size_mb:
         raise HTTPException(
             status_code=413,
-            detail=f"File too large ({file_size_mb:.1f}MB). Maximum size is {MAX_FILE_SIZE_MB}MB"
+            detail=(
+                f"File too large ({file_size_mb:.1f}MB). Files up to {max_file_size_mb} MB are supported."
+            )
         )
 
     validation_error = validate_uploaded_file_signature(file_ext, file_bytes)

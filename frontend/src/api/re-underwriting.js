@@ -34,6 +34,12 @@ export async function updateUnderwritingInputs(getToken, runId, inputs) {
   return response.data;
 }
 
+export async function updateUnderwritingRunMetadata(getToken, runId, metadata) {
+  const api = createAuthenticatedApi(getToken);
+  const response = await api.patch(`/api/v1/re/underwriting/runs/${runId}`, metadata);
+  return response.data;
+}
+
 export async function runSensitivityAnalysis(getToken, runId, purchasePrices) {
   const api = createAuthenticatedApi(getToken);
   const response = await api.post(

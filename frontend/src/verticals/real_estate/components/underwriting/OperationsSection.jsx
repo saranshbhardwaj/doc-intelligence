@@ -10,7 +10,7 @@ import { formatCompactCurrency, formatCurrency, formatPercent } from './formatte
 
 function getExpenseBasisTone(source) {
   if (source === 'line_items' || source === 'expense_ratio_current') return 'success';
-  if (source === 'expense_ratio_pro_forma') return 'warning';
+  if (source === 'expense_ratio_pro_forma' || source === 'om_noi') return 'warning';
   return 'danger';
 }
 
@@ -40,6 +40,10 @@ export default function OperationsSection({
   onToggle,
   unitMix,
   unitMixSummary,
+  unitMixIsPartial = false,
+  propertyUnits = null,
+  extractedUnits = 0,
+  unitMixCoveragePct = null,
   occupancy,
   currentExpenseRatio,
   proFormaExpenseRatio,
@@ -89,8 +93,19 @@ export default function OperationsSection({
           <div className="underwriting-panel p-4 sm:p-5">
             <div className="mb-4 flex items-center justify-between gap-3">
               <div>
-                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Unit mix</p>
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Unit mix</p>
+                  {unitMixIsPartial ? (
+                    <UnderwritingStatusBadge tone="warning">Partial OM unit schedule</UnderwritingStatusBadge>
+                  ) : null}
+                </div>
                 <p className="mt-1 text-sm text-muted-foreground">Occupancy and rent by unit type.</p>
+                {unitMixIsPartial && propertyUnits > 0 ? (
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {extractedUnits} of {propertyUnits} property units represented
+                    {unitMixCoveragePct != null ? ` (${Math.round(unitMixCoveragePct * 100)}% coverage)` : ''}
+                  </p>
+                ) : null}
               </div>
               <OccupancyBadge pct={occupancy} />
             </div>
@@ -174,20 +189,22 @@ export default function OperationsSection({
                         {expenseBasis.label}
                       </UnderwritingStatusBadge>
                     </div>
-                    <div className="mt-3 grid gap-3 sm:grid-cols-3">
-                      <div>
-                        <p className="text-xs text-muted-foreground">Line-item OpEx</p>
-                        <p className="mt-1 font-semibold text-foreground">{formatCompactCurrency(expenseBasis.year1_line_item_opex)}</p>
+                    {expenseBasis.source !== 'om_noi' ? (
+                      <div className="mt-3 grid gap-3 sm:grid-cols-3">
+                        <div>
+                          <p className="text-xs text-muted-foreground">Line-item OpEx</p>
+                          <p className="mt-1 font-semibold text-foreground">{formatCompactCurrency(expenseBasis.year1_line_item_opex)}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-muted-foreground">Ratio-implied OpEx</p>
+                          <p className="mt-1 font-semibold text-foreground">{formatCompactCurrency(expenseBasis.year1_ratio_opex)}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-muted-foreground">Expense ratio used</p>
+                          <p className="mt-1 font-semibold text-foreground">{formatPercent(expenseBasis.ratio)}</p>
+                        </div>
                       </div>
-                      <div>
-                        <p className="text-xs text-muted-foreground">Ratio-implied OpEx</p>
-                        <p className="mt-1 font-semibold text-foreground">{formatCompactCurrency(expenseBasis.year1_ratio_opex)}</p>
-                      </div>
-                      <div>
-                        <p className="text-xs text-muted-foreground">Expense ratio used</p>
-                        <p className="mt-1 font-semibold text-foreground">{formatPercent(expenseBasis.ratio)}</p>
-                      </div>
-                    </div>
+                    ) : null}
                     {expenseBasisFormula ? (
                       <p className="mt-3 whitespace-pre-line rounded-xl bg-muted/40 px-3 py-2 font-mono text-xs leading-5 text-muted-foreground">
                         {expenseBasisFormula}

@@ -31,7 +31,10 @@ function DocCard({ slot, selected, onOpen, onRemove, extracting }) {
             {slot.required ? <UnderwritingStatusBadge tone="warning">Required</UnderwritingStatusBadge> : null}
             {selected ? <CheckCircle2 className="h-3.5 w-3.5 text-uw-success" /> : null}
           </div>
-          <p className="mt-1 text-xs leading-5 text-muted-foreground">
+          <p
+            className="mt-1 max-w-full truncate text-xs leading-5 text-muted-foreground"
+            title={selected ? selected.name : undefined}
+          >
             {selected ? selected.name : slot.hint}
           </p>
         </div>

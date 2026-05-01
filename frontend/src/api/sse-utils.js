@@ -139,6 +139,41 @@ export async function streamJobProgress(
   let terminalFailed = false;
   let lastProgressTime = Date.now();
 
+  // Re-check job status once the SSE connection is open. This closes the race
+  // window between fetchInitialState (pre-connect) and the EventSource being
+  // ready: if the job completed in that gap, its events were already published
+  // to Redis and will never arrive on this stream.
+  if (fetchInitialState && getJobStatus) {
+    eventSource.onopen = async () => {
+      if (streamEnded) return;
+      try {
+        const state = await getJobStatus(jobId, getToken);
+        if (streamEnded) return; // stream may have resolved during the await
+        const { callbacks } = _activeStreams.get(jobId) || { callbacks: {} };
+        if (state.status === "completed") {
+          callbacks.onComplete?.({
+            message: state.message || "Job completed successfully",
+            run_id: state.run_id,
+            extraction_id: state.extraction_id,
+          });
+          callbacks.onEnd?.({ reason: "completed", job_id: jobId });
+          cleanup();
+        } else if (state.status === "failed") {
+          callbacks.onError?.({
+            message: state.error_message || "Job failed",
+            stage: state.error_stage,
+            type: state.error_type,
+            isRetryable: state.is_retryable ?? false,
+          });
+          callbacks.onEnd?.({ reason: "failed", job_id: jobId });
+          cleanup();
+        }
+      } catch (err) {
+        console.error("[SSE Utils] onopen status check failed:", err);
+      }
+    };
+  }
+
   const cleanup = () => {
     if (isCleaningUp) return;
     isCleaningUp = true;

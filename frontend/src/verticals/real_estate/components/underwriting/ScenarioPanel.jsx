@@ -37,7 +37,7 @@ export default function ScenarioPanel({
     <div className="mt-4 underwriting-panel p-4 sm:p-5">
       <div className="mb-4 flex items-center justify-between gap-3">
         <div>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">What-if scenario</p>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Assumption what-if</p>
           <p className="mt-1 text-sm text-muted-foreground">Adjust assumptions to preview updated returns. Changes are not saved.</p>
         </div>
         <div className="flex items-center gap-2">

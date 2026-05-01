@@ -5,6 +5,8 @@ from workos import WorkOSClient
 from app.auth import get_current_user, get_current_org_role, is_admin_role, _verify_token, _claim
 from app.db_models_users import User
 from app.repositories.extraction_repository import ExtractionRepository
+from app.repositories.user_repository import UserRepository
+from app.schemas.user_thresholds import UserUnderwritingThresholds
 from app.services.beta_limits import get_usage_snapshot
 from app.utils.logging import logger
 from pathlib import Path
@@ -182,6 +184,37 @@ def get_user_extractions(
         "offset": offset,
         "has_more": (offset + len(extractions)) < total
     }
+
+
+@router.get("/api/users/me/thresholds")
+def get_underwriting_thresholds(user: User = Depends(get_current_user)):
+    """Return the current user's saved underwriting threshold defaults."""
+    repo = UserRepository()
+    saved = repo.get_underwriting_thresholds(user.id) or {}
+    return UserUnderwritingThresholds(**saved).model_dump(exclude_none=True)
+
+
+@router.patch("/api/users/me/thresholds")
+def update_underwriting_thresholds(
+    payload: UserUnderwritingThresholds,
+    user: User = Depends(get_current_user),
+):
+    """Sparse-merge threshold overrides for the current user.
+
+    Only fields included in the request body are updated; unset fields
+    preserve their previously saved values.
+    """
+    repo = UserRepository()
+    try:
+        updated = repo.update_underwriting_thresholds(
+            user.id, payload.model_dump(exclude_none=True)
+        )
+        return UserUnderwritingThresholds(**updated).model_dump(exclude_none=True)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="User not found")
+    except Exception as e:
+        logger.error("Failed to update underwriting thresholds", extra={"user_id": user.id, "error": str(e)})
+        raise HTTPException(status_code=500, detail="Failed to save thresholds")
 
 
 @router.delete("/api/extractions/{extraction_id}")

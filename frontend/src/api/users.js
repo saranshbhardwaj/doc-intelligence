@@ -46,3 +46,15 @@ export const deleteExtraction = async (getToken, extractionId) => {
   const response = await authenticatedApi.delete(`/api/extractions/${extractionId}`);
   return response.data;
 };
+
+export const getMyThresholds = async (getToken) => {
+  const authenticatedApi = createAuthenticatedApi(getToken);
+  const response = await authenticatedApi.get('/api/users/me/thresholds');
+  return response.data;
+};
+
+export const updateMyThresholds = async (getToken, payload) => {
+  const authenticatedApi = createAuthenticatedApi(getToken);
+  const response = await authenticatedApi.patch('/api/users/me/thresholds', payload);
+  return response.data;
+};

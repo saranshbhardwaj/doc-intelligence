@@ -18,6 +18,7 @@ export { default as KeyValueList } from './KeyValueList';
 export { default as OccupancyBadge } from './OccupancyBadge';
 export { default as SourceSupportActions } from './SourceSupportActions';
 export { default as ScenarioPanel } from './ScenarioPanel';
+export { default as MaxBidPanel } from './MaxBidPanel';
 export { default as ModelBasisPanel } from './ModelBasisPanel';
 export { default as TrustPanel } from './TrustPanel';
 export { default as ReturnsSection } from './ReturnsSection';
@@ -25,6 +26,7 @@ export { default as OperationsSection } from './OperationsSection';
 export { default as EvidenceSection } from './EvidenceSection';
 export { default as MarketSection } from './MarketSection';
 export { default as DiscrepanciesSection } from './DiscrepanciesSection';
+export { default as UnderwritingDefaultsModal } from './UnderwritingDefaultsModal';
 export { default as WorkflowRail } from './wizard/WorkflowRail';
 export { default as WizardInputStage } from './wizard/WizardInputStage';
 export {

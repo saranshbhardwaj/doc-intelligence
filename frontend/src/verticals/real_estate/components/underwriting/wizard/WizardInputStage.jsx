@@ -16,6 +16,7 @@ import { TAB_CONFIG } from './wizardConfig';
 import {
   FieldGroup,
   NumericField,
+  OperationsIncomeBasisStrip,
   OperationsWarnings,
   ValueAddEvidence,
 } from './WizardFields';
@@ -81,6 +82,7 @@ export default function WizardInputStage({
       case 'operations':
         return (
           <div className="fields-grid">
+            <OperationsIncomeBasisStrip inputs={inputs} currentRun={currentRun} />
             <FieldGroup label="Revenue" />
             <NumericField label="Gross Potential Rent (Annual)" value={inputs.operational.gross_potential_rent_annual} onChange={(v) => patchOp('gross_potential_rent_annual', v)} placeholder="600,000" prefix="$" citation={getCitation('gross_potential_rent_annual')} onOpenSource={handleOpenSource} />
             <NumericField label="Avg Current Rent / Door / Mo" value={inputs.operational.avg_in_place_rent_per_unit_monthly} onChange={(v) => patchOp('avg_in_place_rent_per_unit_monthly', v)} placeholder="115" prefix="$" citation={getCitation('avg_in_place_rent_per_unit_monthly')} onOpenSource={handleOpenSource} />
@@ -135,17 +137,20 @@ export default function WizardInputStage({
         );
       case 'market':
         return (
-          <div className="fields-grid">
-            <FieldGroup label="Nearby Facilities" />
-            <NumericField label="Nearby Storage Facilities (1 mi)" value={projectData.nearby_storage_count_1mi} onChange={(v) => patchProject('nearby_storage_count_1mi', v)} citation={getCitation('nearby_storage_count_1mi')} onOpenSource={handleOpenSource} />
-            <NumericField label="Nearby Storage Facilities (3 mi)" value={projectData.nearby_storage_count_3mi} onChange={(v) => patchProject('nearby_storage_count_3mi', v)} citation={getCitation('nearby_storage_count_3mi')} onOpenSource={handleOpenSource} />
-            <NumericField label="Nearby Storage Facilities (5 mi)" value={projectData.nearby_storage_count_5mi} onChange={(v) => patchProject('nearby_storage_count_5mi', v)} citation={getCitation('nearby_storage_count_5mi')} onOpenSource={handleOpenSource} />
-            <FieldGroup label="Demographics" />
-            <NumericField label="Population (3 mi)" value={projectData.population_3mi} onChange={(v) => patchProject('population_3mi', v)} citation={getCitation('population_3mi')} onOpenSource={handleOpenSource} />
-            <NumericField label="Avg Household Income (3 mi)" value={projectData.avg_household_income_3mi} onChange={(v) => patchProject('avg_household_income_3mi', v)} prefix="$" citation={getCitation('avg_household_income_3mi')} onOpenSource={handleOpenSource} />
-            <NumericField label="Storage Sq Ft / Capita" value={projectData.storage_sqft_per_capita_3mi} onChange={(v) => patchProject('storage_sqft_per_capita_3mi', v)} suffix="sqft" citation={getCitation('storage_sqft_per_capita_3mi')} onOpenSource={handleOpenSource} />
-            <FieldGroup label="Tight Comp Set" />
-            <div className={`xl:col-span-2 rounded-2xl border p-4 ${rentCompsCitation ? 'border-green-500/40 bg-green-500/5' : 'border-border/60 bg-background/60'}`}>
+          <>
+            <div className="fields-grid">
+              <FieldGroup label="Nearby Facilities" />
+              <NumericField label="Nearby Storage Facilities (1 mi)" value={projectData.nearby_storage_count_1mi} onChange={(v) => patchProject('nearby_storage_count_1mi', v)} citation={getCitation('nearby_storage_count_1mi')} onOpenSource={handleOpenSource} />
+              <NumericField label="Nearby Storage Facilities (3 mi)" value={projectData.nearby_storage_count_3mi} onChange={(v) => patchProject('nearby_storage_count_3mi', v)} citation={getCitation('nearby_storage_count_3mi')} onOpenSource={handleOpenSource} />
+              <NumericField label="Nearby Storage Facilities (5 mi)" value={projectData.nearby_storage_count_5mi} onChange={(v) => patchProject('nearby_storage_count_5mi', v)} citation={getCitation('nearby_storage_count_5mi')} onOpenSource={handleOpenSource} />
+              <FieldGroup label="Demographics" />
+              <NumericField label="Population (3 mi)" value={projectData.population_3mi} onChange={(v) => patchProject('population_3mi', v)} citation={getCitation('population_3mi')} onOpenSource={handleOpenSource} />
+              <NumericField label="Avg Household Income (3 mi)" value={projectData.avg_household_income_3mi} onChange={(v) => patchProject('avg_household_income_3mi', v)} prefix="$" citation={getCitation('avg_household_income_3mi')} onOpenSource={handleOpenSource} />
+              <NumericField label="Storage Sq Ft / Capita" value={projectData.storage_sqft_per_capita_3mi} onChange={(v) => patchProject('storage_sqft_per_capita_3mi', v)} suffix="sqft" citation={getCitation('storage_sqft_per_capita_3mi')} onOpenSource={handleOpenSource} />
+              <FieldGroup label="Tight Comp Set" />
+            </div>
+
+            <div className={`rounded-2xl border p-4 ${rentCompsCitation ? 'border-green-500/40 bg-green-500/5' : 'border-border/60 bg-background/60'}`}>
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                   <div className="flex flex-wrap items-center gap-2">
@@ -228,7 +233,7 @@ export default function WizardInputStage({
                 </div>
               )}
             </div>
-          </div>
+          </>
         );
       case 'debtExit':
         return (

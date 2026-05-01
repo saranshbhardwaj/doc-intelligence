@@ -48,6 +48,46 @@ def test_om_gpr_used_when_no_t12():
     assert merged["operational"]["gross_potential_rent_annual"] == 520_000.0
 
 
+def test_om_noi_projected_maps_to_noi_year_one_stated():
+    results = [_om_result(purchase_price=1_000_000.0, noi_projected=275_000.0)]
+
+    merged, citations = merge_extractions(results)
+
+    assert merged["operational"]["noi_year_one_stated"] == 275_000.0
+    assert citations["noi_year_one_stated"]["doc_type"] == "om"
+
+
+def test_om_noi_year_one_stated_beats_projected_noi():
+    results = [
+        _om_result(
+            purchase_price=1_000_000.0,
+            noi_year_one_stated=300_000.0,
+            noi_projected=275_000.0,
+        )
+    ]
+
+    merged, _ = merge_extractions(results)
+
+    assert merged["operational"]["noi_year_one_stated"] == 300_000.0
+
+
+def test_t12_operating_actuals_still_win_when_om_noi_projected_exists():
+    results = [
+        _om_result(
+            purchase_price=1_000_000.0,
+            gpr_annual_projected=520_000.0,
+            noi_projected=275_000.0,
+        ),
+        _t12_result(gpr_annual_actual=480_000.0, property_tax_annual=42_000.0, period_months=12),
+    ]
+
+    merged, _ = merge_extractions(results)
+
+    assert merged["operational"]["gross_potential_rent_annual"] == 480_000.0
+    assert merged["operational"]["property_tax_annual"] == 42_000.0
+    assert merged["operational"]["noi_year_one_stated"] == 275_000.0
+
+
 # ── T-6 annualisation ────────────────────────────────────────────────────────
 
 def test_t6_gpr_is_annualised():
@@ -67,6 +107,24 @@ def test_om_purchase_price_always_used():
     merged, _ = merge_extractions(results)
     assert merged["acquisition"]["purchase_price"] == 2_500_000.0
     assert merged["exit"]["exit_cap_rate"] == 0.065
+
+
+def test_missing_purchase_price_remains_none_not_zero_default():
+    results = [_om_result(gpr_annual_projected=520_000.0)]
+
+    merged, citations = merge_extractions(results)
+
+    assert merged["acquisition"]["purchase_price"] is None
+    assert "purchase_price" not in citations
+
+
+def test_max_ltv_default_carries_default_citation():
+    results = [_om_result(purchase_price=1_000_000.0)]
+
+    merged, citations = merge_extractions(results)
+
+    assert merged["criteria"]["max_ltv"] == 0.80
+    assert citations["max_ltv"]["is_default"] is True
 
 
 # ── Rent Roll wins for unit count ────────────────────────────────────────────
@@ -129,6 +187,34 @@ def test_additional_analyst_fields_merge_from_documents():
     assert merged["exit"]["market_cap_rate_sale"] == 0.0675
 
 
+def test_computed_t12_expense_ratio_has_formula_metadata():
+    results = [
+        _om_result(purchase_price=1_000_000.0),
+        _t12_result(
+            gpr_annual_actual=1_000_000.0,
+            other_income_annual=100_000.0,
+            property_tax_annual=100_000.0,
+            insurance_annual=50_000.0,
+            payroll_annual=150_000.0,
+            repairs_maintenance_annual=40_000.0,
+            utilities_annual=30_000.0,
+            marketing_annual=20_000.0,
+            other_opex_annual=10_000.0,
+            mgmt_fee_pct_actual=0.05,
+            period_months=12,
+        ),
+    ]
+
+    merged, citations = merge_extractions(results)
+
+    assert merged["operational"]["expense_ratio_current"] == pytest.approx(455_000.0 / 1_100_000.0)
+    citation = citations["expense_ratio_current"]
+    assert citation["doc_type"] == "t12"
+    assert citation["is_computed"] is True
+    assert "formula" in citation
+    assert "total revenue" in citation["formula"]
+
+
 def test_om_only_run_uses_om_expense_lines_when_t12_missing():
     results = [
         _om_result(
@@ -161,6 +247,41 @@ def test_om_only_run_uses_om_expense_lines_when_t12_missing():
     assert merged["operational"]["other_opex_annual"] == 22_500.0
     assert merged["operational"]["mgmt_fee_pct"] == pytest.approx(0.05)
     assert merged["operational"]["expense_ratio_current"] == pytest.approx(0.4587301587)
+
+
+def test_om_other_opex_uses_combined_component_citations():
+    result = ExtractedDocResult(
+        run_id="r1",
+        job_id="j1",
+        doc_type="om",
+        om=OMExtraction(
+            purchase_price=1_000_000.0,
+            expense_office_admin_annual=8_000.0,
+            expense_bank_fees_annual=2_500.0,
+        ),
+        field_citations={
+            "expense_office_admin_annual": {
+                "doc_type": "om",
+                "confidence": 0.9,
+                "citations": ["S1:p10"],
+                "source_text": "Office & Admin $8,000",
+            },
+            "expense_bank_fees_annual": {
+                "doc_type": "om",
+                "confidence": 0.9,
+                "citations": ["S1:p11"],
+                "source_text": "Bank Fees $2,500",
+            },
+        },
+    )
+
+    merged, citations = merge_extractions([result])
+
+    assert merged["operational"]["other_opex_annual"] == 10_500.0
+    assert citations["other_opex_annual"]["doc_type"] == "om"
+    assert citations["other_opex_annual"]["is_computed"] is True
+    assert citations["other_opex_annual"]["citations"] == ["S1:p10", "S1:p11"]
+    assert "is_uncited_extraction" not in citations["other_opex_annual"]
 
 
 def test_plausibility_guards_drop_implausible_extracted_scalars():
@@ -319,3 +440,25 @@ def test_om_rent_comps_pass_through_to_merged_inputs():
 def test_empty_unit_mix_defaults_to_empty_list():
     merged, _ = merge_extractions([_om_result(purchase_price=900_000.0)])
     assert merged["unit_mix"] == []
+
+
+def test_uncited_extracted_t12_value_is_not_marked_default():
+    results = [
+        _om_result(purchase_price=1_000_000.0),
+        _t12_result(other_opex_annual=70_105.0, period_months=12),
+    ]
+
+    merged, citations = merge_extractions(results)
+
+    assert merged["operational"]["other_opex_annual"] == 70_105.0
+    assert citations["other_opex_annual"]["doc_type"] == "t12"
+    assert citations["other_opex_annual"]["is_default"] is False
+    assert citations["other_opex_annual"]["is_uncited_extraction"] is True
+
+
+def test_hardcoded_fallback_still_marked_default():
+    merged, citations = merge_extractions([_om_result(purchase_price=1_000_000.0)])
+
+    assert merged["operational"]["other_opex_annual"] == 0.0
+    assert citations["other_opex_annual"]["is_default"] is True
+    assert "is_uncited_extraction" not in citations["other_opex_annual"]

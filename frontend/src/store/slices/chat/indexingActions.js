@@ -138,11 +138,13 @@ export const createChatIndexingActions = (set, get) => ({
           });
 
           // Guard: if the job was already completed/cleared by onComplete above,
-          // don't re-add it. Spreading a missing entry would create a zombie
-          // job with isProcessing: true that never resolves.
+          // don't re-add it. If the initial status came back failed, onError has
+          // already marked it non-processing; do not revive it as a zombie job.
           set((state) => {
             const existing = state.chat.indexingJobs[docId];
-            if (!existing) return state;
+            if (!existing || existing.error || existing.isProcessing === false) {
+              return state;
+            }
             return {
               chat: {
                 ...state.chat,

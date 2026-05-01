@@ -43,6 +43,11 @@ class Settings(BaseSettings):
     re_uw_discrepancy_threshold_pct: float = 0.10  # flag if sources differ by > 10%
     re_uw_task_soft_time_limit_seconds: int = 600  # 10 min → SoftTimeLimitExceeded → mark_error
     re_uw_stale_job_timeout_minutes: int = 20  # periodic_cleanup sweeps runs stuck here
+    re_uw_om_context_selector_enabled: bool = True
+    re_uw_om_context_selector_min_chars: int = 25_000
+    re_uw_om_context_max_chars: int = 24_000
+    re_uw_om_initial_output_max_tokens: int = 16_000
+    re_uw_om_retry_output_max_tokens: int = 32_000
 
     # ===== EXCEL TEMPLATE MAPPING CONFIGURATION =====
     # Schema-based mapping system for known Excel templates
@@ -71,7 +76,20 @@ class Settings(BaseSettings):
 
     # File Upload Limits
     max_file_size_mb: int = 5
+    library_max_file_size_mb: int = 50
     max_pages: int = 200 # Maximum number of pages per document
+    spreadsheet_max_sheets: int = 30
+    spreadsheet_max_rows_per_sheet: int = 10_000
+    spreadsheet_max_total_cells: int = 250_000
+    spreadsheet_rows_per_chunk: int = 200
+    spreadsheet_max_chunk_tokens: int = 6000
+
+    # Template fill guardrails
+    template_fill_max_template_mb: int = 10
+    template_fill_max_pdf_context_items: int = 600
+    template_fill_max_llm_context_chars: int = 80_000
+    template_fill_max_table_rows_per_block: int = 200
+    template_fill_max_narrative_chars_per_block: int = 2_500
     
     # LLM Settings - Expensive Model (Structured Extraction)
     llm_model: str = "claude-sonnet-4-5-20250929"

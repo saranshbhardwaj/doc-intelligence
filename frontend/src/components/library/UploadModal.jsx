@@ -49,7 +49,7 @@ export default function UploadModal({
   onCollectionChange,
   onUpload,
 }) {
-  const uploadAccept = ".pdf,.docx,.pptx,.jpg,.jpeg,.png,.bmp,.tif,.tiff,.heif,.heic";
+  const uploadAccept = ".pdf,.docx,.pptx,.xlsx,.xlsm,.csv,.jpg,.jpeg,.png,.bmp,.tif,.tiff,.heif,.heic";
   const [selectedFiles, setSelectedFiles] = useState([]);
   const [dragActive, setDragActive] = useState(false);
   const [uploading, setUploading] = useState(false);
@@ -73,6 +73,11 @@ export default function UploadModal({
       "application/pdf",
       "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
       "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+      "application/vnd.ms-excel.sheet.macroEnabled.12",
+      "text/csv",
+      "application/csv",
+      "application/vnd.ms-excel",
       "image/jpeg",
       "image/png",
       "image/bmp",
@@ -81,10 +86,10 @@ export default function UploadModal({
       "image/heic",
     ]);
     const ext = file.name.toLowerCase().split('.').pop();
-    const allowedExts = ["pdf", "docx", "pptx", "jpg", "jpeg", "png", "bmp", "tif", "tiff", "heif", "heic"];
+    const allowedExts = ["pdf", "docx", "pptx", "xlsx", "xlsm", "csv", "jpg", "jpeg", "png", "bmp", "tif", "tiff", "heif", "heic"];
 
     if (!allowedTypes.has(file.type) && !allowedExts.includes(ext)) {
-      errors.push("Only PDF, DOCX, PPTX, JPEG, PNG, BMP, TIFF, HEIF, and HEIC files are allowed");
+      errors.push("Only PDF, DOCX, PPTX, XLSX, XLSM, CSV, JPEG, PNG, BMP, TIFF, HEIF, and HEIC files are allowed");
     }
 
     if (file.size > 50 * 1024 * 1024) {
@@ -167,7 +172,7 @@ export default function UploadModal({
         <DialogHeader>
           <DialogTitle className="text-xl">Upload Documents</DialogTitle>
           <DialogDescription>
-            Upload documents to your collection. Supports PDF, Word, PowerPoint, and image files. Files will be automatically
+            Upload documents to your collection. Supports PDF, Word, PowerPoint, Excel, CSV, and image files. Files will be automatically
             parsed, chunked, and embedded.
           </DialogDescription>
         </DialogHeader>
@@ -266,7 +271,7 @@ export default function UploadModal({
                   Choose Files
                 </Button>
                 <p className="text-xs text-muted-foreground mt-3">
-                  Max file size: 50MB • PDF, DOCX, PPTX, JPEG, PNG, BMP, TIFF, HEIF, HEIC
+                  Max file size: 50MB • PDF, DOCX, PPTX, XLSX, XLSM, CSV, JPEG, PNG, BMP, TIFF, HEIF, HEIC
                 </p>
               </div>
             )}

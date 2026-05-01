@@ -167,6 +167,34 @@ class UnderwritingRunRepository:
             logger.exception("Failed to update inputs for run %s", run_id)
             raise
 
+    def update_metadata(self, run_id: str, user_id: str, updates: dict) -> bool:
+        """Update editable run metadata and mirror name/address into saved project inputs."""
+        run = self.get(run_id, user_id)
+        if not run:
+            return False
+        try:
+            if "name" in updates:
+                run.name = updates["name"]
+            if "address" in updates:
+                run.address = updates["address"]
+
+            if run.inputs and any(key in updates for key in ("name", "address")):
+                inputs = dict(run.inputs)
+                project = dict(inputs.get("project") or {})
+                if "name" in updates:
+                    project["name"] = updates["name"]
+                if "address" in updates:
+                    project["address"] = updates["address"]
+                inputs["project"] = project
+                run.inputs = inputs
+
+            self.db.commit()
+            return True
+        except SQLAlchemyError:
+            self.db.rollback()
+            logger.exception("Failed to update metadata for run %s", run_id)
+            raise
+
     def update_loi_inputs(self, run_id: str, user_id: str, loi_inputs: dict) -> bool:
         """Update LOI inputs for a deal — scoped to user for security."""
         run = self.get(run_id, user_id)

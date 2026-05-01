@@ -3,6 +3,7 @@
 from .base import DocumentParser, ParserOutput, ParserType
 from .parser_factory import ParserFactory
 from .azure_document_intelligence_parser import AzureDocumentIntelligenceParser
+from .spreadsheet_parser import SpreadsheetParser
 
 __all__ = [
     "DocumentParser",
@@ -10,4 +11,5 @@ __all__ = [
     "ParserType",
     "ParserFactory",
     "AzureDocumentIntelligenceParser",
+    "SpreadsheetParser",
 ]

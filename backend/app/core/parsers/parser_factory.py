@@ -2,6 +2,7 @@
 """Factory for creating the document parser."""
 from .base import DocumentParser
 from .azure_document_intelligence_parser import AzureDocumentIntelligenceParser
+from .spreadsheet_parser import SpreadsheetParser
 from app.config import settings
 from app.utils.logging import logger
 
@@ -17,7 +18,7 @@ class ParserFactory:
     """
 
     @classmethod
-    def get_parser(cls) -> DocumentParser:
+    def get_parser(cls, file_ext: str | None = None) -> DocumentParser:
         """Get the Azure Document Intelligence parser.
 
         Returns:
@@ -29,6 +30,9 @@ class ParserFactory:
         if settings.force_parser:
             logger.warning(f"TESTING MODE: Forcing parser={settings.force_parser}")
             return cls._create_parser(settings.force_parser)
+
+        if (file_ext or "").lower() in {".xlsx", ".xlsm", ".csv"}:
+            return SpreadsheetParser()
 
         return AzureDocumentIntelligenceParser(
             endpoint=settings.azure_doc_intelligence_endpoint or None,
@@ -57,5 +61,8 @@ class ParserFactory:
                 model_name=settings.azure_doc_model or None,
                 timeout_seconds=settings.azure_doc_timeout_seconds or None,
             )
+
+        if parser_name == "spreadsheet":
+            return SpreadsheetParser()
 
         raise ValueError(f"Unknown parser: {parser_name}")

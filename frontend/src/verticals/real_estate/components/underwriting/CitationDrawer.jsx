@@ -11,7 +11,8 @@ import {
 } from '@/components/ui/sheet';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import DocumentViewer from '@/components/pdf/DocumentViewer';
-import { AlertCircle, Loader2 } from 'lucide-react';
+import { AlertCircle, Download, Loader2 } from 'lucide-react';
+import { Button } from '@/components/ui/button';
 import { useAppAuth } from '@/hooks/useAppAuth';
 import { getDocumentDownloadUrl } from '@/api/documents';
 
@@ -39,6 +40,17 @@ function buildHighlightPayload(citation) {
   return null;
 }
 
+function isSpreadsheetCitation(citation, filename = '', contentType = '') {
+  const lowerName = String(filename || citation?.filename || '').toLowerCase();
+  const lowerType = String(contentType || '').toLowerCase();
+  return citation?.source_kind === 'spreadsheet'
+    || lowerName.endsWith('.xlsx')
+    || lowerName.endsWith('.xlsm')
+    || lowerName.endsWith('.csv')
+    || lowerType.includes('spreadsheet')
+    || lowerType.includes('text/csv');
+}
+
 export default function CitationDrawer({ isOpen, onClose, citation }) {
   const { getToken } = useAppAuth();
   const [isLoadingDoc, setIsLoadingDoc] = useState(false);
@@ -52,6 +64,7 @@ export default function CitationDrawer({ isOpen, onClose, citation }) {
 
   const highlightPayload = useMemo(() => buildHighlightPayload(activeCitation), [activeCitation]);
   const defaultPage = Number(activeCitation?.page);
+  const spreadsheetCitation = isSpreadsheetCitation(activeCitation, documentFilename, documentContentType);
 
   useEffect(() => {
     if (!isOpen || !activeCitation?.document_id) {
@@ -161,7 +174,32 @@ export default function CitationDrawer({ isOpen, onClose, citation }) {
               </div>
             ) : null}
 
-            {!isLoadingDoc && documentUrl ? (
+            {!isLoadingDoc && documentUrl && spreadsheetCitation ? (
+              <div className="h-full overflow-y-auto p-6">
+                <div className="rounded-xl border bg-card p-4">
+                  <p className="text-xs font-semibold uppercase tracking-widest text-muted-foreground">Spreadsheet source</p>
+                  {activeCitation?.sheet_name ? (
+                    <p className="mt-2 text-sm font-medium">
+                      {activeCitation.sheet_name}
+                      {activeCitation.row_start ? ` rows ${activeCitation.row_start}-${activeCitation.row_end}` : ''}
+                    </p>
+                  ) : null}
+                  {activeCitation?.source_text ? (
+                    <pre className="mt-4 max-h-[60vh] overflow-auto whitespace-pre-wrap rounded-lg bg-muted p-3 text-xs leading-5">
+                      {activeCitation.source_text}
+                    </pre>
+                  ) : null}
+                  <Button asChild variant="outline" size="sm" className="mt-4">
+                    <a href={documentUrl} target="_blank" rel="noreferrer">
+                      <Download className="mr-2 h-3.5 w-3.5" />
+                      Open source file
+                    </a>
+                  </Button>
+                </div>
+              </div>
+            ) : null}
+
+            {!isLoadingDoc && documentUrl && !spreadsheetCitation ? (
               <DocumentViewer
                 fileUrl={documentUrl}
                 filename={documentFilename || activeCitation.filename || ''}

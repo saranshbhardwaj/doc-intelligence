@@ -30,12 +30,17 @@ export default function ReturnsSection({
   totalUnits,
   sourceCitations,
   omStatedNoi,
+  noiBridge,
   modeledNoi,
   noiBridgeDelta,
   noiBridgeDeltaPct,
   noiBridgeAlert,
+  expenseBasisSource,
   onOpenSource,
 }) {
+  const isOmNoiMode = expenseBasisSource === 'om_noi';
+  const noiBridgeRows = Array.isArray(noiBridge?.rows) ? noiBridge.rows : [];
+
   return (
     <UnderwritingSection
       eyebrow="Returns"
@@ -174,7 +179,7 @@ export default function ReturnsSection({
               />
 
               {/* NOI build-up */}
-              {projections[0] && (
+              {projections[0] && !isOmNoiMode && (
                 <div className="rounded-2xl border border-border/60 bg-background/60 p-4">
                   <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">NOI build-up — Year 1</p>
                   <p className="mt-1 text-sm text-muted-foreground">How modeled NOI is constructed from extracted components.</p>
@@ -208,14 +213,78 @@ export default function ReturnsSection({
                   </div>
                 </div>
               )}
+              {projections[0] && isOmNoiMode && (
+                <div className="rounded-2xl border border-warning/25 bg-warning/10 p-4">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">NOI — Year 1</p>
+                  <p className="mt-1 text-sm text-muted-foreground">
+                    Quick-screen basis from OM-stated NOI. Revenue and expense components are not backsolved.
+                  </p>
+                  <div className="mt-3 flex items-center justify-between py-1.5">
+                    <span className="text-sm text-muted-foreground">OM-stated NOI</span>
+                    <span className="font-mono text-sm font-semibold text-foreground">{formatCompactCurrency(projections[0].noi)}</span>
+                  </div>
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    Upload a T-12 to replace this with line-item income and expense support.
+                  </p>
+                </div>
+              )}
 
-              {/* NOI bridge (OM stated vs modeled) */}
-              {omStatedNoi != null && modeledNoi != null ? (
+              {/* NOI bridge */}
+              {noiBridgeRows.length > 0 ? (
+                <div className={`rounded-2xl border p-4 ${noiBridgeRows.some((row) => Math.abs(row.delta_to_prior?.pct || 0) > 0.10) ? 'border-amber-500/30 bg-amber-500/5' : 'border-border/60 bg-background/60'}`}>
+                  <div className="flex items-start justify-between gap-3">
+                    <div>
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">NOI bridge</p>
+                      <p className="mt-1 text-sm text-muted-foreground">
+                        OM is broker context, T-12 is actuals support when available, and model NOI drives returns.
+                      </p>
+                    </div>
+                    {noiBridge.has_t12 ? (
+                      <span className="rounded-full border border-emerald-500/30 bg-emerald-500/10 px-2 py-0.5 text-[10px] font-bold uppercase tracking-[0.12em] text-emerald-700 dark:text-emerald-300">
+                        T-12 present
+                      </span>
+                    ) : null}
+                  </div>
+                  <div className="mt-3 space-y-2">
+                    {noiBridgeRows.map((row) => {
+                      const citation = sourceCitations?.[row.source_field];
+                      const pct = row.delta_to_prior?.pct;
+                      const amount = row.delta_to_prior?.amount;
+                      return (
+                        <div key={`${row.source_type}-${row.source_field}`} className="rounded-2xl border border-border/60 bg-background/70 px-3 py-3">
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <div>
+                              <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">{row.label}</p>
+                              <p className="mt-1 font-semibold text-foreground">{formatCompactCurrency(row.value)}</p>
+                            </div>
+                            <div className="flex items-center gap-2">
+                              {pct != null ? (
+                                <span className={`text-sm font-semibold ${Math.abs(pct) > 0.10 ? 'text-amber-700 dark:text-amber-300' : 'text-muted-foreground'}`}>
+                                  {amount >= 0 ? '+' : ''}{formatCompactCurrency(amount)} · {pct >= 0 ? '+' : ''}{(pct * 100).toFixed(0)}%
+                                </span>
+                              ) : null}
+                              {citation ? (
+                                <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-[10px] font-bold uppercase tracking-wide text-uw-citation" onClick={() => onOpenSource?.(citation)}>
+                                  Source
+                                </Button>
+                              ) : null}
+                            </div>
+                          </div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              ) : omStatedNoi != null && modeledNoi != null ? (
                 <div className={`rounded-2xl border p-4 ${noiBridgeAlert ? 'border-amber-500/30 bg-amber-500/5' : 'border-border/60 bg-background/60'}`}>
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">NOI bridge</p>
-                      <p className="mt-1 text-sm text-muted-foreground">OM NOI is a reference check; modeled NOI is what drives valuation and returns.</p>
+                      <p className="mt-1 text-sm text-muted-foreground">
+                        {isOmNoiMode
+                          ? 'OM-stated NOI drives valuation in quick-screen mode.'
+                          : 'OM NOI is a reference check; modeled NOI is what drives valuation and returns.'}
+                      </p>
                     </div>
                     <span className={`text-sm font-semibold ${noiBridgeAlert ? 'text-amber-700 dark:text-amber-300' : 'text-foreground'}`}>
                       {formatPercent(noiBridgeDeltaPct)}
@@ -225,12 +294,16 @@ export default function ReturnsSection({
                     <div className="rounded-2xl border border-border/60 bg-background/70 px-3 py-3">
                       <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">OM stated NOI</p>
                       <p className="mt-1 font-semibold text-foreground">{formatCompactCurrency(omStatedNoi)}</p>
-                      <p className="mt-1 text-[11px] font-medium text-muted-foreground">Reference only</p>
+                      <p className="mt-1 text-[11px] font-medium text-muted-foreground">
+                        {isOmNoiMode ? 'Quick-screen basis' : 'Reference only'}
+                      </p>
                     </div>
                     <div className="rounded-2xl border border-border/60 bg-background/70 px-3 py-3">
                       <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Modeled NOI</p>
                       <p className="mt-1 font-semibold text-foreground">{formatCompactCurrency(modeledNoi)}</p>
-                      <p className="mt-1 text-[11px] font-medium text-uw-success">Used in valuation</p>
+                      <p className="mt-1 text-[11px] font-medium text-uw-success">
+                        {isOmNoiMode ? 'Same NOI basis' : 'Used in valuation'}
+                      </p>
                     </div>
                     <div className="rounded-2xl border border-border/60 bg-background/70 px-3 py-3">
                       <p className="text-[11px] uppercase tracking-[0.18em] text-muted-foreground">Delta</p>

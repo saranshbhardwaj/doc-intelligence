@@ -7,6 +7,8 @@ from __future__ import annotations
 
 import math
 import re
+from collections import defaultdict
+from typing import NamedTuple
 
 import numpy_financial as npf
 
@@ -22,15 +24,7 @@ from .schemas.self_storage import (
     TotalReturn,
     UnitMixRow,
 )
-
-
-def _normalize_size_label(value: str | None) -> str | None:
-    if not value:
-        return None
-    normalized = value.lower().replace("×", "x")
-    normalized = re.sub(r"\s+", "", normalized)
-    normalized = re.sub(r"[^0-9xa-z]", "", normalized)
-    return normalized or None
+from .thresholds import LINE_ITEMS_VS_RATIO_CUTOFF
 
 
 def _row_label(*parts: str | None) -> str:
@@ -57,76 +51,133 @@ def _is_climate_control_row(row: UnitMixRow) -> bool:
     return bool(re.search(r"\bclimate\b|\bcc\b|\btemp[- ]?controlled\b|\bheated\b|\bhumidity\b", label))
 
 
-def _resolve_comp_monthly_rent(
-    comp: RentCompRow,
-    row: UnitMixRow,
-) -> float | None:
-    if comp.asking_rent is not None and comp.asking_rent > 0:
-        return comp.asking_rent
+_DIMENSION_RE = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)\s*$", re.IGNORECASE)
+_SCALAR_RE = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*(?:sq\.?\s*ft\.?)?$", re.IGNORECASE)
 
-    if comp.rent_per_sqft is not None and comp.rent_per_sqft > 0 and row.standard_sqft and row.standard_sqft > 0:
-        return comp.rent_per_sqft * row.standard_sqft
+
+def _parse_standard_sqft(size: str | None) -> float | None:
+    if not size:
+        return None
+    m = _DIMENSION_RE.match(size)
+    if m:
+        return float(m.group(1)) * float(m.group(2))
+    m = _SCALAR_RE.match(size)
+    if m:
+        return float(m.group(1))
     return None
+
+
+def _size_bucket(sqft: float) -> str:
+    if sqft <= 0:
+        raise ValueError(f"sqft must be positive, got {sqft}")
+    if sqft < 25:
+        return "locker"
+    if sqft < 75:
+        return "small"
+    if sqft < 150:
+        return "medium"
+    if sqft < 300:
+        return "large"
+    return "xlarge"
 
 
 def _build_rent_position_analysis(
     unit_mix: list[UnitMixRow],
     rent_comps: list[RentCompRow],
-) -> list[RentPositionRow]:
-    analysis: list[RentPositionRow] = []
+) -> tuple[list[RentPositionRow], int]:
     if not unit_mix or not rent_comps:
-        return analysis
+        return [], 0
 
+    class _CompEntry(NamedTuple):
+        bucket: str
+        climate: str
+        rate: float
+
+    comp_data: list[_CompEntry] = []
+    unknown_count = 0
+    for comp in rent_comps:
+        sqft = comp.standard_sqft or _parse_standard_sqft(comp.size)
+        if sqft is None or sqft <= 0:
+            continue
+        # Treat both None (extractor didn't classify) and "UNKNOWN" (explicitly unclear) as
+        # unclassifiable — exclude from matching and surface the count to the UI.
+        climate = comp.climate_type or "UNKNOWN"
+        if climate == "UNKNOWN":
+            unknown_count += 1
+            continue
+        rate = comp.asking_rent
+        if rate is None or rate <= 0:
+            continue
+        comp_data.append(_CompEntry(_size_bucket(sqft), climate, rate))
+
+    def _weighted_avg(rows: list[UnitMixRow], field: str) -> float | None:
+        def weight(r: UnitMixRow) -> int:
+            return r.num_units if r.num_units and r.num_units > 0 else 1
+        valued = [r for r in rows if getattr(r, field) is not None]
+        if not valued:
+            return None
+        total_w = sum(weight(r) for r in valued)
+        return sum(getattr(r, field) * weight(r) for r in valued) / total_w
+
+    cell_rows: dict[tuple[str, str], list[UnitMixRow]] = defaultdict(list)
     for row in unit_mix:
         if not _is_storage_row(row):
             continue
-
-        size_key = _normalize_size_label(row.size)
-        if not size_key:
+        sqft = row.standard_sqft or _parse_standard_sqft(row.size)
+        if sqft is None or sqft <= 0:
             continue
+        bucket = _size_bucket(sqft)
+        climate = row.climate_type if row.climate_type in ("CC", "NC") else (
+            "CC" if _is_climate_control_row(row) else "NC"
+        )
+        cell_rows[(bucket, climate)].append(row)
 
-        is_climate = _is_climate_control_row(row)
-        matched_rates: list[float] = []
-        for comp in rent_comps:
-            if _normalize_size_label(comp.size) != size_key:
-                continue
-            comp_rate = _resolve_comp_monthly_rent(comp, row)
-            if comp_rate is not None and comp_rate > 0:
-                matched_rates.append(comp_rate)
-
+    analysis: list[RentPositionRow] = []
+    for (bucket, climate), rows in cell_rows.items():
+        matched_rates = [e.rate for e in comp_data if e.bucket == bucket and e.climate == climate]
         if not matched_rates:
             continue
 
         comp_average_rent = sum(matched_rates) / len(matched_rates)
+        subject_current = _weighted_avg(rows, "current_rent")
+        subject_market = _weighted_avg(rows, "market_rent")
         current_ratio = (
-            row.current_rent / comp_average_rent
-            if row.current_rent is not None and comp_average_rent > 0
+            subject_current / comp_average_rent
+            if subject_current is not None and comp_average_rent > 0
             else None
         )
         market_ratio = (
-            row.market_rent / comp_average_rent
-            if row.market_rent is not None and comp_average_rent > 0
+            subject_market / comp_average_rent
+            if subject_market is not None and comp_average_rent > 0
             else None
         )
 
         analysis.append(
             RentPositionRow(
-                size=row.size,
-                climate_type="CC" if is_climate else "NC",
-                subject_current_rent=row.current_rent,
-                subject_market_rent=row.market_rent,
+                size=rows[0].size or bucket,
+                climate_type=climate,
+                subject_current_rent=subject_current,
+                subject_market_rent=subject_market,
                 comp_average_rent=comp_average_rent,
                 current_vs_comp_ratio=current_ratio,
                 market_vs_comp_ratio=market_ratio,
                 comp_count=len(matched_rates),
+                bucket=bucket,
             )
         )
 
-    return analysis
+    return analysis, unknown_count
 
 
 def _positive_ratio(value: float | None) -> bool:
     return value is not None and value > 0
+
+
+def _stated_om_noi(inputs: SelfStorageInputs) -> float | None:
+    """Return the best OM-stated NOI basis available for NOI-only quick screens."""
+    if inputs.operational.noi_year_one_stated is not None:
+        return inputs.operational.noi_year_one_stated
+    return inputs.operational.noi_current_stated
 
 
 def _resolve_expense_basis(
@@ -151,6 +202,21 @@ def _resolve_expense_basis(
 
     ratio_opex = year1_egi * ratio if ratio is not None and year1_egi > 0 else None
     has_line_items = year1_line_item_opex > 0
+    noi_stated = _stated_om_noi(inputs)
+
+    def om_noi_basis() -> ExpenseBasis:
+        return ExpenseBasis(
+            source="om_noi",
+            label="OM-stated NOI quick screen",
+            ratio=None,
+            year1_line_item_opex=year1_line_item_opex,
+            year1_ratio_opex=None,
+            reason=(
+                f"No reliable GPR/expense build-up is available. Projections use OM-stated NOI "
+                f"(${noi_stated or 0:,.0f}) grown at the assumed rent growth rate. "
+                "Upload a T-12 to verify actual income and expenses."
+            ),
+        )
 
     if ratio_source and ratio_opex is not None:
         if not has_line_items:
@@ -162,7 +228,7 @@ def _resolve_expense_basis(
                 year1_ratio_opex=ratio_opex,
                 reason="Detailed expense line items were missing, so the model used the stated expense ratio.",
             )
-        if year1_line_item_opex < ratio_opex * 0.75:
+        if year1_line_item_opex < ratio_opex * LINE_ITEMS_VS_RATIO_CUTOFF:
             return ExpenseBasis(
                 source=ratio_source,
                 label=ratio_label,
@@ -175,6 +241,9 @@ def _resolve_expense_basis(
                 ),
             )
 
+    if noi_stated and year1_egi <= 0 and not ratio_source:
+        return om_noi_basis()
+
     if has_line_items:
         return ExpenseBasis(
             source="line_items",
@@ -184,6 +253,9 @@ def _resolve_expense_basis(
             ratio=ratio,
             reason="Operating expenses were modeled from extracted or manually entered line items.",
         )
+
+    if noi_stated and not ratio_source:
+        return om_noi_basis()
 
     return ExpenseBasis(
         source="missing",
@@ -204,9 +276,12 @@ def calculate(inputs: SelfStorageInputs) -> SelfStorageResult:
     ex = inputs.exit
     proj = inputs.project
 
-    purchase_price: float = acq.purchase_price
+    purchase_price = acq.purchase_price
     hold_years: int = ex.hold_period_years
     exit_cap: float = ex.exit_cap_rate
+
+    if purchase_price is None or purchase_price <= 0:
+        raise ValueError("purchase_price required and must be > 0")
 
     if exit_cap <= 0:
         raise ValueError(
@@ -298,21 +373,30 @@ def calculate(inputs: SelfStorageInputs) -> SelfStorageResult:
     for yr in range(1, hold_years + 1):
         n = yr  # 1-indexed
 
-        gpr = op.gross_potential_rent_annual * (1 + op.rent_growth_pct) ** (n - 1)
-        vacancy_loss = gpr * op.vacancy_credit_loss_pct
-        other_income = op.other_income_annual * (1 + op.rent_growth_pct) ** (n - 1)
-        egi = gpr - vacancy_loss + other_income
-
-        if expense_basis.source in ("expense_ratio_current", "expense_ratio_pro_forma"):
-            opex = (expense_basis.year1_ratio_opex or 0.0) * (1 + op.opex_growth_pct) ** (n - 1)
+        if expense_basis.source == "om_noi":
+            noi_stated = _stated_om_noi(inputs) or 0.0
+            noi = noi_stated * (1 + op.rent_growth_pct) ** (n - 1)
+            gpr = 0.0
+            vacancy_loss = 0.0
+            other_income = 0.0
+            egi = noi
+            opex = 0.0
         else:
-            property_tax = op.property_tax_annual * (1 + property_tax_growth) ** (n - 1)
-            other_fixed_opex = base_non_tax_opex * (1 + op.opex_growth_pct) ** (n - 1)
-            fixed_opex = property_tax + other_fixed_opex
-            mgmt_fee = egi * op.mgmt_fee_pct
-            opex = fixed_opex + mgmt_fee
+            gpr = op.gross_potential_rent_annual * (1 + op.rent_growth_pct) ** (n - 1)
+            vacancy_loss = gpr * op.vacancy_credit_loss_pct
+            other_income = op.other_income_annual * (1 + op.rent_growth_pct) ** (n - 1)
+            egi = gpr - vacancy_loss + other_income
 
-        noi = egi - opex
+            if expense_basis.source in ("expense_ratio_current", "expense_ratio_pro_forma"):
+                opex = (expense_basis.year1_ratio_opex or 0.0) * (1 + op.opex_growth_pct) ** (n - 1)
+            else:
+                property_tax = op.property_tax_annual * (1 + property_tax_growth) ** (n - 1)
+                other_fixed_opex = base_non_tax_opex * (1 + op.opex_growth_pct) ** (n - 1)
+                fixed_opex = property_tax + other_fixed_opex
+                mgmt_fee = egi * op.mgmt_fee_pct
+                opex = fixed_opex + mgmt_fee
+
+            noi = egi - opex
 
         # Property value — guard against zero exit cap
         if exit_cap > 0:
@@ -402,7 +486,9 @@ def calculate(inputs: SelfStorageInputs) -> SelfStorageResult:
 
     # Break-even occupancy: minimum occupancy so Year-1 NOI covers debt service.
     break_even_occupancy_pct: float | None = None
-    if annual_debt_service > 0 and op.gross_potential_rent_annual > 0:
+    if expense_basis.source == "om_noi":
+        break_even_occupancy_pct = None
+    elif annual_debt_service > 0 and op.gross_potential_rent_annual > 0:
         if expense_basis.source in ("expense_ratio_current", "expense_ratio_pro_forma") and expense_basis.ratio is not None:
             noi_margin = 1 - expense_basis.ratio
             if noi_margin > 0:
@@ -429,19 +515,25 @@ def calculate(inputs: SelfStorageInputs) -> SelfStorageResult:
     cap_rate_year_one = projections[0].noi / purchase_price if purchase_price > 0 else None
     cap_rate_pro_forma = projections[-1].noi / purchase_price if purchase_price > 0 else None
     ltv = loan_amount / purchase_price if purchase_price > 0 else None
-    rent_position_analysis = _build_rent_position_analysis(inputs.unit_mix, inputs.rent_comps)
+    rent_position_analysis, unknown_climate_comp_count = _build_rent_position_analysis(inputs.unit_mix, inputs.rent_comps)
 
     # Build formula metadata — backend is the authority
     from .schemas.self_storage import FormulaMetadata, FormulaComputedValues
 
     fixed_opex_yr1 = op.property_tax_annual + base_non_tax_opex
     mgmt_factor_yr1 = 1 - op.mgmt_fee_pct
-    break_even_description = (
-        "Debt service ÷ (1 − expense ratio), adjusted for other income, then divided by GPR. "
-        "Used when operating expenses are modeled from an expense-ratio fallback."
-        if expense_basis.source in ("expense_ratio_current", "expense_ratio_pro_forma")
-        else "(Debt service + fixed opex − other income × (1 − mgmt fee)) ÷ (GPR × (1 − mgmt fee)). Minimum occupancy so Year-1 cash flow after debt service equals zero."
-    )
+    if expense_basis.source == "om_noi":
+        break_even_description = (
+            "Break-even occupancy is not computed in OM-stated NOI quick-screen mode "
+            "because GPR, vacancy, and expense components are not available."
+        )
+    elif expense_basis.source in ("expense_ratio_current", "expense_ratio_pro_forma"):
+        break_even_description = (
+            "Debt service ÷ (1 − expense ratio), adjusted for other income, then divided by GPR. "
+            "Used when operating expenses are modeled from an expense-ratio fallback."
+        )
+    else:
+        break_even_description = "(Debt service + fixed opex − other income × (1 − mgmt fee)) ÷ (GPR × (1 − mgmt fee)). Minimum occupancy so Year-1 cash flow after debt service equals zero."
 
     formula_metadata = {
         "irr": FormulaMetadata(
@@ -539,6 +631,7 @@ def calculate(inputs: SelfStorageInputs) -> SelfStorageResult:
         total_return=total_return,
         projections=projections,
         rent_position_analysis=rent_position_analysis,
+        unknown_climate_comp_count=unknown_climate_comp_count,
         formula_metadata=formula_metadata,
     )
 

@@ -14,16 +14,16 @@ function docTone(docType) {
 }
 
 function docLabel(docType) {
-  if (docType === 't12') return 'T-12';
-  if (docType === 'rent_roll') return 'Rent Roll';
-  if (docType === 'om') return 'OM';
+  if (docType === 't12') return 'T-12 actual';
+  if (docType === 'rent_roll') return 'Rent roll actual';
+  if (docType === 'om') return 'OM stated';
   if (docType === 'derived') return 'Derived';
   return null;
 }
 
 function revenueBasisTone(source) {
   if (source === 't12' || source === 'rent_roll') return 'success';
-  if (source === 'om') return 'warning';
+  if (source === 'om' || source === 'om_noi') return 'warning';
   return 'active';
 }
 
@@ -59,6 +59,53 @@ function MetricRow({ label, value, alert = false }) {
       >
         {value ?? '—'}
       </span>
+    </div>
+  );
+}
+
+function expenseBasisDriverLabel(expenseBasis) {
+  switch (expenseBasis?.source) {
+    case 'line_items':
+      return 'T-12 line items';
+    case 'expense_ratio_current':
+      return 'T-12 expense ratio';
+    case 'expense_ratio_pro_forma':
+      return 'OM pro-forma ratio';
+    case 'om_noi':
+      return 'OM-NOI quick screen';
+    case 'missing':
+      return 'Missing support';
+    default:
+      return expenseBasis?.label ?? null;
+  }
+}
+
+function NoiBridgeMini({ bridge }) {
+  const rows = Array.isArray(bridge?.rows) ? bridge.rows : [];
+  if (!rows.length) return null;
+  return (
+    <div className="mt-2 rounded-lg border border-border/40 bg-background/50 p-2">
+      <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+        NOI bridge
+      </p>
+      {rows.map((row) => {
+        const pct = row.delta_to_prior?.pct;
+        return (
+          <div key={`${row.source_type}-${row.source_field}`} className="flex items-center justify-between gap-2 py-1">
+            <span className="truncate text-[11px] text-muted-foreground">{row.label}</span>
+            <div className="flex items-center gap-1.5">
+              {pct != null ? (
+                <span className={`text-[10px] font-semibold ${Math.abs(pct) > 0.1 ? 'text-warning' : 'text-muted-foreground'}`}>
+                  {pct >= 0 ? '+' : ''}{(pct * 100).toFixed(0)}%
+                </span>
+              ) : null}
+              <span className="text-[11px] font-semibold text-foreground tabular-nums">
+                {formatCompactCurrency(row.value)}
+              </span>
+            </div>
+          </div>
+        );
+      })}
     </div>
   );
 }
@@ -100,6 +147,7 @@ export default function TrustPanel({
   expenseBasis,
   capitalStructure,
   omStatedNoi,
+  noiBridge,
   sourceCitations,
   rentCompCoverage,
   // Col 2 — model outputs
@@ -114,11 +162,14 @@ export default function TrustPanel({
   onToggle,
 }) {
   const occupancy = artifact?.rent_roll_data?.summary?.occupancy_pct;
+  const isOmNoiMode = expenseBasis?.source === 'om_noi';
 
   const expenseRatioValue = currentExpenseRatio ?? proFormaExpenseRatio;
   // T-12/line items = actuals source; pro forma only = derived; no basis = unknown
   const expenseRatioDocType =
-    currentExpenseRatio != null
+    isOmNoiMode
+      ? 'om'
+      : currentExpenseRatio != null
       ? expenseBasis?.source === 'expense_ratio_current' || expenseBasis?.source === 'line_items'
         ? 't12'
         : 'derived'
@@ -127,7 +178,7 @@ export default function TrustPanel({
   const revenueBasisDocType =
     revenueBasis?.source === 't12' ? 't12'
     : revenueBasis?.source === 'rent_roll' ? 'rent_roll'
-    : revenueBasis?.source === 'om' ? 'om'
+    : revenueBasis?.source === 'om' || revenueBasis?.source === 'om_noi' ? 'om'
     : null;
 
   const noiBridgeDisplay = noiBridgeDeltaPct != null
@@ -233,14 +284,18 @@ export default function TrustPanel({
             <MetricRow label="Equity multiple" value={formatMultiple(currentRun?.equity_multiple)} />
             <MetricRow label="DSCR yr 1" value={formatMultiple(currentRun?.dscr_year_one)} />
             <MetricRow label="NOI yr 1" value={formatCompactCurrency(currentRun?.noi_year_one)} />
-            <MetricRow
-              label="NOI vs OM stated"
-              value={noiBridgeDisplay}
-              alert={noiBridgeAlert}
-            />
+            {noiBridge?.rows?.length ? (
+              <NoiBridgeMini bridge={noiBridge} />
+            ) : (
+              <MetricRow
+                label="NOI vs OM stated"
+                value={noiBridgeDisplay}
+                alert={noiBridgeAlert}
+              />
+            )}
             <MetricRow label="Break-even occ" value={formatPercent(breakEvenOccupancyPct)} />
             <MetricRow label="Cap rate yr 1" value={formatPercent(currentRun?.cap_rate_year_one)} />
-            <MetricRow label="Expense basis" value={expenseBasis?.label ?? null} />
+            <MetricRow label="Expense basis" value={expenseBasisDriverLabel(expenseBasis)} />
           </div>
 
           {/* Col 3: What needs review */}

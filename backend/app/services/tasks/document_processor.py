@@ -25,7 +25,7 @@ from app.repositories.document_repository import DocumentRepository
 from app.repositories.user_repository import UserRepository
 from app.db_models_chat import DocumentChunk
 from app.services.beta_limits import enforce_page_limit, log_shadow_credits
-from app.utils.document_uploads import IMAGE_EXTENSIONS, POWERPOINT_EXTENSIONS, WORD_EXTENSIONS
+from app.utils.document_uploads import IMAGE_EXTENSIONS, POWERPOINT_EXTENSIONS, SPREADSHEET_EXTENSIONS, WORD_EXTENSIONS
 from app.utils.logging import logger
 from app.utils.pdf_utils import detect_pdf_type
 from app.utils.file_utils import save_raw_text, save_chunks
@@ -127,13 +127,19 @@ def parse_document_for_indexing_task(self, payload: Dict[str, Any]) -> Dict[str,
                 progress_percent=8,
                 message="Detected image document"
             )
+        elif file_ext in SPREADSHEET_EXTENSIONS:
+            pdf_type = "spreadsheet"
+            tracker.update_progress(
+                progress_percent=8,
+                message="Detected spreadsheet"
+            )
         else:
             pdf_type = detect_pdf_type(file_path)
             tracker.update_progress(
                 progress_percent=8,
                 message=f"Detected {pdf_type} PDF"
             )
-        parser = ParserFactory.get_parser()
+        parser = ParserFactory.get_parser(file_ext=file_ext)
 
         logger.info(
             f"Parsing document for indexing: {filename}",
@@ -172,9 +178,15 @@ def parse_document_for_indexing_task(self, payload: Dict[str, Any]) -> Dict[str,
         }
 
     except Exception as e:
+        user_error = (
+            str(e)
+            if "spreadsheet is too large to index reliably" in str(e).lower()
+            or "unsupported spreadsheet format" in str(e).lower()
+            else "Failed to parse document — please try re-uploading."
+        )
         tracker.mark_error(
             error_stage="parsing",
-            error_message="Failed to parse document — please try re-uploading.",
+            error_message=user_error,
             internal_error=str(e)[:1000],
             error_type="parsing_error",
             is_retryable=True
@@ -182,7 +194,7 @@ def parse_document_for_indexing_task(self, payload: Dict[str, Any]) -> Dict[str,
         # Mark document as failed
         doc_repo.mark_failed(
             document_id=document_id,
-            error_message=str(e)[:500]
+            error_message=user_error[:500]
         )
         raise
     finally:

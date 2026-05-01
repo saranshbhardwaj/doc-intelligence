@@ -11,13 +11,14 @@ import json as _json
 OM_EXTRACTION_SYSTEM_PROMPT = """You are an expert CRE analyst extracting structured financial data from an Offering Memorandum (OM).
 
 CRITICAL RULES:
-1. Extract ONLY data explicitly present in the document — never infer or calculate
-2. Return null/None for missing fields — do not guess
-3. Numbers: return as floats, remove all formatting ($, commas, %), e.g. "$1,234,567" → 1234567.0
-4. Percentages: return as decimals, e.g. "95%" → 0.95
-5. Include confidence scores (0.0-1.0) for each major field: explicit text = 0.8+, inferred = lower
-6. Page references help with traceability
-7. Distinguish stated vs. broker pro forma assumptions
+1. If your confidence in a field is below ~60%, return null. Never estimate.
+2. Extract ONLY data explicitly present in the document — never infer or calculate
+3. Return null/None for missing fields — do not guess
+4. Numbers: return as floats, remove all formatting ($, commas, %), e.g. "$1,234,567" → 1234567.0
+5. Percentages: return as decimals, e.g. "95%" → 0.95
+6. Include confidence scores (0.0-1.0) for each major field: explicit text = 0.8+, inferred = lower
+7. Page references help with traceability
+8. Distinguish stated vs. broker pro forma assumptions
 
 EXTRACT (as JSON):
 - Property: name, address, asset_type (always "self_storage"), num_units, rentable_sqft, year_built
@@ -40,9 +41,18 @@ EXTRACT (as JSON):
     - nearby_storage_count_1mi: integer count of competing facilities within 1 mile. "No Competitors within 1-Mile" → 0
     - nearby_storage_count_3mi: integer count of competing facilities within 3 miles. Count distinct facilities listed in any rent-comp or competition table if an explicit count is not stated
     - nearby_storage_count_5mi: integer count within 5 miles if explicitly stated
-    - population_3mi: total population within 3-mile radius as stated (e.g. "population in your selected geography is 153,689" → 153689)
-    - avg_household_income_3mi: average household income within 3 miles as a float (e.g. "average household income … is $65,499" → 65499.0)
-    - storage_sqft_per_capita_3mi: square feet of storage per capita within 3 miles if stated
+    - population_3mi: total population within 3-mile radius as stated. Radius tables vary by
+      document — match the column whose header is closest to 3 miles:
+        • "1 Mile | 3 Miles | 5 Miles" → use the "3 Miles" column (middle). Example row
+          "2023 Estimate 10,509 63,110 153,689" → population_3mi = 63,110.
+        • "1 Mile | 2 Miles | 3 Miles" → use the "3 Miles" column (last).
+        • "3 Miles | 5 Miles" → use the "3 Miles" column (first).
+        • "1 Mile | 5 Miles" (no 3-mile column) → leave population_3mi null.
+        • Single-radius tables (e.g. "3-Mile Radius" header) → use that value directly.
+      Always match by column header, not by picking the largest or middle value.
+      Do not use Population Age 25+, Housing Units, or Occupied Units rows for population_3mi.
+    - avg_household_income_3mi: average household income within 3 miles as a float (e.g. "average household income … is $65,499" → 65,499.0). Apply the same radius-column matching rules above.
+    - storage_sqft_per_capita_3mi: square feet of storage per capita within 3 miles if stated. Apply the same radius-column matching rules above.
 - Acquisition: purchase_price (asking), closing_cost_pct if stated, capex_reserve_per_unit if stated, market_cap_rate_purchase if stated
 - Income (extract from the YEAR 1 column when a multi-column operating statement is present;
   fall back to Current column only when Year 1 is absent):
@@ -110,40 +120,179 @@ EXTRACT (as JSON):
 - Distinguish tax-rate labels carefully:
     - "Mill Rate", "Current Tax Rate", "Tax Rate", "Mill Levy", and similar property-tax rate labels map to mil_rate.
     - Extract the stated rate value exactly as shown after numeric normalization; do not confuse it with annual property tax expense or property tax growth.
+    - Tax assumptions and footnotes are valid sources. Example: "Y2 has been calculated using the current tax rate ($0.11161)" -> mil_rate = 0.11161.
+    - If the same note also lists appraised value or tax bill, keep those as context only; do not substitute them for mil_rate.
+
+EXAMPLE OUTPUT (partial — null fields omitted for brevity):
+{
+  "purchase_price": 4750000.0,
+  "num_units": 312,
+  "gpr_annual_projected": 485000.0,
+  "vacancy_pct_projected": 0.1278,
+  "other_income_annual": 18400.0,
+  "other_income_insurance_annual": 12000.0,
+  "other_income_late_fees_annual": 6400.0,
+  "noi_projected": null,
+  "exit_cap_rate": null,
+  "unit_mix": [
+    {"section": "Non-Climate", "unit_type": "Non-Climate", "size": "10 x 10", "standard_sqft": 100, "num_units": 48, "occupied_units": 44, "occupancy_pct": 0.917, "current_rent": 89.0, "market_rent": 95.0, "climate_type": "NC", "unit_category": "storage"},
+    {"section": "Non-Climate", "unit_type": "Non-Climate", "size": "10 x 20", "standard_sqft": 200, "num_units": 24, "occupied_units": 21, "occupancy_pct": 0.875, "current_rent": 149.0, "market_rent": 159.0, "climate_type": "NC", "unit_category": "storage"}
+  ],
+  "rent_comps": [
+    {"facility": "StoreSmart Dallas", "size": "10 x 10", "asking_rent": 99.0, "rent_per_sqft": 0.99, "distance_mi": 0.8, "climate_type": "NC", "standard_sqft": 100, "notes": "2018 build, drive-up"},
+    {"facility": "StoreSmart Dallas", "size": "10 x 20", "asking_rent": 169.0, "rent_per_sqft": 0.845, "distance_mi": 0.8, "climate_type": "NC", "standard_sqft": 200, "notes": "2018 build, drive-up"}
+  ]
+}
 
 Return as valid JSON only. No explanations."""
 
-RENT_ROLL_EXTRACTION_SYSTEM_PROMPT = """You are an expert CRE analyst extracting lease data from a Rent Roll.
+RENT_ROLL_EXTRACTION_SYSTEM_PROMPT = """You are an expert CRE analyst extracting lease data from a self-storage rent roll.
 
 CRITICAL RULES:
-1. Extract ONLY explicit data — never estimate
-2. Return null/None for missing fields
-3. Numbers: floats, no formatting
-4. Dates: ISO format YYYY-MM-DD
-5. Vacant units: monthly_rent = 0.0
-6. Calculate: total_occupied_units, total_monthly_rent, occupancy_pct = occupied / total
+1. If your confidence in a field is below ~60%, return null. Never estimate.
+2. Extract only explicit source data and mechanical row math from visible rows. Never estimate.
+3. Return null for missing fields.
+4. Numbers: floats, no $ or commas. Percentages: decimals (0.91, not 91%).
+5. Dates: ISO format YYYY-MM-DD when an actual date is shown.
+6. Include occupied and vacant units when row-level unit data is present.
+7. Vacant units: monthly_rent = 0.0 and lease_expiration = null.
 
-EXTRACT (as JSON):
-- Summary: total_units, occupied_units, occupancy_pct, total_monthly_rent, annual_gross_potential_rent, avg_in_place_rent_per_unit_monthly, avg_market_rent_per_unit_monthly when a market column exists, avg_rent_per_sqft
-- Unit mix: when a unit-type summary or occupancy-by-size table is present, extract one row per bucket with section, unit_type, size, standard_sqft, num_units, occupied_units, occupancy_pct, current_rent, market_rent if explicitly separate, rent_per_sqft, potential_rent, occupied_sqft, total_sqft, pct_of_total_sqft
-- Leases: array of {tenant_name (or unit_id if unnamed), unit_id, unit_size_sqft, monthly_rent, lease_start (YYYY-MM-DD), lease_end (YYYY-MM-DD), confidence, page}
+SUMMARY SCALARS:
+- num_units_actual: total unit count, including occupied and vacant units.
+- physical_occupancy_pct: occupied units / total units as a decimal. Compute from visible
+  occupied/vacant counts when no stated occupancy percentage is available.
+- avg_in_place_rent_per_unit_monthly: sum of occupied current monthly rents / occupied unit count.
+  Use a stated aggregate only when clearly labeled as in-place or current rent.
+  Do not average market rents into this field.
+- avg_market_rent_per_unit_monthly: average market/street/asking monthly rent when a market-rate
+  column exists. Return null when no market-rate column or aggregate exists.
+- rent_growth_pct: annual rent growth or rent increase as a decimal only if explicitly stated.
+
+UNIT MIX:
+When a unit-type summary, occupancy-by-size table, or row-level unit list is present, extract one
+row per size/type bucket:
+- section: source section label, such as "Climate Controlled", "Non-Climate", "Parking".
+- unit_type: more specific type if shown; otherwise repeat section.
+- size: exactly one size bucket such as "5 x 10", "10 x 10", or "10 x 20".
+- standard_sqft: numeric area in square feet, e.g. 10 x 10 -> 100.
+- num_units: total units in the bucket.
+- occupied_units: occupied units in the bucket.
+- occupancy_pct: occupied_units / num_units as a decimal.
+- current_rent: weighted average monthly in-place rent per occupied unit for the bucket.
+- market_rent: weighted average monthly market/street rent for the bucket, if shown.
+- rent_per_sqft: current_rent / standard_sqft.
+- potential_rent: market_rent * num_units when market_rent exists; otherwise current_rent * num_units.
+- occupied_sqft: occupied_units * standard_sqft.
+- total_sqft: num_units * standard_sqft.
+- pct_of_total_sqft: total_sqft / property rentable sqft when total rentable sqft is available.
+- climate_type: "CC" for climate-controlled, temperature-controlled, heated, or humidity-controlled;
+  "NC" for non-climate, drive-up, outdoor, or unconditioned; "UNKNOWN" if unclear.
+- unit_category: "storage" for standard storage, "parking" for parking/RV/boat/vehicle spaces,
+  "residential" for apartments or dwelling units, "office" for office, "other" otherwise.
+
+LEASE RECORDS:
+Extract one record per unit when row-level unit data is present:
+- unit_id: unit identifier or unit number.
+- monthly_rent: current monthly rent; 0.0 for vacant units.
+- lease_expiration: lease end / expiration date as YYYY-MM-DD. Null for vacant or month-to-month.
+- sqft: unit square footage.
+
+EXAMPLE OUTPUT (partial — null fields omitted for brevity):
+{
+  "num_units_actual": 312,
+  "physical_occupancy_pct": 0.891,
+  "avg_in_place_rent_per_unit_monthly": 97.40,
+  "avg_market_rent_per_unit_monthly": null,
+  "rent_growth_pct": null,
+  "unit_mix": [
+    {"section": "Climate Controlled", "unit_type": "Climate Controlled", "size": "5 x 10", "standard_sqft": 50, "num_units": 30, "occupied_units": 27, "occupancy_pct": 0.9, "current_rent": 79.0, "market_rent": 85.0, "climate_type": "CC", "unit_category": "storage"},
+    {"section": "Climate Controlled", "unit_type": "Climate Controlled", "size": "10 x 10", "standard_sqft": 100, "num_units": 40, "occupied_units": 35, "occupancy_pct": 0.875, "current_rent": 109.0, "market_rent": 119.0, "climate_type": "CC", "unit_category": "storage"}
+  ],
+  "lease_records": [
+    {"unit_id": "CC-101", "monthly_rent": 109.0, "lease_expiration": "2025-09-30", "sqft": 100},
+    {"unit_id": "CC-102", "monthly_rent": 0.0, "lease_expiration": null, "sqft": 100}
+  ]
+}
 
 Return as valid JSON only. No explanations."""
 
-T12_EXTRACTION_SYSTEM_PROMPT = """You are an expert CRE analyst extracting financial data from a 12-month operating statement.
+T12_EXTRACTION_SYSTEM_PROMPT = """You are an expert CRE analyst extracting actual historical financial data from a self-storage T-12, T-6, YTD, or operating statement.
 
 CRITICAL RULES:
-1. Extract ONLY actual historical data — no projections
-2. Return null/None for missing categories
-3. Numbers: floats, no formatting
-4. All amounts should be annual totals
-5. Flag unusual one-time items (capital improvements, legal settlements, etc.)
-6. Calculate: total_revenue, total_opex, implied_noi, opex_ratio = total_opex / total_revenue
+1. If your confidence in a field is below ~60%, return null. Never estimate.
+2. Extract only actual historical operating data. Do not use broker projections or pro forma figures.
+3. Return null for missing categories. Do not estimate missing values.
+4. Numbers: floats, no $ or commas. Percentages: decimals (0.08, not 8%).
+5. Return totals for the source statement period. Do not annualize T-6 or YTD values before returning.
+6. Set period_months to the number of months covered. The merger annualizes using 12 / period_months.
+7. Mechanical math is allowed only from visible rows/columns, such as summing monthly columns when a
+   total column is blank or absent.
 
-EXTRACT (as JSON):
-- Revenue: rental_income, late_fees, other_income (itemized), bad_debt_annual if stated, corrections_collections_annual if stated, total_revenue
-- Expenses: property_tax, insurance, mgmt_fee, payroll, repairs_maintenance, utilities, marketing, other_opex (itemized), total_opex
-- Summary: total_revenue, total_opex, noi, expense_ratio_actual, unusual_items
+PERIOD DETECTION:
+- Look for date ranges and month columns. Jan-Dec = 12 months; Jul-Dec = 6 months.
+- If the statement says T-12, trailing twelve, or shows 12 month columns, set period_months = 12.
+- If it says T-6 or shows 6 month columns, set period_months = 6.
+- If it is YTD, set period_months to the visible month count.
+- If the period cannot be determined, return null for period_months rather than guessing.
+
+COLUMN LAYOUT:
+- T-12 statements often show one row per category and one column per month plus a Total column.
+- Prefer the Total column for the statement period when populated.
+- If the Total column is blank or missing, sum the visible monthly columns for that row.
+- Some statements show one row per month and one column per category. In that layout, sum each
+  category down the visible monthly rows.
+- Prefer the most recent operating period when multiple periods are shown.
+
+REVENUE:
+- gpr_annual_actual: Gross Potential Rent, Scheduled Rent, Gross Rental Income, Rental Income, or
+  tenant rental revenue for the statement period.
+- vacancy_credit_loss_pct_actual: vacancy, concessions, credit loss, bad debt, or write-offs as a
+  decimal when shown as a percentage. If only dollar lines are shown, compute percentage only when
+  GPR is also visible.
+- other_income_annual: all non-rental income for the statement period, including admin fees, late
+  fees, tenant insurance commissions, move-in fees, lien/NSF fees, truck rental, retail/locks,
+  merchandise, and miscellaneous income.
+- bad_debt_annual: bad debt, write-offs, uncollectible rent, or delinquency write-off when broken out.
+- corrections_collections_annual: collections, corrections, prior-period adjustments, or similar.
+
+EXPENSES:
+- property_tax_annual: Property Taxes, Real Estate Taxes, Tax Expense.
+- insurance_annual: Property Insurance, Casualty Insurance, Hazard Insurance.
+- mgmt_fee_pct_actual: explicit management fee percentage only. If management fee is a dollar line,
+  include it in other_opex_annual and leave mgmt_fee_pct_actual null.
+- payroll_annual: Payroll, Salaries & Wages, Labor, Benefits, Taxes & Benefits, On-Site Manager.
+- repairs_maintenance_annual: Repairs & Maintenance, R&M, Maintenance, Janitorial, Cleaning,
+  Landscaping, Snow Removal, Pest Control.
+- utilities_annual: Utilities, Electric, Gas, Water, Trash, Sewer.
+- marketing_annual: Marketing, Advertising, Promotion, Online Marketing, SEO, Web Leads.
+- other_opex_annual: operating expenses not mapped above, including Office Supplies, Bank Fees,
+  Credit Card Fees, Merchant Fees, Software, SiteLink, storEDGE, Telephone, Communications,
+  Security Monitoring, Gate/Fire, Legal & Professional, Administrative, Owner Auto, Travel,
+  Meals, Miscellaneous, and dollar management fees.
+
+SUMMARY:
+- noi_actual: Net Operating Income, NOI, or Net Income from Operations when stated. If no NOI line is
+  stated, compute only when total revenue and total operating expenses are visible.
+- expense_ratio_actual: total operating expenses / effective gross income as a decimal when stated
+  or mechanically derivable from visible totals.
+- period_months: integer month count for the source statement period.
+
+EXAMPLE OUTPUT (partial — null fields omitted for brevity):
+{
+  "gpr_annual_actual": 242000.0,
+  "other_income_annual": 18600.0,
+  "vacancy_credit_loss_pct_actual": null,
+  "property_tax_annual": 14200.0,
+  "insurance_annual": 3800.0,
+  "payroll_annual": 28500.0,
+  "utilities_annual": 6100.0,
+  "repairs_maintenance_annual": 4200.0,
+  "marketing_annual": 3600.0,
+  "other_opex_annual": null,
+  "noi_actual": 139600.0,
+  "expense_ratio_actual": 0.532,
+  "period_months": 12
+}
 
 Return as valid JSON only. No explanations."""
 
@@ -187,7 +336,7 @@ CHUNK TYPES (indicated in each chunk header):
 - Table Chunk: High confidence — extract every numeric column and row.
 - Narrative: Extract only explicitly stated figures (e.g. "$485,000 annual rent"). Skip vague descriptions.
 
-CITATION: Each chunk starts with a token like [S1:p5]. Use that exact token in citations.
+CITATION: Each chunk starts with a source token like [S1:p5] for PDFs or [S1:Rent Roll!R2-R201] for spreadsheets. Use that exact token in citations.
 
 NUMBERS: Remove $, commas. Convert percentages to decimals. "$1,234,567" → "1234567". "95%" → "0.95".
 
@@ -218,10 +367,10 @@ def _schema_json(fields: list[dict]) -> str:
     return _json.dumps({f["name"]: f.get("type", "float | null") for f in fields}, indent=2)
 
 
-# Derived from OMExtraction field metadata — do not edit manually.
-# To add a new scalar field: add it to OMExtraction in schemas.py with
-# Field(description=..., json_schema_extra={"cite": bool}).
-from .schemas import _OM_REGISTRY as _om_reg  # noqa: E402
+# Derived from extraction model field metadata — do not edit manually.
+# To add a new scalar field: add it to the corresponding model in schemas.py
+# with Field(description=..., json_schema_extra={"cite": bool}).
+from .schemas import _OM_REGISTRY as _om_reg, _T12_REGISTRY as _t12_reg, _RENT_ROLL_REGISTRY as _rr_reg  # noqa: E402
 
 _OM_FIELDS = _om_reg["om_fields_for_prompt"] + [
     {
@@ -236,117 +385,125 @@ _OM_FIELDS = _om_reg["om_fields_for_prompt"] + [
     },
     {
         "name": "rent_comps",
-        "type": "array of {facility, size, asking_rent, rent_per_sqft, distance_mi, notes}",
+        "type": (
+            'array of {facility, size, asking_rent, rent_per_sqft, distance_mi, '
+            'climate_type ("CC"|"NC"|"UNKNOWN"), standard_sqft (float|null), notes}'
+        ),
     },
 ]
 
-_T12_FIELDS = [
-    {"name": "gpr_annual_actual", "type": "float | null (annualised if T-6)"},
-    {"name": "vacancy_credit_loss_pct_actual", "type": "float | null (decimal)"},
-    {"name": "expense_ratio_actual", "type": "float | null (decimal)"},
-    {"name": "other_income_annual", "type": "float | null"},
-    {"name": "bad_debt_annual", "type": "float | null"},
-    {"name": "corrections_collections_annual", "type": "float | null"},
-    {"name": "property_tax_annual", "type": "float | null"},
-    {"name": "insurance_annual", "type": "float | null"},
-    {"name": "mgmt_fee_pct_actual", "type": "float | null (decimal)"},
-    {"name": "payroll_annual", "type": "float | null"},
-    {"name": "repairs_maintenance_annual", "type": "float | null"},
-    {"name": "utilities_annual", "type": "float | null"},
-    {"name": "marketing_annual", "type": "float | null"},
-    {"name": "other_opex_annual", "type": "float | null"},
-    {"name": "noi_actual", "type": "float | null"},
-    {"name": "period_months", "type": "int | null (12 or 6)"},
-]
+# T-12 scalar fields derived from T12Extraction registry; no complex fields to append.
+_T12_FIELDS = _t12_reg["t12_fields_for_prompt"]
 
-_RENT_ROLL_FIELDS = [
-    {"name": "num_units_actual", "type": "int | null"},
-    {"name": "physical_occupancy_pct", "type": "float | null (decimal)"},
-    {"name": "avg_in_place_rent_per_unit_monthly", "type": "float | null (monthly)"},
-    {"name": "avg_market_rent_per_unit_monthly", "type": "float | null (monthly)"},
-    {"name": "rent_growth_pct", "type": "float | null (decimal, if stated)"},
+_RENT_ROLL_FIELDS = _rr_reg["rr_fields_for_prompt"] + [
     {"name": "unit_mix", "type": "array of {section, unit_type, size, standard_sqft, num_units, occupied_units, occupancy_pct, current_rent, market_rent, rent_per_sqft, potential_rent, occupied_sqft, total_sqft, pct_of_total_sqft, climate_type (\"CC\"|\"NC\"|\"UNKNOWN\"), unit_category (\"storage\"|\"parking\"|\"residential\"|\"office\"|\"other\")}"},
-    {"name": "lease_records", "type": "array of {unit_id, monthly_rent, lease_expiration (YYYY-MM-DD), sqft}"},
+    {"name": "lease_records", "type": "array of {unit_id, monthly_rent (0.0 for vacant), lease_expiration (YYYY-MM-DD or null), sqft}"},
 ]
 
 
-def _phase2_system(doc_label: str, fields: list[dict], condensed_json: str) -> str:
+_OM_PHASE2_RULES = """OM MAPPING RULES:
+- "purchase price", "asking price", "listing price" -> purchase_price
+- "current cap rate", "in-place cap rate", "going-in cap rate", and cap rate stated at the asking or purchase basis -> market_cap_rate_purchase
+- "pro forma cap rate", "stabilized cap rate", "exit cap", "going-out cap", "terminal cap" -> exit_cap_rate
+- "mill rate", "current tax rate", "tax rate", and "mill levy" -> mil_rate
+- Property-tax assumptions and footnotes count for mil_rate. Example: "Y2 has been calculated using the current tax rate ($0.11161)" -> mil_rate = 0.11161
+- "gross potential rent", "GPR", "scheduled rent" -> gpr_annual_projected (annual)
+- "hold period", "investment horizon" -> hold_period_years
+- Do not map annual property tax expense or property tax growth into mil_rate
+- Nearby competitor / facility counts -> nearby_storage_count_1mi, nearby_storage_count_3mi, nearby_storage_count_5mi. "No Competitors within 1-Mile" -> nearby_storage_count_1mi = 0. Count distinct facilities in rent-comp tables for nearby_storage_count_3mi if not explicitly stated
+- Population within 3 miles -> population_3mi (integer). Average household income within 3 miles -> avg_household_income_3mi (float). Square feet per capita -> storage_sqft_per_capita_3mi. Extract these even when they appear on a demographics or market overview page separate from the operating statement. For all *_3mi fields, match by the column whose header is closest to 3 miles — do not pick the largest or middle value blindly. "1 Mile | 3 Miles | 5 Miles" → middle column; "1 Mile | 2 Miles | 3 Miles" → last column; "3 Miles | 5 Miles" → first column; "1 Mile | 5 Miles" → leave null; single-radius table with 3-mile header → use directly. Example: "2023 Estimate 10,509 63,110 153,689" in a 1/3/5 table → population_3mi = 63,110. Do not use age-25+, housing-unit, or occupied-unit rows for population_3mi.
+- For OM unit-mix tables, preserve one row per bucket. Use the section header (for example NON-CLIMATE or COVERED PARKING) in both section and unit_type when no more specific type label exists.
+- For OM competitive-set rent tables, preserve one row per facility and size bucket in rent_comps. Use asking_rent for Rent/Unit, rent_per_sqft for Rent/Sq.Ft., and keep notes for address, year built, square footage, blanks like "no data", or specials.
+- Never collapse multiple size buckets into one rent_comps row. Repeat facility, distance, and notes across separate rows when a facility lists multiple sizes.
+- The size field must contain exactly one size bucket. Do not put comma-separated sizes, addresses, year built, or square footage into size.
+- If the table shows Rent/Unit and Rent/Sq.Ft., populate asking_rent and rent_per_sqft for each emitted row.
+- For each rent_comps row, set climate_type to "CC" if the facility or unit is described as climate-controlled, temperature-controlled, heated, or humidity-controlled; "NC" if described as non-climate, drive-up, or outdoor; "UNKNOWN" if unclear. Set standard_sqft to the numeric area in sqft derived from size (e.g. "5x10" -> 50, "10x20" -> 200).
+- When a document contains multiple scenarios (e.g. Current, Year-One, Pro Forma), prefer the "Year-One" or "Year 1" column for gpr_annual_projected, vacancy_pct_projected, noi_projected, and expense line items. Use the "Current" column only when Year-One is absent. Never use the "Pro Forma" column for base-case inputs.
+- When other income sub-categories are present (Administrative Fees, Late/Lien/NSF Fees, Tenant Insurance Net Commissions, Miscellaneous Income), populate BOTH other_income_annual (the aggregate sum) AND each individual other_income_*_annual field. Cite all contributing source tokens in other_income_annual.
+- For OM expense line items, always prefer the Year 1 column dollar amounts. Map ALL operating expenses to one of the named expense fields when possible. If no named field matches, treat it as part of other_opex_annual. Never leave an expense line item unaccounted for.
+- Never map the expense ratio percentage into any dollar field.
+- For unit_mix rows, set climate_type to "CC" if the row is described as climate-controlled, temperature-controlled, heated, or humidity-controlled. Set it to "NC" if described as non-climate, drive-up, outdoor, or similar. Set it to "UNKNOWN" if unclear.
+- Set unit_category to "storage" for standard storage units, "parking" for parking spaces, "residential" for apartments or dwelling units, "office" for office space, and "other" for anything else.
+- avg_in_place_rent_per_unit_monthly: only when the OM explicitly states it as a single per-door aggregate figure. Do NOT derive or compute from unit-mix rows.
+- mgmt_fee_pct: only when an explicit management fee percentage is stated in OM text; do not compute from the annual dollar amount.
+- property_tax_growth_pct: only when a property-tax-specific growth rate is stated separately from opex_growth_pct; do not copy opex_growth_pct into this field."""
+
+_T12_PHASE2_RULES = """T-12 / T-6 MAPPING RULES:
+- Return source-period totals, not pre-annualized T-6 values. If the source covers 6 months, return the 6-month totals and set period_months = 6; the merger annualizes later.
+- "Gross Potential Rent", "Scheduled Rent", "Gross Rental Income", "Rental Income" -> gpr_annual_actual
+- "Vacancy", "Physical Vacancy", "Credit Loss", "Concessions", "Bad Debt" percentage -> vacancy_credit_loss_pct_actual as a decimal
+- If vacancy, credit loss, concessions, or bad debt are shown as dollar lines and GPR is visible, compute vacancy_credit_loss_pct_actual from visible values only
+- "Other Income", "Ancillary Income", "Admin Fees", "Late Fees", "Tenant Insurance", "Truck Rental", "Merchandise", "Locks", "Misc Income" -> other_income_annual
+- "Bad Debt", "Write-offs", "Uncollectible" as a separate amount -> bad_debt_annual
+- "Collections", "Corrections", "Prior Period Adjustments" -> corrections_collections_annual
+- "Property Taxes", "Real Estate Taxes", "Tax Expense" -> property_tax_annual
+- "Insurance", "Property Insurance", "Casualty", "Hazard" -> insurance_annual
+- "Management Fee %" or stated management fee rate only -> mgmt_fee_pct_actual as a decimal. Dollar-only management fee lines -> other_opex_annual
+- "Payroll", "Labor", "Salaries", "Benefits", "On-Site Manager" -> payroll_annual
+- "Repairs", "Maintenance", "R&M", "Janitorial", "Cleaning", "Landscaping", "Pest Control" -> repairs_maintenance_annual
+- "Utilities", "Electric", "Gas", "Water", "Trash", "Sewer" -> utilities_annual
+- "Marketing", "Advertising", "Promotion", "Online Marketing", "Web Leads" -> marketing_annual
+- All other operating expenses, including bank fees, merchant fees, software, telephone, security, gate/fire, office/admin, legal/professional, owner auto, travel, meals, and miscellaneous -> other_opex_annual
+- "NOI", "Net Operating Income", "Net Income from Operations" -> noi_actual. If no NOI line is stated, compute only when total revenue and total operating expenses are visible.
+- "Expense Ratio", "Opex Ratio" -> expense_ratio_actual as a decimal. If not stated, compute only when total operating expenses and effective gross income are visible.
+- For monthly-column tables, prefer populated Total columns; otherwise sum visible month columns mechanically.
+- For row-per-month tables, sum visible monthly rows for each mapped category.
+- Set period_months from the visible month count: 12 for T-12, 6 for T-6, YTD count for YTD. Return null if unclear."""
+
+_RENT_ROLL_PHASE2_RULES = """RENT ROLL MAPPING RULES:
+- "Total Units", "Unit Count", occupied + vacant unit count -> num_units_actual
+- "Occupancy", "Occupied %" -> physical_occupancy_pct as a decimal. If not stated, compute from visible occupied and total unit counts.
+- "Average Rent", "Avg In-Place Rent", "Avg Monthly Rent Per Unit", current occupied rent aggregate -> avg_in_place_rent_per_unit_monthly
+- Do not average market or street rents into avg_in_place_rent_per_unit_monthly.
+- "Market Rent", "Street Rate", "Asking Rate", "Avg Market Rate" -> avg_market_rent_per_unit_monthly only when market-rate data exists.
+- "Rent Growth", "Annual Rent Increase" -> rent_growth_pct as a decimal only when explicitly stated.
+- Unit mix: preserve one row per size/type bucket. Use climate_type "CC" for climate/interior/temperature-controlled/heated/humidity-controlled; "NC" for non-climate/drive-up/outdoor/unconditioned; "UNKNOWN" when unclear.
+- Unit category: "storage" for standard storage, "parking" for vehicle/RV/boat/parking rows, "residential" for apartments/dwellings, "office" for offices, "other" otherwise.
+- Size must contain exactly one size bucket, e.g. "5 x 10". Do not collapse multiple sizes into one row.
+- Lease records: one row per unit when row-level data exists. Use the schema field lease_expiration for the end date. monthly_rent = 0.0 for vacant units. sqft = unit square footage."""
+
+
+def _phase2_system(
+    doc_label: str,
+    fields: list[dict],
+    condensed_json: str,
+    doc_rules: str = "",
+) -> str:
+    rules_section = f"\n{doc_rules}\n" if doc_rules else ""
     return f"""You are converting condensed field extractions into a typed {doc_label} underwriting schema.
 
 The condensed data below was extracted from a real estate document.
 Map field values to the schema. Rules:
 - Monetary values: float, no symbols or commas
 - Percentages: decimal (0.065 not 6.5%)
-- "purchase price", "asking price", "listing price" → purchase_price
-- "current cap rate", "in-place cap rate", "going-in cap rate", and cap rate stated at the asking or purchase basis → market_cap_rate_purchase
-- "pro forma cap rate", "stabilized cap rate", "exit cap", "going-out cap", "terminal cap" → exit_cap_rate
-- "mill rate", "current tax rate", "tax rate", and "mill levy" → mil_rate
-- "gross potential rent", "GPR", "scheduled rent" → gpr_annual_projected (annualised)
-- "hold period", "investment horizon" → hold_period_years
-- Do not map annual property tax expense or property tax growth into mil_rate
-- Nearby competitor / facility counts → nearby_storage_count_1mi, nearby_storage_count_3mi, nearby_storage_count_5mi. "No Competitors within 1-Mile" → nearby_storage_count_1mi = 0. Count distinct facilities in rent-comp tables for nearby_storage_count_3mi if not explicitly stated
-- Population within 3 miles → population_3mi (integer). Average household income within 3 miles → avg_household_income_3mi (float). Square feet per capita → storage_sqft_per_capita_3mi. Extract these even when they appear on a demographics or market overview page separate from the operating statement
-- For OM unit-mix tables, preserve one row per bucket. Use the section header (for example NON-CLIMATE or COVERED PARKING) in both section and unit_type when no more specific type label exists.
-- For OM competitive-set rent tables, preserve one row per facility and size bucket in rent_comps. Use asking_rent for Rent/Unit, rent_per_sqft for Rent/Sq.Ft., and keep notes for address, year built, square footage, blanks like "no data", or specials.
-- Never collapse multiple size buckets into one rent_comps row. Repeat facility, distance, and notes across separate rows when a facility lists multiple sizes.
-- The size field must contain exactly one size bucket. Do not put comma-separated sizes, addresses, year built, or square footage into size.
-- If the table shows Rent/Unit and Rent/Sq.Ft., populate asking_rent and rent_per_sqft for each emitted row.
-- For rent-roll unit-mix or occupancy summary tables, preserve one row per size/type bucket using the same unit_mix row structure as the OM output.
-- In unit_mix rows, map weighted average or stated asking monthly rate into current_rent unless a separate market rate is explicitly shown.
-- When a document contains multiple scenarios (e.g. Current, Year-One, Pro Forma):
-  prefer the "Year-One" or "Year 1" column for gpr_annual_projected, 
-  vacancy_pct_projected, noi_projected, and expense line items.
-  Use the "Current" column only when Year-One is absent.
-  Never use the "Pro Forma" column for base-case inputs.
-- When other income sub-categories are present (Administrative Fees, Late/Lien/NSF Fees,
-  Tenant Insurance Net Commissions, Miscellaneous Income), populate BOTH other_income_annual
-  (the aggregate sum) AND each individual other_income_*_annual field. Cite all contributing
-  source tokens in other_income_annual.
-- For OM expense line items, always prefer the Year 1 column dollar amounts.
-  Map ALL operating expenses to one of the 7 primary fields: expense_property_tax_annual,
-  expense_insurance_annual, expense_payroll_annual, expense_repairs_maintenance_annual,
-  expense_utilities_annual, expense_marketing_annual, expense_mgmt_fee_annual.
-  Any expense that does not clearly fit one of those 7 — including but not limited to
-  bank fees, office/admin supplies, telephone/communications, contract services, janitorial,
-  security monitoring, credit card processing, miscellaneous — should be extracted into the
-  most appropriate named field if one exists (expense_bank_fees_annual,
-  expense_contract_services_annual, expense_office_admin_annual, expense_telephone_annual,
-  expense_miscellaneous_annual). If no named field matches, treat it as part of
-  other_opex_annual. Never leave an expense line item unaccounted for.
-  Never map the expense ratio percentage into any dollar field.
-- For unit_mix rows, set climate_type to "CC" if the row is described as climate-controlled,
-  temperature-controlled, heated, or humidity-controlled. Set it to "NC" if described as
-  non-climate, drive-up, outdoor, or similar. Set it to "UNKNOWN" if unclear.
-  Set unit_category to "storage" for standard storage units, "parking" for parking spaces
-  (covered or uncovered), "residential" for apartments or dwelling units, "office" for
-  office space, and "other" for anything else.
-- avg_in_place_rent_per_unit_monthly: only when the OM explicitly states it as a single per-door
-  aggregate figure. Do NOT derive or compute from unit-mix rows.
-- mgmt_fee_pct: only when an explicit management fee percentage is stated in OM text; do not
-  compute from the annual dollar amount.
-- property_tax_growth_pct: only when a property-tax-specific growth rate is stated separately
-  from opex_growth_pct; do not copy opex_growth_pct into this field.
 - If a value genuinely cannot be found, return null
+{rules_section}
 
 CITATIONS: For every SCALAR field you populate (not arrays like unit_mix, rent_comps, or lease_records), also emit the companion citation fields:
 - {{field}}_confidence: your confidence 0.0-1.0
-- {{field}}_citations: the [S{{n}}:p{{page}}] tokens from condensed_fields that contained this data (e.g. ["S1:p5"])
+- {{field}}_citations: the S{{n}} source tokens from condensed_fields that contained this data (e.g. ["S1:p5"] or ["S1:Rent Roll!R2-R201"])
 - {{field}}_source: verbatim snippet ≤40 chars — the key phrase only, no full sentences
 
 Condensed data:
 {condensed_json}
+
+Before returning JSON, verify:
+1. Every value you emit appears in the condensed data above — no invention
+2. Numbers are floats, not strings and not raw percentages
+3. Every populated scalar field has non-empty {{field}}_citations
+4. Any field you are less than 60% confident about is null, not a guess
 
 Return ONLY valid JSON matching this schema (null for missing):
 {_schema_json(fields)}"""
 
 
 def create_phase2_om_prompt(condensed_json: str) -> str:
-    return _phase2_system("Offering Memorandum (OM)", _OM_FIELDS, condensed_json)
+    return _phase2_system("Offering Memorandum (OM)", _OM_FIELDS, condensed_json, _OM_PHASE2_RULES)
 
 
 def create_phase2_t12_prompt(condensed_json: str) -> str:
-    return _phase2_system("T-12/T-6 Operating Statement", _T12_FIELDS, condensed_json)
+    return _phase2_system("T-12/T-6 Operating Statement", _T12_FIELDS, condensed_json, _T12_PHASE2_RULES)
 
 
 def create_phase2_rent_roll_prompt(condensed_json: str) -> str:
-    return _phase2_system("Rent Roll", _RENT_ROLL_FIELDS, condensed_json)
+    return _phase2_system("Rent Roll", _RENT_ROLL_FIELDS, condensed_json, _RENT_ROLL_PHASE2_RULES)

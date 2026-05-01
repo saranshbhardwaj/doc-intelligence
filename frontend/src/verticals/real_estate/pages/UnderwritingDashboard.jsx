@@ -25,6 +25,7 @@ import { useAppAuth } from '../../../hooks/useAppAuth';
 import { useUnderwriting, useUnderwritingActions } from '../../../store';
 import { deleteUnderwritingRun, updateUnderwritingRunMetadata } from '../../../api/re-underwriting';
 import {
+  UnderwritingDefaultsModal,
   UnderwritingEmptyState,
   UnderwritingMetricCard,
   UnderwritingStatusBadge,
@@ -307,10 +308,13 @@ export default function UnderwritingDashboard() {
   };
 
   const newAnalysisBtn = (
-    <Button onClick={() => navigate('/app/re/underwriting/new')}>
-      <Plus className="mr-1.5 h-4 w-4" />
-      New Analysis
-    </Button>
+    <div className="flex items-center gap-2">
+      <UnderwritingDefaultsModal getToken={getToken} />
+      <Button onClick={() => navigate('/app/re/underwriting/new')}>
+        <Plus className="mr-1.5 h-4 w-4" />
+        New Analysis
+      </Button>
+    </div>
   );
 
   const pageHeader = {

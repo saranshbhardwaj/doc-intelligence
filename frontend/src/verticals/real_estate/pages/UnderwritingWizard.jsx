@@ -109,6 +109,7 @@ export default function UnderwritingWizard() {
 
   const [projectData, setProjectData] = useState(INITIAL_PROJECT_DATA);
   const savedMeta = useRef({ name: "", address: null });
+  const hydratedInputsKey = useRef(null);
   const [selectedDocs, setSelectedDocs] = useState(EMPTY_SELECTED_DOCS);
   const [docPickerOpen, setDocPickerOpen] = useState(null);
   const [activeTab, setActiveTab] = useState(TAB_CONFIG[0].id);
@@ -143,6 +144,7 @@ export default function UnderwritingWizard() {
     setShowSourcePanel(false);
     setActiveCitation(null);
     savedMeta.current = { name: "", address: null };
+    hydratedInputsKey.current = null;
   };
 
   // On mount: re-hydrate from DB if run_id is in URL; otherwise start fresh.
@@ -260,6 +262,15 @@ export default function UnderwritingWizard() {
     if (!runIdFromUrl || !currentRun?.inputs || String(currentRunId) !== String(runIdFromUrl)) {
       return;
     }
+    const runHydrationKey = [
+      currentRunId,
+      currentRun?.updated_at || currentRun?.completed_at || '',
+      currentRun?.status || '',
+    ].join(':');
+    if (hydratedInputsKey.current === runHydrationKey) {
+      return;
+    }
+
     if (currentRun.name || currentRun.address || currentRun.inputs.project) {
       const { name: _ignoredName, ...projectInputs } = currentRun.inputs.project || {};
 
@@ -289,10 +300,16 @@ export default function UnderwritingWizard() {
     if (Object.values(hydratedDocs).some(Boolean)) {
       setSelectedDocs(hydratedDocs);
     }
-  // Dep is run id only — the guard `String(currentRunId) !== String(runIdFromUrl)` already
-  // prevents re-hydration when other currentRun properties change mid-session.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [runIdFromUrl, currentRun?.id ?? currentRun?.run_id]);
+    hydratedInputsKey.current = runHydrationKey;
+  }, [
+    runIdFromUrl,
+    currentRun?.id,
+    currentRun?.run_id,
+    currentRun?.inputs,
+    currentRun?.updated_at,
+    currentRun?.completed_at,
+    currentRun?.status,
+  ]);
 
   // Consider docs "attached" if user selected any in the UI OR the run already has documents from a prior extraction.
   const anyDocSelected = Object.values(selectedDocs).some(Boolean)

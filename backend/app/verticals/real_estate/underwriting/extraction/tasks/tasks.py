@@ -28,6 +28,7 @@ from ..merger import apply_plausibility_guards, merge_extractions
 from ..discrepancy import detect_discrepancies_from_results
 from ..schemas import ExtractedDocResult
 from ...calculator import calculate
+from ...noi_bridge import build_noi_bridge
 from ...stress_tests import run_stress_tests
 from ...rollover import compute_rollover_risk
 from ...verdict import evaluate
@@ -141,6 +142,10 @@ def _build_rent_roll_source_data(doc_results: list[ExtractedDocResult]) -> dict 
             data["unit_mix"] = [row.model_dump() for row in rr.unit_mix]
         if rr.lease_records:
             data["leases"] = [record.model_dump() for record in rr.lease_records]
+        if result.extraction_metadata.get("spreadsheet_interpretation"):
+            data["source_metadata"] = result.extraction_metadata["spreadsheet_interpretation"]
+        if result.extraction_metadata.get("review_warnings"):
+            data["review_warnings"] = result.extraction_metadata["review_warnings"]
         return data
     return None
 
@@ -176,6 +181,8 @@ def _build_t12_source_data(doc_results: list[ExtractedDocResult]) -> dict | None
         if t12.period_months is not None:
             summary["period_months"] = t12.period_months
             summary["annualized"] = t12.period_months < 12
+        if t12.noi_actual is not None:
+            summary["noi_actual"] = t12.noi_actual * factor
         if t12.bad_debt_annual is not None:
             summary["bad_debt_annual"] = t12.bad_debt_annual * factor
         if t12.corrections_collections_annual is not None:
@@ -195,8 +202,33 @@ def _build_t12_source_data(doc_results: list[ExtractedDocResult]) -> dict | None
         ]
         if missing_expense_fields:
             summary["missing_expense_fields"] = missing_expense_fields
-        return {"summary": {key: value for key, value in summary.items() if value is not None}}
+        data = {"summary": {key: value for key, value in summary.items() if value is not None}}
+        source_metadata = result.extraction_metadata.get("t12_table_totals")
+        if source_metadata:
+            data["source_metadata"] = source_metadata
+        if result.extraction_metadata.get("review_warnings"):
+            data["review_warnings"] = result.extraction_metadata["review_warnings"]
+        return data
     return None
+
+
+def _build_discrepancy_warning(discrepancies: list[dict]) -> VerdictWarning | None:
+    material = [
+        discrepancy for discrepancy in discrepancies or []
+        if discrepancy.get("severity") in {"critical", "error", "warning"}
+    ]
+    if not material:
+        return None
+
+    critical_count = sum(1 for discrepancy in material if discrepancy.get("severity") in {"critical", "error"})
+    preview = "; ".join((discrepancy.get("note") or discrepancy.get("field") or "source conflict") for discrepancy in material[:2])
+    if len(material) > 2:
+        preview = f"{preview}; and {len(material) - 2} more"
+    return VerdictWarning(
+        key="source_discrepancies",
+        message=f"Source documents disagree on underwriting inputs: {preview}.",
+        severity="critical" if critical_count else "warning",
+    )
 
 
 def _build_plausibility_warning(plausibility_flags: list[dict]) -> VerdictWarning | None:
@@ -262,6 +294,17 @@ def _get_t12_period_months(doc_results: list[ExtractedDocResult]) -> int | None:
         if result.doc_type == "t12" and result.t12 and not result.error and result.t12.period_months:
             return result.t12.period_months
     return None
+
+
+def _get_extracted_om_t12(doc_results: list[ExtractedDocResult]):
+    om = None
+    t12 = None
+    for result in doc_results:
+        if result.doc_type == "om" and result.om and not result.error:
+            om = result.om
+        elif result.doc_type == "t12" and result.t12 and not result.error:
+            t12 = result.t12
+    return om, t12
 
 
 def _get_db_session():
@@ -414,7 +457,7 @@ def re_detect_discrepancies_task(self, payload: dict) -> dict:
             progress_percent=70, message="Checking for inconsistencies...",
         )
         results = [ExtractedDocResult(**d) for d in payload.get("doc_results", [])]
-        discrepancies = detect_discrepancies_from_results(results)
+        discrepancies = detect_discrepancies_from_results(results, payload.get("merged_inputs", {}))
         payload["discrepancies"] = discrepancies
         return payload
     except Exception as e:
@@ -461,6 +504,14 @@ def re_calculate_underwriting_task(self, payload: dict) -> dict:
             if plausibility_warning.message not in verdict.rationale:
                 verdict.rationale = f"{verdict.rationale} Warning: {plausibility_warning.message}"
 
+        discrepancy_warning = _build_discrepancy_warning(payload.get("discrepancies", []))
+        if discrepancy_warning is not None:
+            verdict.warnings.append(discrepancy_warning)
+            if verdict.status == "worth_pursuing":
+                verdict.status = "needs_review"
+            if discrepancy_warning.message not in verdict.rationale:
+                verdict.rationale = f"{verdict.rationale} Warning: {discrepancy_warning.message}"
+
         tracker.update_progress(
             status="completed", current_stage="storage",
             progress_percent=95, message="Storing results...",
@@ -484,6 +535,8 @@ def re_calculate_underwriting_task(self, payload: dict) -> dict:
         if inputs.rent_comps:
             result_payload["rent_comps"] = [row.model_dump() for row in inputs.rent_comps]
         result_payload.update(_build_source_artifact_data(doc_results, payload.get("plausibility_flags", [])))
+        om, t12 = _get_extracted_om_t12(doc_results)
+        result_payload["noi_bridge"] = build_noi_bridge(inputs, om, t12, result)
         repo.update_result(run_id, result_payload, typed_metrics)
         repo.update_extraction(
             run_id,
