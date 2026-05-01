@@ -116,6 +116,7 @@ export default function UnderwritingWizard() {
   const [isExtracting, setIsExtracting] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
+  const [savingMeta, setSavingMeta] = useState(false);
   const [error, setError] = useState(null);
 
   // Value-add evidence section (Operations tab)
@@ -140,6 +141,7 @@ export default function UnderwritingWizard() {
     setLeftCollapsed(false);
     setShowSourcePanel(false);
     setActiveCitation(null);
+    savedMeta.current = { name: "", address: "" };
   };
 
   // On mount: re-hydrate from DB if run_id is in URL; otherwise start fresh.
@@ -440,8 +442,8 @@ export default function UnderwritingWizard() {
       const existingRunId = currentRun?.run_id || currentRun?.id || runIdFromUrl;
       if (existingRunId) {
         await updateUnderwritingRunMetadata(getToken, existingRunId, {
-          name: projectData.name,
-          address: projectData.address,
+          name: projectData.name?.trim() || "",
+          address: projectData.address?.trim() || null,
         });
         savedMeta.current = {
           name: projectData.name?.trim() || "",
@@ -465,8 +467,6 @@ export default function UnderwritingWizard() {
       setIsSubmitting(false);
     }
   };
-
-  const [savingMeta, setSavingMeta] = useState(false);
 
   async function handleSaveMeta() {
     if (!analysisRunId || !projectData.name?.trim()) return;
@@ -533,6 +533,7 @@ export default function UnderwritingWizard() {
 
   const isMetaDirty =
     !!analysisRunId &&
+    !!currentRun &&
     (projectData.name !== savedMeta.current.name ||
       (projectData.address || "") !== (savedMeta.current.address || ""));
 
