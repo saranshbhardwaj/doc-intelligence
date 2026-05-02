@@ -254,6 +254,12 @@ def test_om_extraction_populates_year1_expense_fields_from_three_column_statemen
     """When the LLM returns Year-1 and Current values for all five adjustable
     expense line items, the extraction service must surface them in scalars."""
     payload = {
+        "detected_deal_subtype": "stabilized",
+        "detected_current_column_label": "Current",
+        "detected_year1_column_label": "Year 1",
+        "detected_has_current_column": True,
+        "detected_expense_format": "absolute",
+        "detected_income_period_label": "T-12",
         "purchase_price": 2_500_000,
         "purchase_price_citations": ["S1:p16"],
         "purchase_price_confidence": 0.95,
@@ -311,6 +317,38 @@ def test_om_extraction_populates_year1_expense_fields_from_three_column_statemen
     assert scalars["expense_insurance_annual_year1"] == 11_840
     assert scalars["expense_utilities_annual_year1"] == 6_868
     assert scalars["expense_repairs_maintenance_annual_year1"] == 2_102
+
+    assert scalars["detected_deal_subtype"] == "stabilized"
+    assert scalars["detected_current_column_label"] == "Current"
+    assert scalars["detected_year1_column_label"] == "Year 1"
+    assert scalars["detected_has_current_column"] is True
+
+
+def test_om_extraction_handles_no_current_column():
+    """When detected_has_current_column=False, _current fields absent, _year1 present."""
+    payload = {
+        "detected_deal_subtype": "value_add",
+        "detected_current_column_label": None,
+        "detected_year1_column_label": "Year 1",
+        "detected_has_current_column": False,
+        "detected_expense_format": "absolute",
+        "detected_income_period_label": None,
+        "purchase_price": 1_800_000,
+        "purchase_price_citations": ["S1:p1"],
+        "purchase_price_confidence": 0.9,
+        "purchase_price_source": "$1,800,000",
+        "expense_property_tax_annual_year1": 13_106,
+        "expense_property_tax_annual_year1_citations": ["S1:p8"],
+        "expense_property_tax_annual_year1_confidence": 0.9,
+        "expense_property_tax_annual_year1_source": "Property Taxes Year 1: $13,106",
+    }
+    service = REExtractionLLMService(_FakeLLMClient([_FakeMessage(payload)]))
+    extracted = service.extract_om("No current column OM")
+    scalars = extracted["scalars"]
+
+    assert scalars["detected_has_current_column"] is False
+    assert scalars["expense_property_tax_annual_year1"] == 13_106
+    assert scalars.get("expense_property_tax_annual_current") is None
 
 
 def test_phase1_prompt_extracts_column_structure_and_both_column_values():
