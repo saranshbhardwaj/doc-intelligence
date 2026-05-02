@@ -380,6 +380,31 @@ CHUNK TYPES (indicated in each chunk header):
 - Table Chunk: High confidence — extract every numeric column and row.
 - Narrative: Extract only explicitly stated figures (e.g. "$485,000 annual rent"). Skip vague descriptions.
 
+MULTI-COLUMN TABLES: When a table row has values across multiple columns
+(e.g. Current | Year 1 | Pro Forma, or 2024 Actuals | Year 1 Projected | Year 2):
+- Extract a SEPARATE field entry for each column's value for expense line items.
+- Suffix the field name with a normalized column label:
+    {"field": "property_taxes_current", "value": "6139", "citations": [...], "source_text": "..."}
+    {"field": "property_taxes_year1",   "value": "15346", "citations": [...], "source_text": "..."}
+    {"field": "insurance_current",      "value": "9867",  "citations": [...], "source_text": "..."}
+    {"field": "insurance_year1",        "value": "11840", "citations": [...], "source_text": "..."}
+- Never collapse multiple columns into one field entry.
+- When a column value is explicitly $0, emit value="0" — do NOT skip it.
+
+STRUCTURE METADATA: When an operating statement table is present, also emit these
+metadata fields (one entry each, not per-row):
+  {"field": "operating_statement_column_structure",
+   "value": "Current | Year 1 | Pro Forma",
+   "citations": ["[S1:p5]"], "source_text": "column headers from operating statement"}
+  {"field": "expense_format",
+   "value": "absolute",
+   "citations": ["[S1:p5]"], "source_text": "expense line items are dollar totals"}
+  (set value to "per_sqft" when expenses appear as $/sqft rates, "mixed" when both)
+  {"field": "income_period_label",
+   "value": "T-12",
+   "citations": ["[S1:p5]"], "source_text": "trailing 12 months"}
+  (use the exact label from the document: "T-12", "T-6", "2024 Actuals", "Trailing 12", etc.)
+
 CITATION: Each chunk starts with a source token like [S1:p5] for PDFs or [S1:Rent Roll!R2-R201] for spreadsheets. Use that exact token in citations.
 
 NUMBERS: Remove $, commas. Convert percentages to decimals. "$1,234,567" → "1234567". "95%" → "0.95".

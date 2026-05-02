@@ -311,3 +311,31 @@ def test_om_extraction_populates_year1_expense_fields_from_three_column_statemen
     assert scalars["expense_insurance_annual_year1"] == 11_840
     assert scalars["expense_utilities_annual_year1"] == 6_868
     assert scalars["expense_repairs_maintenance_annual_year1"] == 2_102
+
+
+def test_phase1_prompt_extracts_column_structure_and_both_column_values():
+    """Phase 1 must emit structure metadata and both _current/_year1 column values."""
+    from app.verticals.real_estate.underwriting.extraction.prompts import (
+        PHASE1_CONDENSATION_SYSTEM_PROMPT,
+    )
+    prompt = PHASE1_CONDENSATION_SYSTEM_PROMPT
+
+    # Must extract column structure as a named metadata field
+    assert "operating_statement_column_structure" in prompt
+
+    # Must emit separate entries per column using _current / _year1 suffixes
+    assert "_current" in prompt
+    assert "_year1" in prompt
+
+    # Must not collapse multiple columns
+    assert "never collapse" in prompt.lower() or "separate field entry" in prompt.lower()
+
+    # Must emit explicit $0 values
+    assert 'value="0"' in prompt or "do not skip" in prompt.lower() or \
+           "do not omit" in prompt.lower()
+
+    # Must extract expense_format metadata
+    assert "expense_format" in prompt
+
+    # Must extract income_period_label metadata
+    assert "income_period_label" in prompt
