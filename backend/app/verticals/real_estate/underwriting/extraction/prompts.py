@@ -11,9 +11,9 @@ import json as _json
 OM_EXTRACTION_SYSTEM_PROMPT = """You are an expert CRE analyst extracting structured financial data from an Offering Memorandum (OM).
 
 CRITICAL RULES:
-1. If your confidence in a field is below ~60%, return null. Never estimate.
+1. If your confidence in a field is below ~60%, omit the field. Never estimate.
 2. Extract ONLY data explicitly present in the document — never infer or calculate
-3. Return null/None for missing fields — do not guess
+3. Omit missing fields — do not guess or emit null placeholders
 4. Numbers: return as floats, remove all formatting ($, commas, %), e.g. "$1,234,567" → 1234567.0
 5. Percentages: return as decimals, e.g. "95%" → 0.95
 6. Include confidence scores (0.0-1.0) for each major field: explicit text = 0.8+, inferred = lower
@@ -24,7 +24,7 @@ EXTRACT (as JSON):
 - Property: name, address, asset_type (always "self_storage"), num_units, rentable_sqft, year_built
 - Income basis: income_basis_months (int, 6 or 12) when the document states income is based on
   trailing N months (e.g. "trailing 6-month income, annualized"); income_basis_note (str) for any
-  accompanying explanation. Return null for both when not stated.
+  accompanying explanation. Omit both when not stated.
 - Value-add evidence (extract only when explicitly stated, never infer):
     - physical_occupancy_pct: stated occupancy percentage as decimal (e.g. "91% occupancy" → 0.91)
     - price_per_rentable_sqft: stated price per rentable square foot if the OM lists it
@@ -47,7 +47,7 @@ EXTRACT (as JSON):
           "2023 Estimate 10,509 63,110 153,689" → population_3mi = 63,110.
         • "1 Mile | 2 Miles | 3 Miles" → use the "3 Miles" column (last).
         • "3 Miles | 5 Miles" → use the "3 Miles" column (first).
-        • "1 Mile | 5 Miles" (no 3-mile column) → leave population_3mi null.
+        • "1 Mile | 5 Miles" (no 3-mile column) → omit population_3mi.
         • Single-radius tables (e.g. "3-Mile Radius" header) → use that value directly.
       Always match by column header, not by picking the largest or middle value.
       Do not use Population Age 25+, Housing Units, or Occupied Units rows for population_3mi.
@@ -64,12 +64,12 @@ EXTRACT (as JSON):
     - avg_in_place_rent_per_unit_monthly: average monthly in-place rent per unit ONLY if the OM
       states it as a single explicit aggregate figure (e.g. "Average In-Place Rent: $125/unit/mo"
       or "Avg Monthly Rent Per Unit: $114"). Do NOT compute or derive this from individual unit-mix
-      rows — return null if not explicitly stated as an aggregate
-    - avg_market_rent_per_unit_monthly: average market rent per unit if explicitly stated; null otherwise
+      rows — omit if not explicitly stated as an aggregate
+    - avg_market_rent_per_unit_monthly: average market rent per unit if explicitly stated; omit otherwise
     - vacancy_pct_projected: Year 1 total economic vacancy as a decimal. Economic vacancy combines
       physical vacancy AND rent concessions/bad debt. Look in the YEAR 1 column for a row labeled
       "(Economic Vacancy)", "(Vacancy)", or "(Physical Vacancy) + (Rent Concessions/Bad Debt)".
-      If shown as "12.78% / ($36,530)", return 0.1278. Return null if not found — never default.
+      If shown as "12.78% / ($36,530)", return 0.1278. Omit if not found — never default.
     - other_income_annual: Sum of ALL non-rental income items in the Year 1 column. In self-storage
       OMs this typically includes: Administrative Fees, Late/Lien/NSF Fees, Tenant Insurance Net
       Commissions, and Miscellaneous Income. This equals the difference between "Effective Gross
@@ -91,27 +91,42 @@ EXTRACT (as JSON):
     - expense_miscellaneous_annual: "Miscellaneous"
     - expense_telephone_annual: "Telephone & Communications"
     - expense_payroll_annual: "Salaries, Taxes & Benefits (On-Site)"
-    - For each of the five adjustable expense line items below, extract TWO values:
-      the Year 1 (or "Year-One") broker-adjusted figure into the `_year1` field,
-      and the Current (trailing actual) figure into the `_current` field.
-      If only one figure is present in the document, populate BOTH the `_year1`
-      and `_current` fields with the same value.
-      Never use the "Pro Forma" column.
-
+    - STEP 1 — DETECT STRUCTURE: Before extracting any expense values, fill these fields:
+        detected_deal_subtype: "stabilized" (existing ops, Year-1 has post-sale adjustments
+          like tax reassessment) | "value_add" (owner-operated Current with $0 management/
+          payroll/marketing; Year-1 adds professional management costs) | "unsupported"
+          (ground-up development, non-self-storage, or unclear).
+        detected_current_column_label: exact column header for current operations —
+          "Current", a calendar year ("2024", "2023"), or a phrase ("2024 Financials",
+          "2023 Actuals", "Trailing 12"). Null if no current column exists.
+        detected_year1_column_label: exact column header for Year-1 projections —
+          "Year 1", "Year-One", "Year 1 Projected". Null if absent.
+        detected_has_current_column: true if a current-operations column exists
+          alongside Year-1, false otherwise.
+        detected_expense_format: "absolute" if expense line items are dollar totals;
+          "per_sqft" if shown as $/sqft (you must multiply by rentable_sqft to produce
+          the annual dollar total); "mixed" if both formats appear.
+        detected_income_period_label: period the current column covers as written —
+          "T-12", "T-6", "2024 Actuals", "Trailing 12". Null if not stated.
+    - STEP 2 — EXTRACT using your detected labels as anchors. For each of the five
+      adjustable expense line items, read _current from detected_current_column_label
+      and _year1 from detected_year1_column_label:
+        • If detected_has_current_column is false: emit only _year1 fields; omit _current.
+        • If detected_expense_format is "per_sqft": multiply rate × rentable_sqft first.
+        • When Current is explicitly $0 (owner-operated): emit _current=0.0 — never omit it.
+        • Never emit only one of the pair when both columns exist. If Year-1 and Current
+          are identical, still emit both.
+        • For tables with more than 3 columns (Year 2, Year 3 ...): ignore beyond Year-1.
+        • If detected_deal_subtype is "unsupported": return only the six detected_* fields.
       - expense_property_tax_annual_year1 / expense_property_tax_annual_current:
-          "Property Taxes". Year 1 often reflects the actual assessor bill or a
-          post-reassessment estimate and will be materially higher than Current.
-          Always extract the Year 1 column if present — do not substitute Current.
-
+          "Property Taxes". Extract the dollar amount directly from each column —
+          do not compute from assessed value or tax rate.
       - expense_insurance_annual_year1 / expense_insurance_annual_current:
-          "Property Insurance". Year 1 is typically adjusted upward from Current.
-
+          "Property Insurance".
       - expense_repairs_maintenance_annual_year1 / expense_repairs_maintenance_annual_current:
           "Repairs, Maintenance & Reserves".
-
       - expense_marketing_annual_year1 / expense_marketing_annual_current:
           "Marketing & Promotion".
-
       - expense_utilities_annual_year1 / expense_utilities_annual_current:
           "Utilities & Trash".
     - expense_mgmt_fee_annual: "Third Party Management (Off-Site)"
@@ -126,7 +141,18 @@ EXTRACT (as JSON):
     - property_tax_growth_pct: ONLY when the OM states a property-tax-specific annual growth
       rate separate from general opex growth (e.g. "property taxes grow 4% annually, other
       expenses grow 2%"). If only one blended opex growth rate applies to all expenses,
-      return null here — do not copy opex_growth_pct into this field.
+      omit this field — do not copy opex_growth_pct into this field.
+    - Property-tax calculation mechanics, extract only when explicitly stated:
+      - property_tax_value_basis_amount: fair cash value, appraised value, assessed market
+        value, or purchase-price tax basis explicitly used in a tax calculation.
+      - property_tax_assessed_value: assessed value or taxable assessed value after the
+        assessment ratio is applied.
+      - property_tax_assessment_ratio: assessment ratio as a decimal, e.g. 11% -> 0.11.
+      - property_tax_millage_rate: true mills per $1,000 of assessed value. Example:
+        "111.61 mills" or "$111.61 per $1,000 assessed value" -> property_tax_millage_rate = 111.61.
+      - property_tax_rate_per_assessed_dollar: tax rate per $1 of assessed value. Example:
+        "current tax rate ($0.11161)" or "$0.11161 per assessed dollar" -> property_tax_rate_per_assessed_dollar = 0.11161.
+      If the tax-rate unit is ambiguous, omit both tax-rate fields rather than guessing.
 - Financing: loan_amount, interest_rate, loan_term_years, amortization_years, loan_type if stated
 - Exit: hold_period_years, exit_cap_rate, selling_cost_pct, market_cap_rate_sale if stated
 - Broker metrics: broker_cap_rate, broker_noi if stated
@@ -139,13 +165,15 @@ EXTRACT (as JSON):
     - "Current Cap Rate", "In-Place Cap Rate", "Going-In Cap Rate", and cap rate stated at the asking or purchase basis map to market_cap_rate_purchase.
     - "Pro Forma Cap Rate", "Stabilized Cap Rate", "Exit Cap Rate", "Going-Out Cap Rate", and "Terminal Cap Rate" map to exit_cap_rate.
     - Never map "Current Cap Rate" into exit_cap_rate.
-- Distinguish tax-rate labels carefully:
-    - "Mill Rate", "Current Tax Rate", "Tax Rate", "Mill Levy", and similar property-tax rate labels map to mil_rate.
-    - Extract the stated rate value exactly as shown after numeric normalization; do not confuse it with annual property tax expense or property tax growth.
-    - Tax assumptions and footnotes are valid sources. Example: "Y2 has been calculated using the current tax rate ($0.11161)" -> mil_rate = 0.11161.
-    - If the same note also lists appraised value or tax bill, keep those as context only; do not substitute them for mil_rate.
+- Distinguish property-tax mechanics carefully:
+    - "Mill Rate", "Mill Levy", "millage", or "$X per $1,000 assessed value" map to property_tax_millage_rate.
+    - "Current Tax Rate", "Tax Rate", or "$X per assessed dollar" map to property_tax_rate_per_assessed_dollar only when the unit is clear.
+    - Example: "Y2 has been calculated using the current tax rate ($0.11161)" -> property_tax_rate_per_assessed_dollar = 0.11161.
+    - Example: "111.61 mills" -> property_tax_millage_rate = 111.61.
+    - Do not confuse tax rate with annual property tax expense, property tax growth, assessed value, appraised value, or assessment ratio.
+    - If the same note also lists appraised value, assessed value, assessment ratio, or tax bill, extract those into their own fields only when explicitly labeled.
 
-EXAMPLE OUTPUT (partial — null fields omitted for brevity):
+EXAMPLE OUTPUT (partial — missing fields omitted for brevity):
 {
   "purchase_price": 4750000.0,
   "num_units": 312,
@@ -154,8 +182,6 @@ EXAMPLE OUTPUT (partial — null fields omitted for brevity):
   "other_income_annual": 18400.0,
   "other_income_insurance_annual": 12000.0,
   "other_income_late_fees_annual": 6400.0,
-  "noi_projected": null,
-  "exit_cap_rate": null,
   "unit_mix": [
     {"section": "Non-Climate", "unit_type": "Non-Climate", "size": "10 x 10", "standard_sqft": 100, "num_units": 48, "occupied_units": 44, "occupancy_pct": 0.917, "current_rent": 89.0, "market_rent": 95.0, "climate_type": "NC", "unit_category": "storage"},
     {"section": "Non-Climate", "unit_type": "Non-Climate", "size": "10 x 20", "standard_sqft": 200, "num_units": 24, "occupied_units": 21, "occupancy_pct": 0.875, "current_rent": 149.0, "market_rent": 159.0, "climate_type": "NC", "unit_category": "storage"}
@@ -171,9 +197,9 @@ Return as valid JSON only. No explanations."""
 RENT_ROLL_EXTRACTION_SYSTEM_PROMPT = """You are an expert CRE analyst extracting lease data from a self-storage rent roll.
 
 CRITICAL RULES:
-1. If your confidence in a field is below ~60%, return null. Never estimate.
+1. If your confidence in a field is below ~60%, omit the field. Never estimate.
 2. Extract only explicit source data and mechanical row math from visible rows. Never estimate.
-3. Return null for missing fields.
+3. Omit missing fields — do not guess or emit null placeholders.
 4. Numbers: floats, no $ or commas. Percentages: decimals (0.91, not 91%).
 5. Dates: ISO format YYYY-MM-DD when an actual date is shown.
 6. Include occupied and vacant units when row-level unit data is present.
@@ -187,7 +213,7 @@ SUMMARY SCALARS:
   Use a stated aggregate only when clearly labeled as in-place or current rent.
   Do not average market rents into this field.
 - avg_market_rent_per_unit_monthly: average market/street/asking monthly rent when a market-rate
-  column exists. Return null when no market-rate column or aggregate exists.
+  column exists. Omit when no market-rate column or aggregate exists.
 - rent_growth_pct: annual rent growth or rent increase as a decimal only if explicitly stated.
 
 UNIT MIX:
@@ -216,23 +242,21 @@ LEASE RECORDS:
 Extract one record per unit when row-level unit data is present:
 - unit_id: unit identifier or unit number.
 - monthly_rent: current monthly rent; 0.0 for vacant units.
-- lease_expiration: lease end / expiration date as YYYY-MM-DD. Null for vacant or month-to-month.
+- lease_expiration: lease end / expiration date as YYYY-MM-DD. Omit for vacant or month-to-month.
 - sqft: unit square footage.
 
-EXAMPLE OUTPUT (partial — null fields omitted for brevity):
+EXAMPLE OUTPUT (partial — missing fields omitted for brevity):
 {
   "num_units_actual": 312,
   "physical_occupancy_pct": 0.891,
   "avg_in_place_rent_per_unit_monthly": 97.40,
-  "avg_market_rent_per_unit_monthly": null,
-  "rent_growth_pct": null,
   "unit_mix": [
     {"section": "Climate Controlled", "unit_type": "Climate Controlled", "size": "5 x 10", "standard_sqft": 50, "num_units": 30, "occupied_units": 27, "occupancy_pct": 0.9, "current_rent": 79.0, "market_rent": 85.0, "climate_type": "CC", "unit_category": "storage"},
     {"section": "Climate Controlled", "unit_type": "Climate Controlled", "size": "10 x 10", "standard_sqft": 100, "num_units": 40, "occupied_units": 35, "occupancy_pct": 0.875, "current_rent": 109.0, "market_rent": 119.0, "climate_type": "CC", "unit_category": "storage"}
   ],
   "lease_records": [
     {"unit_id": "CC-101", "monthly_rent": 109.0, "lease_expiration": "2025-09-30", "sqft": 100},
-    {"unit_id": "CC-102", "monthly_rent": 0.0, "lease_expiration": null, "sqft": 100}
+    {"unit_id": "CC-102", "monthly_rent": 0.0, "sqft": 100}
   ]
 }
 
@@ -241,9 +265,9 @@ Return as valid JSON only. No explanations."""
 T12_EXTRACTION_SYSTEM_PROMPT = """You are an expert CRE analyst extracting actual historical financial data from a self-storage T-12, T-6, YTD, or operating statement.
 
 CRITICAL RULES:
-1. If your confidence in a field is below ~60%, return null. Never estimate.
+1. If your confidence in a field is below ~60%, omit the field. Never estimate.
 2. Extract only actual historical operating data. Do not use broker projections or pro forma figures.
-3. Return null for missing categories. Do not estimate missing values.
+3. Omit missing categories. Do not estimate missing values or emit null placeholders.
 4. Numbers: floats, no $ or commas. Percentages: decimals (0.08, not 8%).
 5. Return totals for the source statement period. Do not annualize T-6 or YTD values before returning.
 6. Set period_months to the number of months covered. The merger annualizes using 12 / period_months.
@@ -255,7 +279,7 @@ PERIOD DETECTION:
 - If the statement says T-12, trailing twelve, or shows 12 month columns, set period_months = 12.
 - If it says T-6 or shows 6 month columns, set period_months = 6.
 - If it is YTD, set period_months to the visible month count.
-- If the period cannot be determined, return null for period_months rather than guessing.
+- If the period cannot be determined, omit period_months rather than guessing.
 
 COLUMN LAYOUT:
 - T-12 statements often show one row per category and one column per month plus a Total column.
@@ -281,7 +305,7 @@ EXPENSES:
 - property_tax_annual: Property Taxes, Real Estate Taxes, Tax Expense.
 - insurance_annual: Property Insurance, Casualty Insurance, Hazard Insurance.
 - mgmt_fee_pct_actual: explicit management fee percentage only. If management fee is a dollar line,
-  include it in other_opex_annual and leave mgmt_fee_pct_actual null.
+  include it in other_opex_annual and omit mgmt_fee_pct_actual.
 - payroll_annual: Payroll, Salaries & Wages, Labor, Benefits, Taxes & Benefits, On-Site Manager.
 - repairs_maintenance_annual: Repairs & Maintenance, R&M, Maintenance, Janitorial, Cleaning,
   Landscaping, Snow Removal, Pest Control.
@@ -299,18 +323,16 @@ SUMMARY:
   or mechanically derivable from visible totals.
 - period_months: integer month count for the source statement period.
 
-EXAMPLE OUTPUT (partial — null fields omitted for brevity):
+EXAMPLE OUTPUT (partial — missing fields omitted for brevity):
 {
   "gpr_annual_actual": 242000.0,
   "other_income_annual": 18600.0,
-  "vacancy_credit_loss_pct_actual": null,
   "property_tax_annual": 14200.0,
   "insurance_annual": 3800.0,
   "payroll_annual": 28500.0,
   "utilities_annual": 6100.0,
   "repairs_maintenance_annual": 4200.0,
   "marketing_annual": 3600.0,
-  "other_opex_annual": null,
   "noi_actual": 139600.0,
   "expense_ratio_actual": 0.532,
   "period_months": 12
@@ -427,13 +449,16 @@ _OM_PHASE2_RULES = """OM MAPPING RULES:
 - "purchase price", "asking price", "listing price" -> purchase_price
 - "current cap rate", "in-place cap rate", "going-in cap rate", and cap rate stated at the asking or purchase basis -> market_cap_rate_purchase
 - "pro forma cap rate", "stabilized cap rate", "exit cap", "going-out cap", "terminal cap" -> exit_cap_rate
-- "mill rate", "current tax rate", "tax rate", and "mill levy" -> mil_rate
-- Property-tax assumptions and footnotes count for mil_rate. Example: "Y2 has been calculated using the current tax rate ($0.11161)" -> mil_rate = 0.11161
+- "mill rate", "mill levy", "millage", and "$X per $1,000 assessed value" -> property_tax_millage_rate
+- "current tax rate", "tax rate", and "$X per assessed dollar" -> property_tax_rate_per_assessed_dollar only when the unit is clear
+- Property-tax assumptions and footnotes can support explicit tax mechanics. Example: "Y2 has been calculated using the current tax rate ($0.11161)" -> property_tax_rate_per_assessed_dollar = 0.11161
+- "111.61 mills" -> property_tax_millage_rate = 111.61
+- If the tax-rate unit is ambiguous, omit both tax-rate fields rather than guessing
 - "gross potential rent", "GPR", "scheduled rent" -> gpr_annual_projected (annual)
 - "hold period", "investment horizon" -> hold_period_years
-- Do not map annual property tax expense or property tax growth into mil_rate
+- Do not map annual property tax expense, property tax growth, appraised value, assessed value, or assessment ratio into tax-rate fields
 - Nearby competitor / facility counts -> nearby_storage_count_1mi, nearby_storage_count_3mi, nearby_storage_count_5mi. "No Competitors within 1-Mile" -> nearby_storage_count_1mi = 0. Count distinct facilities in rent-comp tables for nearby_storage_count_3mi if not explicitly stated
-- Population within 3 miles -> population_3mi (integer). Average household income within 3 miles -> avg_household_income_3mi (float). Square feet per capita -> storage_sqft_per_capita_3mi. Extract these even when they appear on a demographics or market overview page separate from the operating statement. For all *_3mi fields, match by the column whose header is closest to 3 miles — do not pick the largest or middle value blindly. "1 Mile | 3 Miles | 5 Miles" → middle column; "1 Mile | 2 Miles | 3 Miles" → last column; "3 Miles | 5 Miles" → first column; "1 Mile | 5 Miles" → leave null; single-radius table with 3-mile header → use directly. Example: "2023 Estimate 10,509 63,110 153,689" in a 1/3/5 table → population_3mi = 63,110. Do not use age-25+, housing-unit, or occupied-unit rows for population_3mi.
+- Population within 3 miles -> population_3mi (integer). Average household income within 3 miles -> avg_household_income_3mi (float). Square feet per capita -> storage_sqft_per_capita_3mi. Extract these even when they appear on a demographics or market overview page separate from the operating statement. For all *_3mi fields, match by the column whose header is closest to 3 miles — do not pick the largest or middle value blindly. "1 Mile | 3 Miles | 5 Miles" → middle column; "1 Mile | 2 Miles | 3 Miles" → last column; "3 Miles | 5 Miles" → first column; "1 Mile | 5 Miles" → omit; single-radius table with 3-mile header → use directly. Example: "2023 Estimate 10,509 63,110 153,689" in a 1/3/5 table → population_3mi = 63,110. Do not use age-25+, housing-unit, or occupied-unit rows for population_3mi.
 - For OM unit-mix tables, preserve one row per bucket. Use the section header (for example NON-CLIMATE or COVERED PARKING) in both section and unit_type when no more specific type label exists.
 - For OM competitive-set rent tables, preserve one row per facility and size bucket in rent_comps. Use asking_rent for Rent/Unit, rent_per_sqft for Rent/Sq.Ft., and keep notes for address, year built, square footage, blanks like "no data", or specials.
 - Never collapse multiple size buckets into one rent_comps row. Repeat facility, distance, and notes across separate rows when a facility lists multiple sizes.
@@ -498,7 +523,7 @@ The condensed data below was extracted from a real estate document.
 Map field values to the schema. Rules:
 - Monetary values: float, no symbols or commas
 - Percentages: decimal (0.065 not 6.5%)
-- If a value genuinely cannot be found, return null
+- If a value genuinely cannot be found, omit the field
 {rules_section}
 
 CITATIONS: For every SCALAR field you populate (not arrays like unit_mix, rent_comps, or lease_records), also emit the companion citation fields:
@@ -513,9 +538,9 @@ Before returning JSON, verify:
 1. Every value you emit appears in the condensed data above — no invention
 2. Numbers are floats, not strings and not raw percentages
 3. Every populated scalar field has non-empty {{field}}_citations
-4. Any field you are less than 60% confident about is null, not a guess
+4. Any field you are less than 60% confident about is omitted, not a guess
 
-Return ONLY valid JSON matching this schema (null for missing):
+Return ONLY valid JSON matching this schema. Omit missing fields:
 {_schema_json(fields)}"""
 
 

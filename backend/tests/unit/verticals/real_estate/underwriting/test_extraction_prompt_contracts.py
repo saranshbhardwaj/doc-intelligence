@@ -223,20 +223,31 @@ def test_om_extraction_caps_verbose_notes_and_source_text():
 
 
 def test_om_prompt_requires_year1_fields_from_three_column_statement():
-    """Prompt must instruct the LLM to populate _year1 AND _current when a
-    Current/Year-1/Pro Forma operating statement is present, and must not
-    allow _year1 to be left null when the Year-1 column exists."""
+    """Prompt must use detection-first approach for dual _year1/_current fields."""
     prompt = OM_EXTRACTION_SYSTEM_PROMPT
 
-    assert "expense_property_tax_annual_year1" in prompt
-    assert "expense_marketing_annual_year1" in prompt
-    assert "expense_insurance_annual_year1" in prompt
-    assert "expense_utilities_annual_year1" in prompt
-    assert "expense_repairs_maintenance_annual_year1" in prompt
-    # Must explicitly forbid leaving _year1 null when the column is present
-    assert "never leave" in prompt.lower() or "must populate both" in prompt.lower() or "never\nleave" in prompt.lower()
-    # Must not instruct the LLM to compute property tax from mechanics
-    assert "assessed value" not in prompt.lower() or "do not compute" in prompt.lower()
+    # Detection-first anchors must be present
+    assert "detected_current_column_label" in prompt
+    assert "detected_year1_column_label" in prompt
+    assert "detected_has_current_column" in prompt
+    assert "detected_deal_subtype" in prompt
+
+    # Must explicitly handle no-current-column case
+    assert "detected_has_current_column is false" in prompt.lower()
+
+    # Per-sqft handling must be mentioned
+    assert "per_sqft" in prompt
+
+    # Must not fall back to hardcoded "three columns" examples
+    assert "EXAMPLE A" not in prompt
+    assert "EXAMPLE B" not in prompt
+
+
+def test_om_prompt_instructs_zero_current_not_omitted():
+    """Prompt must explicitly state that $0 Current values must be emitted."""
+    prompt = OM_EXTRACTION_SYSTEM_PROMPT.lower()
+    assert "_current=0.0" in prompt or "emit _current=0" in prompt or \
+           "do not omit it" in prompt
 
 
 def test_om_extraction_populates_year1_expense_fields_from_three_column_statement():
