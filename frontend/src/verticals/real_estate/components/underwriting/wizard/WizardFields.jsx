@@ -289,40 +289,6 @@ export function ValueAddEvidence({ omData, getCitation, onOpenSource }) {
   );
 }
 
-export function OperationsWarnings({ inputs }) {
-  const milRateVal = inputs.operational.mil_rate;
-  const purchasePriceVal = inputs.acquisition.purchase_price;
-  const currentTaxVal = inputs.operational.property_tax_annual;
-
-  const reassessmentNote = (() => {
-    if (!milRateVal || !purchasePriceVal || !currentTaxVal) return null;
-    const estimatedAssessed = purchasePriceVal * 0.11;
-    const estimatedTax = (milRateVal / 1000) * estimatedAssessed;
-    if (estimatedTax - currentTaxVal < 2000) return null;
-    return (
-      <div className="rounded-2xl border border-warning/30 bg-warning/8 p-3 text-sm text-muted-foreground">
-        <span className="font-medium text-foreground">Reassessment note: </span>
-        At the {milRateVal} mil rate and {(0.11 * 100).toFixed(0)}% assessment ratio,
-        post-acquisition property tax could be approximately{' '}
-        <span className="font-semibold text-foreground">
-          ${Math.round((milRateVal / 1000) * purchasePriceVal * 0.11).toLocaleString()}
-        </span>
-        {' '}vs the currently stated{' '}
-        <span className="font-semibold text-foreground">
-          ${Math.round(currentTaxVal).toLocaleString()}
-        </span>.
-        {' '}Verify with the county assessor.
-      </div>
-    );
-  })();
-
-  if (!reassessmentNote) return null;
-  return (
-    <div className="col-span-full space-y-4">
-      {reassessmentNote}
-    </div>
-  );
-}
 
 export function OperationsIncomeBasisStrip({ inputs, currentRun }) {
   const artifact = currentRun?.result_artifact || {};
