@@ -339,3 +339,26 @@ def test_phase1_prompt_extracts_column_structure_and_both_column_values():
 
     # Must extract income_period_label metadata
     assert "income_period_label" in prompt
+
+
+def test_phase2_om_rules_map_suffixed_fields_and_structure_metadata():
+    """Phase 2 rules must map _current/_year1 suffixed fields and structure metadata."""
+    from app.verticals.real_estate.underwriting.extraction.prompts import (
+        create_phase2_om_prompt,
+    )
+    prompt = create_phase2_om_prompt("{}").lower()
+
+    # Must reference the suffixed field naming convention from Phase 1
+    assert "_current" in prompt
+    assert "_year1" in prompt
+
+    # Must reference structure metadata fields from Phase 1
+    assert "operating_statement_column_structure" in prompt
+
+    # Must fill detected_* fields
+    assert "detected_current_column_label" in prompt
+    assert "detected_has_current_column" in prompt
+
+    # Must handle explicit $0
+    assert "_current=0.0" in prompt or "map it as 0.0" in prompt or \
+           "do not omit" in prompt

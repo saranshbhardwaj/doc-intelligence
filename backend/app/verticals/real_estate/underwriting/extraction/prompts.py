@@ -490,9 +490,25 @@ _OM_PHASE2_RULES = """OM MAPPING RULES:
 - The size field must contain exactly one size bucket. Do not put comma-separated sizes, addresses, year built, or square footage into size.
 - If the table shows Rent/Unit and Rent/Sq.Ft., populate asking_rent and rent_per_sqft for each emitted row.
 - For each rent_comps row, set climate_type to "CC" if the facility or unit is described as climate-controlled, temperature-controlled, heated, or humidity-controlled; "NC" if described as non-climate, drive-up, or outdoor; "UNKNOWN" if unclear. Set standard_sqft to the numeric area in sqft derived from size (e.g. "5x10" -> 50, "10x20" -> 200).
-- When a document contains multiple scenarios (e.g. Current, Year-One, Pro Forma), prefer the "Year-One" or "Year 1" column for gpr_annual_projected, vacancy_pct_projected, noi_projected, and expense line items. Use the "Current" column only when Year-One is absent. Never use the "Pro Forma" column for base-case inputs.
+- Phase 1 condensation extracted both column values for expense line items using
+  _current and _year1 suffixes (e.g. property_taxes_current, property_taxes_year1,
+  insurance_current, insurance_year1, repairs_maintenance_current, etc.). Map these
+  directly to the schema's corresponding _current and _year1 fields.
+- Phase 1 also emitted structure metadata fields. Use them to fill the six detected_*
+  schema fields:
+    operating_statement_column_structure -> parse into detected_current_column_label
+      (the part before the first "|") and detected_year1_column_label (the "Year 1" part).
+      Set detected_has_current_column=true when a current column is present, false
+      when only Year-1 exists.
+    expense_format -> detected_expense_format ("absolute", "per_sqft", or "mixed").
+    income_period_label -> detected_income_period_label.
+- When a _current value is 0, map it as 0.0 — do not omit it.
+- When no _current variants appear in the condensed fields, set
+  detected_has_current_column=false and leave all _current fields null.
+- For gpr_annual_projected, vacancy_pct_projected, noi_projected: prefer Year-1
+  condensed values over Current. Never use Pro Forma values for base-case inputs.
 - When other income sub-categories are present (Administrative Fees, Late/Lien/NSF Fees, Tenant Insurance Net Commissions, Miscellaneous Income), populate BOTH other_income_annual (the aggregate sum) AND each individual other_income_*_annual field. Cite all contributing source tokens in other_income_annual.
-- For OM expense line items, always prefer the Year 1 column dollar amounts. Map ALL operating expenses to one of the named expense fields when possible. If no named field matches, treat it as part of other_opex_annual. Never leave an expense line item unaccounted for.
+- Map ALL operating expenses to one of the named expense fields when possible. If no named field matches, treat it as part of other_opex_annual. Never leave an expense line item unaccounted for.
 - Never map the expense ratio percentage into any dollar field.
 - For unit_mix rows, set climate_type to "CC" if the row is described as climate-controlled, temperature-controlled, heated, or humidity-controlled. Set it to "NC" if described as non-climate, drive-up, outdoor, or similar. Set it to "UNKNOWN" if unclear.
 - Set unit_category to "storage" for standard storage units, "parking" for parking spaces, "residential" for apartments or dwelling units, "office" for office space, and "other" for anything else.
