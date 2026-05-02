@@ -221,12 +221,12 @@ def test_om_only_run_uses_om_expense_lines_when_t12_missing():
             purchase_price=1_000_000.0,
             gpr_annual_projected=480_000.0,
             other_income_annual=24_000.0,
-            expense_property_tax_annual=52_000.0,
-            expense_insurance_annual=18_500.0,
+            expense_property_tax_annual_year1=52_000.0,
+            expense_insurance_annual_year1=18_500.0,
             expense_payroll_annual=61_000.0,
-            expense_repairs_maintenance_annual=27_000.0,
-            expense_utilities_annual=15_500.0,
-            expense_marketing_annual=9_500.0,
+            expense_repairs_maintenance_annual_year1=27_000.0,
+            expense_utilities_annual_year1=15_500.0,
+            expense_marketing_annual_year1=9_500.0,
             expense_office_admin_annual=8_000.0,
             expense_bank_fees_annual=2_500.0,
             expense_contract_services_annual=5_500.0,
@@ -462,3 +462,37 @@ def test_hardcoded_fallback_still_marked_default():
     assert merged["operational"]["other_opex_annual"] == 0.0
     assert citations["other_opex_annual"]["is_default"] is True
     assert "is_uncited_extraction" not in citations["other_opex_annual"]
+
+
+def test_om_extraction_has_year1_and_current_fields():
+    """OMExtraction schema exposes both _year1 and _current variants."""
+    from app.verticals.real_estate.underwriting.extraction.schemas import OMExtraction
+    om = OMExtraction(
+        expense_property_tax_annual_year1=15346.0,
+        expense_property_tax_annual_current=6139.0,
+        expense_insurance_annual_year1=11840.0,
+        expense_insurance_annual_current=9867.0,
+        expense_repairs_maintenance_annual_year1=2102.0,
+        expense_repairs_maintenance_annual_current=1424.0,
+        expense_marketing_annual_year1=4203.0,
+        expense_marketing_annual_current=3847.0,
+        expense_utilities_annual_year1=6868.0,
+        expense_utilities_annual_current=8080.0,
+    )
+    assert om.expense_property_tax_annual_year1 == 15346.0
+    assert om.expense_property_tax_annual_current == 6139.0
+    assert om.expense_insurance_annual_year1 == 11840.0
+    assert om.expense_repairs_maintenance_annual_year1 == 2102.0
+    assert om.expense_marketing_annual_year1 == 4203.0
+    assert om.expense_utilities_annual_year1 == 6868.0
+
+
+def test_om_extraction_old_single_fields_removed():
+    """Old single-variant field names no longer exist on OMExtraction."""
+    from app.verticals.real_estate.underwriting.extraction.schemas import OMExtraction
+    om = OMExtraction()
+    assert not hasattr(om, "expense_property_tax_annual")
+    assert not hasattr(om, "expense_insurance_annual")
+    assert not hasattr(om, "expense_repairs_maintenance_annual")
+    assert not hasattr(om, "expense_marketing_annual")
+    assert not hasattr(om, "expense_utilities_annual")

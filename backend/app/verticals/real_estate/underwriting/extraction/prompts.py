@@ -89,15 +89,31 @@ EXTRACT (as JSON):
     - expense_bank_fees_annual: "Bank & Credit Card Fees"
     - expense_contract_services_annual: "Contract Services (Fire, Security & Grounds)"
     - expense_miscellaneous_annual: "Miscellaneous"
-    - expense_utilities_annual: "Utilities & Trash"
     - expense_telephone_annual: "Telephone & Communications"
-    - expense_marketing_annual: "Marketing & Promotion"
-    - expense_repairs_maintenance_annual: "Repairs, Maintenance & Reserves"
-    - expense_insurance_annual: "Property Insurance"
     - expense_payroll_annual: "Salaries, Taxes & Benefits (On-Site)"
-    - expense_property_tax_annual: "Property Taxes" from the Year 1 column. Property taxes are
-      often reassessed post-acquisition (sometimes 2–3× the current assessed value) — the Year 1
-      column reflects this reassessment. Use it even if it is materially higher than the Current column.
+    - For each of the five adjustable expense line items below, extract TWO values:
+      the Year 1 (or "Year-One") broker-adjusted figure into the `_year1` field,
+      and the Current (trailing actual) figure into the `_current` field.
+      If only one figure is present in the document, populate BOTH the `_year1`
+      and `_current` fields with the same value.
+      Never use the "Pro Forma" column.
+
+      - expense_property_tax_annual_year1 / expense_property_tax_annual_current:
+          "Property Taxes". Year 1 often reflects the actual assessor bill or a
+          post-reassessment estimate and will be materially higher than Current.
+          Always extract the Year 1 column if present — do not substitute Current.
+
+      - expense_insurance_annual_year1 / expense_insurance_annual_current:
+          "Property Insurance". Year 1 is typically adjusted upward from Current.
+
+      - expense_repairs_maintenance_annual_year1 / expense_repairs_maintenance_annual_current:
+          "Repairs, Maintenance & Reserves".
+
+      - expense_marketing_annual_year1 / expense_marketing_annual_current:
+          "Marketing & Promotion".
+
+      - expense_utilities_annual_year1 / expense_utilities_annual_current:
+          "Utilities & Trash".
     - expense_mgmt_fee_annual: "Third Party Management (Off-Site)"
     - expense_total_annual: "Total Operating Expenses"
     - noi_year_one_stated: "Net Operating Income" from Year 1 column
