@@ -36,6 +36,48 @@ class OMExtraction(BaseModel):
     and om_source_data artifact — no other files need updating.
     """
 
+    # ── Detection (filled first — model detects structure before extracting values) ──
+    detected_deal_subtype: Optional[str] = Field(
+        default=None,
+        description='"stabilized" | "value_add" | "unsupported". '
+                    'stabilized = existing ops, minimal Year-1 adjustments. '
+                    'value_add = owner-operated Current, Year-1 adds pro management costs. '
+                    'unsupported = development, non-self-storage, or unclear.',
+        json_schema_extra={"cite": False},
+    )
+    detected_current_column_label: Optional[str] = Field(
+        default=None,
+        description='Exact header text of the column representing current operations, '
+                    'e.g. "Current", "2024 Financials", "2023 Actuals", "Trailing 12". '
+                    'Null if no current-period column exists.',
+        json_schema_extra={"cite": False},
+    )
+    detected_year1_column_label: Optional[str] = Field(
+        default=None,
+        description='Exact header text of the Year-1 projections column, '
+                    'e.g. "Year 1", "Year-One", "Year 1 Projected".',
+        json_schema_extra={"cite": False},
+    )
+    detected_has_current_column: Optional[bool] = Field(
+        default=None,
+        description='True if the operating statement has a current-operations column '
+                    'alongside the Year-1 column.',
+        json_schema_extra={"cite": False},
+    )
+    detected_expense_format: Optional[str] = Field(
+        default=None,
+        description='"absolute" if expense line items are dollar totals. '
+                    '"per_sqft" if shown as $/sqft (multiply by rentable_sqft for annual). '
+                    '"mixed" if both formats appear.',
+        json_schema_extra={"cite": False},
+    )
+    detected_income_period_label: Optional[str] = Field(
+        default=None,
+        description='Period the current column covers: "T-12", "T-6", "2024", '
+                    '"Trailing 12", "2023 Actuals", etc. Null if not stated.',
+        json_schema_extra={"cite": False},
+    )
+
     # ── Identity ──────────────────────────────────────────────────────────────
     name:    Optional[str]   = Field(default=None, description="property name",    json_schema_extra={"cite": False})
     address: Optional[str]   = Field(default=None, description="property address", json_schema_extra={"cite": False})
@@ -78,7 +120,11 @@ class OMExtraction(BaseModel):
     mgmt_fee_pct:          Optional[float] = Field(default=None, description="decimal e.g. 0.08",                  json_schema_extra={"cite": True})
     opex_growth_pct:       Optional[float] = Field(default=None, description="decimal e.g. 0.02",                  json_schema_extra={"cite": True})
     property_tax_growth_pct: Optional[float] = Field(default=None, description="decimal e.g. 0.04",               json_schema_extra={"cite": True})
-    mil_rate:              Optional[float] = Field(default=None, description="property tax mill rate",             json_schema_extra={"cite": True})
+    property_tax_value_basis_amount: Optional[float] = Field(default=None, description="property tax value basis amount explicitly used for tax calculation, such as appraised value, fair cash value, or purchase-price tax basis", json_schema_extra={"cite": True})
+    property_tax_assessed_value: Optional[float] = Field(default=None, description="property tax assessed or taxable assessed value after any assessment ratio, if explicitly stated", json_schema_extra={"cite": True})
+    property_tax_assessment_ratio: Optional[float] = Field(default=None, description="property tax assessment ratio as a decimal, e.g. 0.11", json_schema_extra={"cite": True})
+    property_tax_millage_rate: Optional[float] = Field(default=None, description="property tax millage rate in true mills per $1,000 of assessed value, e.g. 111.61", json_schema_extra={"cite": True})
+    property_tax_rate_per_assessed_dollar: Optional[float] = Field(default=None, description="property tax rate per $1 of assessed value, e.g. 0.11161", json_schema_extra={"cite": True})
     expense_ratio_pro_forma: Optional[float] = Field(default=None, description="decimal e.g. 0.35",               json_schema_extra={"cite": True})
 
     # ── Individual expense line items (Year 1 column preferred) ───────────────

@@ -5,8 +5,10 @@ import types
 
 from app.verticals.real_estate.underwriting.extraction.discrepancy import detect_discrepancies
 from app.verticals.real_estate.underwriting.extraction.prompts import (
+    OM_EXTRACTION_SYSTEM_PROMPT,
     RENT_ROLL_EXTRACTION_SYSTEM_PROMPT,
     T12_EXTRACTION_SYSTEM_PROMPT,
+    create_phase2_om_prompt,
     create_phase2_rent_roll_prompt,
     create_phase2_t12_prompt,
 )
@@ -75,6 +77,25 @@ def test_rent_roll_prompt_uses_schema_lease_expiration_field():
     assert "lease_end" not in prompt
 
 
+def test_om_tool_schema_has_detection_fields_before_extraction_fields():
+    """Detection fields must exist in tool schema and appear before extraction fields."""
+    props = REExtractionLLMService._TOOL_SCHEMAS["om"]["properties"]
+    detection_fields = [
+        "detected_deal_subtype",
+        "detected_current_column_label",
+        "detected_year1_column_label",
+        "detected_has_current_column",
+        "detected_expense_format",
+        "detected_income_period_label",
+    ]
+    for f in detection_fields:
+        assert f in props, f"Missing detection field: {f}"
+
+    # Detection fields should appear before acquisition fields in the ordered dict
+    keys = list(props.keys())
+    assert keys.index("detected_deal_subtype") < keys.index("purchase_price")
+
+
 def test_rent_roll_tool_schema_accepts_unit_mix_classification():
     unit_mix_props = (
         REExtractionLLMService._TOOL_SCHEMAS["rent_roll"]["properties"]["unit_mix"]["items"]["properties"]
@@ -103,6 +124,23 @@ def test_phase2_prompts_include_doc_specific_rules():
     assert "rent roll mapping rules" in rent_roll_prompt
     assert "lease_expiration" in rent_roll_prompt
     assert "unit category" in rent_roll_prompt
+
+
+def test_extraction_prompts_omit_missing_fields_instead_of_emitting_nulls():
+    prompts = [
+        OM_EXTRACTION_SYSTEM_PROMPT,
+        RENT_ROLL_EXTRACTION_SYSTEM_PROMPT,
+        T12_EXTRACTION_SYSTEM_PROMPT,
+        create_phase2_om_prompt("{}"),
+        create_phase2_t12_prompt("{}"),
+        create_phase2_rent_roll_prompt("{}"),
+    ]
+
+    for prompt in prompts:
+        normalized = prompt.lower()
+        assert "omit missing" in normalized
+        assert "return null for missing" not in normalized
+        assert "null for missing" not in normalized
 
 
 def test_discrepancy_includes_model_used_and_preferred_source_reason():
@@ -182,3 +220,83 @@ def test_om_extraction_caps_verbose_notes_and_source_text():
     assert len(extracted["field_citations"]["purchase_price"]["source_text"]) <= 100
     assert len(extracted["scalars"]["value_add_notes"]) <= 200
     assert len(extracted["scalars"]["rent_comps"][0]["notes"]) <= 120
+
+
+def test_om_prompt_requires_year1_fields_from_three_column_statement():
+    """Prompt must instruct the LLM to populate _year1 AND _current when a
+    Current/Year-1/Pro Forma operating statement is present, and must not
+    allow _year1 to be left null when the Year-1 column exists."""
+    prompt = OM_EXTRACTION_SYSTEM_PROMPT
+
+    assert "expense_property_tax_annual_year1" in prompt
+    assert "expense_marketing_annual_year1" in prompt
+    assert "expense_insurance_annual_year1" in prompt
+    assert "expense_utilities_annual_year1" in prompt
+    assert "expense_repairs_maintenance_annual_year1" in prompt
+    # Must explicitly forbid leaving _year1 null when the column is present
+    assert "never leave" in prompt.lower() or "must populate both" in prompt.lower() or "never\nleave" in prompt.lower()
+    # Must not instruct the LLM to compute property tax from mechanics
+    assert "assessed value" not in prompt.lower() or "do not compute" in prompt.lower()
+
+
+def test_om_extraction_populates_year1_expense_fields_from_three_column_statement():
+    """When the LLM returns Year-1 and Current values for all five adjustable
+    expense line items, the extraction service must surface them in scalars."""
+    payload = {
+        "purchase_price": 2_500_000,
+        "purchase_price_citations": ["S1:p16"],
+        "purchase_price_confidence": 0.95,
+        "purchase_price_source": "$2,500,000",
+        # Five adjustable line items — both _year1 and _current populated
+        "expense_property_tax_annual_year1": 15_346,
+        "expense_property_tax_annual_year1_citations": ["S1:p16"],
+        "expense_property_tax_annual_year1_confidence": 0.95,
+        "expense_property_tax_annual_year1_source": "Property Taxes Year 1: $15,346",
+        "expense_property_tax_annual_current": 6_139,
+        "expense_property_tax_annual_current_citations": ["S1:p16"],
+        "expense_property_tax_annual_current_confidence": 0.95,
+        "expense_property_tax_annual_current_source": "Property Taxes Current: $6,139",
+        "expense_marketing_annual_year1": 4_203,
+        "expense_marketing_annual_year1_citations": ["S1:p16"],
+        "expense_marketing_annual_year1_confidence": 0.9,
+        "expense_marketing_annual_year1_source": "Marketing Year 1: $4,203",
+        "expense_marketing_annual_current": 3_847,
+        "expense_marketing_annual_current_citations": ["S1:p16"],
+        "expense_marketing_annual_current_confidence": 0.9,
+        "expense_marketing_annual_current_source": "Marketing Current: $3,847",
+        "expense_insurance_annual_year1": 11_840,
+        "expense_insurance_annual_year1_citations": ["S1:p16"],
+        "expense_insurance_annual_year1_confidence": 0.9,
+        "expense_insurance_annual_year1_source": "Insurance Year 1: $11,840",
+        "expense_insurance_annual_current": 9_867,
+        "expense_insurance_annual_current_citations": ["S1:p16"],
+        "expense_insurance_annual_current_confidence": 0.9,
+        "expense_insurance_annual_current_source": "Insurance Current: $9,867",
+        "expense_utilities_annual_year1": 6_868,
+        "expense_utilities_annual_year1_citations": ["S1:p16"],
+        "expense_utilities_annual_year1_confidence": 0.85,
+        "expense_utilities_annual_year1_source": "Utilities Year 1: $6,868",
+        "expense_utilities_annual_current": 8_080,
+        "expense_utilities_annual_current_citations": ["S1:p16"],
+        "expense_utilities_annual_current_confidence": 0.85,
+        "expense_utilities_annual_current_source": "Utilities Current: $8,080",
+        "expense_repairs_maintenance_annual_year1": 2_102,
+        "expense_repairs_maintenance_annual_year1_citations": ["S1:p16"],
+        "expense_repairs_maintenance_annual_year1_confidence": 0.9,
+        "expense_repairs_maintenance_annual_year1_source": "R&M Year 1: $2,102",
+        "expense_repairs_maintenance_annual_current": 1_424,
+        "expense_repairs_maintenance_annual_current_citations": ["S1:p16"],
+        "expense_repairs_maintenance_annual_current_confidence": 0.9,
+        "expense_repairs_maintenance_annual_current_source": "R&M Current: $1,424",
+    }
+    service = REExtractionLLMService(_FakeLLMClient([_FakeMessage(payload)]))
+    extracted = service.extract_om("Operating statement with Current/Year-1/Pro Forma columns")
+    scalars = extracted["scalars"]
+
+    assert scalars["expense_property_tax_annual_year1"] == 15_346
+    assert scalars["expense_property_tax_annual_current"] == 6_139
+    assert scalars["expense_marketing_annual_year1"] == 4_203
+    assert scalars["expense_marketing_annual_current"] == 3_847
+    assert scalars["expense_insurance_annual_year1"] == 11_840
+    assert scalars["expense_utilities_annual_year1"] == 6_868
+    assert scalars["expense_repairs_maintenance_annual_year1"] == 2_102
