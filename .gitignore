@@ -91,3 +91,6 @@ DESIGN.md
 backend/.local/
 backend/tests/fixtures/excel/Synthesis - Tulsa Storage OK - Copy.xlsx
 clickhouse/DESIGN.md
+
+# Local git worktrees
+.worktrees/
