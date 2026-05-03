@@ -129,6 +129,22 @@ EXTRACT (as JSON):
           "Marketing & Promotion".
       - expense_utilities_annual_year1 / expense_utilities_annual_current:
           "Utilities & Trash".
+      EXPECTED OUTPUT SHAPE (both fields required when detected_has_current_column is true):
+        expense_property_tax_annual_current        = [dollar amount from detected_current_column_label column]
+        expense_property_tax_annual_year1          = [dollar amount from detected_year1_column_label column]  ← DO NOT OMIT
+        expense_insurance_annual_current           = [dollar amount from detected_current_column_label column]
+        expense_insurance_annual_year1             = [dollar amount from detected_year1_column_label column]  ← DO NOT OMIT
+        expense_repairs_maintenance_annual_current = [dollar amount from detected_current_column_label column]
+        expense_repairs_maintenance_annual_year1   = [dollar amount from detected_year1_column_label column]  ← DO NOT OMIT
+        expense_marketing_annual_current           = [dollar amount from detected_current_column_label column]
+        expense_marketing_annual_year1             = [dollar amount from detected_year1_column_label column]  ← DO NOT OMIT
+        expense_utilities_annual_current           = [dollar amount from detected_current_column_label column]
+        expense_utilities_annual_year1             = [dollar amount from detected_year1_column_label column]  ← DO NOT OMIT
+      COLUMN POSITION RULE: Within a single document, column headers may vary by section.
+        The expense table may label Year-1 as "Estimated" or "Projected" rather than the
+        exact detected_year1_column_label text. Use column position (second data column in
+        a 3-column table; first projection column in a 6-column table) to identify Year-1,
+        not header text matching.
     - expense_mgmt_fee_annual: "Third Party Management (Off-Site)"
     - expense_total_annual: "Total Operating Expenses"
     - noi_year_one_stated: "Net Operating Income" from Year 1 column

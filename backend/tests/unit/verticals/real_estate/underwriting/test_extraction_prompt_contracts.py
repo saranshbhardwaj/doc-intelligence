@@ -242,6 +242,12 @@ def test_om_prompt_requires_year1_fields_from_three_column_statement():
     assert "EXAMPLE A" not in prompt
     assert "EXAMPLE B" not in prompt
 
+    # Must include concrete output shape with DO NOT OMIT annotation
+    assert "DO NOT OMIT" in prompt
+
+    # Must include column position rule for header-agnostic Year-1 identification
+    assert "COLUMN POSITION RULE" in prompt
+
 
 def test_om_prompt_instructs_zero_current_not_omitted():
     """Prompt must explicitly state that $0 Current values must be emitted."""
