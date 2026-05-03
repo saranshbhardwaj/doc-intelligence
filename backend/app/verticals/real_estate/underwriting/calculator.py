@@ -27,28 +27,16 @@ from .schemas.self_storage import (
 from .thresholds import LINE_ITEMS_VS_RATIO_CUTOFF
 
 
-def _row_label(*parts: str | None) -> str:
-    return " ".join((part or "").strip().lower() for part in parts if part).strip()
-
-
 def _is_storage_row(row: UnitMixRow) -> bool:
     if row.unit_category is not None:
         return row.unit_category == "storage"
-    # Fallback for rows extracted before unit_category was introduced
-    label = _row_label(row.section, row.unit_type)
-    if not label:
-        return True
-    return not any(keyword in label for keyword in ("parking", "residential", "apartment", "office"))
+    return True  # default assumption
 
 
 def _is_climate_control_row(row: UnitMixRow) -> bool:
     if row.climate_type is not None:
         return row.climate_type == "CC"
-    # Fallback for rows extracted before climate_type was introduced
-    label = _row_label(row.section, row.unit_type)
-    if re.search(r"\bnon[- ]?climate\b|\bnon[- ]?temp\b|\bnc\b|\bdrive[- ]?up\b", label):
-        return False
-    return bool(re.search(r"\bclimate\b|\bcc\b|\btemp[- ]?controlled\b|\bheated\b|\bhumidity\b", label))
+    return False  # default assumption
 
 
 _DIMENSION_RE = re.compile(r"^\s*(\d+(?:\.\d+)?)\s*[x×]\s*(\d+(?:\.\d+)?)\s*$", re.IGNORECASE)

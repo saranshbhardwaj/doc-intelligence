@@ -71,7 +71,7 @@ function normalizeClimateLabel(value) {
 }
 
 function isParkingOrOtherRow(row) {
-  const label = `${row?.unit_category || ''} ${row?.section || ''} ${row?.unit_type || ''}`.toLowerCase();
+  const label = `${row?.unit_category || ''}`.toLowerCase();
   return ['parking', 'residential', 'apartment', 'office', 'commercial'].some((kw) => label.includes(kw));
 }
 
@@ -85,8 +85,7 @@ function isClimateRow(row) {
   if (!row || !isStorageRow(row)) return false;
   if (row.climate_type === 'CC') return true;
   if (row.climate_type === 'NC') return false;
-  const label = `${row.section || ''} ${row.unit_type || ''}`.toLowerCase();
-  return label.includes('climate') && !label.includes('non-climate') && !label.includes('non climate');
+  return false;
 }
 
 function hasRows(rows) {
@@ -247,7 +246,7 @@ export function getRentCompCoverage(unitMix = [], rentComps = [], rentPositionAn
   const subjectSizeMap = new Map();
   storageRows.forEach((row) => {
     const sizeKey = normalizeSizeLabel(row.size);
-    const climateKey = normalizeClimateLabel(row.climate_type || `${row.section || ''} ${row.unit_type || ''}`);
+    const climateKey = normalizeClimateLabel(row.climate_type || '');
     const key = climateKey === 'unknown' ? sizeKey : `${sizeKey}-${climateKey}`;
     if (!subjectSizeMap.has(key)) {
       subjectSizeMap.set(key, {

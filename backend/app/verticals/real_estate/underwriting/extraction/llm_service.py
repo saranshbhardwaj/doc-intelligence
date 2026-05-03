@@ -137,8 +137,6 @@ class REExtractionLLMService:
             "items": {
                 "type": "object",
                 "properties": {
-                    "section":          {"type": "string"},
-                    "unit_type":        {"type": "string"},
                     "size":             {"type": "string"},
                     "standard_sqft":    {"type": "number"},
                     "num_units":        {"type": "integer"},
