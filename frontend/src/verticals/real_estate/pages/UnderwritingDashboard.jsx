@@ -61,7 +61,7 @@ function getStatusMeta(status) {
 
 function getVerdictMeta(verdict) {
   if (verdict === 'worth_pursuing') return { tone: 'success', label: 'Passes Screen' };
-  if (verdict === 'needs_review') return { tone: 'warning', label: 'Review Needed' };
+  if (verdict === 'needs_review') return { tone: 'warning', label: 'Passes With Conditions' };
   if (verdict) return { tone: 'danger', label: 'Below Screen' };
   return null;
 }

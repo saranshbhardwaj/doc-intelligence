@@ -250,6 +250,12 @@ export default function ReturnsSection({
                       const citation = sourceCitations?.[row.source_field];
                       const pct = row.delta_to_prior?.pct;
                       const amount = row.delta_to_prior?.amount;
+                      const basisLabel = row.delta_to_prior?.basis_label;
+                      const signedAmount = amount == null
+                        ? null
+                        : amount >= 0
+                          ? `+${formatCompactCurrency(amount)}`
+                          : `-${formatCompactCurrency(Math.abs(amount))}`;
                       return (
                         <div key={`${row.source_type}-${row.source_field}`} className="rounded-2xl border border-border/60 bg-background/70 px-3 py-3">
                           <div className="flex flex-wrap items-center justify-between gap-2">
@@ -260,7 +266,7 @@ export default function ReturnsSection({
                             <div className="flex items-center gap-2">
                               {pct != null ? (
                                 <span className={`text-sm font-semibold ${Math.abs(pct) > 0.10 ? 'text-amber-700 dark:text-amber-300' : 'text-muted-foreground'}`}>
-                                  {amount >= 0 ? '+' : ''}{formatCompactCurrency(amount)} · {pct >= 0 ? '+' : ''}{(pct * 100).toFixed(0)}%
+                                  {signedAmount} · {pct >= 0 ? '+' : ''}{(pct * 100).toFixed(0)}%{basisLabel ? ` vs ${basisLabel}` : ''}
                                 </span>
                               ) : null}
                               {citation ? (

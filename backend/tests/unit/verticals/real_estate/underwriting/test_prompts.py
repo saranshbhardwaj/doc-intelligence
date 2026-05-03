@@ -13,18 +13,24 @@ def test_om_prompt_distinguishes_current_vs_exit_cap_rate_terms():
     assert 'never map "current cap rate" into exit_cap_rate'.lower() in prompt
 
 
-def test_om_prompt_maps_common_tax_rate_labels_to_mil_rate():
+def test_om_prompt_maps_property_tax_mechanics_to_explicit_fields():
     prompt = OM_EXTRACTION_SYSTEM_PROMPT.lower()
 
-    assert "mil_rate" in prompt
+    assert "mil_rate" not in prompt
+    assert "property_tax_value_basis_amount" in prompt
+    assert "property_tax_assessed_value" in prompt
+    assert "property_tax_assessment_ratio" in prompt
+    assert "property_tax_millage_rate" in prompt
+    assert "property_tax_rate_per_assessed_dollar" in prompt
     assert "mill rate" in prompt
     assert "current tax rate" in prompt
     assert "mill levy" in prompt
-    assert "tax assumptions and footnotes are valid sources" in prompt
     assert "current tax rate ($0.11161)" in prompt
-    assert "mil_rate = 0.11161" in prompt
-    assert "do not substitute them for mil_rate" in prompt
-    assert "do not confuse it with annual property tax expense or property tax growth" in prompt
+    assert "property_tax_rate_per_assessed_dollar = 0.11161" in prompt
+    assert "111.61 mills" in prompt
+    assert "property_tax_millage_rate = 111.61" in prompt
+    assert "if the tax-rate unit is ambiguous" in prompt
+    assert "do not confuse tax rate" in prompt
 
 
 def test_om_prompt_uses_three_mile_column_for_demographics():
@@ -45,7 +51,7 @@ def test_om_prompt_uses_three_mile_column_for_demographics():
     assert "1 mile | 2 miles | 3 miles" in prompt
     assert "3 miles | 5 miles" in prompt
     assert "1 mile | 5 miles" in prompt
-    assert "leave population_3mi null" in prompt or "leave null" in prompt
+    assert "omit population_3mi" in prompt
     # Income and sqft fields follow the same rule
     assert "avg_household_income_3mi" in prompt
     assert "storage_sqft_per_capita_3mi" in prompt

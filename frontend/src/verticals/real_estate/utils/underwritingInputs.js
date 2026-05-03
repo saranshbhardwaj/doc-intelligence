@@ -6,7 +6,7 @@
 
 const PCT_FIELDS = {
   acquisition: ['closing_cost_pct', 'market_cap_rate_purchase'],
-  operational: ['vacancy_credit_loss_pct', 'expense_ratio_current', 'expense_ratio_pro_forma', 'rent_growth_pct', 'mgmt_fee_pct', 'property_tax_growth_pct', 'opex_growth_pct'],
+  operational: ['vacancy_credit_loss_pct', 'expense_ratio_current', 'expense_ratio_pro_forma', 'rent_growth_pct', 'mgmt_fee_pct', 'property_tax_growth_pct', 'property_tax_assessment_ratio', 'opex_growth_pct'],
   financing:   ['interest_rate_pct', 'ltv_pct'],
   exit:        ['market_cap_rate_sale', 'exit_cap_rate', 'selling_cost_pct'],
   criteria:    ['target_irr', 'target_cash_on_cash', 'max_ltv'],

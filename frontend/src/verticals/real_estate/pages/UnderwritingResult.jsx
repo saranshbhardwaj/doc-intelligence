@@ -166,7 +166,7 @@ export default function UnderwritingResult() {
     : verdictStatus === 'needs_review' ? 'warning'
     : verdictStatus ? 'danger' : 'neutral';
   const verdictLabel = verdictStatus === 'worth_pursuing' ? 'Passes Screen'
-    : verdictStatus === 'needs_review' ? 'Review Needed'
+    : verdictStatus === 'needs_review' ? 'Passes With Conditions'
     : verdictStatus ? 'Below Screen' : 'In Review';
 
   const projections = artifact.projections || [];
@@ -246,7 +246,11 @@ export default function UnderwritingResult() {
     marketing_annual: getFieldCitation(fieldCitations, citationContext, 'marketing_annual'),
     other_income_annual: getFieldCitation(fieldCitations, citationContext, 'other_income_annual'),
     property_tax_growth_pct: getFieldCitation(fieldCitations, citationContext, 'property_tax_growth_pct'),
-    mil_rate: getFieldCitation(fieldCitations, citationContext, 'mil_rate'),
+    property_tax_value_basis_amount: getFieldCitation(fieldCitations, citationContext, 'property_tax_value_basis_amount'),
+    property_tax_assessed_value: getFieldCitation(fieldCitations, citationContext, 'property_tax_assessed_value'),
+    property_tax_assessment_ratio: getFieldCitation(fieldCitations, citationContext, 'property_tax_assessment_ratio'),
+    property_tax_millage_rate: getFieldCitation(fieldCitations, citationContext, 'property_tax_millage_rate'),
+    property_tax_rate_per_assessed_dollar: getFieldCitation(fieldCitations, citationContext, 'property_tax_rate_per_assessed_dollar'),
     bad_debt_annual: getFieldCitation(fieldCitations, citationContext, 'bad_debt_annual'),
     corrections_collections_annual: getFieldCitation(fieldCitations, citationContext, 'corrections_collections_annual'),
     interest_rate_pct: getFieldCitation(fieldCitations, citationContext, 'interest_rate_pct'),
@@ -651,11 +655,36 @@ export default function UnderwritingResult() {
       citation: getFieldCitation(fieldCitations, citationContext, 'property_tax_growth_pct'),
     },
     {
-      key: 'mil_rate',
-      label: 'Mil rate',
-      value: persistedInputs.operational?.mil_rate != null
-        ? `${persistedInputs.operational.mil_rate.toFixed(1)} mills` : '—',
-      citation: getFieldCitation(fieldCitations, citationContext, 'mil_rate'),
+      key: 'property_tax_value_basis_amount',
+      label: 'Tax value basis',
+      value: formatEvidenceValue(formatCompactCurrency, persistedInputs.operational?.property_tax_value_basis_amount),
+      citation: getFieldCitation(fieldCitations, citationContext, 'property_tax_value_basis_amount'),
+    },
+    {
+      key: 'property_tax_assessed_value',
+      label: 'Tax assessed value',
+      value: formatEvidenceValue(formatCompactCurrency, persistedInputs.operational?.property_tax_assessed_value),
+      citation: getFieldCitation(fieldCitations, citationContext, 'property_tax_assessed_value'),
+    },
+    {
+      key: 'property_tax_assessment_ratio',
+      label: 'Tax assessment ratio',
+      value: formatEvidenceValue(formatPercent, persistedInputs.operational?.property_tax_assessment_ratio),
+      citation: getFieldCitation(fieldCitations, citationContext, 'property_tax_assessment_ratio'),
+    },
+    {
+      key: 'property_tax_millage_rate',
+      label: 'Tax millage rate',
+      value: persistedInputs.operational?.property_tax_millage_rate != null
+        ? `${persistedInputs.operational.property_tax_millage_rate.toFixed(2)} mills` : '—',
+      citation: getFieldCitation(fieldCitations, citationContext, 'property_tax_millage_rate'),
+    },
+    {
+      key: 'property_tax_rate_per_assessed_dollar',
+      label: 'Tax rate / assessed $',
+      value: persistedInputs.operational?.property_tax_rate_per_assessed_dollar != null
+        ? persistedInputs.operational.property_tax_rate_per_assessed_dollar.toFixed(5) : '—',
+      citation: getFieldCitation(fieldCitations, citationContext, 'property_tax_rate_per_assessed_dollar'),
     },
     {
       key: 'interest_rate_pct',
@@ -1090,7 +1119,6 @@ export default function UnderwritingResult() {
                       proFormaExpenseRatio={proFormaExpenseRatio}
                       propertyTaxAnnual={persistedInputs.operational?.property_tax_annual}
                       propertyTaxGrowthPct={persistedInputs.operational?.property_tax_growth_pct ?? artifact.om_data?.property_tax_growth_pct}
-                      milRate={persistedInputs.operational?.mil_rate ?? artifact.om_data?.mil_rate}
                       badDebtAnnual={persistedInputs.operational?.bad_debt_annual ?? artifact.t12_data?.summary?.bad_debt_annual}
                       correctionsCollectionsAnnual={persistedInputs.operational?.corrections_collections_annual ?? artifact.t12_data?.summary?.corrections_collections_annual}
                       purchasePrice={purchasePrice}

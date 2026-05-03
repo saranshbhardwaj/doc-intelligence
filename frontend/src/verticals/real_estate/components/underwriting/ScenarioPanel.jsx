@@ -130,7 +130,7 @@ export default function ScenarioPanel({
             }`}>
               Scenario verdict: {
                 scenarioResult.verdict_status === 'worth_pursuing' ? 'Passes Screen'
-                : scenarioResult.verdict_status === 'needs_review' ? 'Review Needed'
+                : scenarioResult.verdict_status === 'needs_review' ? 'Passes With Conditions'
                 : 'Below Screen'
               }
             </div>

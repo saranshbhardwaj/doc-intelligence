@@ -336,12 +336,12 @@ def detect_discrepancies(
     )
 
     for field, om_field, label in [
-        ("property_tax_annual", "expense_property_tax_annual", "Property tax mismatch"),
-        ("insurance_annual", "expense_insurance_annual", "Insurance mismatch"),
+        ("property_tax_annual", "expense_property_tax_annual_year1", "Property tax mismatch"),
+        ("insurance_annual", "expense_insurance_annual_year1", "Insurance mismatch"),
         ("payroll_annual", "expense_payroll_annual", "Payroll mismatch"),
-        ("repairs_maintenance_annual", "expense_repairs_maintenance_annual", "Repairs and maintenance mismatch"),
-        ("utilities_annual", "expense_utilities_annual", "Utilities mismatch"),
-        ("marketing_annual", "expense_marketing_annual", "Marketing mismatch"),
+        ("repairs_maintenance_annual", "expense_repairs_maintenance_annual_year1", "Repairs and maintenance mismatch"),
+        ("utilities_annual", "expense_utilities_annual_year1", "Utilities mismatch"),
+        ("marketing_annual", "expense_marketing_annual_year1", "Marketing mismatch"),
     ]:
         _compare_numeric_sources(
             discrepancies,
@@ -433,12 +433,17 @@ def detect_discrepancies_from_results(results: list, model_inputs: dict | None =
                 "noi_year_one_stated": om_dict.get("noi_year_one_stated"),
                 "avg_in_place_rent_per_unit_monthly": om_dict.get("avg_in_place_rent_per_unit_monthly"),
                 "avg_market_rent_per_unit_monthly": om_dict.get("avg_market_rent_per_unit_monthly"),
-                "expense_property_tax_annual": om_dict.get("expense_property_tax_annual"),
-                "expense_insurance_annual": om_dict.get("expense_insurance_annual"),
+                "expense_property_tax_annual": om_dict.get("expense_property_tax_annual_year1"),
+                "expense_insurance_annual": om_dict.get("expense_insurance_annual_year1"),
                 "expense_payroll_annual": om_dict.get("expense_payroll_annual"),
-                "expense_repairs_maintenance_annual": om_dict.get("expense_repairs_maintenance_annual"),
-                "expense_utilities_annual": om_dict.get("expense_utilities_annual"),
-                "expense_marketing_annual": om_dict.get("expense_marketing_annual"),
+                "expense_repairs_maintenance_annual": om_dict.get("expense_repairs_maintenance_annual_year1"),
+                "expense_utilities_annual": om_dict.get("expense_utilities_annual_year1"),
+                "expense_marketing_annual": om_dict.get("expense_marketing_annual_year1"),
+                "property_tax_value_basis_amount": om_dict.get("property_tax_value_basis_amount"),
+                "property_tax_assessed_value": om_dict.get("property_tax_assessed_value"),
+                "property_tax_assessment_ratio": om_dict.get("property_tax_assessment_ratio"),
+                "property_tax_millage_rate": om_dict.get("property_tax_millage_rate"),
+                "property_tax_rate_per_assessed_dollar": om_dict.get("property_tax_rate_per_assessed_dollar"),
             }
             # Convert vacancy_pct_projected to occupancy_pct
             if "vacancy_pct_projected" in om_dict and om_dict["vacancy_pct_projected"] is not None:

@@ -38,6 +38,7 @@ def _row(
     source_type: str,
     source_field: str,
     prior_value: float | None,
+    prior_label: str | None = None,
 ) -> dict[str, Any]:
     """Create one bridge row.
 
@@ -55,6 +56,7 @@ def _row(
         payload["delta_to_prior"] = {
             "amount": delta,
             "pct": delta / prior_value if prior_value else None,
+            "basis_label": prior_label,
         }
     return payload
 
@@ -85,6 +87,7 @@ def build_noi_bridge(
                 source_type=source_type,
                 source_field=source_field,
                 prior_value=prior,
+                prior_label=rows[-1]["label"] if rows else None,
             )
         )
 

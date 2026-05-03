@@ -268,10 +268,11 @@ class TestVerdictEvidenceQualityWarning:
     def test_t6_annualized_warning_appended_to_rationale(self, passing_result, default_criteria):
         verdict = evaluate(passing_result, default_criteria, income_statement_period_months=6)
 
-        assert verdict.status == "worth_pursuing"
+        assert verdict.status == "needs_review"
         warning = next(w for w in verdict.warnings if w.key == "annualized_short_period_income")
         assert warning.severity == "warning"
         assert "trailing 6-month period, annualized" in verdict.rationale
+        assert "-10% reduction to GPR" in warning.message
 
     @pytest.mark.parametrize("months", [7, 8, 9, 10, 11])
     def test_t7_through_t11_emit_annualized_warning_with_severity(self, passing_result, default_criteria, months):
@@ -280,6 +281,7 @@ class TestVerdictEvidenceQualityWarning:
         warning = next(w for w in verdict.warnings if w.key == "annualized_short_period_income")
         assert warning.severity == "warning"
         assert f"trailing {months}-month period" in warning.message
+        assert verdict.status == "needs_review"
 
     def test_period_under_three_months_emits_stronger_warning(self, passing_result, default_criteria):
         verdict = evaluate(passing_result, default_criteria, income_statement_period_months=2)
@@ -328,6 +330,74 @@ class TestVerdictEvidenceQualityWarning:
         expense_warning = next(w for w in verdict.warnings if w.key == "expenses_missing")
         assert expense_warning.severity == "critical"
         assert "analyst review is required" in verdict.rationale
+
+    def test_low_expense_ratio_requires_review(self, passing_result, default_criteria):
+        result = passing_result.model_copy(deep=True)
+        result.expense_basis = ExpenseBasis(
+            source="line_items",
+            label="Detailed expense line items",
+            ratio=0.27,
+            reason="test",
+        )
+        inputs = SelfStorageInputs(
+            project=ProjectDetails(name="Low OpEx Deal", asset_type="self_storage"),
+            acquisition=AcquisitionInputs(purchase_price=5_000_000),
+            operational=OperationalInputs(gross_potential_rent_annual=600_000),
+            financing=FinancingInputs(),
+            exit=ExitInputs(),
+            criteria=default_criteria,
+        )
+
+        verdict = evaluate(result, default_criteria, inputs=inputs)
+
+        warning = next(w for w in verdict.warnings if w.key == "expense_ratio_benchmark")
+        assert verdict.status == "needs_review"
+        assert "below the 30%" in warning.message
+
+    def test_high_expense_ratio_requires_review(self, passing_result, default_criteria):
+        result = passing_result.model_copy(deep=True)
+        result.expense_basis = ExpenseBasis(
+            source="line_items",
+            label="Detailed expense line items",
+            ratio=0.49,
+            reason="test",
+        )
+        inputs = SelfStorageInputs(
+            project=ProjectDetails(name="High OpEx Deal", asset_type="self_storage"),
+            acquisition=AcquisitionInputs(purchase_price=5_000_000),
+            operational=OperationalInputs(gross_potential_rent_annual=600_000),
+            financing=FinancingInputs(),
+            exit=ExitInputs(),
+            criteria=default_criteria,
+        )
+
+        verdict = evaluate(result, default_criteria, inputs=inputs)
+
+        warning = next(w for w in verdict.warnings if w.key == "expense_ratio_benchmark")
+        assert verdict.status == "needs_review"
+        assert "above the 45%" in warning.message
+
+    def test_sqft_per_capita_supply_watch_requires_review(self, passing_result, default_criteria):
+        inputs = SelfStorageInputs(
+            project=ProjectDetails(
+                name="Supply Watch Deal",
+                asset_type="self_storage",
+                storage_sqft_per_capita_3mi=6.9,
+                nearby_storage_count_3mi=10,
+            ),
+            acquisition=AcquisitionInputs(purchase_price=5_000_000),
+            operational=OperationalInputs(gross_potential_rent_annual=600_000),
+            financing=FinancingInputs(),
+            exit=ExitInputs(),
+            criteria=default_criteria,
+        )
+
+        verdict = evaluate(passing_result, default_criteria, inputs=inputs)
+
+        warning = next(w for w in verdict.warnings if w.key == "market_supply_watch")
+        assert verdict.status == "needs_review"
+        assert "6.9 sqft/capita" in warning.message
+        assert "10 competitors" in warning.message
 
 
 class TestVerdictOMNOIWarnings:
@@ -417,11 +487,24 @@ class TestVerdictMixedRevenueWarning:
 
         verdict = evaluate(result, default_criteria)
 
-        assert verdict.status == "worth_pursuing"
+        assert verdict.status == "needs_review"
         assert len(verdict.failures) == 0
-        assert any(w.key == "mixed_revenue_unit_mix" for w in verdict.warnings)
+        assert any(w.key == "mixed_revenue_material" for w in verdict.warnings)
         assert "Mixed revenue detected" in verdict.rationale
-        assert "70 of 203 units/spaces" in verdict.rationale
+        assert "70 of 203 units/spaces (34%)" in verdict.rationale
+
+    def test_material_mixed_revenue_by_scheduled_rent_requires_review(self, passing_result, default_criteria):
+        result = passing_result.model_copy()
+        result.unit_mix = [
+            UnitMixRow(section="NON-CLIMATE", unit_type="Storage", num_units=100, current_rent=50),
+            UnitMixRow(section="RESIDENTIAL LEASE", unit_type="Residential", num_units=1, current_rent=1_500),
+        ]
+
+        verdict = evaluate(result, default_criteria)
+
+        warning = next(w for w in verdict.warnings if w.key == "mixed_revenue_material")
+        assert verdict.status == "needs_review"
+        assert "approximately 23% of unit-mix scheduled rent" in warning.message
 
     def test_storage_only_unit_mix_has_no_mixed_revenue_warning(self, passing_result, default_criteria):
         result = passing_result.model_copy()

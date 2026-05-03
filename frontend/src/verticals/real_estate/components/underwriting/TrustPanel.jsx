@@ -66,7 +66,7 @@ function MetricRow({ label, value, alert = false }) {
 function expenseBasisDriverLabel(expenseBasis) {
   switch (expenseBasis?.source) {
     case 'line_items':
-      return 'T-12 line items';
+      return expenseBasis?.label || 'Detailed expense line items';
     case 'expense_ratio_current':
       return 'T-12 expense ratio';
     case 'expense_ratio_pro_forma':
@@ -90,13 +90,14 @@ function NoiBridgeMini({ bridge }) {
       </p>
       {rows.map((row) => {
         const pct = row.delta_to_prior?.pct;
+        const basisLabel = row.delta_to_prior?.basis_label;
         return (
           <div key={`${row.source_type}-${row.source_field}`} className="flex items-center justify-between gap-2 py-1">
             <span className="truncate text-[11px] text-muted-foreground">{row.label}</span>
             <div className="flex items-center gap-1.5">
               {pct != null ? (
                 <span className={`text-[10px] font-semibold ${Math.abs(pct) > 0.1 ? 'text-warning' : 'text-muted-foreground'}`}>
-                  {pct >= 0 ? '+' : ''}{(pct * 100).toFixed(0)}%
+                  {pct >= 0 ? '+' : ''}{(pct * 100).toFixed(0)}%{basisLabel ? ` vs ${basisLabel}` : ''}
                 </span>
               ) : null}
               <span className="text-[11px] font-semibold text-foreground tabular-nums">

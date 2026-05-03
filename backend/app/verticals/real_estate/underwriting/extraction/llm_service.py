@@ -453,12 +453,12 @@ class REExtractionLLMService:
         # Expenses: T12 overrides OM (actuals beat projections)
         # OM field names use the expense_ prefix from the new extraction schema
         OM_EXPENSE_FIELD_MAP = {
-            "property_tax_annual":        "expense_property_tax_annual",
-            "insurance_annual":           "expense_insurance_annual",
+            "property_tax_annual":        "expense_property_tax_annual_year1",
+            "insurance_annual":           "expense_insurance_annual_year1",
             "payroll_annual":             "expense_payroll_annual",
-            "repairs_maintenance_annual": "expense_repairs_maintenance_annual",
-            "utilities_annual":           "expense_utilities_annual",
-            "marketing_annual":           "expense_marketing_annual",
+            "repairs_maintenance_annual": "expense_repairs_maintenance_annual_year1",
+            "utilities_annual":           "expense_utilities_annual_year1",
+            "marketing_annual":           "expense_marketing_annual_year1",
         }
         for operational_field, om_field in OM_EXPENSE_FIELD_MAP.items():
             t12_val = t12_data.get("expenses", {}).get(operational_field)
@@ -478,6 +478,18 @@ class REExtractionLLMService:
                 merged[field] = t12_val
                 citations[field] = {"doc_type": "t12", "value": t12_val}
             elif om_val is not None:
+                merged[field] = om_val
+                citations[field] = {"doc_type": "om", "value": om_val}
+
+        for field in [
+            "property_tax_value_basis_amount",
+            "property_tax_assessed_value",
+            "property_tax_assessment_ratio",
+            "property_tax_millage_rate",
+            "property_tax_rate_per_assessed_dollar",
+        ]:
+            om_val = om_data.get(field)
+            if om_val is not None:
                 merged[field] = om_val
                 citations[field] = {"doc_type": "om", "value": om_val}
 

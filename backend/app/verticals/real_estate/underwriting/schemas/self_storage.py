@@ -152,9 +152,25 @@ class OperationalInputs(BaseModel):
         default=None,
         description="Annual property tax growth rate.",
     )
-    mil_rate: Optional[float] = Field(
+    property_tax_value_basis_amount: Optional[float] = Field(
         default=None,
-        description="Property tax millage rate when stated.",
+        description="Explicit value basis used for property tax calculation.",
+    )
+    property_tax_assessed_value: Optional[float] = Field(
+        default=None,
+        description="Explicit assessed or taxable assessed value for property tax calculation.",
+    )
+    property_tax_assessment_ratio: Optional[float] = Field(
+        default=None,
+        description="Property tax assessment ratio as a decimal.",
+    )
+    property_tax_millage_rate: Optional[float] = Field(
+        default=None,
+        description="Property tax millage rate in true mills per $1,000 of assessed value.",
+    )
+    property_tax_rate_per_assessed_dollar: Optional[float] = Field(
+        default=None,
+        description="Property tax rate per $1 of assessed value.",
     )
     opex_growth_pct: float = Field(
         default=0.02, description="Annual operating expense growth rate."
