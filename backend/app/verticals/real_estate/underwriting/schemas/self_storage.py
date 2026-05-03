@@ -62,7 +62,10 @@ class AcquisitionInputs(BaseModel):
 
     model_config = ConfigDict(populate_by_name=True)
 
-    purchase_price: float = Field(description="Asking / negotiated price.")
+    purchase_price: Optional[float] = Field(
+        default=None,
+        description="Asking / negotiated price.",
+    )
     closing_cost_pct: float = Field(
         default=0.02, description="Closing costs as % of purchase price."
     )
@@ -149,9 +152,25 @@ class OperationalInputs(BaseModel):
         default=None,
         description="Annual property tax growth rate.",
     )
-    mil_rate: Optional[float] = Field(
+    property_tax_value_basis_amount: Optional[float] = Field(
         default=None,
-        description="Property tax millage rate when stated.",
+        description="Explicit value basis used for property tax calculation.",
+    )
+    property_tax_assessed_value: Optional[float] = Field(
+        default=None,
+        description="Explicit assessed or taxable assessed value for property tax calculation.",
+    )
+    property_tax_assessment_ratio: Optional[float] = Field(
+        default=None,
+        description="Property tax assessment ratio as a decimal.",
+    )
+    property_tax_millage_rate: Optional[float] = Field(
+        default=None,
+        description="Property tax millage rate in true mills per $1,000 of assessed value.",
+    )
+    property_tax_rate_per_assessed_dollar: Optional[float] = Field(
+        default=None,
+        description="Property tax rate per $1 of assessed value.",
     )
     opex_growth_pct: float = Field(
         default=0.02, description="Annual operating expense growth rate."
@@ -287,6 +306,14 @@ class RentCompRow(BaseModel):
         default=None,
         description="Optional note such as online special or missing data.",
     )
+    climate_type: Optional[Literal["CC", "NC", "UNKNOWN"]] = Field(
+        default=None,
+        description='"CC" = climate-controlled, "NC" = non-climate / drive-up, "UNKNOWN" = unclear.',
+    )
+    standard_sqft: Optional[float] = Field(
+        default=None,
+        description="Canonical unit area in sqft derived from the size string (e.g. '5×10' → 50).",
+    )
 
 
 class SelfStorageInputs(BaseModel):
@@ -345,6 +372,7 @@ class ExpenseBasis(BaseModel):
         "line_items",
         "expense_ratio_current",
         "expense_ratio_pro_forma",
+        "om_noi",
         "missing",
     ]
     label: str
@@ -452,6 +480,10 @@ class RentPositionRow(BaseModel):
     current_vs_comp_ratio: Optional[float] = None
     market_vs_comp_ratio: Optional[float] = None
     comp_count: int
+    bucket: Optional[Literal["locker", "small", "medium", "large", "xlarge"]] = Field(
+        default=None,
+        description="Size bucket label: locker / small / medium / large / xlarge.",
+    )
 
 
 class FormulaComputedValues(BaseModel):
@@ -548,6 +580,10 @@ class SelfStorageResult(BaseModel):
     rent_position_analysis: list[RentPositionRow] = Field(
         default_factory=list,
         description="Subject rent position versus matched extracted rent comps.",
+    )
+    unknown_climate_comp_count: int = Field(
+        default=0,
+        description="Number of rent comps excluded from matching because climate type was unclear.",
     )
 
 

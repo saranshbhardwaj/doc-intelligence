@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
 from app.auth import get_current_user, get_current_org_role, is_admin_role
+from app.config import settings
 from app.database import get_db
 from app.db_models_users import User
 from app.repositories.document_repository import DocumentRepository
@@ -261,6 +262,15 @@ async def upload_template(
         # Compute file hash and size
         content_hash = handler.compute_file_hash(temp_path)
         file_size = handler.get_file_size(temp_path)
+        max_template_bytes = settings.template_fill_max_template_mb * 1024 * 1024
+        if file_size > max_template_bytes:
+            raise HTTPException(
+                status_code=413,
+                detail=(
+                    f"Excel templates up to {settings.template_fill_max_template_mb} MB are supported. "
+                    "Remove unused sheets, images, or excess formatting and try again."
+                ),
+            )
 
         # Validate fingerprint — only the known RE Investment Model is supported for beta.
         # This is synchronous but fast (reads only 3 cells).

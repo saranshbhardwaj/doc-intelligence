@@ -174,4 +174,18 @@ export const createUnderwritingSlice = (set, get) => ({
       },
     }));
   },
+
+  /**
+   * Patch name/address of one run in the list without a full refetch.
+   */
+  updateRunInList: (runId, patch) => {
+    set((state) => ({
+      underwriting: {
+        ...state.underwriting,
+        runs: state.underwriting.runs.map((r) =>
+          r.id === runId ? { ...r, ...patch } : r
+        ),
+      },
+    }));
+  },
 });

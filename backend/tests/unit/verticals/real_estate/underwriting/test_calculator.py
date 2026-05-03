@@ -1,6 +1,7 @@
 """Unit tests for the underwriting calculator."""
 import pytest
 from app.verticals.real_estate.underwriting.calculator import calculate, calculate_sensitivity
+from app.verticals.real_estate.underwriting import calculator as calc_module
 from app.verticals.real_estate.underwriting.schemas.self_storage import (
     SelfStorageInputs,
     ProjectDetails,
@@ -10,6 +11,7 @@ from app.verticals.real_estate.underwriting.schemas.self_storage import (
     ExitInputs,
     InvestmentCriteria,
     RentCompRow,
+    RentPositionRow,
     UnitMixRow,
 )
 
@@ -150,14 +152,14 @@ class TestCalculatorHappyPath:
     def test_rent_position_analysis_matches_unit_mix_to_comps(self):
         inputs = VALID_INPUTS.model_copy(deep=True)
         inputs.unit_mix = [
-            UnitMixRow(section="NON-CLIMATE", size="10 x 10", standard_sqft=100.0, current_rent=110.0, market_rent=120.0, num_units=50),
-            UnitMixRow(section="CLIMATE CONTROL", size="10 x 10", standard_sqft=100.0, current_rent=140.0, market_rent=150.0, num_units=20),
-            UnitMixRow(section="UNCOVERED PARKING", size="10 x 20", current_rent=45.0, num_units=10),
+            UnitMixRow(section="NON-CLIMATE", size="10 x 10", standard_sqft=100.0, climate_type="NC", current_rent=110.0, market_rent=120.0, num_units=50, unit_category="storage"),
+            UnitMixRow(section="CLIMATE CONTROL", size="10 x 10", standard_sqft=100.0, climate_type="CC", current_rent=140.0, market_rent=150.0, num_units=20, unit_category="storage"),
+            UnitMixRow(section="UNCOVERED PARKING", size="10 x 20", current_rent=45.0, num_units=10, unit_category="parking"),
         ]
         inputs.rent_comps = [
-            RentCompRow(size="10x10", asking_rent=100.0),
-            RentCompRow(size="10 X 10", asking_rent=120.0),
-            RentCompRow(size="10x10", rent_per_sqft=1.6),
+            RentCompRow(size="10x10", standard_sqft=100.0, climate_type="NC", asking_rent=100.0),
+            RentCompRow(size="10 X 10", standard_sqft=100.0, climate_type="NC", asking_rent=120.0),
+            RentCompRow(size="10x10", standard_sqft=100.0, climate_type="CC", asking_rent=160.0),
         ]
 
         result = calculate(inputs)
@@ -165,12 +167,13 @@ class TestCalculatorHappyPath:
         assert len(result.rent_position_analysis) == 2
         nc_row = next(row for row in result.rent_position_analysis if row.climate_type == "NC")
         cc_row = next(row for row in result.rent_position_analysis if row.climate_type == "CC")
-        assert nc_row.comp_average_rent == pytest.approx(126.6666666667)
-        assert nc_row.comp_count == 3
-        assert nc_row.current_vs_comp_ratio == pytest.approx(110.0 / 126.6666666667)
-        assert nc_row.market_vs_comp_ratio == pytest.approx(120.0 / 126.6666666667)
-        assert cc_row.comp_average_rent == pytest.approx(126.6666666667)
-        assert cc_row.current_vs_comp_ratio == pytest.approx(140.0 / 126.6666666667)
+        assert nc_row.comp_average_rent == pytest.approx(110.0)
+        assert nc_row.comp_count == 2
+        assert nc_row.current_vs_comp_ratio == pytest.approx(110.0 / 110.0)
+        assert nc_row.market_vs_comp_ratio == pytest.approx(120.0 / 110.0)
+        assert cc_row.comp_average_rent == pytest.approx(160.0)
+        assert cc_row.comp_count == 1
+        assert cc_row.current_vs_comp_ratio == pytest.approx(140.0 / 160.0)
 
 
 class TestCalculatorEdgeCases:
@@ -206,6 +209,22 @@ class TestCalculatorEdgeCases:
         with pytest.raises(ValueError, match="exit_cap_rate must be > 0"):
             calculate(inputs)
 
+    def test_missing_purchase_price_raises(self):
+        """purchase_price=None must fail instead of producing a $0 underwriting."""
+        inputs = VALID_INPUTS.model_copy(deep=True)
+        inputs.acquisition.purchase_price = None
+
+        with pytest.raises(ValueError, match="purchase_price required and must be > 0"):
+            calculate(inputs)
+
+    def test_zero_purchase_price_raises(self):
+        """purchase_price=0 must fail before capital-stack math."""
+        inputs = VALID_INPUTS.model_copy(deep=True)
+        inputs.acquisition.purchase_price = 0
+
+        with pytest.raises(ValueError, match="purchase_price required and must be > 0"):
+            calculate(inputs)
+
     def test_very_small_equity_invested(self):
         """Very small equity → shouldn't crash, ratios still computed."""
         inputs = VALID_INPUTS.model_copy(deep=True)
@@ -227,3 +246,275 @@ class TestCalculatorEdgeCases:
 
         # Lower purchase price → higher IRR
         assert sensitivity[0].irr > sensitivity[2].irr
+
+
+class TestSchemaNewFields:
+    """Test new fields added to RentCompRow and RentPositionRow."""
+
+    def test_rent_comp_row_has_climate_type(self):
+        row = RentCompRow(size="5x10", asking_rent=85.0, climate_type="CC")
+        assert row.climate_type == "CC"
+
+    def test_rent_comp_row_climate_type_defaults_none(self):
+        row = RentCompRow(size="5x10", asking_rent=85.0)
+        assert row.climate_type is None
+
+    def test_rent_comp_row_has_standard_sqft(self):
+        row = RentCompRow(size="5x10", asking_rent=85.0, standard_sqft=50.0)
+        assert row.standard_sqft == 50.0
+
+    def test_rent_position_row_has_bucket(self):
+        row = RentPositionRow(
+            size="5x10", climate_type="CC", comp_average_rent=90.0,
+            comp_count=2, bucket="small"
+        )
+        assert row.bucket == "small"
+
+    def test_rent_comp_row_standard_sqft_defaults_none(self):
+        row = RentCompRow(size="5x10", asking_rent=85.0)
+        assert row.standard_sqft is None
+
+    def test_rent_position_row_bucket_defaults_none(self):
+        row = RentPositionRow(
+            size="5x10", climate_type="CC", comp_average_rent=90.0, comp_count=2
+        )
+        assert row.bucket is None
+
+
+
+class TestSizeBucketUtilities:
+    def test_parse_standard_sqft_dimension_string(self):
+        assert calc_module._parse_standard_sqft("5x10") == pytest.approx(50.0)
+        assert calc_module._parse_standard_sqft("10x20") == pytest.approx(200.0)
+        assert calc_module._parse_standard_sqft("5 x 10") == pytest.approx(50.0)
+        assert calc_module._parse_standard_sqft("5×10") == pytest.approx(50.0)
+
+    def test_parse_standard_sqft_plain_number(self):
+        assert calc_module._parse_standard_sqft("200") == pytest.approx(200.0)
+        assert calc_module._parse_standard_sqft("200 sqft") == pytest.approx(200.0)
+
+    def test_parse_standard_sqft_none_on_garbage(self):
+        assert calc_module._parse_standard_sqft(None) is None
+        assert calc_module._parse_standard_sqft("") is None
+        assert calc_module._parse_standard_sqft("various") is None
+
+    def test_parse_standard_sqft_ignores_trailing_text(self):
+        # Should NOT match — trailing text after dimensions
+        assert calc_module._parse_standard_sqft("5x10 (climate)") is None
+        assert calc_module._parse_standard_sqft("5x10 ft2") is None
+
+    def test_size_bucket_boundaries(self):
+        assert calc_module._size_bucket(10) == "locker"
+        assert calc_module._size_bucket(24.9) == "locker"
+        assert calc_module._size_bucket(25) == "small"
+        assert calc_module._size_bucket(50) == "small"
+        assert calc_module._size_bucket(74.9) == "small"
+        assert calc_module._size_bucket(75) == "medium"
+        assert calc_module._size_bucket(100) == "medium"
+        assert calc_module._size_bucket(149.9) == "medium"
+        assert calc_module._size_bucket(150) == "large"
+        assert calc_module._size_bucket(200) == "large"
+        assert calc_module._size_bucket(299.9) == "large"
+        assert calc_module._size_bucket(300) == "xlarge"
+        assert calc_module._size_bucket(500) == "xlarge"
+
+
+class TestRentPositionBucketMatching:
+    def _make_unit_row(self, size, sqft, climate, current_rent, market_rent=None):
+        from app.verticals.real_estate.underwriting.schemas.self_storage import UnitMixRow
+        return UnitMixRow(
+            size=size, standard_sqft=sqft, climate_type=climate,
+            current_rent=current_rent, market_rent=market_rent,
+            num_units=10, unit_category="storage",
+        )
+
+    def _make_comp_row(self, size, sqft, climate, asking_rent):
+        from app.verticals.real_estate.underwriting.schemas.self_storage import RentCompRow
+        return RentCompRow(
+            size=size, standard_sqft=sqft, climate_type=climate, asking_rent=asking_rent,
+        )
+
+    def test_matching_by_bucket_and_climate(self):
+        unit_mix = [self._make_unit_row("5x10", 50, "CC", 95.0)]
+        comps = [
+            self._make_comp_row("5x10", 50, "CC", 90.0),
+            self._make_comp_row("5x10", 50, "CC", 100.0),
+            self._make_comp_row("5x10", 50, "NC", 70.0),  # different climate — should not match
+        ]
+        result, _ = calc_module._build_rent_position_analysis(unit_mix, comps)
+        assert len(result) == 1
+        assert result[0].climate_type == "CC"
+        assert result[0].comp_count == 2
+        assert result[0].comp_average_rent == pytest.approx(95.0)
+        assert result[0].bucket == "small"
+
+    def test_no_comp_match_returns_no_row(self):
+        unit_mix = [self._make_unit_row("10x20", 200, "CC", 150.0)]
+        comps = [self._make_comp_row("5x10", 50, "CC", 90.0)]
+        result, _ = calc_module._build_rent_position_analysis(unit_mix, comps)
+        assert result == []
+
+    def test_cc_and_nc_rows_matched_separately(self):
+        unit_mix = [
+            self._make_unit_row("5x10", 50, "CC", 95.0),
+            self._make_unit_row("5x10", 50, "NC", 65.0),
+        ]
+        comps = [
+            self._make_comp_row("5x10", 50, "CC", 90.0),
+            self._make_comp_row("5x10", 50, "NC", 70.0),
+        ]
+        result, _ = calc_module._build_rent_position_analysis(unit_mix, comps)
+        cc = next(r for r in result if r.climate_type == "CC")
+        nc = next(r for r in result if r.climate_type == "NC")
+        assert cc.comp_count == 1
+        assert nc.comp_count == 1
+        assert cc.comp_average_rent == pytest.approx(90.0)
+        assert nc.comp_average_rent == pytest.approx(70.0)
+
+    def test_different_size_labels_same_bucket_match(self):
+        """5x10 and 50sqft both map to 'small' bucket — should match."""
+        unit_mix = [self._make_unit_row("5x10", 50, "CC", 95.0)]
+        comps = [self._make_comp_row("50 sqft", 50, "CC", 88.0)]
+        result, _ = calc_module._build_rent_position_analysis(unit_mix, comps)
+        assert len(result) == 1
+        assert result[0].bucket == "small"
+
+    def test_weighted_avg_across_same_bucket_cell(self):
+        """Two NC rows in the same bucket use num_units-weighted avg, not first-match."""
+        from app.verticals.real_estate.underwriting.schemas.self_storage import UnitMixRow, RentCompRow
+        unit_mix = [
+            UnitMixRow(size="5x5", standard_sqft=25.0, climate_type="NC", current_rent=50.0, num_units=10, unit_category="storage"),
+            UnitMixRow(size="5x10", standard_sqft=50.0, climate_type="NC", current_rent=80.0, num_units=30, unit_category="storage"),
+        ]
+        comps = [RentCompRow(size="5x10", standard_sqft=50.0, climate_type="NC", asking_rent=70.0)]
+        result, _ = calc_module._build_rent_position_analysis(unit_mix, comps)
+        assert len(result) == 1
+        # weighted avg: (50*10 + 80*30) / (10+30) = (500 + 2400) / 40 = 72.5
+        assert result[0].subject_current_rent == pytest.approx(72.5)
+
+    def test_unknown_comp_climate_count(self):
+        """UNKNOWN climate comps are excluded and counted."""
+        from app.verticals.real_estate.underwriting.schemas.self_storage import UnitMixRow, RentCompRow
+        unit_mix = [
+            UnitMixRow(size="5x10", standard_sqft=50.0, climate_type="NC", current_rent=80.0, num_units=10, unit_category="storage"),
+        ]
+        comps = [
+            RentCompRow(size="5x10", standard_sqft=50.0, climate_type="NC", asking_rent=70.0),
+            RentCompRow(size="5x10", standard_sqft=50.0, climate_type="UNKNOWN", asking_rent=65.0),
+            RentCompRow(size="5x10", standard_sqft=50.0, climate_type=None, asking_rent=60.0),
+        ]
+        result, unknown_count = calc_module._build_rent_position_analysis(unit_mix, comps)
+        assert unknown_count == 2
+        assert len(result) == 1
+        assert result[0].comp_count == 1  # only the NC comp matched
+
+
+class TestOMNOIMode:
+    """OM-only quick screen: stated NOI drives projections when detail is missing."""
+
+    OM_NOI_INPUTS = SelfStorageInputs(
+        project=ProjectDetails(name="Lone Star Storage", asset_type="self_storage", num_units=400),
+        acquisition=AcquisitionInputs(purchase_price=8_000_000, closing_cost_pct=0.02),
+        operational=OperationalInputs(
+            gross_potential_rent_annual=0.0,
+            noi_current_stated=663_830.0,
+            rent_growth_pct=0.03,
+            opex_growth_pct=0.02,
+        ),
+        financing=FinancingInputs(
+            ltv_pct=0.70,
+            interest_rate_pct=0.065,
+            amortization_years=25,
+            loan_term_years=10,
+        ),
+        exit=ExitInputs(hold_period_years=5, exit_cap_rate=0.065, selling_cost_pct=0.03),
+        criteria=InvestmentCriteria(
+            target_irr=0.15,
+            target_cash_on_cash=0.08,
+            target_equity_multiple=2.0,
+            max_ltv=0.80,
+        ),
+    )
+
+    def test_om_noi_mode_activates_when_detail_missing_and_noi_stated(self):
+        result = calculate(self.OM_NOI_INPUTS)
+
+        assert result.expense_basis.source == "om_noi"
+
+    def test_om_noi_year1_noi_equals_stated_noi(self):
+        result = calculate(self.OM_NOI_INPUTS)
+
+        assert result.noi_year_one == pytest.approx(663_830.0, rel=1e-4)
+
+    def test_om_noi_projects_with_rent_growth(self):
+        result = calculate(self.OM_NOI_INPUTS)
+
+        assert result.projections[1].noi == pytest.approx(663_830.0 * 1.03, rel=1e-4)
+
+    def test_om_noi_does_not_backsolve_revenue_or_expenses(self):
+        result = calculate(self.OM_NOI_INPUTS)
+        year_one = result.projections[0]
+
+        assert year_one.gpr == 0.0
+        assert year_one.vacancy_loss == 0.0
+        assert year_one.opex == 0.0
+        assert result.break_even_occupancy_pct is None
+
+    def test_om_noi_mode_not_triggered_when_gpr_and_expenses_present(self):
+        inputs = self.OM_NOI_INPUTS.model_copy(deep=True)
+        inputs.operational.gross_potential_rent_annual = 600_000.0
+        inputs.operational.property_tax_annual = 60_000.0
+        inputs.operational.insurance_annual = 20_000.0
+
+        result = calculate(inputs)
+
+        assert result.expense_basis.source == "line_items"
+
+    def test_om_noi_mode_wins_when_expenses_exist_but_revenue_missing(self):
+        inputs = self.OM_NOI_INPUTS.model_copy(deep=True)
+        inputs.operational.property_tax_annual = 60_000.0
+        inputs.operational.insurance_annual = 20_000.0
+
+        result = calculate(inputs)
+
+        assert result.expense_basis.source == "om_noi"
+        assert result.noi_year_one == pytest.approx(663_830.0, rel=1e-4)
+
+    def test_om_noi_prefers_noi_year_one_stated_over_noi_current_stated(self):
+        inputs = self.OM_NOI_INPUTS.model_copy(deep=True)
+        inputs.operational.noi_year_one_stated = 700_000.0
+        inputs.operational.noi_current_stated = 663_830.0
+
+        result = calculate(inputs)
+
+        assert result.noi_year_one == pytest.approx(700_000.0, rel=1e-4)
+
+    def test_t12_expense_ratio_with_zero_gpr_does_not_trigger_om_noi(self):
+        """T-12 expense ratio present but EGI=0 must NOT silently downgrade to om_noi.
+
+        When a T-12 is uploaded and supplies expense_ratio_current but the OM has no
+        GPR projection, ratio_opex cannot be computed (EGI=0). The fallback must land
+        on 'missing' — not 'om_noi' — so the analyst knows to supply a GPR figure
+        rather than silently receiving a quick screen backed by no real data.
+        """
+        inputs = self.OM_NOI_INPUTS.model_copy(deep=True)
+        inputs.operational.expense_ratio_current = 0.40  # T-12 supplied this
+
+        result = calculate(inputs)
+
+        assert result.expense_basis.source != "om_noi"
+        assert result.expense_basis.source == "missing"
+
+    def test_stated_om_noi_zero_does_not_fall_through_to_current(self):
+        """noi_year_one_stated=0.0 is an explicit value and must not fall through to noi_current_stated."""
+        inputs = self.OM_NOI_INPUTS.model_copy(deep=True)
+        inputs.operational.noi_year_one_stated = 0.0
+        inputs.operational.noi_current_stated = 663_830.0
+        inputs.operational.gross_potential_rent_annual = 0.0
+
+        # noi_year_one_stated=0.0 is falsy so om_noi won't activate;
+        # the important thing is 0.0 is treated as "explicitly set to zero"
+        # and does NOT fall through to noi_current_stated.
+        from app.verticals.real_estate.underwriting import calculator as calc_module
+        result_noi = calc_module._stated_om_noi(inputs)
+        assert result_noi == 0.0  # returned 0.0, not 663_830

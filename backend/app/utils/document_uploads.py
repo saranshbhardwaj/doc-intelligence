@@ -6,9 +6,11 @@ from typing import Optional
 PDF_EXTENSIONS = {".pdf"}
 WORD_EXTENSIONS = {".docx"}
 POWERPOINT_EXTENSIONS = {".pptx"}
+SPREADSHEET_EXTENSIONS = {".xlsx", ".xlsm", ".csv"}
 IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".bmp", ".tif", ".tiff", ".heif", ".heic"}
-ZIP_BASED_OFFICE_EXTENSIONS = WORD_EXTENSIONS | POWERPOINT_EXTENSIONS
-SUPPORTED_UPLOAD_EXTENSIONS = PDF_EXTENSIONS | ZIP_BASED_OFFICE_EXTENSIONS | IMAGE_EXTENSIONS
+ZIP_BASED_SPREADSHEET_EXTENSIONS = {".xlsx", ".xlsm"}
+ZIP_BASED_OFFICE_EXTENSIONS = WORD_EXTENSIONS | POWERPOINT_EXTENSIONS | ZIP_BASED_SPREADSHEET_EXTENSIONS
+SUPPORTED_UPLOAD_EXTENSIONS = PDF_EXTENSIONS | ZIP_BASED_OFFICE_EXTENSIONS | IMAGE_EXTENSIONS | {".csv"}
 
 CONTENT_TYPE_BY_EXTENSION = {
     ".pdf": "application/pdf",
@@ -24,6 +26,7 @@ CONTENT_TYPE_BY_EXTENSION = {
     ".heic": "image/heic",
     ".xlsx": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     ".xlsm": "application/vnd.ms-excel.sheet.macroEnabled.12",
+    ".csv": "text/csv",
     ".json": "application/json",
     ".txt": "text/plain",
 }
@@ -53,7 +56,22 @@ def validate_uploaded_file_signature(file_ext: str, file_bytes: bytes) -> Option
                 return "File does not appear to be a valid DOCX file"
             if file_ext == ".pptx":
                 return "File does not appear to be a valid PPTX file"
+            if file_ext in ZIP_BASED_SPREADSHEET_EXTENSIONS:
+                return "File does not appear to be a valid Excel workbook"
             return "File does not appear to be a valid Office file"
+        return None
+
+    if file_ext == ".csv":
+        sample = file_bytes[:4096]
+        if b"\x00" in sample:
+            return "File does not appear to be a valid CSV file"
+        try:
+            sample.decode("utf-8")
+        except UnicodeDecodeError:
+            try:
+                sample.decode("latin-1")
+            except UnicodeDecodeError:
+                return "File does not appear to be a valid CSV file"
         return None
 
     if file_ext in {".jpg", ".jpeg"}:

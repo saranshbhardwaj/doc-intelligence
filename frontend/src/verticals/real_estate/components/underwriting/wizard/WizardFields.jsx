@@ -1,7 +1,169 @@
 import { useId, useState } from 'react';
-import { AlertCircle } from 'lucide-react';
-import { Alert, AlertDescription } from '@/components/ui/alert';
+import { ChevronRight, Sigma } from 'lucide-react';
+import { Tooltip, TooltipContent, TooltipPortal, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import AIPrefilledField from '../AIPrefilledField';
+
+function citationTier(citation) {
+  if (!citation) return null;
+  if (citation.is_default) {
+    return { label: 'Default', tone: 'default', title: 'System default; review before relying on this assumption.' };
+  }
+  if (citation.is_derived) {
+    return { label: 'Derived', tone: 'derived', title: citation.formula ?? 'Computed from extracted fields.' };
+  }
+  if (citation.is_uncited_extraction) {
+    return { label: 'Extracted', tone: 'extracted', title: 'Extracted from a source document, but exact citation was not captured.' };
+  }
+  if (citation.doc_type === 'om' && citation.is_computed) {
+    return { label: 'OM computed', tone: 'om', title: citation.formula ?? 'Computed from OM source-backed line items.' };
+  }
+  if (citation.doc_type === 't12' && citation.is_computed) {
+    return { label: 'T-12 computed', tone: 'actual', title: citation.formula ?? 'Computed from T-12 operating statement evidence.' };
+  }
+  if (citation.doc_type === 't12') {
+    return { label: 'T-12 actual', tone: 'actual', title: citation.formula ?? 'Supported by T-12 operating statement evidence.' };
+  }
+  if (citation.doc_type === 'rent_roll') {
+    return { label: 'Rent roll actual', tone: 'actual', title: 'Supported by rent roll evidence.' };
+  }
+  if (citation.doc_type === 'om') {
+    return { label: 'OM stated', tone: 'om', title: 'Broker or offering memorandum stated assumption.' };
+  }
+  return { label: 'Extracted', tone: 'extracted', title: 'Extracted from source evidence.' };
+}
+
+function confidenceTone(citation) {
+  const confidence = Number(citation?.confidence);
+  if (!Number.isFinite(confidence)) return 'neutral';
+  if (confidence >= 0.9) return 'high';
+  if (confidence >= 0.7) return 'mid';
+  return 'low';
+}
+
+function confidenceLabel(citation) {
+  const confidence = Number(citation?.confidence);
+  if (!Number.isFinite(confidence)) return null;
+  return `${Math.round(confidence * 100)}%`;
+}
+
+function CitationTooltipContent({ citation, tier, canOpen }) {
+  const token = citation?.citations?.[0];
+  const sourceText = citation?.source_text;
+  const formula = citation?.formula;
+  const isComputed = citation?.is_computed || citation?.is_derived;
+  const confidence = confidenceLabel(citation);
+  const confidenceClass = `uw-confidence-dot-${confidenceTone(citation)}`;
+
+  return (
+    <div className="w-[320px] overflow-hidden rounded-2xl border border-border/70 bg-popover p-0 text-popover-foreground shadow-2xl shadow-foreground/10">
+      <div className="border-b border-border/60 bg-gradient-to-br from-card via-card to-muted/40 px-4 py-3">
+        <div className="flex items-start justify-between gap-3">
+          <div>
+            <p className="text-[10px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">
+              Source Basis
+            </p>
+            <p className="mt-1 text-sm font-semibold text-foreground">{tier.label}</p>
+          </div>
+          <span className={`cite-tier-badge cite-tier-${tier.tone}`}>
+            {tier.label}
+          </span>
+        </div>
+      </div>
+
+      <div className="space-y-3 px-4 py-3">
+        {confidence ? (
+          <div className="flex items-center justify-between rounded-xl border border-border/60 bg-background/70 px-3 py-2">
+            <span className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+              AI confidence
+            </span>
+            <span className="inline-flex items-center gap-2 text-xs font-semibold text-foreground">
+              <span className={`uw-confidence-dot ${confidenceClass}`} />
+              {confidence}
+            </span>
+          </div>
+        ) : null}
+
+        {formula ? (
+          <div className="rounded-xl border border-border/60 bg-background/70 p-3">
+            <div className="mb-1.5 flex items-center gap-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+              {isComputed ? <Sigma className="h-3.5 w-3.5 text-primary" /> : null}
+              Calculation
+            </div>
+            <p className="font-mono text-[12px] leading-5 text-foreground">{formula}</p>
+          </div>
+        ) : null}
+
+        {sourceText ? (
+          <div>
+            <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+              Source Text
+            </p>
+            <p className="rounded-xl bg-muted/50 px-3 py-2 text-xs leading-5 text-muted-foreground">
+              "{sourceText}"
+            </p>
+          </div>
+        ) : null}
+
+        <div className="flex items-center justify-between gap-3 text-xs">
+          <span className="rounded-full bg-muted px-2.5 py-1 font-mono text-[11px] text-muted-foreground">
+            {token || 'No exact source token'}
+          </span>
+          {canOpen ? (
+            <span className="inline-flex items-center gap-1 font-medium text-primary/80">
+              Click badge to open source <ChevronRight className="h-3.5 w-3.5" />
+            </span>
+          ) : (
+            <span className="text-muted-foreground">Review manually</span>
+          )}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function CitationControl({ citation, onOpenSource }) {
+  const tier = citationTier(citation);
+  if (!tier) return null;
+
+  const className = `cite-tier-badge cite-tier-${tier.tone}`;
+  const canOpen = Boolean(citation
+    && citation.citations?.length
+    && !citation.is_default
+    && !citation.is_derived
+    && !citation.is_uncited_extraction);
+  const trigger = canOpen ? (
+    <button
+      type="button"
+      className={`${className} as-button`}
+      onClick={() => onOpenSource?.(citation)}
+    >
+      {tier.label}
+    </button>
+  ) : (
+    <span className={className}>
+      {tier.label}
+    </span>
+  );
+
+  return (
+    <TooltipProvider delayDuration={120}>
+      <Tooltip>
+        <TooltipTrigger asChild>{trigger}</TooltipTrigger>
+        <TooltipPortal>
+          <TooltipContent
+            side="top"
+            align="end"
+            sideOffset={10}
+            collisionPadding={18}
+            className="border-0 bg-transparent p-0 shadow-none"
+          >
+            <CitationTooltipContent citation={citation} tier={tier} canOpen={canOpen} />
+          </TooltipContent>
+        </TooltipPortal>
+      </Tooltip>
+    </TooltipProvider>
+  );
+}
 
 export function FieldGroup({ label }) {
   return (
@@ -15,6 +177,11 @@ export function NumericField({ label, value, onChange, prefix, suffix, citation,
   const id = useId();
   const [raw, setRaw] = useState('');
   const [focused, setFocused] = useState(false);
+  const isSourceCited = Boolean(citation
+    && !citation.is_default
+    && !citation.is_derived
+    && !citation.is_uncited_extraction);
+  const inputToneClass = isSourceCited ? ` cited confidence-${confidenceTone(citation)}` : '';
 
   const display = focused
     ? raw
@@ -42,26 +209,10 @@ export function NumericField({ label, value, onChange, prefix, suffix, citation,
     <div className={`field-wrap${wide ? ' wide' : ''}`}>
       <div className="field-label-row">
         <label htmlFor={id} className="field-label">{label}</label>
-        {citation?.is_derived ? (
-          <span
-            className="cite-derived-badge"
-            title={citation.formula ?? 'Computed from extracted fields'}
-          >
-            Derived
-          </span>
-        ) : citation && !citation.is_default ? (
-          <button type="button" className="cite-btn" onClick={() => onOpenSource?.(citation)}>
-            <svg width="9" height="9" viewBox="0 0 9 9" fill="none" aria-hidden="true">
-              <path d="M1 8L8 1M8 1H3.5M8 1V5.5" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" />
-            </svg>
-            SOURCE
-          </button>
-        ) : citation?.is_default ? (
-          <span className="cite-default-badge">Default</span>
-        ) : null}
+        <CitationControl citation={citation} onOpenSource={onOpenSource} />
       </div>
 
-      <div className={`field-input-row${citation && !citation.is_default && !citation.is_derived ? ' cited' : ''}`}>
+      <div className={`field-input-row${inputToneClass}`}>
         {prefix ? <span className="field-affix">{prefix}</span> : null}
         <input
           id={id}
@@ -138,48 +289,53 @@ export function ValueAddEvidence({ omData, getCitation, onOpenSource }) {
   );
 }
 
-export function OperationsWarnings({ inputs, currentRun }) {
-  const milRateVal = inputs.operational.mil_rate;
-  const purchasePriceVal = inputs.acquisition.purchase_price;
-  const currentTaxVal = inputs.operational.property_tax_annual;
 
-  const reassessmentNote = (() => {
-    if (!milRateVal || !purchasePriceVal || !currentTaxVal) return null;
-    const estimatedAssessed = purchasePriceVal * 0.11;
-    const estimatedTax = (milRateVal / 1000) * estimatedAssessed;
-    if (estimatedTax - currentTaxVal < 2000) return null;
-    return (
-      <div className="rounded-2xl border border-warning/30 bg-warning/8 p-3 text-sm text-muted-foreground">
-        <span className="font-medium text-foreground">Reassessment note: </span>
-        At the {milRateVal} mil rate and {(0.11 * 100).toFixed(0)}% assessment ratio,
-        post-acquisition property tax could be approximately{' '}
-        <span className="font-semibold text-foreground">
-          ${Math.round((milRateVal / 1000) * purchasePriceVal * 0.11).toLocaleString()}
-        </span>
-        {' '}vs the currently stated{' '}
-        <span className="font-semibold text-foreground">
-          ${Math.round(currentTaxVal).toLocaleString()}
-        </span>.
-        {' '}Verify with the county assessor.
-      </div>
-    );
-  })();
+export function OperationsIncomeBasisStrip({ inputs, currentRun }) {
+  const artifact = currentRun?.result_artifact || {};
+  const expenseBasisSource = artifact.expense_basis?.source;
+  // Prefer saved model inputs because they reflect any analyst edits, then fall back to
+  // preserved extraction artifacts so historical runs still show a useful basis strip.
+  const months = inputs.operational?.income_basis_months
+    ?? artifact.income_basis_months
+    ?? artifact.t12_data?.summary?.period_months
+    ?? artifact.om_data?.income_basis_months
+    ?? null;
 
-  const incomeBasisWarning = currentRun?.result_artifact?.om_data?.income_basis_months === 6 ? (
-    <Alert className="border-warning/40 bg-warning/10">
-      <AlertCircle className="h-4 w-4 text-warning" />
-      <AlertDescription className="text-sm text-muted-foreground">
-        Income figures are based on a trailing 6-month statement, annualized by the broker.
-        Consider requesting a full T-12 before closing.
-      </AlertDescription>
-    </Alert>
-  ) : null;
+  let tone = 'neutral';
+  let title = 'Income period not stated';
+  let detail = 'The source period is unknown. Treat income and expense support as preliminary.';
 
-  if (!reassessmentNote && !incomeBasisWarning) return null;
+  if (expenseBasisSource === 'om_noi') {
+    tone = 'warning';
+    title = 'OM-NOI quick screen';
+    detail = 'Returns are driven by OM-stated NOI. Upload a T-12 to validate actual income and expenses.';
+  } else if (months === 12) {
+    tone = 'success';
+    title = 'T-12 actuals';
+    detail = '12-month operating statement support is driving the operations assumptions.';
+  } else if (months != null && months > 0 && months <= 3) {
+    tone = 'danger';
+    title = `T-${months} very short period`;
+    detail = `Only ${months} month(s) of income support are annualized. Request a fuller T-12 before relying on this screen.`;
+  } else if (months != null && months > 0 && months < 12) {
+    tone = 'warning';
+    title = `T-${months} annualized × ${(12 / months).toFixed(1)}`;
+    detail = 'Short-period operating statement annualized for screening. Request a full T-12 before close.';
+  }
+
+  const toneClasses = {
+    success: 'border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300',
+    warning: 'border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-300',
+    danger: 'border-red-500/30 bg-red-500/10 text-red-700 dark:text-red-300',
+    neutral: 'border-border/70 bg-muted/40 text-muted-foreground',
+  };
+
   return (
-    <div className="col-span-full space-y-4">
-      {reassessmentNote}
-      {incomeBasisWarning}
+    <div className={`col-span-full rounded-2xl border px-4 py-3 ${toneClasses[tone]}`}>
+      <div className="flex flex-col gap-1 sm:flex-row sm:items-center sm:justify-between">
+        <p className="text-xs font-bold uppercase tracking-[0.18em]">{title}</p>
+        <p className="text-xs text-muted-foreground sm:text-right">{detail}</p>
+      </div>
     </div>
   );
 }

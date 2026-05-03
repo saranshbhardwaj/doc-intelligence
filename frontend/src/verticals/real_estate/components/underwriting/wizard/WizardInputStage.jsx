@@ -16,9 +16,36 @@ import { TAB_CONFIG } from './wizardConfig';
 import {
   FieldGroup,
   NumericField,
-  OperationsWarnings,
+  OperationsIncomeBasisStrip,
   ValueAddEvidence,
 } from './WizardFields';
+
+function ExpenseHint({ citation }) {
+  if (!citation) return null;
+
+  const { doc_type, formula, original_value } = citation;
+
+  if (doc_type === 'derived' && formula) {
+    return (
+      <p className="text-xs text-muted-foreground mt-0.5">
+        Computed: {formula}
+        {original_value != null && (
+          <> · OM current: ${original_value.toLocaleString()}</>
+        )}
+      </p>
+    );
+  }
+
+  if (doc_type === 'benchmark' && original_value != null) {
+    return (
+      <p className="text-xs text-amber-600 mt-0.5">
+        Raised to benchmark floor ({formula}) — OM: ${original_value.toLocaleString()}
+      </p>
+    );
+  }
+
+  return null;
+}
 
 export default function WizardInputStage({
   activeTab,
@@ -81,6 +108,7 @@ export default function WizardInputStage({
       case 'operations':
         return (
           <div className="fields-grid">
+            <OperationsIncomeBasisStrip inputs={inputs} currentRun={currentRun} />
             <FieldGroup label="Revenue" />
             <NumericField label="Gross Potential Rent (Annual)" value={inputs.operational.gross_potential_rent_annual} onChange={(v) => patchOp('gross_potential_rent_annual', v)} placeholder="600,000" prefix="$" citation={getCitation('gross_potential_rent_annual')} onOpenSource={handleOpenSource} />
             <NumericField label="Avg Current Rent / Door / Mo" value={inputs.operational.avg_in_place_rent_per_unit_monthly} onChange={(v) => patchOp('avg_in_place_rent_per_unit_monthly', v)} placeholder="115" prefix="$" citation={getCitation('avg_in_place_rent_per_unit_monthly')} onOpenSource={handleOpenSource} />
@@ -93,15 +121,41 @@ export default function WizardInputStage({
             <NumericField label="Corrections / Collections" value={inputs.operational.corrections_collections_annual} onChange={(v) => patchOp('corrections_collections_annual', v)} placeholder="0" prefix="$" citation={getCitation('corrections_collections_annual')} onOpenSource={handleOpenSource} />
             <NumericField label="Rent Growth" value={inputs.operational.rent_growth_pct} onChange={(v) => patchOp('rent_growth_pct', v)} placeholder="3" suffix="%" citation={getCitation('rent_growth_pct')} onOpenSource={handleOpenSource} />
             <FieldGroup label="Operating Expenses" />
-            <NumericField label="Property Tax (Annual)" value={inputs.operational.property_tax_annual} onChange={(v) => patchOp('property_tax_annual', v)} placeholder="0" prefix="$" citation={getCitation('property_tax_annual')} onOpenSource={handleOpenSource} />
+            <div>
+              <NumericField label="Property Tax (Year 1)" value={inputs.operational.property_tax_annual} onChange={(v) => patchOp('property_tax_annual', v)} placeholder="0" prefix="$" citation={getCitation('property_tax_annual')} onOpenSource={handleOpenSource} />
+              <ExpenseHint citation={getCitation('property_tax_annual')} />
+              {getCitation('property_tax_annual')?.field === 'expense_property_tax_annual_current'
+                && currentRun?.result_artifact?.om_data?.detected_has_current_column !== false && (
+                <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">
+                  Year-1 value not extracted — using Current column value instead.
+                  Verify against the OM operating statement.
+                </p>
+              )}
+            </div>
             <NumericField label="Property Tax Growth" value={inputs.operational.property_tax_growth_pct} onChange={(v) => patchOp('property_tax_growth_pct', v)} placeholder="4" suffix="%" citation={getCitation('property_tax_growth_pct')} onOpenSource={handleOpenSource} />
-            <NumericField label="Mil Rate" value={inputs.operational.mil_rate} onChange={(v) => patchOp('mil_rate', v)} placeholder="28.5" suffix="mills" citation={getCitation('mil_rate')} onOpenSource={handleOpenSource} />
-            <NumericField label="Insurance (Annual)" value={inputs.operational.insurance_annual} onChange={(v) => patchOp('insurance_annual', v)} placeholder="0" prefix="$" citation={getCitation('insurance_annual')} onOpenSource={handleOpenSource} />
+            <NumericField label="Tax Value Basis" value={inputs.operational.property_tax_value_basis_amount} onChange={(v) => patchOp('property_tax_value_basis_amount', v)} placeholder="2,500,000" prefix="$" citation={getCitation('property_tax_value_basis_amount')} onOpenSource={handleOpenSource} />
+            <NumericField label="Assessed Value" value={inputs.operational.property_tax_assessed_value} onChange={(v) => patchOp('property_tax_assessed_value', v)} placeholder="275,000" prefix="$" citation={getCitation('property_tax_assessed_value')} onOpenSource={handleOpenSource} />
+            <NumericField label="Assessment Ratio" value={inputs.operational.property_tax_assessment_ratio} onChange={(v) => patchOp('property_tax_assessment_ratio', v)} placeholder="11" suffix="%" citation={getCitation('property_tax_assessment_ratio')} onOpenSource={handleOpenSource} />
+            <NumericField label="Millage Rate" value={inputs.operational.property_tax_millage_rate} onChange={(v) => patchOp('property_tax_millage_rate', v)} placeholder="111.61" suffix="mills" citation={getCitation('property_tax_millage_rate')} onOpenSource={handleOpenSource} />
+            <NumericField label="Tax Rate / Assessed $" value={inputs.operational.property_tax_rate_per_assessed_dollar} onChange={(v) => patchOp('property_tax_rate_per_assessed_dollar', v)} placeholder="0.11161" citation={getCitation('property_tax_rate_per_assessed_dollar')} onOpenSource={handleOpenSource} />
+            <div>
+              <NumericField label="Insurance (Year 1)" value={inputs.operational.insurance_annual} onChange={(v) => patchOp('insurance_annual', v)} placeholder="0" prefix="$" citation={getCitation('insurance_annual')} onOpenSource={handleOpenSource} />
+              <ExpenseHint citation={getCitation('insurance_annual')} />
+            </div>
             <NumericField label="Mgmt Fee" value={inputs.operational.mgmt_fee_pct} onChange={(v) => patchOp('mgmt_fee_pct', v)} placeholder="8" suffix="%" citation={getCitation('mgmt_fee_pct')} onOpenSource={handleOpenSource} />
             <NumericField label="Payroll (Annual)" value={inputs.operational.payroll_annual} onChange={(v) => patchOp('payroll_annual', v)} placeholder="0" prefix="$" citation={getCitation('payroll_annual')} onOpenSource={handleOpenSource} />
-            <NumericField label="Repairs & Maintenance" value={inputs.operational.repairs_maintenance_annual} onChange={(v) => patchOp('repairs_maintenance_annual', v)} placeholder="0" prefix="$" citation={getCitation('repairs_maintenance_annual')} onOpenSource={handleOpenSource} />
-            <NumericField label="Utilities (Annual)" value={inputs.operational.utilities_annual} onChange={(v) => patchOp('utilities_annual', v)} placeholder="0" prefix="$" citation={getCitation('utilities_annual')} onOpenSource={handleOpenSource} />
-            <NumericField label="Marketing (Annual)" value={inputs.operational.marketing_annual} onChange={(v) => patchOp('marketing_annual', v)} placeholder="0" prefix="$" citation={getCitation('marketing_annual')} onOpenSource={handleOpenSource} />
+            <div>
+              <NumericField label="Repairs & Maintenance (Year 1)" value={inputs.operational.repairs_maintenance_annual} onChange={(v) => patchOp('repairs_maintenance_annual', v)} placeholder="0" prefix="$" citation={getCitation('repairs_maintenance_annual')} onOpenSource={handleOpenSource} />
+              <ExpenseHint citation={getCitation('repairs_maintenance_annual')} />
+            </div>
+            <div>
+              <NumericField label="Utilities (Year 1)" value={inputs.operational.utilities_annual} onChange={(v) => patchOp('utilities_annual', v)} placeholder="0" prefix="$" citation={getCitation('utilities_annual')} onOpenSource={handleOpenSource} />
+              <ExpenseHint citation={getCitation('utilities_annual')} />
+            </div>
+            <div>
+              <NumericField label="Marketing (Year 1)" value={inputs.operational.marketing_annual} onChange={(v) => patchOp('marketing_annual', v)} placeholder="0" prefix="$" citation={getCitation('marketing_annual')} onOpenSource={handleOpenSource} />
+              <ExpenseHint citation={getCitation('marketing_annual')} />
+            </div>
             <NumericField label="Other OpEx (Annual)" value={inputs.operational.other_opex_annual} onChange={(v) => patchOp('other_opex_annual', v)} placeholder="0" prefix="$" citation={getCitation('other_opex_annual')} onOpenSource={handleOpenSource} />
             <NumericField label="OpEx Growth" value={inputs.operational.opex_growth_pct} onChange={(v) => patchOp('opex_growth_pct', v)} placeholder="2" suffix="%" citation={getCitation('opex_growth_pct')} onOpenSource={handleOpenSource} />
 
@@ -130,22 +184,24 @@ export default function WizardInputStage({
               />
             ) : null}
 
-            <OperationsWarnings inputs={inputs} currentRun={currentRun} />
           </div>
         );
       case 'market':
         return (
-          <div className="fields-grid">
-            <FieldGroup label="Nearby Facilities" />
-            <NumericField label="Nearby Storage Facilities (1 mi)" value={projectData.nearby_storage_count_1mi} onChange={(v) => patchProject('nearby_storage_count_1mi', v)} citation={getCitation('nearby_storage_count_1mi')} onOpenSource={handleOpenSource} />
-            <NumericField label="Nearby Storage Facilities (3 mi)" value={projectData.nearby_storage_count_3mi} onChange={(v) => patchProject('nearby_storage_count_3mi', v)} citation={getCitation('nearby_storage_count_3mi')} onOpenSource={handleOpenSource} />
-            <NumericField label="Nearby Storage Facilities (5 mi)" value={projectData.nearby_storage_count_5mi} onChange={(v) => patchProject('nearby_storage_count_5mi', v)} citation={getCitation('nearby_storage_count_5mi')} onOpenSource={handleOpenSource} />
-            <FieldGroup label="Demographics" />
-            <NumericField label="Population (3 mi)" value={projectData.population_3mi} onChange={(v) => patchProject('population_3mi', v)} citation={getCitation('population_3mi')} onOpenSource={handleOpenSource} />
-            <NumericField label="Avg Household Income (3 mi)" value={projectData.avg_household_income_3mi} onChange={(v) => patchProject('avg_household_income_3mi', v)} prefix="$" citation={getCitation('avg_household_income_3mi')} onOpenSource={handleOpenSource} />
-            <NumericField label="Storage Sq Ft / Capita" value={projectData.storage_sqft_per_capita_3mi} onChange={(v) => patchProject('storage_sqft_per_capita_3mi', v)} suffix="sqft" citation={getCitation('storage_sqft_per_capita_3mi')} onOpenSource={handleOpenSource} />
-            <FieldGroup label="Tight Comp Set" />
-            <div className={`xl:col-span-2 rounded-2xl border p-4 ${rentCompsCitation ? 'border-green-500/40 bg-green-500/5' : 'border-border/60 bg-background/60'}`}>
+          <>
+            <div className="fields-grid">
+              <FieldGroup label="Nearby Facilities" />
+              <NumericField label="Nearby Storage Facilities (1 mi)" value={projectData.nearby_storage_count_1mi} onChange={(v) => patchProject('nearby_storage_count_1mi', v)} citation={getCitation('nearby_storage_count_1mi')} onOpenSource={handleOpenSource} />
+              <NumericField label="Nearby Storage Facilities (3 mi)" value={projectData.nearby_storage_count_3mi} onChange={(v) => patchProject('nearby_storage_count_3mi', v)} citation={getCitation('nearby_storage_count_3mi')} onOpenSource={handleOpenSource} />
+              <NumericField label="Nearby Storage Facilities (5 mi)" value={projectData.nearby_storage_count_5mi} onChange={(v) => patchProject('nearby_storage_count_5mi', v)} citation={getCitation('nearby_storage_count_5mi')} onOpenSource={handleOpenSource} />
+              <FieldGroup label="Demographics" />
+              <NumericField label="Population (3 mi)" value={projectData.population_3mi} onChange={(v) => patchProject('population_3mi', v)} citation={getCitation('population_3mi')} onOpenSource={handleOpenSource} />
+              <NumericField label="Avg Household Income (3 mi)" value={projectData.avg_household_income_3mi} onChange={(v) => patchProject('avg_household_income_3mi', v)} prefix="$" citation={getCitation('avg_household_income_3mi')} onOpenSource={handleOpenSource} />
+              <NumericField label="Storage Sq Ft / Capita" value={projectData.storage_sqft_per_capita_3mi} onChange={(v) => patchProject('storage_sqft_per_capita_3mi', v)} suffix="sqft" citation={getCitation('storage_sqft_per_capita_3mi')} onOpenSource={handleOpenSource} />
+              <FieldGroup label="Tight Comp Set" />
+            </div>
+
+            <div className={`rounded-2xl border p-4 ${rentCompsCitation ? 'border-green-500/40 bg-green-500/5' : 'border-border/60 bg-background/60'}`}>
               <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                   <div className="flex flex-wrap items-center gap-2">
@@ -228,7 +284,7 @@ export default function WizardInputStage({
                 </div>
               )}
             </div>
-          </div>
+          </>
         );
       case 'debtExit':
         return (

@@ -66,6 +66,21 @@
     --uw-danger-soft: 0 100% 97%;
     --uw-success: 152 66% 39%;
     --uw-success-soft: 151 57% 95%;
+    --cite-tier-actual-fg: 152 66% 30%;
+    --cite-tier-actual-bg: var(--uw-success-soft);
+    --cite-tier-actual-border: var(--uw-success);
+    --cite-tier-om-fg: 29 92% 38%;
+    --cite-tier-om-bg: var(--uw-risk-soft);
+    --cite-tier-om-border: var(--uw-risk);
+    --cite-tier-derived-fg: 167 58% 34%;
+    --cite-tier-derived-bg: var(--uw-citation-soft);
+    --cite-tier-derived-border: var(--uw-citation);
+    --cite-tier-default-fg: var(--muted-foreground);
+    --cite-tier-default-bg: var(--muted);
+    --cite-tier-default-border: var(--border);
+    --cite-tier-extracted-fg: 192 85% 34%;
+    --cite-tier-extracted-bg: var(--surface-soft);
+    --cite-tier-extracted-border: var(--primary);
 
     /* Document type badge tokens (bg + foreground text) */
     --dt-spa: 214 95% 93%;        --dt-spa-fg: 214 89% 35%;
@@ -144,6 +159,21 @@
     --uw-danger-soft: 0 42% 18%;
     --uw-success: 152 58% 44%;
     --uw-success-soft: 152 36% 18%;
+    --cite-tier-actual-fg: 152 58% 72%;
+    --cite-tier-actual-bg: var(--uw-success-soft);
+    --cite-tier-actual-border: var(--uw-success);
+    --cite-tier-om-fg: 39 88% 72%;
+    --cite-tier-om-bg: var(--uw-risk-soft);
+    --cite-tier-om-border: var(--uw-risk);
+    --cite-tier-derived-fg: 167 62% 72%;
+    --cite-tier-derived-bg: var(--uw-citation-soft);
+    --cite-tier-derived-border: var(--uw-citation);
+    --cite-tier-default-fg: var(--muted-foreground);
+    --cite-tier-default-bg: var(--muted);
+    --cite-tier-default-border: var(--border);
+    --cite-tier-extracted-fg: 191 82% 72%;
+    --cite-tier-extracted-bg: var(--surface-soft);
+    --cite-tier-extracted-border: var(--primary);
 
     /* Comparison document colors - dark mode */
     --doc-a: 191 82% 54%;
@@ -1675,9 +1705,27 @@
   }
 
   .field-input-row.cited {
-    border-color: hsl(167 58% 40% / 0.45);
-    background: hsl(167 70% 95%);
-    box-shadow: inset 3px 0 0 hsl(167 58% 40%);
+    border-color: hsl(var(--border));
+    background: hsl(var(--muted) / 0.25);
+    box-shadow: inset 3px 0 0 hsl(var(--muted-foreground) / 0.45);
+  }
+
+  .field-input-row.cited.confidence-high {
+    border-color: hsl(var(--uw-success) / 0.45);
+    background: hsl(var(--uw-success-soft) / 0.82);
+    box-shadow: inset 3px 0 0 hsl(var(--uw-success));
+  }
+
+  .field-input-row.cited.confidence-mid {
+    border-color: hsl(var(--uw-risk) / 0.48);
+    background: hsl(var(--uw-risk-soft) / 0.76);
+    box-shadow: inset 3px 0 0 hsl(var(--uw-risk));
+  }
+
+  .field-input-row.cited.confidence-low {
+    border-color: hsl(var(--uw-danger) / 0.45);
+    background: hsl(var(--uw-danger-soft) / 0.72);
+    box-shadow: inset 3px 0 0 hsl(var(--uw-danger));
   }
 
   .field-affix {
@@ -1751,25 +1799,56 @@
     flex-shrink: 0;
   }
 
-  .cite-derived-badge {
+  .cite-tier-badge {
     font-size: 9px;
-    font-weight: 700;
-    letter-spacing: 0.1em;
+    font-weight: 750;
+    letter-spacing: 0.08em;
     text-transform: uppercase;
-    color: hsl(38 92% 38%);
-    padding: 1px 6px;
+    padding: 1px 7px;
     border-radius: 999px;
-    border: 1px solid hsl(38 92% 70% / 0.4);
-    background: hsl(38 92% 95% / 0.6);
+    border: 1px solid transparent;
     line-height: 1.6;
     flex-shrink: 0;
-    cursor: default;
+    white-space: nowrap;
   }
 
-  .dark .cite-derived-badge {
-    color: hsl(38 92% 70%);
-    border-color: hsl(38 92% 40% / 0.4);
-    background: hsl(38 92% 20% / 0.4);
+  .cite-tier-badge.as-button {
+    cursor: pointer;
+    font-family: "Instrument Sans", sans-serif;
+  }
+
+  .cite-tier-badge.as-button:hover {
+    filter: brightness(0.96);
+  }
+
+  .cite-tier-actual {
+    color: hsl(var(--cite-tier-actual-fg));
+    border-color: hsl(var(--cite-tier-actual-border) / 0.42);
+    background: hsl(var(--cite-tier-actual-bg) / 0.8);
+  }
+
+  .cite-tier-om {
+    color: hsl(var(--cite-tier-om-fg));
+    border-color: hsl(var(--cite-tier-om-border) / 0.45);
+    background: hsl(var(--cite-tier-om-bg) / 0.75);
+  }
+
+  .cite-tier-derived {
+    color: hsl(var(--cite-tier-derived-fg));
+    border-color: hsl(var(--cite-tier-derived-border) / 0.4);
+    background: hsl(var(--cite-tier-derived-bg) / 0.65);
+  }
+
+  .cite-tier-default {
+    color: hsl(var(--cite-tier-default-fg));
+    border-color: hsl(var(--cite-tier-default-border));
+    background: hsl(var(--cite-tier-default-bg) / 0.5);
+  }
+
+  .cite-tier-extracted {
+    color: hsl(var(--cite-tier-extracted-fg));
+    border-color: hsl(var(--cite-tier-extracted-border) / 0.4);
+    background: hsl(var(--cite-tier-extracted-bg) / 0.65);
   }
 
   .field-section {

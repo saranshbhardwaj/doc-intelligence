@@ -18,6 +18,7 @@ from .schemas import (
     RentRollExtraction,
     T12Extraction,
 )
+from ..benchmarks import get_expense_floors
 
 
 def _make_plausibility_flag(doc_type: str, field: str, value: Any, reason: str) -> dict[str, Any]:
@@ -93,6 +94,11 @@ def _apply_om_plausibility_guards(om: OMExtraction, flags: list[dict[str, Any]])
     _guard_range(om, "om", "rent_growth_pct", -0.2, 0.2, flags, "Rent growth")
     _guard_range(om, "om", "opex_growth_pct", -0.2, 0.2, flags, "OpEx growth")
     _guard_range(om, "om", "property_tax_growth_pct", -0.2, 0.2, flags, "Property tax growth")
+    _guard_positive(om, "om", "property_tax_value_basis_amount", flags, "Property tax value basis")
+    _guard_positive(om, "om", "property_tax_assessed_value", flags, "Property tax assessed value")
+    _guard_range(om, "om", "property_tax_assessment_ratio", 0.0, 1.0, flags, "Property tax assessment ratio")
+    _guard_positive(om, "om", "property_tax_millage_rate", flags, "Property tax millage rate")
+    _guard_positive(om, "om", "property_tax_rate_per_assessed_dollar", flags, "Property tax rate per assessed dollar")
     _guard_range(om, "om", "market_cap_rate_purchase", 0.01, 0.2, flags, "Purchase cap rate")
     _guard_range(om, "om", "market_cap_rate_sale", 0.01, 0.2, flags, "Sale cap rate")
     _guard_range(om, "om", "exit_cap_rate", 0.01, 0.2, flags, "Exit cap rate")
@@ -160,31 +166,49 @@ def apply_plausibility_guards(results: list[ExtractedDocResult]) -> tuple[list[E
     return sanitized_results, flags
 
 
-def _derived_t12_expense_ratio(t12: Optional[T12Extraction], factor: float) -> Optional[float]:
+def _derived_t12_expense_ratio_details(
+    t12: Optional[T12Extraction],
+    factor: float,
+) -> tuple[Optional[float], Optional[str], bool]:
     if not t12:
-        return None
+        return None, None, False
     if t12.expense_ratio_actual is not None:
-        return t12.expense_ratio_actual
+        return t12.expense_ratio_actual, None, False
 
     total_revenue = ((t12.gpr_annual_actual or 0) + (t12.other_income_annual or 0)) * factor
     if total_revenue <= 0:
-        return None
+        return None, None, False
 
-    total_opex = sum(
-        (value or 0) * factor
-        for value in [
-            t12.property_tax_annual,
-            t12.insurance_annual,
-            t12.payroll_annual,
-            t12.repairs_maintenance_annual,
-            t12.utilities_annual,
-            t12.marketing_annual,
-            t12.other_opex_annual,
-        ]
-    )
+    line_items = [
+        ("property tax", t12.property_tax_annual),
+        ("insurance", t12.insurance_annual),
+        ("payroll", t12.payroll_annual),
+        ("repairs & maintenance", t12.repairs_maintenance_annual),
+        ("utilities", t12.utilities_annual),
+        ("marketing", t12.marketing_annual),
+        ("other OpEx", t12.other_opex_annual),
+    ]
+    annualized_items = [
+        (label, value * factor)
+        for label, value in line_items
+        if value is not None
+    ]
+    total_opex = sum(value for _, value in annualized_items)
+    formula_parts = [f"${value:,.0f} {label}" for label, value in annualized_items if value]
     if t12.mgmt_fee_pct_actual is not None:
-        total_opex += total_revenue * t12.mgmt_fee_pct_actual
-    return total_opex / total_revenue if total_opex > 0 else None
+        mgmt_fee = total_revenue * t12.mgmt_fee_pct_actual
+        total_opex += mgmt_fee
+        if mgmt_fee:
+            formula_parts.append(f"${mgmt_fee:,.0f} management fee")
+    if total_opex <= 0:
+        return None, None, False
+    formula = f"({' + '.join(formula_parts)}) ÷ ${total_revenue:,.0f} total revenue"
+    return total_opex / total_revenue, formula, True
+
+
+def _derived_t12_expense_ratio(t12: Optional[T12Extraction], factor: float) -> Optional[float]:
+    ratio, _, _ = _derived_t12_expense_ratio_details(t12, factor)
+    return ratio
 
 
 def _om_other_income_total(om: Optional[OMExtraction]) -> Optional[float]:
@@ -207,17 +231,71 @@ def _om_other_opex_total(om: Optional[OMExtraction]) -> Optional[float]:
     if not om:
         return None
 
-    components = [
-        om.expense_office_admin_annual,
-        om.expense_bank_fees_annual,
-        om.expense_contract_services_annual,
-        om.expense_miscellaneous_annual,
-        om.expense_telephone_annual,
-    ]
-    present = [value for value in components if value is not None]
+    present = [value for _, value in _om_other_opex_components(om)]
     if not present:
         return None
     return sum(present)
+
+
+def _om_other_opex_components(om: Optional[OMExtraction]) -> list[tuple[str, float]]:
+    if not om:
+        return []
+    components = [
+        ("expense_office_admin_annual", om.expense_office_admin_annual),
+        ("expense_bank_fees_annual", om.expense_bank_fees_annual),
+        ("expense_contract_services_annual", om.expense_contract_services_annual),
+        ("expense_miscellaneous_annual", om.expense_miscellaneous_annual),
+        ("expense_telephone_annual", om.expense_telephone_annual),
+    ]
+    return [(field, value) for field, value in components if value is not None]
+
+
+def _benchmark_citation(
+    floor_value: float,
+    original_value: float | None,
+    formula: str,
+) -> dict:
+    return {
+        "doc_type": "benchmark",
+        "confidence": 1.0,
+        "citations": [],
+        "source_text": "Self-storage industry floor (CBRE/SSA)",
+        "is_default": False,
+        "is_computed": True,
+        "formula": formula,
+        "original_value": original_value,
+    }
+
+
+
+def _combined_om_other_opex_citation(
+    per_doc_citations: dict,
+    components: list[tuple[str, float]],
+) -> dict:
+    citations: list[str] = []
+    source_parts: list[str] = []
+    formula_parts: list[str] = []
+
+    for field, value in components:
+        cdata = per_doc_citations.get("om", {}).get(field, {})
+        for token in cdata.get("citations", []) or []:
+            if token not in citations:
+                citations.append(token)
+        if cdata.get("source_text"):
+            source_parts.append(str(cdata["source_text"]))
+        label = field.replace("expense_", "").replace("_annual", "").replace("_", " ")
+        formula_parts.append(f"${value:,.0f} {label}")
+
+    return {
+        "doc_type": "om",
+        "confidence": 1.0 if citations else 0.0,
+        "citations": citations,
+        "source_text": "; ".join(source_parts)[:240] if source_parts else None,
+        "is_default": False,
+        "is_computed": True,
+        "formula": " + ".join(formula_parts) if formula_parts else None,
+        **({"is_uncited_extraction": True} if not citations else {}),
+    }
 
 
 def _om_total_revenue(om: Optional[OMExtraction]) -> Optional[float]:
@@ -247,12 +325,12 @@ def _derived_om_expense_ratio(om: Optional[OMExtraction]) -> Optional[float]:
         return None
 
     line_items = [
-        om.expense_property_tax_annual,
-        om.expense_insurance_annual,
+        om.expense_property_tax_annual_year1,
+        om.expense_insurance_annual_year1,
         om.expense_payroll_annual,
-        om.expense_repairs_maintenance_annual,
-        om.expense_utilities_annual,
-        om.expense_marketing_annual,
+        om.expense_repairs_maintenance_annual_year1,
+        om.expense_utilities_annual_year1,
+        om.expense_marketing_annual_year1,
         _om_other_opex_total(om),
         om.expense_mgmt_fee_annual,
     ]
@@ -299,6 +377,8 @@ def _cited(
     doc_type: str,
     field: str,
     formula: str | None = None,
+    is_default_candidate: bool = False,
+    is_computed: bool = False,
 ) -> dict:
     """Build a citation entry for the winning field from the given doc_type.
 
@@ -316,13 +396,20 @@ def _cited(
             "formula": formula,
         }
     cdata = per_doc_citations.get(doc_type, {}).get(field, {})
-    return {
+    citation = {
         "doc_type": doc_type,
         "confidence": cdata.get("confidence", 0.0),
         "citations":  cdata.get("citations", []),
         "source_text": cdata.get("source_text"),
-        "is_default": not bool(cdata),  # True when AI found nothing; value is a hardcoded fallback
+        "is_default": is_default_candidate,
     }
+    if cdata.get("is_computed") or is_computed:
+        citation["is_computed"] = True
+    if formula:
+        citation["formula"] = formula
+    if not cdata and not is_default_candidate:
+        citation["is_uncited_extraction"] = True
+    return citation
 
 
 def _build_merged_inputs(
@@ -354,13 +441,26 @@ def _build_merged_inputs(
 
     def pick(output_field: str, *candidates: tuple) -> Any:
         """Pick first non-None candidate.
-        Each candidate is (value, doc_type, src_field) or (value, doc_type, src_field, formula).
+        Each candidate is:
+        - (value, doc_type, src_field)
+        - (value, doc_type, src_field, formula)
+        - (value, doc_type, src_field, formula, is_default_candidate)
+        - (value, doc_type, src_field, formula, is_default_candidate, is_computed)
         Records citation for the winning candidate."""
         for candidate in candidates:
             val, doc_type, src_field = candidate[0], candidate[1], candidate[2]
             formula = candidate[3] if len(candidate) > 3 else None
+            is_default_candidate = bool(candidate[4]) if len(candidate) > 4 else False
+            is_computed = bool(candidate[5]) if len(candidate) > 5 else False
             if val is not None:
-                citations[output_field] = _cited(per_doc_citations, doc_type, src_field, formula)
+                citations[output_field] = _cited(
+                    per_doc_citations,
+                    doc_type,
+                    src_field,
+                    formula,
+                    is_default_candidate,
+                    is_computed,
+                )
                 return val
         return None
 
@@ -374,18 +474,21 @@ def _build_merged_inputs(
     _opex_derived = _derived_om_expense_ratio(om)
     _opex_rev = _om_total_revenue(om) or 0
     _opex_line_total = sum(v for v in [
-        om.expense_property_tax_annual if om else None,
-        om.expense_insurance_annual if om else None,
+        om.expense_property_tax_annual_year1 if om else None,
+        om.expense_insurance_annual_year1 if om else None,
         om.expense_payroll_annual if om else None,
-        om.expense_repairs_maintenance_annual if om else None,
-        om.expense_utilities_annual if om else None,
-        om.expense_marketing_annual if om else None,
+        om.expense_repairs_maintenance_annual_year1 if om else None,
+        om.expense_utilities_annual_year1 if om else None,
+        om.expense_marketing_annual_year1 if om else None,
         om.expense_mgmt_fee_annual if om else None,
         _om_other_opex_total(om),
     ] if v is not None)
     _opex_formula = (
         f"${_opex_line_total:,.0f} total expenses ÷ ${_opex_rev:,.0f} EGI"
     ) if _opex_derived is not None and _opex_rev > 0 else None
+
+    _t12_opex_derived, _t12_opex_formula, _t12_opex_is_computed = _derived_t12_expense_ratio_details(t12, t12_factor)
+    _om_other_opex_parts = _om_other_opex_components(om)
 
     _other_inc = _om_other_income_total(om)
     _other_formula: str | None = None
@@ -442,25 +545,24 @@ def _build_merged_inputs(
         "acquisition": {
             "purchase_price": pick("purchase_price",
                 (om.purchase_price if om else None, "om", "purchase_price"),
-                (0.0, "om", "purchase_price"),
             ),
             "closing_cost_pct": pick("closing_cost_pct",
                 (om.closing_cost_pct if om else None, "om", "closing_cost_pct"),
-                (0.02, "om", "closing_cost_pct"),
+                (0.02, "om", "closing_cost_pct", None, True),
             ),
             "market_cap_rate_purchase": pick("market_cap_rate_purchase",
                 (om.market_cap_rate_purchase if om else None, "om", "market_cap_rate_purchase"),
             ),
             "capex_reserve_per_unit": pick("capex_reserve_per_unit",
                 (om.capex_reserve_per_unit if om else None, "om", "capex_reserve_per_unit"),
-                (0.0, "om", "capex_reserve_per_unit"),
+                (0.0, "om", "capex_reserve_per_unit", None, True),
             ),
         },
         "operational": {
             "gross_potential_rent_annual": pick("gross_potential_rent_annual",
                 (ann(t12.gpr_annual_actual) if t12 else None, "t12", "gpr_annual_actual"),
                 (om.gpr_annual_projected if om else None, "om", "gpr_annual_projected"),
-                (0.0, "om", "gpr_annual_projected"),
+                (0.0, "om", "gpr_annual_projected", None, True),
             ),
             "avg_in_place_rent_per_unit_monthly": pick("avg_in_place_rent_per_unit_monthly",
                 (rr.avg_in_place_rent_per_unit_monthly if rr else None, "rent_roll", "avg_in_place_rent_per_unit_monthly"),
@@ -473,10 +575,10 @@ def _build_merged_inputs(
             "vacancy_credit_loss_pct": pick("vacancy_credit_loss_pct",
                 (t12.vacancy_credit_loss_pct_actual if t12 else None, "t12", "vacancy_credit_loss_pct_actual"),
                 (om.vacancy_pct_projected if om else None, "om", "vacancy_pct_projected"),
-                (0.10, "om", "vacancy_pct_projected"),
+                (0.10, "om", "vacancy_pct_projected", None, True),
             ),
             "expense_ratio_current": pick("expense_ratio_current",
-                (_derived_t12_expense_ratio(t12, t12_factor), "t12", "expense_ratio_actual"),
+                (_t12_opex_derived, "t12", "expense_ratio_actual", _t12_opex_formula, False, _t12_opex_is_computed),
                 (_opex_derived, "derived", "expense_ratio_pro_forma", _opex_formula),
             ),
             "expense_ratio_pro_forma": pick("expense_ratio_pro_forma",
@@ -484,6 +586,7 @@ def _build_merged_inputs(
             ),
             "noi_year_one_stated": pick("noi_year_one_stated",
                 (om.noi_year_one_stated if om else None, "om", "noi_year_one_stated"),
+                (om.noi_projected if om else None, "om", "noi_projected"),
             ),
             "noi_current_stated": pick("noi_current_stated",
                 (om.noi_current_stated if om else None, "om", "noi_current_stated"),
@@ -500,7 +603,7 @@ def _build_merged_inputs(
                 (ann(t12.other_income_annual) if t12 else None, "t12", "other_income_annual"),
                 (om.other_income_annual if om else None, "om", "other_income_annual"),
                 (_other_inc, "derived", "other_income_annual", _other_formula),
-                (0.0, "t12", "other_income_annual"),
+                (0.0, "t12", "other_income_annual", None, True),
             ),
             "bad_debt_annual": pick("bad_debt_annual",
                 (ann(t12.bad_debt_annual) if t12 else None, "t12", "bad_debt_annual"),
@@ -511,109 +614,129 @@ def _build_merged_inputs(
             "rent_growth_pct": pick("rent_growth_pct",
                 (rr.rent_growth_pct if rr else None, "rent_roll", "rent_growth_pct"),
                 (om.rent_growth_pct if om else None, "om", "rent_growth_pct"),
-                (0.03, "rent_roll", "rent_growth_pct"),
+                (0.03, "rent_roll", "rent_growth_pct", None, True),
             ),
             "property_tax_annual": pick("property_tax_annual",
                 (ann(t12.property_tax_annual) if t12 else None, "t12", "property_tax_annual"),
-                (om.expense_property_tax_annual if om else None, "om", "expense_property_tax_annual"),
-                (0.0, "t12", "property_tax_annual"),
+                (om.expense_property_tax_annual_year1 if om else None, "om", "expense_property_tax_annual_year1"),
+                (om.expense_property_tax_annual_current if om else None, "om", "expense_property_tax_annual_current"),
+                (None, "om", "property_tax_annual", None, True),
             ),
             "insurance_annual": pick("insurance_annual",
                 (ann(t12.insurance_annual) if t12 else None, "t12", "insurance_annual"),
-                (om.expense_insurance_annual if om else None, "om", "expense_insurance_annual"),
-                (0.0, "t12", "insurance_annual"),
+                (om.expense_insurance_annual_year1 if om else None, "om", "expense_insurance_annual_year1"),
+                (om.expense_insurance_annual_current if om else None, "om", "expense_insurance_annual_current"),
+                (0.0, "t12", "insurance_annual", None, True),
             ),
             "mgmt_fee_pct": pick("mgmt_fee_pct",
                 (t12.mgmt_fee_pct_actual if t12 else None, "t12", "mgmt_fee_pct_actual"),
                 (om.mgmt_fee_pct if om else None, "om", "mgmt_fee_pct"),
                 (_mgmt_derived, "derived", "expense_mgmt_fee_annual", _mgmt_formula),
-                (0.08, "om", "mgmt_fee_pct"),
+                (0.08, "om", "mgmt_fee_pct", None, True),
             ),
             "payroll_annual": pick("payroll_annual",
                 (ann(t12.payroll_annual) if t12 else None, "t12", "payroll_annual"),
                 (om.expense_payroll_annual if om else None, "om", "expense_payroll_annual"),
-                (0.0, "t12", "payroll_annual"),
+                (0.0, "t12", "payroll_annual", None, True),
             ),
             "repairs_maintenance_annual": pick("repairs_maintenance_annual",
                 (ann(t12.repairs_maintenance_annual) if t12 else None, "t12", "repairs_maintenance_annual"),
-                (om.expense_repairs_maintenance_annual if om else None, "om", "expense_repairs_maintenance_annual"),
-                (0.0, "t12", "repairs_maintenance_annual"),
+                (om.expense_repairs_maintenance_annual_year1 if om else None, "om", "expense_repairs_maintenance_annual_year1"),
+                (om.expense_repairs_maintenance_annual_current if om else None, "om", "expense_repairs_maintenance_annual_current"),
+                (0.0, "t12", "repairs_maintenance_annual", None, True),
             ),
             "utilities_annual": pick("utilities_annual",
                 (ann(t12.utilities_annual) if t12 else None, "t12", "utilities_annual"),
-                (om.expense_utilities_annual if om else None, "om", "expense_utilities_annual"),
-                (0.0, "t12", "utilities_annual"),
+                (om.expense_utilities_annual_year1 if om else None, "om", "expense_utilities_annual_year1"),
+                (om.expense_utilities_annual_current if om else None, "om", "expense_utilities_annual_current"),
+                (0.0, "t12", "utilities_annual", None, True),
             ),
             "marketing_annual": pick("marketing_annual",
                 (ann(t12.marketing_annual) if t12 else None, "t12", "marketing_annual"),
-                (om.expense_marketing_annual if om else None, "om", "expense_marketing_annual"),
-                (0.0, "t12", "marketing_annual"),
+                (om.expense_marketing_annual_year1 if om else None, "om", "expense_marketing_annual_year1"),
+                (om.expense_marketing_annual_current if om else None, "om", "expense_marketing_annual_current"),
+                (0.0, "t12", "marketing_annual", None, True),
             ),
             "other_opex_annual": pick("other_opex_annual",
                 (ann(t12.other_opex_annual) if t12 else None, "t12", "other_opex_annual"),
                 (_om_other_opex_total(om), "om", "expense_miscellaneous_annual"),
-                (0.0, "t12", "other_opex_annual"),
+                (0.0, "t12", "other_opex_annual", None, True),
             ),
             "property_tax_growth_pct": pick("property_tax_growth_pct",
                 (om.property_tax_growth_pct if om else None, "om", "property_tax_growth_pct"),
             ),
-            "mil_rate": pick("mil_rate",
-                (om.mil_rate if om else None, "om", "mil_rate"),
+            "property_tax_value_basis_amount": pick("property_tax_value_basis_amount",
+                (om.property_tax_value_basis_amount if om else None, "om", "property_tax_value_basis_amount"),
+            ),
+            "property_tax_assessed_value": pick("property_tax_assessed_value",
+                (om.property_tax_assessed_value if om else None, "om", "property_tax_assessed_value"),
+            ),
+            "property_tax_assessment_ratio": pick("property_tax_assessment_ratio",
+                (om.property_tax_assessment_ratio if om else None, "om", "property_tax_assessment_ratio"),
+            ),
+            "property_tax_millage_rate": pick("property_tax_millage_rate",
+                (om.property_tax_millage_rate if om else None, "om", "property_tax_millage_rate"),
+            ),
+            "property_tax_rate_per_assessed_dollar": pick("property_tax_rate_per_assessed_dollar",
+                (om.property_tax_rate_per_assessed_dollar if om else None, "om", "property_tax_rate_per_assessed_dollar"),
             ),
             "opex_growth_pct": pick("opex_growth_pct",
                 (om.opex_growth_pct if om else None, "om", "opex_growth_pct"),
-                (0.02, "om", "opex_growth_pct"),
+                (0.02, "om", "opex_growth_pct", None, True),
             ),
         },
         "financing": {
             "ltv_pct": pick("ltv_pct",
                 (om.ltv_pct if om else None, "om", "ltv_pct"),
-                (0.70, "om", "ltv_pct"),
+                (0.70, "om", "ltv_pct", None, True),
             ),
             "interest_rate_pct": pick("interest_rate_pct",
                 (om.interest_rate_pct if om else None, "om", "interest_rate_pct"),
-                (0.065, "om", "interest_rate_pct"),
+                (0.065, "om", "interest_rate_pct", None, True),
             ),
             "amortization_years": pick("amortization_years",
                 (om.amortization_years if om else None, "om", "amortization_years"),
-                (25, "om", "amortization_years"),
+                (25, "om", "amortization_years", None, True),
             ),
             "loan_term_years": pick("loan_term_years",
                 (om.loan_term_years if om else None, "om", "loan_term_years"),
-                (10, "om", "loan_term_years"),
+                (10, "om", "loan_term_years", None, True),
             ),
         },
         "exit": {
             "hold_period_years": pick("hold_period_years",
                 (om.hold_period_years if om else None, "om", "hold_period_years"),
-                (10, "om", "hold_period_years"),
+                (10, "om", "hold_period_years", None, True),
             ),
             "market_cap_rate_sale": pick("market_cap_rate_sale",
                 (om.market_cap_rate_sale if om else None, "om", "market_cap_rate_sale"),
             ),
             "exit_cap_rate": pick("exit_cap_rate",
                 (om.exit_cap_rate if om else None, "om", "exit_cap_rate"),
-                (0.065, "om", "exit_cap_rate"),
+                (0.065, "om", "exit_cap_rate", None, True),
             ),
             "selling_cost_pct": pick("selling_cost_pct",
                 (om.selling_cost_pct if om else None, "om", "selling_cost_pct"),
-                (0.03, "om", "selling_cost_pct"),
+                (0.03, "om", "selling_cost_pct", None, True),
             ),
         },
         "criteria": {
             "target_irr": pick("target_irr",
                 (om.target_irr if om else None, "om", "target_irr"),
-                (0.15, "om", "target_irr"),
+                (0.15, "om", "target_irr", None, True),
             ),
             "target_cash_on_cash": pick("target_cash_on_cash",
                 (om.target_cash_on_cash if om else None, "om", "target_cash_on_cash"),
-                (0.08, "om", "target_cash_on_cash"),
+                (0.08, "om", "target_cash_on_cash", None, True),
             ),
             "target_equity_multiple": pick("target_equity_multiple",
                 (om.target_equity_multiple if om else None, "om", "target_equity_multiple"),
-                (2.0, "om", "target_equity_multiple"),
+                (2.0, "om", "target_equity_multiple", None, True),
             ),
-            "max_ltv": 0.80,
+            "max_ltv": pick("max_ltv",
+                (getattr(om, "max_ltv", None) if om else None, "om", "max_ltv"),
+                (0.80, "om", "max_ltv", None, True),
+            ),
         },
         "lease_records": [
             lr.model_dump() for lr in (rr.lease_records if rr else [])
@@ -625,5 +748,47 @@ def _build_merged_inputs(
             row.model_dump() for row in (om.rent_comps if om else [])
         ],
     }
+
+    # Apply benchmark floors to OM-sourced expenses (T-12 actuals bypass floors)
+    _rentable_sqft = merged.get("project", {}).get("rentable_sqft")
+    _gpr = merged.get("operational", {}).get("gross_potential_rent_annual")
+    _floors = get_expense_floors("self_storage", rentable_sqft=_rentable_sqft, egi=_gpr)
+
+    _floored_fields = ["repairs_maintenance_annual", "insurance_annual", "utilities_annual", "marketing_annual"]
+
+    for field in _floored_fields:
+        floor_val = _floors.get(field)
+        if floor_val is None:
+            continue
+        current_citation = citations.get(field, {})
+        if current_citation.get("doc_type") == "t12":
+            continue
+        current_val = merged["operational"].get(field)
+        if current_val is not None and current_val < floor_val:
+            sqft_based = field in ("repairs_maintenance_annual", "insurance_annual", "utilities_annual")
+            if sqft_based and _rentable_sqft:
+                rate = floor_val / _rentable_sqft
+                formula = f"${rate:.2f}/sqft × {_rentable_sqft:,.0f} sqft"
+            else:
+                if _gpr:
+                    pct = floor_val / _gpr
+                    formula = f"{pct:.1%} of GPR × ${_gpr:,.0f}"
+                else:
+                    formula = f"${floor_val:,.0f} (marketing floor)"
+            merged["operational"][field] = floor_val
+            citations[field] = _benchmark_citation(
+                floor_value=floor_val,
+                original_value=current_val,
+                formula=formula,
+            )
+
+    if t12 and t12.noi_actual is not None and "noi_actual" not in citations:
+        citations["noi_actual"] = _cited(per_doc_citations, "t12", "noi_actual")
+
+    if (not t12 or t12.other_opex_annual is None) and _om_other_opex_parts:
+        citations["other_opex_annual"] = _combined_om_other_opex_citation(
+            per_doc_citations,
+            _om_other_opex_parts,
+        )
 
     return merged, citations

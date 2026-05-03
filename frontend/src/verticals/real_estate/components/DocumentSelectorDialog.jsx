@@ -13,7 +13,7 @@ import {
 import { Button } from '../../../components/ui/button';
 import { Input } from '../../../components/ui/input';
 import { ScrollArea } from '../../../components/ui/scroll-area';
-import { FileText, Search, AlertCircle, CheckCircle2, Folder, FolderOpen, Sparkles, Files } from 'lucide-react';
+import { FileSpreadsheet, FileText, Search, AlertCircle, CheckCircle2, Folder, FolderOpen, Sparkles, Files } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { listCollections } from '../../../api';
 
@@ -25,7 +25,27 @@ function buildDefaultFillName(filename) {
   return `${baseName} - ${month} ${day}`;
 }
 
-export default function DocumentSelectorDialog({ open, onOpenChange, onSelect, templateName }) {
+function getFileExtension(filename = '') {
+  const parts = String(filename).toLowerCase().split('.');
+  return parts.length > 1 ? parts.pop() : '';
+}
+
+function isSpreadsheet(filename = '') {
+  return ['xlsx', 'xlsm', 'csv'].includes(getFileExtension(filename));
+}
+
+export default function DocumentSelectorDialog({
+  open,
+  onOpenChange,
+  onSelect,
+  templateName,
+  allowedExtensions = null,
+  dialogDescription = null,
+  emptyStateLabel = 'No ready source documents in this collection',
+  emptyStateDescription = 'Upload a supported document to your library first',
+  submitLabel = 'Start Fill',
+  showFillName = true,
+}) {
   const { getToken } = useAppAuth();
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -91,8 +111,17 @@ export default function DocumentSelectorDialog({ open, onOpenChange, onSelect, t
   }
 
   const readyDocuments = useMemo(
-    () => documents.filter((doc) => doc.status === 'completed' && doc.has_embeddings),
-    [documents]
+    () => {
+      const allowed = allowedExtensions?.length
+        ? new Set(allowedExtensions.map((ext) => String(ext).replace('.', '').toLowerCase()))
+        : null;
+      return documents.filter((doc) => {
+        if (doc.status !== 'completed' || !doc.has_embeddings) return false;
+        if (!allowed) return true;
+        return allowed.has(getFileExtension(doc.filename));
+      });
+    },
+    [allowedExtensions, documents]
   );
 
   const collectionFiltered = useMemo(
@@ -144,10 +173,13 @@ export default function DocumentSelectorDialog({ open, onOpenChange, onSelect, t
                 </span>
               </div>
               <p className="text-xs text-muted-foreground truncate">
-                Choose the PDF to analyze and fill <span className="font-medium text-foreground">{templateName}</span>
+                {dialogDescription || (
+                  <>Choose a source document for <span className="font-medium text-foreground">{templateName}</span></>
+                )}
               </p>
             </div>
           </div>
+          {showFillName ? (
           <div className="mt-4">
             <label htmlFor="fill-run-name" className="block text-[11px] font-medium text-muted-foreground mb-1.5">
               Name
@@ -165,6 +197,7 @@ export default function DocumentSelectorDialog({ open, onOpenChange, onSelect, t
               maxLength={255}
             />
           </div>
+          ) : null}
         </div>
 
         {/* Body: two-column */}
@@ -254,10 +287,10 @@ export default function DocumentSelectorDialog({ open, onOpenChange, onSelect, t
                     <Folder className="h-6 w-6 text-muted-foreground" />
                   </div>
                   <p className="text-sm font-medium text-foreground mb-1">
-                    {searchQuery ? `No matches for "${searchQuery}"` : 'No PDFs in this collection'}
+                    {searchQuery ? `No matches for "${searchQuery}"` : emptyStateLabel}
                   </p>
                   {!searchQuery && (
-                    <p className="text-xs text-muted-foreground">Upload a PDF to your library first</p>
+                    <p className="text-xs text-muted-foreground">{emptyStateDescription}</p>
                   )}
                 </div>
               ) : (
@@ -284,7 +317,7 @@ export default function DocumentSelectorDialog({ open, onOpenChange, onSelect, t
           </Button>
           <Button size="sm" onClick={handleSelect} disabled={!selectedDocKey} className="gap-2">
             <Sparkles className="h-3.5 w-3.5" />
-            Start Fill
+            {submitLabel}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -310,7 +343,11 @@ function DocumentCard({ document, selected, showCollection, onSelect }) {
             selected ? 'bg-primary/15' : 'bg-muted/70'
           )}
         >
-          <FileText className={cn('h-4 w-4', selected ? 'text-primary' : 'text-muted-foreground')} />
+          {isSpreadsheet(document.filename) ? (
+            <FileSpreadsheet className={cn('h-4 w-4', selected ? 'text-primary' : 'text-muted-foreground')} />
+          ) : (
+            <FileText className={cn('h-4 w-4', selected ? 'text-primary' : 'text-muted-foreground')} />
+          )}
         </div>
 
         <div className="flex-1 min-w-0">
@@ -322,7 +359,11 @@ function DocumentCard({ document, selected, showCollection, onSelect }) {
               <span className="truncate max-w-[120px]">{document.collectionName}</span>
             )}
             {showCollection && document.page_count && <span className="shrink-0">·</span>}
-            {document.page_count && <span className="shrink-0">{document.page_count}p</span>}
+            {document.page_count && (
+              <span className="shrink-0">
+                {document.page_count}{isSpreadsheet(document.filename) ? ' sheets' : 'p'}
+              </span>
+            )}
           </div>
         </div>
 

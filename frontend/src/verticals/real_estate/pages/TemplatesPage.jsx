@@ -518,6 +518,13 @@ export default function TemplatesPage() {
         onOpenChange={setShowDocumentSelector}
         onSelect={handleDocumentSelected}
         templateName={selectedTemplate?.name || ''}
+        allowedExtensions={['pdf']}
+        dialogDescription={(
+          <>Choose the PDF source document to analyze and fill <span className="font-medium text-foreground">{selectedTemplate?.name || ''}</span></>
+        )}
+        emptyStateLabel="No PDFs in this collection"
+        emptyStateDescription="Upload a PDF to your library first"
+        submitLabel="Start Fill"
       />
 
       {/* Excel Viewer Dialog */}

@@ -1,6 +1,7 @@
 """LLM service for Self Storage underwriting extraction."""
 import json as _json
 import time
+from app.config import settings
 from app.services.llm_client import LLMClient
 from app.utils.logging import logger
 from app.utils.metrics import (
@@ -73,6 +74,8 @@ class REExtractionLLMService:
             doc_type="om",
             schema_cls=OMExtraction,
             source_context=document_text,
+            max_tokens=settings.re_uw_om_initial_output_max_tokens,
+            retry_max_tokens=settings.re_uw_om_retry_output_max_tokens,
         )
 
     def extract_rent_roll(self, document_text: str) -> dict:
@@ -119,7 +122,7 @@ class REExtractionLLMService:
     def _citation_props(cls, field: str) -> dict:
         return {
             f"{field}_confidence": {"type": "number", "description": "0.0-1.0 confidence"},
-            f"{field}_citations":  {"type": "array", "items": {"type": "string"}, "description": 'page tokens e.g. ["S1:p5"]'},
+            f"{field}_citations":  {"type": "array", "items": {"type": "string"}, "description": 'source tokens e.g. ["S1:p5"] or ["S1:Rent Roll!R2-R201"]'},
             f"{field}_source":     {"type": "string", "description": "verbatim snippet ≤40 chars"},
         }
 
@@ -222,6 +225,8 @@ class REExtractionLLMService:
                         "occupied_sqft":     {"type": "number"},
                         "total_sqft":        {"type": "number"},
                         "pct_of_total_sqft": {"type": "number", "description": "decimal"},
+                        "climate_type":      {"type": "string", "description": '"CC" | "NC" | "UNKNOWN"'},
+                        "unit_category":     {"type": "string", "description": '"storage" | "parking" | "residential" | "office" | "other"'},
                     },
                 },
             },
@@ -260,7 +265,23 @@ class REExtractionLLMService:
             "rent_roll": cls._RENT_ROLL_CITED_COLLECTION_FIELDS,
         }[doc_type]
 
-    def _extract(self, system_prompt: str, user_prompt: str, doc_type: str, schema_cls, source_context: str | None = None) -> dict:
+    @staticmethod
+    def _truncate_text(value, max_chars: int) -> str | None:
+        if value is None:
+            return None
+        text = str(value)
+        return text if len(text) <= max_chars else text[: max_chars - 1].rstrip() + "…"
+
+    def _extract(
+        self,
+        system_prompt: str,
+        user_prompt: str,
+        doc_type: str,
+        schema_cls,
+        source_context: str | None = None,
+        max_tokens: int | None = None,
+        retry_max_tokens: int | None = None,
+    ) -> dict:
         """Call Anthropic with tool-use structured output.
 
         Returns {"scalars": {field: value, ...}, "field_citations": {field: {confidence, citations, source_text}}}
@@ -268,25 +289,49 @@ class REExtractionLLMService:
         tool_name = f"extract_{doc_type}"
         t0 = time.time()
         try:
-            message = self.client.messages.create(
-                model=self.model,
-                max_tokens=self.max_tokens,
-                temperature=0.0,
-                system=[
-                    {
-                        "type": "text",
-                        "text": system_prompt,
-                        "cache_control": {"type": "ephemeral"},
-                    }
-                ],
-                messages=[{"role": "user", "content": user_prompt}],
-                tools=[{
-                    "name": tool_name,
-                    "description": f"Extract structured underwriting data from this {doc_type.upper()} document.",
-                    "input_schema": self._TOOL_SCHEMAS[doc_type],
-                }],
-                tool_choice={"type": "tool", "name": tool_name},
-            )
+            request_max_tokens = max_tokens or self.max_tokens
+
+            def send_request(output_max_tokens: int):
+                return self.client.messages.create(
+                    model=self.model,
+                    max_tokens=output_max_tokens,
+                    temperature=0.0,
+                    system=[
+                        {
+                            "type": "text",
+                            "text": system_prompt,
+                            "cache_control": {"type": "ephemeral"},
+                        }
+                    ],
+                    messages=[{"role": "user", "content": user_prompt}],
+                    tools=[{
+                        "name": tool_name,
+                        "description": f"Extract structured underwriting data from this {doc_type.upper()} document.",
+                        "input_schema": self._TOOL_SCHEMAS[doc_type],
+                    }],
+                    tool_choice={"type": "tool", "name": tool_name},
+                )
+
+            message = send_request(request_max_tokens)
+            if (
+                getattr(message, "stop_reason", None) == "max_tokens"
+                and retry_max_tokens
+                and retry_max_tokens > request_max_tokens
+            ):
+                usage = message.usage
+                logger.warning(
+                    f"{doc_type} extraction hit max_tokens={request_max_tokens}; "
+                    f"retrying with max_tokens={retry_max_tokens}",
+                    extra={"run_id": self.run_id, "doc_type": doc_type},
+                )
+                self._record_llm_metrics(
+                    usage.input_tokens or 0,
+                    usage.output_tokens or 0,
+                    getattr(usage, "cache_read_input_tokens", 0) or 0,
+                    getattr(usage, "cache_creation_input_tokens", 0) or 0,
+                    stage=f"extract_{doc_type}_truncated",
+                )
+                message = send_request(retry_max_tokens)
             tool_block = next((b for b in message.content if b.type == "tool_use"), None)
             if tool_block is None:
                 logger.error(f"No tool_use block in response for {doc_type}")
@@ -303,6 +348,9 @@ class REExtractionLLMService:
                 cleaned_scalars["unit_mix"] = raw["unit_mix"]
             if doc_type == "om" and raw.get("rent_comps"):
                 repaired = repair_om_rent_comp_rows(raw["rent_comps"], source_context)
+                for row in repaired:
+                    if isinstance(row, dict) and row.get("notes") is not None:
+                        row["notes"] = self._truncate_text(row.get("notes"), 120)
                 # Deduplicate on (facility, size) — keep first occurrence
                 seen = set()
                 deduped = []
@@ -315,6 +363,11 @@ class REExtractionLLMService:
                         seen.add(key)
                         deduped.append(row)
                 cleaned_scalars["rent_comps"] = deduped
+            if doc_type == "om" and cleaned_scalars.get("value_add_notes") is not None:
+                cleaned_scalars["value_add_notes"] = self._truncate_text(
+                    cleaned_scalars.get("value_add_notes"),
+                    200,
+                )
             if doc_type == "rent_roll" and raw.get("unit_mix"):
                 cleaned_scalars["unit_mix"] = raw["unit_mix"]
             # rent_roll: also grab lease_records (non-scalar, no companion fields)
@@ -330,7 +383,7 @@ class REExtractionLLMService:
                     field_citations[field] = {
                         "confidence":  raw.get(f"{field}_confidence") or 0.0,
                         "citations":   raw.get(f"{field}_citations") or [],
-                        "source_text": raw.get(f"{field}_source"),
+                        "source_text": self._truncate_text(raw.get(f"{field}_source"), 100),
                     }
 
             usage = message.usage
@@ -400,12 +453,12 @@ class REExtractionLLMService:
         # Expenses: T12 overrides OM (actuals beat projections)
         # OM field names use the expense_ prefix from the new extraction schema
         OM_EXPENSE_FIELD_MAP = {
-            "property_tax_annual":        "expense_property_tax_annual",
-            "insurance_annual":           "expense_insurance_annual",
+            "property_tax_annual":        "expense_property_tax_annual_year1",
+            "insurance_annual":           "expense_insurance_annual_year1",
             "payroll_annual":             "expense_payroll_annual",
-            "repairs_maintenance_annual": "expense_repairs_maintenance_annual",
-            "utilities_annual":           "expense_utilities_annual",
-            "marketing_annual":           "expense_marketing_annual",
+            "repairs_maintenance_annual": "expense_repairs_maintenance_annual_year1",
+            "utilities_annual":           "expense_utilities_annual_year1",
+            "marketing_annual":           "expense_marketing_annual_year1",
         }
         for operational_field, om_field in OM_EXPENSE_FIELD_MAP.items():
             t12_val = t12_data.get("expenses", {}).get(operational_field)
@@ -425,6 +478,18 @@ class REExtractionLLMService:
                 merged[field] = t12_val
                 citations[field] = {"doc_type": "t12", "value": t12_val}
             elif om_val is not None:
+                merged[field] = om_val
+                citations[field] = {"doc_type": "om", "value": om_val}
+
+        for field in [
+            "property_tax_value_basis_amount",
+            "property_tax_assessed_value",
+            "property_tax_assessment_ratio",
+            "property_tax_millage_rate",
+            "property_tax_rate_per_assessed_dollar",
+        ]:
+            om_val = om_data.get(field)
+            if om_val is not None:
                 merged[field] = om_val
                 citations[field] = {"doc_type": "om", "value": om_val}
 
@@ -537,7 +602,16 @@ class REExtractionLLMService:
             if doc_type == "om" and raw.get("unit_mix"):
                 cleaned_scalars["unit_mix"] = raw["unit_mix"]
             if doc_type == "om" and raw.get("rent_comps"):
-                cleaned_scalars["rent_comps"] = repair_om_rent_comp_rows(raw["rent_comps"], source_context)
+                repaired = repair_om_rent_comp_rows(raw["rent_comps"], source_context)
+                for row in repaired:
+                    if isinstance(row, dict) and row.get("notes") is not None:
+                        row["notes"] = self._truncate_text(row.get("notes"), 120)
+                cleaned_scalars["rent_comps"] = repaired
+            if doc_type == "om" and cleaned_scalars.get("value_add_notes") is not None:
+                cleaned_scalars["value_add_notes"] = self._truncate_text(
+                    cleaned_scalars.get("value_add_notes"),
+                    200,
+                )
             if doc_type == "rent_roll" and raw.get("unit_mix"):
                 cleaned_scalars["unit_mix"] = raw["unit_mix"]
             if doc_type == "rent_roll" and raw.get("lease_records"):
@@ -551,7 +625,7 @@ class REExtractionLLMService:
                     field_citations[field] = {
                         "confidence":  raw.get(f"{field}_confidence") or 0.0,
                         "citations":   raw.get(f"{field}_citations") or [],
-                        "source_text": raw.get(f"{field}_source"),
+                        "source_text": self._truncate_text(raw.get(f"{field}_source"), 100),
                     }
 
             usage = message.usage

@@ -301,3 +301,31 @@ class UserRepository:
                 )
                 db.rollback()
                 return False
+
+    def get_underwriting_thresholds(self, user_id: str) -> dict | None:
+        """Return the user's saved underwriting threshold blob, or None if unset."""
+        with self._get_session() as db:
+            try:
+                user = db.query(User).filter(User.id == user_id).first()
+                return user.underwriting_thresholds if user else None
+            except SQLAlchemyError as e:
+                logger.error("Failed to get underwriting thresholds", extra={"user_id": user_id, "error": str(e)})
+                return None
+
+    def update_underwriting_thresholds(self, user_id: str, patch: dict) -> dict:
+        """Sparse-merge `patch` into the stored thresholds blob and return the result."""
+        with self._get_session() as db:
+            try:
+                user = db.query(User).filter(User.id == user_id).with_for_update().first()
+                if not user:
+                    raise ValueError(f"User {user_id} not found")
+                existing = dict(user.underwriting_thresholds or {})
+                existing.update({k: v for k, v in patch.items() if v is not None})
+                user.underwriting_thresholds = existing
+                db.commit()
+                db.refresh(user)
+                return dict(user.underwriting_thresholds)
+            except SQLAlchemyError as e:
+                logger.error("Failed to update underwriting thresholds", extra={"user_id": user_id, "error": str(e)})
+                db.rollback()
+                raise

@@ -10,12 +10,12 @@ import { formatCompactCurrency, formatCurrency, formatPercent } from './formatte
 
 function getExpenseBasisTone(source) {
   if (source === 'line_items' || source === 'expense_ratio_current') return 'success';
-  if (source === 'expense_ratio_pro_forma') return 'warning';
+  if (source === 'expense_ratio_pro_forma' || source === 'om_noi') return 'warning';
   return 'danger';
 }
 
 function getUnitTypeBadge(row) {
-  const label = `${row.section || ''} ${row.unit_type || ''}`.toLowerCase();
+  const label = `${row.unit_category || ''} ${row.section || ''} ${row.unit_type || ''}`.toLowerCase();
   if (label.includes('parking')) return <UnderwritingStatusBadge tone="warning">Parking</UnderwritingStatusBadge>;
   if (label.includes('residential')) return <UnderwritingStatusBadge tone="neutral">Residential</UnderwritingStatusBadge>;
   if (label.includes('non-climate') || label.includes('non climate')) {
@@ -35,17 +35,53 @@ function UnitMixStat({ label, value, detail }) {
   );
 }
 
+function unitMixCategory(row) {
+  const label = `${row?.unit_category || ''} ${row?.section || ''} ${row?.unit_type || ''}`.toLowerCase();
+  if (label.includes('residential') || label.includes('apartment')) return 'residential';
+  if (label.includes('parking')) return 'parking';
+  if (label.includes('office') || label.includes('commercial')) return 'other';
+  return 'storage';
+}
+
+function scheduledRent(row) {
+  const units = Number(row?.num_units) || 0;
+  const rent = Number(row?.current_rent ?? row?.market_rent) || 0;
+  return units > 0 && rent > 0 ? units * rent * 12 : 0;
+}
+
+function getRevenueMix(unitMix = []) {
+  const buckets = {
+    storage: { label: 'Storage', rent: 0, tone: 'success' },
+    parking: { label: 'Parking / other', rent: 0, tone: 'warning' },
+    residential: { label: 'Residential', rent: 0, tone: 'neutral' },
+    other: { label: 'Other', rent: 0, tone: 'neutral' },
+  };
+  (Array.isArray(unitMix) ? unitMix : []).forEach((row) => {
+    const rent = scheduledRent(row);
+    if (rent <= 0) return;
+    buckets[unitMixCategory(row)].rent += rent;
+  });
+  const total = Object.values(buckets).reduce((sum, bucket) => sum + bucket.rent, 0);
+  if (total <= 0) return [];
+  return Object.values(buckets)
+    .filter((bucket) => bucket.rent > 0)
+    .map((bucket) => ({ ...bucket, share: bucket.rent / total }));
+}
+
 export default function OperationsSection({
   show,
   onToggle,
   unitMix,
   unitMixSummary,
+  unitMixIsPartial = false,
+  propertyUnits = null,
+  extractedUnits = 0,
+  unitMixCoveragePct = null,
   occupancy,
   currentExpenseRatio,
   proFormaExpenseRatio,
   propertyTaxAnnual,
   propertyTaxGrowthPct,
-  milRate,
   badDebtAnnual,
   correctionsCollectionsAnnual,
   purchasePrice,
@@ -70,6 +106,7 @@ export default function OperationsSection({
     { label: 'Telephone', value: operational?.expense_telephone_annual },
   ];
   const hasOtherOpex = otherOpexItems.some((item) => item.value != null);
+  const revenueMix = getRevenueMix(unitMix);
 
   return (
     <UnderwritingSection
@@ -89,8 +126,19 @@ export default function OperationsSection({
           <div className="underwriting-panel p-4 sm:p-5">
             <div className="mb-4 flex items-center justify-between gap-3">
               <div>
-                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Unit mix</p>
+                <div className="flex flex-wrap items-center gap-2">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Unit mix</p>
+                  {unitMixIsPartial ? (
+                    <UnderwritingStatusBadge tone="warning">Partial OM unit schedule</UnderwritingStatusBadge>
+                  ) : null}
+                </div>
                 <p className="mt-1 text-sm text-muted-foreground">Occupancy and rent by unit type.</p>
+                {unitMixIsPartial && propertyUnits > 0 ? (
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {extractedUnits} of {propertyUnits} property units represented
+                    {unitMixCoveragePct != null ? ` (${Math.round(unitMixCoveragePct * 100)}% coverage)` : ''}
+                  </p>
+                ) : null}
               </div>
               <OccupancyBadge pct={occupancy} />
             </div>
@@ -107,6 +155,25 @@ export default function OperationsSection({
                     detail="Rows with support"
                   />
                 </div>
+                {revenueMix.length > 0 ? (
+                  <div className="rounded-2xl border border-border/60 bg-background/60 p-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">Revenue mix by scheduled rent</p>
+                      <span className="text-xs text-muted-foreground">Current rent × units × 12</span>
+                    </div>
+                    <div className="mt-3 grid gap-2 sm:grid-cols-3">
+                      {revenueMix.map((bucket) => (
+                        <div key={bucket.label} className="rounded-xl border border-border/50 bg-background/70 px-3 py-2">
+                          <div className="flex items-center justify-between gap-2">
+                            <span className="text-xs font-medium text-muted-foreground">{bucket.label}</span>
+                            <UnderwritingStatusBadge tone={bucket.tone}>{formatPercent(bucket.share)}</UnderwritingStatusBadge>
+                          </div>
+                          <p className="mt-1 font-semibold text-foreground">{formatCompactCurrency(bucket.rent)}</p>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ) : null}
                 {!unitMixSummary?.hasOccupancy ? (
                   <div className="rounded-2xl border border-warning/25 bg-warning/10 p-3 text-sm leading-6 text-muted-foreground">
                     <span className="font-medium text-foreground">Review occupancy:</span> unit rows were found, but row-level occupancy was not available.
@@ -174,20 +241,22 @@ export default function OperationsSection({
                         {expenseBasis.label}
                       </UnderwritingStatusBadge>
                     </div>
-                    <div className="mt-3 grid gap-3 sm:grid-cols-3">
-                      <div>
-                        <p className="text-xs text-muted-foreground">Line-item OpEx</p>
-                        <p className="mt-1 font-semibold text-foreground">{formatCompactCurrency(expenseBasis.year1_line_item_opex)}</p>
+                    {expenseBasis.source !== 'om_noi' ? (
+                      <div className="mt-3 grid gap-3 sm:grid-cols-3">
+                        <div>
+                          <p className="text-xs text-muted-foreground">Line-item OpEx</p>
+                          <p className="mt-1 font-semibold text-foreground">{formatCompactCurrency(expenseBasis.year1_line_item_opex)}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-muted-foreground">Ratio-implied OpEx</p>
+                          <p className="mt-1 font-semibold text-foreground">{formatCompactCurrency(expenseBasis.year1_ratio_opex)}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-muted-foreground">Expense ratio used</p>
+                          <p className="mt-1 font-semibold text-foreground">{formatPercent(expenseBasis.ratio)}</p>
+                        </div>
                       </div>
-                      <div>
-                        <p className="text-xs text-muted-foreground">Ratio-implied OpEx</p>
-                        <p className="mt-1 font-semibold text-foreground">{formatCompactCurrency(expenseBasis.year1_ratio_opex)}</p>
-                      </div>
-                      <div>
-                        <p className="text-xs text-muted-foreground">Expense ratio used</p>
-                        <p className="mt-1 font-semibold text-foreground">{formatPercent(expenseBasis.ratio)}</p>
-                      </div>
-                    </div>
+                    ) : null}
                     {expenseBasisFormula ? (
                       <p className="mt-3 whitespace-pre-line rounded-xl bg-muted/40 px-3 py-2 font-mono text-xs leading-5 text-muted-foreground">
                         {expenseBasisFormula}
@@ -206,7 +275,21 @@ export default function OperationsSection({
                   },
                   { label: 'Property tax (year 1)', value: formatCurrency(propertyTaxAnnual) },
                   { label: 'Property tax growth', value: formatPercent(propertyTaxGrowthPct) },
-                  { label: 'Mil rate', value: milRate != null ? `${milRate.toFixed(5)} mills` : '—' },
+                  { label: 'Tax value basis', value: formatCurrency(operational?.property_tax_value_basis_amount) },
+                  { label: 'Tax assessed value', value: formatCurrency(operational?.property_tax_assessed_value) },
+                  { label: 'Tax assessment ratio', value: formatPercent(operational?.property_tax_assessment_ratio) },
+                  {
+                    label: 'Tax millage rate',
+                    value: operational?.property_tax_millage_rate != null
+                      ? `${operational.property_tax_millage_rate.toFixed(2)} mills`
+                      : '—',
+                  },
+                  {
+                    label: 'Tax rate / assessed $',
+                    value: operational?.property_tax_rate_per_assessed_dollar != null
+                      ? operational.property_tax_rate_per_assessed_dollar.toFixed(5)
+                      : '—',
+                  },
                   { label: 'Bad debt', value: formatCurrency(badDebtAnnual) },
                   { label: 'Corrections / collections', value: formatCurrency(correctionsCollectionsAnnual) },
                   {
@@ -259,7 +342,11 @@ export default function OperationsSection({
                     sourceCitations.expense_ratio_pro_forma,
                     sourceCitations.property_tax_annual,
                     sourceCitations.property_tax_growth_pct,
-                    sourceCitations.mil_rate,
+                    sourceCitations.property_tax_value_basis_amount,
+                    sourceCitations.property_tax_assessed_value,
+                    sourceCitations.property_tax_assessment_ratio,
+                    sourceCitations.property_tax_millage_rate,
+                    sourceCitations.property_tax_rate_per_assessed_dollar,
                     sourceCitations.bad_debt_annual,
                     sourceCitations.corrections_collections_annual,
                   ]}

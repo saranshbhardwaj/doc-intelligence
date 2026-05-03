@@ -4,7 +4,9 @@ from unittest.mock import MagicMock
 from app.verticals.real_estate.underwriting.extraction.extractor import (
     batch_chunks_by_chars,
     build_chunk_context,
+    extract_document,
 )
+from app.config import settings
 from app.verticals.real_estate.underwriting.extraction.schemas import (
     OMExtraction,
     T12Extraction,
@@ -93,3 +95,169 @@ def test_build_chunk_context_labels_kv():
     chunk = _make_chunk("Price: $1.2M", page=1, section_type="key_value")
     ctx = build_chunk_context([chunk], source_index=1)
     assert "KV Pair" in ctx
+
+
+def test_t12_spreadsheet_totals_are_injected_and_reconciled():
+    rows = [
+        {"Month": "Apr-25", "Rental Income": "1000", "Total Income": "1100", "Total Expenses": "200", "NOI": "900"},
+        {"Month": "May-25", "Rental Income": "2000", "Total Income": "2200", "Total Expenses": "400", "NOI": "1800"},
+        {"Month": "T12 Total", "Rental Income": "", "Total Income": "", "Total Expenses": "", "NOI": ""},
+    ]
+    chunk = MagicMock()
+    chunk.text = "Sheet: Seller T12 Export"
+    chunk.page_number = None
+    chunk.section_type = "table"
+    chunk.source_filename = "seller_t12.xlsx"
+    chunk.tables = [{
+        "sheet_name": "Seller T12 Export",
+        "table_name": "Seller T12 Export",
+        "row_start": 2,
+        "row_end": 4,
+        "column_headers": ["Month", "Rental Income", "Total Income", "Total Expenses", "NOI"],
+        "table_data": rows,
+    }]
+    chunk.chunk_metadata = {
+        "source_kind": "spreadsheet",
+        "sheet_name": "Seller T12 Export",
+        "row_start": 2,
+        "row_end": 4,
+    }
+
+    class FakeService:
+        last_context = ""
+
+        def extract_t12(self, context):
+            self.last_context = context
+            return {
+                "scalars": {
+                    "gpr_annual_actual": 1000.0,
+                    "other_income_annual": 0.0,
+                    "expense_ratio_actual": 0.1,
+                    "noi_actual": 100.0,
+                    "period_months": 12,
+                },
+                "field_citations": {},
+            }
+
+    service = FakeService()
+
+    result = extract_document(
+        run_id="run-1",
+        job_id="job-1",
+        doc_type="t12",
+        chunks=[chunk],
+        service=service,
+        source_index=2,
+        document_id="doc-1",
+    )
+
+    assert "Verified Spreadsheet Totals" in service.last_context
+    assert "[S2:Seller T12 Export!R2-R4]" in service.last_context
+    assert result.t12.gpr_annual_actual == 3000
+    assert result.t12.other_income_annual == 300
+    assert result.t12.expense_ratio_actual == 600 / 3300
+    assert result.t12.noi_actual == 2700
+    assert result.t12.period_months == 2
+    assert result.field_citations["other_income_annual"]["citations"] == ["S2:Seller T12 Export!R2-R4"]
+    assert result.extraction_metadata["t12_table_totals"]["computed_from_spreadsheet"] is True
+
+
+def test_large_om_uses_selected_context_without_fallback(monkeypatch):
+    monkeypatch.setattr(settings, "re_uw_om_context_selector_enabled", True)
+    monkeypatch.setattr(settings, "re_uw_om_context_selector_min_chars", 50)
+    monkeypatch.setattr(settings, "re_uw_om_context_max_chars", 400)
+    chunks = [
+        _make_chunk("Offering Memorandum cover", page=1),
+        _make_chunk("Purchase price $2,500,000; 205 units; GPR $285,740", page=4),
+        _make_chunk("Confidentiality disclaimer broker biography legal disclosure " + "x" * 200, page=8),
+    ]
+
+    class FakeService:
+        def __init__(self):
+            self.contexts = []
+
+        def extract_om(self, context):
+            self.contexts.append(context)
+            return {
+                "scalars": {
+                    "purchase_price": 2_500_000.0,
+                    "num_units": 205,
+                    "gpr_annual_projected": 285_740.0,
+                    "rentable_sqft": 21_017.0,
+                    "market_cap_rate_purchase": 0.0811,
+                    "vacancy_pct_projected": 0.1278,
+                    "other_income_annual": 34_278.0,
+                    "expense_ratio_pro_forma": 0.2778,
+                    "noi_year_one_stated": 202_790.0,
+                    "rent_comps": [],
+                    "unit_mix": [],
+                },
+                "field_citations": {
+                    "purchase_price": {"citations": ["S1:p4"], "confidence": 0.9, "source_text": "$2,500,000"},
+                    "num_units": {"citations": ["S1:p4"], "confidence": 0.9, "source_text": "205 units"},
+                    "gpr_annual_projected": {"citations": ["S1:p4"], "confidence": 0.9, "source_text": "GPR $285,740"},
+                },
+            }
+
+    service = FakeService()
+    result = extract_document("run-1", "job-1", "om", chunks, service)
+
+    assert len(service.contexts) == 1
+    assert "Purchase price" in service.contexts[0]
+    assert "broker biography" not in service.contexts[0]
+    assert result.om.purchase_price == 2_500_000.0
+    assert result.extraction_metadata["om_context_selection"]["fallback_to_full_context"] is False
+
+
+def test_large_om_falls_back_to_full_context_when_core_fields_missing(monkeypatch):
+    monkeypatch.setattr(settings, "re_uw_om_context_selector_enabled", True)
+    monkeypatch.setattr(settings, "re_uw_om_context_selector_min_chars", 50)
+    monkeypatch.setattr(settings, "re_uw_om_context_max_chars", 350)
+    chunks = [
+        _make_chunk("Offering Memorandum cover", page=1),
+        _make_chunk("Purchase price $2,500,000", page=4),
+        _make_chunk("Confidentiality disclaimer broker biography legal disclosure " + "x" * 200, page=8),
+    ]
+
+    class FakeService:
+        def __init__(self):
+            self.contexts = []
+
+        def extract_om(self, context):
+            self.contexts.append(context)
+            if len(self.contexts) == 1:
+                return {
+                    "scalars": {"purchase_price": 2_500_000.0, "rent_comps": [], "unit_mix": []},
+                    "field_citations": {},
+                }
+            return {
+                "scalars": {
+                    "purchase_price": 2_500_000.0,
+                    "num_units": 205,
+                    "gpr_annual_projected": 285_740.0,
+                    "rentable_sqft": 21_017.0,
+                    "market_cap_rate_purchase": 0.0811,
+                    "vacancy_pct_projected": 0.1278,
+                    "other_income_annual": 34_278.0,
+                    "expense_ratio_pro_forma": 0.2778,
+                    "noi_year_one_stated": 202_790.0,
+                    "rent_comps": [],
+                    "unit_mix": [],
+                },
+                "field_citations": {
+                    "purchase_price": {"citations": ["S1:p4"], "confidence": 0.9, "source_text": "$2,500,000"},
+                    "num_units": {"citations": ["S1:p4"], "confidence": 0.9, "source_text": "205 units"},
+                    "gpr_annual_projected": {"citations": ["S1:p4"], "confidence": 0.9, "source_text": "GPR $285,740"},
+                },
+            }
+
+    service = FakeService()
+    result = extract_document("run-1", "job-1", "om", chunks, service)
+
+    assert len(service.contexts) == 2
+    assert "broker biography" not in service.contexts[0]
+    assert "broker biography" in service.contexts[1]
+    assert result.om.num_units == 205
+    metadata = result.extraction_metadata["om_context_selection"]
+    assert metadata["fallback_to_full_context"] is True
+    assert "missing_units_or_sqft" in metadata["fallback_reasons"]

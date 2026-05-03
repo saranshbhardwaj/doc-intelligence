@@ -30,6 +30,9 @@ class User(Base):
     template_fill_runs_limit = Column(Integer, default=100)  # Closed beta cap (0 = unlimited)
     chat_messages_limit = Column(Integer, default=100)  # Closed beta cap (0 = unlimited)
 
+    # Per-user underwriting threshold overrides (sparse JSONB blob)
+    underwriting_thresholds = Column(JSONB, nullable=True)
+
     # Billing
     subscription_id = Column(String(255), nullable=True)
     subscription_status = Column(String(20), default="inactive")  # inactive, active, canceled

@@ -15,6 +15,7 @@ def test_merge_preserved_result_artifact_keeps_existing_evidence_blocks():
         "market_data": {"submarket_avg_cap_rate": 0.061},
         "rent_comps": [{"facility": "Comp A"}],
         "plausibility_flags": [{"field": "avg_market_rent_per_unit_monthly"}],
+        "noi_bridge": {"rows": [{"label": "OM Year-1 NOI", "value": 100_000}]},
     }
     recalculated_artifact = {
         "irr": 0.18,
@@ -34,6 +35,7 @@ def test_merge_preserved_result_artifact_keeps_existing_evidence_blocks():
     assert merged_artifact["market_data"] == {"submarket_avg_cap_rate": 0.061}
     assert merged_artifact["rent_comps"] == [{"facility": "Comp A"}]
     assert merged_artifact["plausibility_flags"] == [{"field": "avg_market_rent_per_unit_monthly"}]
+    assert merged_artifact["noi_bridge"] == {"rows": [{"label": "OM Year-1 NOI", "value": 100_000}]}
 
 
 def test_merge_preserved_result_artifact_does_not_override_new_values():

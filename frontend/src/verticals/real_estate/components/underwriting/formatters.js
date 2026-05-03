@@ -94,6 +94,15 @@ function hasRows(rows) {
 }
 
 export function getRevenueBasis(artifact = {}, persistedInputs = {}, sourceCitations = {}) {
+  if (artifact.expense_basis?.source === 'om_noi') {
+    return {
+      label: 'OM-stated NOI quick screen',
+      tone: 'warning',
+      source: 'om_noi',
+      detail: 'Returns are driven by OM-stated NOI. Upload a T-12 to verify actual revenue and expenses.',
+    };
+  }
+
   const months = persistedInputs.operational?.income_basis_months
     ?? artifact.income_basis_months
     ?? artifact.om_data?.income_basis_months
@@ -158,13 +167,21 @@ export function getRevenueBasis(artifact = {}, persistedInputs = {}, sourceCitat
   };
 }
 
-export function getUnitMixSource(artifact = {}, persistedInputs = {}) {
+export function getUnitMixSource(artifact = {}, persistedInputs = {}, coverage = null) {
   if (hasRows(artifact.rent_roll_data?.unit_mix)) {
     return {
       label: 'Rent roll',
       tone: 'success',
       source: 'rent_roll',
       detail: 'Unit mix is sourced from rent roll rows.',
+    };
+  }
+  if (coverage?.isPartial) {
+    return {
+      label: 'Partial OM unit schedule',
+      tone: 'warning',
+      source: 'om_partial',
+      detail: `${coverage.extractedUnits} of ${coverage.propertyUnits} property units are represented in extracted OM unit rows.`,
     };
   }
   if (hasRows(artifact.unit_mix)) {
@@ -282,21 +299,30 @@ export function getRentCompCoverage(unitMix = [], rentComps = [], rentPositionAn
 export function buildDerivedMixedRevenueWarning(unitMix) {
   if (!Array.isArray(unitMix) || unitMix.length === 0) return null;
 
-  const nonStorageRows = unitMix.filter((row) => {
-    const label = `${row?.section || ''} ${row?.unit_type || ''}`.trim().toLowerCase();
-    return ['parking', 'residential', 'apartment', 'office'].some((kw) => label.includes(kw));
-  });
+  const nonStorageRows = unitMix.filter((row) => !isStorageRow(row));
   if (nonStorageRows.length === 0) return null;
 
   const nonStorageUnits = nonStorageRows.reduce((s, r) => s + (r?.num_units || 0), 0);
   const totalUnits = unitMix.reduce((s, r) => s + (r?.num_units || 0), 0);
+  const rowRent = (row) => {
+    const units = Number(row?.num_units) || 0;
+    const rent = Number(row?.current_rent ?? row?.market_rent) || 0;
+    return units > 0 && rent > 0 ? units * rent * 12 : 0;
+  };
+  const nonStorageRent = nonStorageRows.reduce((s, r) => s + rowRent(r), 0);
+  const totalRent = unitMix.reduce((s, r) => s + rowRent(r), 0);
+  const unitShare = totalUnits > 0 ? nonStorageUnits / totalUnits : null;
+  const rentShare = totalRent > 0 ? nonStorageRent / totalRent : null;
+  const isMaterial = (unitShare != null && unitShare >= 0.20) || (rentShare != null && rentShare >= 0.15);
   const detail = nonStorageUnits > 0 && totalUnits > 0
-    ? `${nonStorageUnits} of ${totalUnits} units/spaces appear to be parking or residential`
+    ? `${nonStorageUnits} of ${totalUnits} units/spaces (${(unitShare * 100).toFixed(0)}%) appear to be parking or residential`
     : 'parking or residential rows appear in the extracted unit mix';
+  const rentDetail = rentShare != null ? `, representing approximately ${(rentShare * 100).toFixed(0)}% of unit-mix scheduled rent` : '';
+  const materialDetail = isMaterial ? ' This is a material non-storage exposure.' : '';
 
   return {
-    key: 'mixed_revenue_unit_mix',
-    message: `Mixed revenue detected: ${detail}. The current underwriting model still applies blended self-storage assumptions, so per-door metrics and growth interpretations should be reviewed manually.`,
+    key: isMaterial ? 'mixed_revenue_material' : 'mixed_revenue_unit_mix',
+    message: `Mixed revenue detected: ${detail}${rentDetail}.${materialDetail} The current underwriting model still applies blended self-storage assumptions, so per-door metrics and growth interpretations should be reviewed manually.`,
   };
 }
 
@@ -318,6 +344,11 @@ export function normalizeCitation(fieldCitation, citationContext, citationToken)
     document_id: contextEntry?.document_id ?? fieldCitation?.document_id,
     filename: contextEntry?.filename ?? fieldCitation?.filename,
     bbox: contextEntry?.bbox ?? fieldCitation?.bbox ?? null,
+    source_kind: contextEntry?.source_kind ?? fieldCitation?.source_kind,
+    sheet_name: contextEntry?.sheet_name ?? fieldCitation?.sheet_name,
+    row_start: contextEntry?.row_start ?? fieldCitation?.row_start,
+    row_end: contextEntry?.row_end ?? fieldCitation?.row_end,
+    source_text: contextEntry?.source_text ?? fieldCitation?.source_text,
   };
 }
 
@@ -357,7 +388,9 @@ export function flattenCitationEntries(citations) {
       if (!uniqueEntries.has(id)) {
         uniqueEntries.set(id, {
           id,
-          label: entry.page ? `${docTypeLabel} p${entry.page}` : `Open ${docTypeLabel}`,
+          label: entry.source_kind === 'spreadsheet' && entry.sheet_name
+            ? `${docTypeLabel} ${entry.sheet_name}${entry.row_start ? ` rows ${entry.row_start}-${entry.row_end}` : ''}`
+            : entry.page ? `${docTypeLabel} p${entry.page}` : `Open ${docTypeLabel}`,
           title: citation.source_text || entry.filename || docTypeLabel,
           entry,
         });

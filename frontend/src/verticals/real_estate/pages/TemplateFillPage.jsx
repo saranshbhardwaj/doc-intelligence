@@ -642,6 +642,7 @@ export default function TemplateFillPage() {
     actions: fillHeaderRight,
     compact: true,
   };
+  const contextBudgetWarning = fillRun.field_mapping?.context_budget?.user_warning;
 
   return (
     <AppLayout lockViewport pageHeader={pageHeader}>
@@ -710,6 +711,18 @@ export default function TemplateFillPage() {
           </div>
         )}
         </div>
+
+        {contextBudgetWarning && (
+          <div className="px-6 pt-4">
+            <Alert className="border-amber-200 bg-amber-50 text-amber-950">
+              <AlertCircle className="h-4 w-4 text-amber-600" />
+              <AlertTitle>Large document reviewed selectively</AlertTitle>
+              <AlertDescription className="mt-1 text-amber-900">
+                {contextBudgetWarning}
+              </AlertDescription>
+            </Alert>
+          </div>
+        )}
 
         {/* Horizontal Split Layout */}
         <ResizablePanelGroup direction="horizontal" className="flex-1 min-h-0 overflow-hidden">

@@ -4,6 +4,7 @@ from sqlalchemy.orm import Session
 from typing import Any, List, Optional
 from pydantic import BaseModel, ValidationError
 from app.database import get_db
+from app.repositories.document_repository import DocumentRepository
 from app.repositories.re_underwriting_repo import UnderwritingRunRepository
 from app.repositories.job_repository import JobRepository
 from app.auth import get_current_user
@@ -12,8 +13,11 @@ from app.utils.logging import logger
 from app.verticals.real_estate.underwriting.extraction.tasks.tasks import start_re_underwriting_chain
 from app.verticals.real_estate.underwriting.schemas.self_storage import SelfStorageInputs, UnitMixRow
 from app.verticals.real_estate.underwriting.calculator import calculate, calculate_sensitivity
+from app.verticals.real_estate.underwriting.noi_bridge import build_noi_bridge
 from app.verticals.real_estate.underwriting.stress_tests import run_stress_tests
 from app.verticals.real_estate.underwriting.rollover import compute_rollover_risk
+from app.repositories.user_repository import UserRepository
+from app.schemas.user_thresholds import UserUnderwritingThresholds
 from app.verticals.real_estate.underwriting.verdict import evaluate
 from app.verticals.real_estate.underwriting.result_artifact import (
     get_preserved_unit_mix,
@@ -33,6 +37,12 @@ class CreateUnderwritingRunRequest(BaseModel):
 
 class UpdateInputsRequest(BaseModel):
     inputs: dict
+
+
+class UpdateRunMetadataRequest(BaseModel):
+    name: Optional[str] = None
+    address: Optional[str] = None
+
 
 class SensitivityRequest(BaseModel):
     purchase_prices: List[float]
@@ -84,7 +94,44 @@ def _get_t12_period_months_from_artifact(existing_artifact: dict | None) -> int 
     return period_months if isinstance(period_months, int) and period_months > 0 else None
 
 
-def _calculate_and_store_result(repo: UnderwritingRunRepository, run_id: str, inputs_payload: dict) -> None:
+def _load_user_thresholds(user_id: str) -> UserUnderwritingThresholds | None:
+    saved = UserRepository().get_underwriting_thresholds(user_id) or {}
+    return UserUnderwritingThresholds(**saved) if saved else None
+
+
+def _source_documents_for_run(document_ids: list[dict] | None, org_id: str | None) -> list[dict]:
+    """Attach display metadata to saved underwriting source document specs."""
+    source_specs = [
+        doc for doc in (document_ids or [])
+        if isinstance(doc, dict) and doc.get("document_id") and doc.get("doc_type")
+    ]
+    if not source_specs:
+        return []
+
+    metadata = DocumentRepository().get_doc_metadata_by_ids(
+        [doc["document_id"] for doc in source_specs],
+        org_id,
+    )
+    metadata_by_id = {doc["id"]: doc for doc in metadata}
+
+    return [
+        {
+            **doc,
+            "name": metadata_by_id.get(doc["document_id"], {}).get("filename"),
+            "filename": metadata_by_id.get(doc["document_id"], {}).get("filename"),
+            "page_count": metadata_by_id.get(doc["document_id"], {}).get("page_count"),
+            "file_size_bytes": metadata_by_id.get(doc["document_id"], {}).get("file_size_bytes"),
+        }
+        for doc in source_specs
+    ]
+
+
+def _calculate_and_store_result(
+    repo: UnderwritingRunRepository,
+    run_id: str,
+    inputs_payload: dict,
+    thresholds: UserUnderwritingThresholds | None = None,
+) -> None:
     """Recalculate underwriting outputs from saved inputs and persist the result artifact."""
     existing_run = repo.get_by_id(run_id)
     existing_artifact = existing_run.result_artifact if existing_run else None
@@ -115,6 +162,7 @@ def _calculate_and_store_result(repo: UnderwritingRunRepository, run_id: str, in
         stress_tests,
         _get_t12_period_months_from_artifact(existing_artifact),
         inputs=inputs,
+        thresholds=thresholds,
     )
     typed_metrics = {
         "irr": result.irr,
@@ -134,6 +182,13 @@ def _calculate_and_store_result(repo: UnderwritingRunRepository, run_id: str, in
     result_payload["verdict"] = verdict.model_dump()
     if inputs.rent_comps:
         result_payload["rent_comps"] = [row.model_dump() for row in inputs.rent_comps]
+    result_payload["noi_bridge"] = build_noi_bridge(
+        inputs,
+        om=None,
+        t12=None,
+        result=result,
+        source_artifact=existing_artifact,
+    )
     result_payload = merge_preserved_result_artifact(existing_artifact, result_payload)
     repo.update_result(run_id, result_payload, typed_metrics)
 
@@ -175,7 +230,34 @@ def get_underwriting_run(run_id: str, user: User = Depends(get_current_user), db
     run = repo.get(run_id, user.id)
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
-    return {"id": run.id, "name": run.name, "asset_type": run.asset_type, "address": run.address, "status": run.status, "document_ids": run.document_ids or [], "inputs": run.inputs, "field_citations": run.field_citations, "citation_context": run.citation_context, "discrepancies": run.discrepancies, "result_artifact": run.result_artifact, "verdict_status": run.verdict_status, "verdict_failures": run.verdict_failures, "irr": run.irr, "cash_on_cash": run.cash_on_cash, "equity_multiple": run.equity_multiple, "dscr_year_one": run.dscr_year_one, "ltv": run.ltv, "cap_rate_year_one": run.cap_rate_year_one, "cap_rate_pro_forma": run.cap_rate_pro_forma, "noi_year_one": run.noi_year_one, "total_profit": run.total_profit, "monthly_cashflow": run.monthly_cashflow, "created_at": run.created_at, "updated_at": run.updated_at, "completed_at": run.completed_at}
+    source_documents = _source_documents_for_run(run.document_ids, user.org_id)
+    return {"id": run.id, "name": run.name, "asset_type": run.asset_type, "address": run.address, "status": run.status, "document_ids": run.document_ids or [], "source_documents": source_documents, "inputs": run.inputs, "field_citations": run.field_citations, "citation_context": run.citation_context, "discrepancies": run.discrepancies, "result_artifact": run.result_artifact, "verdict_status": run.verdict_status, "verdict_failures": run.verdict_failures, "irr": run.irr, "cash_on_cash": run.cash_on_cash, "equity_multiple": run.equity_multiple, "dscr_year_one": run.dscr_year_one, "ltv": run.ltv, "cap_rate_year_one": run.cap_rate_year_one, "cap_rate_pro_forma": run.cap_rate_pro_forma, "noi_year_one": run.noi_year_one, "total_profit": run.total_profit, "monthly_cashflow": run.monthly_cashflow, "created_at": run.created_at, "updated_at": run.updated_at, "completed_at": run.completed_at}
+
+
+@router.patch("/runs/{run_id}", response_model=dict)
+def update_underwriting_run_metadata(run_id: str, payload: UpdateRunMetadataRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+    repo = UnderwritingRunRepository(db)
+    updates: dict[str, str | None] = {}
+
+    if "name" in payload.model_fields_set:
+        name = (payload.name or "").strip()
+        if not name:
+            raise HTTPException(status_code=422, detail="Deal name is required")
+        updates["name"] = name
+    if "address" in payload.model_fields_set:
+        address = (payload.address or "").strip()
+        updates["address"] = address or None
+
+    if updates:
+        success = repo.update_metadata(run_id, user.id, updates)
+        if not success:
+            raise HTTPException(status_code=404, detail="Run not found")
+
+    run = repo.get(run_id, user.id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+    return {"status": "updated", "run_id": run.id, "name": run.name, "address": run.address, "inputs": run.inputs}
+
 
 @router.patch("/runs/{run_id}/inputs", response_model=dict)
 def update_underwriting_inputs(run_id: str, payload: UpdateInputsRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
@@ -198,8 +280,12 @@ def update_underwriting_inputs(run_id: str, payload: UpdateInputsRequest, user: 
     if not success:
         raise HTTPException(status_code=400, detail="Failed to update inputs")
 
+    user_thresholds = _load_user_thresholds(user.id)
     try:
-        _calculate_and_store_result(repo, run_id, validated_inputs.model_dump())
+        _calculate_and_store_result(repo, run_id, validated_inputs.model_dump(), thresholds=user_thresholds)
+    except ValueError as e:
+        logger.warning(f"Underwriting calculation validation failed for run {run_id}: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
         logger.error(f"Failed to recalculate underwriting run {run_id}: {e}")
         raise HTTPException(status_code=400, detail="Failed to calculate underwriting result")
@@ -251,8 +337,10 @@ def scenario_recalculate(run_id: str, payload: ScenarioOverrides, user: User = D
         result = calculate(inputs)
         stress = run_stress_tests(inputs)
         result.stress_tests = stress
-        verdict = evaluate(result, inputs.criteria, stress, _get_t12_period_months_from_artifact(run.result_artifact), inputs=inputs)
+        verdict = evaluate(result, inputs.criteria, stress, _get_t12_period_months_from_artifact(run.result_artifact), inputs=inputs, thresholds=_load_user_thresholds(user.id))
 
+        # Keep this stateless what-if response lean: the UI only needs scenario
+        # metrics here. Persisted calculation paths build result_artifact.noi_bridge.
         return {
             "irr": result.irr,
             "cash_on_cash": result.cash_on_cash,

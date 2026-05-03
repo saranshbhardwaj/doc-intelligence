@@ -43,6 +43,7 @@ import {
   DiscrepanciesSection,
   EvidenceSection,
   MarketSection,
+  MaxBidPanel,
   ModelBasisPanel,
   OperationsSection,
   ReturnsSection,
@@ -165,7 +166,7 @@ export default function UnderwritingResult() {
     : verdictStatus === 'needs_review' ? 'warning'
     : verdictStatus ? 'danger' : 'neutral';
   const verdictLabel = verdictStatus === 'worth_pursuing' ? 'Passes Screen'
-    : verdictStatus === 'needs_review' ? 'Review Needed'
+    : verdictStatus === 'needs_review' ? 'Passes With Conditions'
     : verdictStatus ? 'Below Screen' : 'In Review';
 
   const projections = artifact.projections || [];
@@ -196,12 +197,36 @@ export default function UnderwritingResult() {
   const discrepancies = currentRun?.discrepancies || [];
   const fieldCitations = currentRun?.field_citations || {};
   const citationContext = currentRun?.citation_context || {};
+  const noiBridge = artifact.noi_bridge || null;
 
   const storedVerdictWarnings = verdict?.warnings || [];
+  const extractionReviewWarnings = [
+    ...(artifact.t12_data?.review_warnings || []),
+    ...(artifact.rent_roll_data?.review_warnings || []),
+  ].map((warning, index) => ({
+    key: warning.key || `extraction-review-${index}`,
+    severity: warning.severity || 'warning',
+    message: warning.message || 'Source document extraction needs analyst review.',
+  }));
+  const discrepancyReviewWarnings = discrepancies
+    .filter((discrepancy) => ['critical', 'error', 'warning'].includes(discrepancy.severity))
+    .slice(0, 3)
+    .map((discrepancy, index) => ({
+      key: `discrepancy-${discrepancy.field}-${index}`,
+      severity: discrepancy.severity === 'error' ? 'critical' : 'warning',
+      message: discrepancy.reason
+        ? `${discrepancy.note} Model used ${discrepancy.preferred_source || 'the preferred source'}.`
+        : discrepancy.note,
+    }));
   const derivedMixedRevenueWarning = buildDerivedMixedRevenueWarning(unitMix);
-  const verdictWarnings = derivedMixedRevenueWarning && !storedVerdictWarnings.some((w) => w.key === derivedMixedRevenueWarning.key)
-    ? [...storedVerdictWarnings, derivedMixedRevenueWarning]
-    : storedVerdictWarnings;
+  const verdictWarningsBase = [
+    ...storedVerdictWarnings,
+    ...extractionReviewWarnings,
+    ...discrepancyReviewWarnings,
+  ];
+  const verdictWarnings = derivedMixedRevenueWarning && !verdictWarningsBase.some((w) => w.key === derivedMixedRevenueWarning.key)
+    ? [...verdictWarningsBase, derivedMixedRevenueWarning]
+    : verdictWarningsBase;
 
   const sourceCitations = {
     purchase_price: getFieldCitation(fieldCitations, citationContext, 'purchase_price'),
@@ -214,8 +239,18 @@ export default function UnderwritingResult() {
     expense_ratio_current: getFieldCitation(fieldCitations, citationContext, 'expense_ratio_current'),
     expense_ratio_pro_forma: getFieldCitation(fieldCitations, citationContext, 'expense_ratio_pro_forma'),
     property_tax_annual: getFieldCitation(fieldCitations, citationContext, 'property_tax_annual'),
+    insurance_annual: getFieldCitation(fieldCitations, citationContext, 'insurance_annual'),
+    payroll_annual: getFieldCitation(fieldCitations, citationContext, 'payroll_annual'),
+    repairs_maintenance_annual: getFieldCitation(fieldCitations, citationContext, 'repairs_maintenance_annual'),
+    utilities_annual: getFieldCitation(fieldCitations, citationContext, 'utilities_annual'),
+    marketing_annual: getFieldCitation(fieldCitations, citationContext, 'marketing_annual'),
+    other_income_annual: getFieldCitation(fieldCitations, citationContext, 'other_income_annual'),
     property_tax_growth_pct: getFieldCitation(fieldCitations, citationContext, 'property_tax_growth_pct'),
-    mil_rate: getFieldCitation(fieldCitations, citationContext, 'mil_rate'),
+    property_tax_value_basis_amount: getFieldCitation(fieldCitations, citationContext, 'property_tax_value_basis_amount'),
+    property_tax_assessed_value: getFieldCitation(fieldCitations, citationContext, 'property_tax_assessed_value'),
+    property_tax_assessment_ratio: getFieldCitation(fieldCitations, citationContext, 'property_tax_assessment_ratio'),
+    property_tax_millage_rate: getFieldCitation(fieldCitations, citationContext, 'property_tax_millage_rate'),
+    property_tax_rate_per_assessed_dollar: getFieldCitation(fieldCitations, citationContext, 'property_tax_rate_per_assessed_dollar'),
     bad_debt_annual: getFieldCitation(fieldCitations, citationContext, 'bad_debt_annual'),
     corrections_collections_annual: getFieldCitation(fieldCitations, citationContext, 'corrections_collections_annual'),
     interest_rate_pct: getFieldCitation(fieldCitations, citationContext, 'interest_rate_pct'),
@@ -223,6 +258,9 @@ export default function UnderwritingResult() {
     market_cap_rate_purchase: getFieldCitation(fieldCitations, citationContext, 'market_cap_rate_purchase'),
     market_cap_rate_sale: getFieldCitation(fieldCitations, citationContext, 'market_cap_rate_sale'),
     mgmt_fee_pct: getFieldCitation(fieldCitations, citationContext, 'mgmt_fee_pct'),
+    noi_year_one_stated: getFieldCitation(fieldCitations, citationContext, 'noi_year_one_stated'),
+    noi_current_stated: getFieldCitation(fieldCitations, citationContext, 'noi_current_stated'),
+    noi_actual: getFieldCitation(fieldCitations, citationContext, 'noi_actual'),
   };
 
   const verdictFailureSupportByMetric = {
@@ -240,6 +278,17 @@ export default function UnderwritingResult() {
     rentable_sqft: [sourceCitations.rentable_sqft],
     occupancy_pct: [sourceCitations.vacancy_credit_loss_pct],
     opex_ratio: [sourceCitations.expense_ratio_current, sourceCitations.expense_ratio_pro_forma, sourceCitations.property_tax_annual],
+    expense_ratio: [sourceCitations.expense_ratio_current, sourceCitations.expense_ratio_pro_forma],
+    other_income_annual: [sourceCitations.other_income_annual],
+    noi: [sourceCitations.gross_potential_rent_annual, sourceCitations.expense_ratio_current],
+    avg_in_place_rent_per_unit_monthly: [sourceCitations.avg_in_place_rent_per_unit_monthly],
+    avg_market_rent_per_unit_monthly: [sourceCitations.avg_market_rent_per_unit_monthly],
+    property_tax_annual: [sourceCitations.property_tax_annual],
+    insurance_annual: [sourceCitations.insurance_annual],
+    payroll_annual: [sourceCitations.payroll_annual],
+    repairs_maintenance_annual: [sourceCitations.repairs_maintenance_annual],
+    utilities_annual: [sourceCitations.utilities_annual],
+    marketing_annual: [sourceCitations.marketing_annual],
     unit_mix: [sourceCitations.num_units, sourceCitations.rentable_sqft],
   };
 
@@ -342,6 +391,7 @@ export default function UnderwritingResult() {
     ?? artifact.om_data?.expense_ratio_pro_forma
     ?? omOpexPct;
   const expenseBasis = artifact.expense_basis || null;
+  const isOmNoiMode = expenseBasis?.source === 'om_noi';
   const expenseBasisFormula = buildTooltip('expense_basis',
     (cv) => {
       const lines = [];
@@ -356,8 +406,25 @@ export default function UnderwritingResult() {
   const breakEvenOccupancyPct = artifact.break_even_occupancy_pct;
   const rentPositionAnalysis = artifact.rent_position_analysis || [];
   const revenueBasis = getRevenueBasis(artifact, persistedInputs, sourceCitations);
-  const unitMixSource = getUnitMixSource(artifact, persistedInputs);
   const unitMixSummary = getUnitMixSummary(unitMix);
+  const propertyUnits = persistedInputs.project?.num_units
+    ?? artifact.om_data?.num_units
+    ?? currentRun?.num_units
+    ?? null;
+  const extractedUnits = unitMixSummary?.totalUnits || 0;
+  const hasRentRollUnitMix = Array.isArray(artifact.rent_roll_data?.unit_mix)
+    && artifact.rent_roll_data.unit_mix.length > 0;
+  const unitMixIsPartial = !hasRentRollUnitMix
+    && propertyUnits > 0
+    && extractedUnits > 0
+    && extractedUnits < propertyUnits * 0.9;
+  const unitMixCoveragePct = propertyUnits > 0 ? extractedUnits / propertyUnits : null;
+  const unitMixSource = getUnitMixSource(artifact, persistedInputs, {
+    isPartial: unitMixIsPartial,
+    propertyUnits,
+    extractedUnits,
+    coveragePct: unitMixCoveragePct,
+  });
   const rentCompCoverage = getRentCompCoverage(unitMix, rentComps, rentPositionAnalysis);
 
   const omStatedNoi = persistedInputs.operational?.noi_year_one_stated
@@ -369,7 +436,7 @@ export default function UnderwritingResult() {
   const modeledNoi = currentRun?.noi_year_one ?? artifact.noi_year_one ?? null;
   const noiBridgeDelta = omStatedNoi != null && modeledNoi != null ? modeledNoi - omStatedNoi : null;
   const noiBridgeDeltaPct = omStatedNoi ? noiBridgeDelta / omStatedNoi : null;
-  const noiBridgeAlert = noiBridgeDeltaPct != null && Math.abs(noiBridgeDeltaPct) > 0.05;
+  const noiBridgeAlert = !isOmNoiMode && noiBridgeDeltaPct != null && Math.abs(noiBridgeDeltaPct) > 0.05;
 
   const capRateSubmarket = marketData.submarket_avg_cap_rate;
   const capRatePurchase = persistedInputs.acquisition?.market_cap_rate_purchase
@@ -382,7 +449,10 @@ export default function UnderwritingResult() {
   const bpsDelta = capRateSubmarket && impliedCapRate
     ? Math.round((impliedCapRate - capRateSubmarket) * 10000) : null;
 
-  const address = currentRun?.address || '';
+  const address = currentRun?.address
+    || persistedInputs.project?.address
+    || artifact.om_data?.address
+    || '';
   const mapsKey = import.meta.env.VITE_GOOGLE_MAPS_KEY;
   const mapUrl = mapsKey && address
     ? `https://maps.googleapis.com/maps/api/staticmap?center=${encodeURIComponent(address)}&zoom=13&size=500x260&markers=color:red%7C${encodeURIComponent(address)}&key=${mapsKey}`
@@ -585,11 +655,36 @@ export default function UnderwritingResult() {
       citation: getFieldCitation(fieldCitations, citationContext, 'property_tax_growth_pct'),
     },
     {
-      key: 'mil_rate',
-      label: 'Mil rate',
-      value: persistedInputs.operational?.mil_rate != null
-        ? `${persistedInputs.operational.mil_rate.toFixed(1)} mills` : '—',
-      citation: getFieldCitation(fieldCitations, citationContext, 'mil_rate'),
+      key: 'property_tax_value_basis_amount',
+      label: 'Tax value basis',
+      value: formatEvidenceValue(formatCompactCurrency, persistedInputs.operational?.property_tax_value_basis_amount),
+      citation: getFieldCitation(fieldCitations, citationContext, 'property_tax_value_basis_amount'),
+    },
+    {
+      key: 'property_tax_assessed_value',
+      label: 'Tax assessed value',
+      value: formatEvidenceValue(formatCompactCurrency, persistedInputs.operational?.property_tax_assessed_value),
+      citation: getFieldCitation(fieldCitations, citationContext, 'property_tax_assessed_value'),
+    },
+    {
+      key: 'property_tax_assessment_ratio',
+      label: 'Tax assessment ratio',
+      value: formatEvidenceValue(formatPercent, persistedInputs.operational?.property_tax_assessment_ratio),
+      citation: getFieldCitation(fieldCitations, citationContext, 'property_tax_assessment_ratio'),
+    },
+    {
+      key: 'property_tax_millage_rate',
+      label: 'Tax millage rate',
+      value: persistedInputs.operational?.property_tax_millage_rate != null
+        ? `${persistedInputs.operational.property_tax_millage_rate.toFixed(2)} mills` : '—',
+      citation: getFieldCitation(fieldCitations, citationContext, 'property_tax_millage_rate'),
+    },
+    {
+      key: 'property_tax_rate_per_assessed_dollar',
+      label: 'Tax rate / assessed $',
+      value: persistedInputs.operational?.property_tax_rate_per_assessed_dollar != null
+        ? persistedInputs.operational.property_tax_rate_per_assessed_dollar.toFixed(5) : '—',
+      citation: getFieldCitation(fieldCitations, citationContext, 'property_tax_rate_per_assessed_dollar'),
     },
     {
       key: 'interest_rate_pct',
@@ -731,6 +826,7 @@ export default function UnderwritingResult() {
                     expenseBasis={expenseBasis}
                     capitalStructure={capitalStructure}
                     omStatedNoi={omStatedNoi}
+                    noiBridge={noiBridge}
                     sourceCitations={sourceCitations}
                     rentCompCoverage={rentCompCoverage}
                     currentRun={currentRun}
@@ -819,6 +915,7 @@ export default function UnderwritingResult() {
                     revenueBasis={revenueBasis}
                     expenseBasis={expenseBasis}
                     noiBasis={{ modeledNoi, omStatedNoi, noiBridgeDeltaPct }}
+                    isOmNoiMode={isOmNoiMode}
                     unitMixSource={unitMixSource}
                     rentCompCoverage={rentCompCoverage}
                   />
@@ -864,7 +961,7 @@ export default function UnderwritingResult() {
                         className="gap-1.5 h-7 px-3 text-xs"
                       >
                         <SlidersHorizontal className="h-3.5 w-3.5" />
-                        What-if
+                        Assumption what-if
                       </Button>
                     </div>
                     <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
@@ -872,6 +969,21 @@ export default function UnderwritingResult() {
                         <UnderwritingMetricCard key={metric.label} {...metric} />
                       ))}
                     </div>
+                  </div>
+
+                  <div className="mt-5">
+                    <MaxBidPanel
+                      purchasePrice={purchasePrice}
+                      currentVerdictLabel={verdictLabel}
+                      currentVerdictTone={verdictTone}
+                      currentNoi={currentRun?.noi_year_one}
+                      criteria={persistedInputs.criteria}
+                      getToken={getToken}
+                      runId={runId}
+                      runSensitivityAnalysis={runSensitivityAnalysis}
+                      purchasePriceCitation={sourceCitations.purchase_price}
+                      onOpenSource={handleOpenSource}
+                    />
                   </div>
 
                   {/* Operating benchmarks */}
@@ -984,10 +1096,12 @@ export default function UnderwritingResult() {
                       totalUnits={totalUnits}
                       sourceCitations={sourceCitations}
                       omStatedNoi={omStatedNoi}
+                      noiBridge={noiBridge}
                       modeledNoi={modeledNoi}
                       noiBridgeDelta={noiBridgeDelta}
                       noiBridgeDeltaPct={noiBridgeDeltaPct}
                       noiBridgeAlert={noiBridgeAlert}
+                      expenseBasisSource={expenseBasis?.source}
                       onOpenSource={handleOpenSource}
                     />
 
@@ -996,12 +1110,15 @@ export default function UnderwritingResult() {
                       onToggle={() => setShowOperations((v) => !v)}
                       unitMix={unitMix}
                       unitMixSummary={unitMixSummary}
+                      unitMixIsPartial={unitMixIsPartial}
+                      propertyUnits={propertyUnits}
+                      extractedUnits={extractedUnits}
+                      unitMixCoveragePct={unitMixCoveragePct}
                       occupancy={occupancy}
                       currentExpenseRatio={currentExpenseRatio}
                       proFormaExpenseRatio={proFormaExpenseRatio}
                       propertyTaxAnnual={persistedInputs.operational?.property_tax_annual}
                       propertyTaxGrowthPct={persistedInputs.operational?.property_tax_growth_pct ?? artifact.om_data?.property_tax_growth_pct}
-                      milRate={persistedInputs.operational?.mil_rate ?? artifact.om_data?.mil_rate}
                       badDebtAnnual={persistedInputs.operational?.bad_debt_annual ?? artifact.t12_data?.summary?.bad_debt_annual}
                       correctionsCollectionsAnnual={persistedInputs.operational?.corrections_collections_annual ?? artifact.t12_data?.summary?.corrections_collections_annual}
                       purchasePrice={purchasePrice}
@@ -1042,6 +1159,7 @@ export default function UnderwritingResult() {
                       rentPositionAnalysis={rentPositionAnalysis}
                       rentComps={rentComps}
                       rentCompCoverage={rentCompCoverage}
+                      unknownClimateCompCount={artifact.unknown_climate_comp_count ?? 0}
                       getToken={getToken}
                       runId={runId}
                       runSensitivityAnalysis={runSensitivityAnalysis}

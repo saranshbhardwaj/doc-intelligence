@@ -3,10 +3,11 @@
 Each doc type gets its own typed schema. All fields Optional — a doc may
 not contain every field. The merger maps these into SelfStorageInputs.
 
-`OMExtraction` is the single source of truth for OM field registration.
-Add `Field(description=..., json_schema_extra={"cite": bool})` to each new
-field and the LLM tool schema, cited-field list, and prompt schema are all
-derived automatically via `_OM_REGISTRY`.
+All three extraction models (OM, T-12, Rent Roll) are the single sources of
+truth for their field registries. Add `Field(description=...,
+json_schema_extra={"cite": bool})` to each scalar field and the LLM tool
+schema, cited-field list, and prompt schema are all derived automatically via
+the corresponding `_*_REGISTRY`.
 """
 
 from __future__ import annotations
@@ -18,6 +19,8 @@ from ..schemas.self_storage import LeaseRecord, RentCompRow, UnitMixRow
 
 # Fields whose values are lists of nested models — excluded from scalar derivation
 _OM_COMPLEX_FIELD_NAMES: frozenset[str] = frozenset({"unit_mix", "rent_comps"})
+_T12_COMPLEX_FIELD_NAMES: frozenset[str] = frozenset()
+_RENT_ROLL_COMPLEX_FIELD_NAMES: frozenset[str] = frozenset({"unit_mix", "lease_records"})
 
 
 class OMExtraction(BaseModel):
@@ -33,15 +36,65 @@ class OMExtraction(BaseModel):
     and om_source_data artifact — no other files need updating.
     """
 
+    # ── Detection (filled first — model detects structure before extracting values) ──
+    detected_deal_subtype: Optional[str] = Field(
+        default=None,
+        description='"stabilized" | "value_add" | "unsupported". '
+                    'stabilized = existing ops, minimal Year-1 adjustments. '
+                    'value_add = owner-operated Current, Year-1 adds pro management costs. '
+                    'unsupported = development, non-self-storage, or unclear.',
+        json_schema_extra={"cite": False},
+    )
+    detected_current_column_label: Optional[str] = Field(
+        default=None,
+        description='Exact header text of the column representing current operations, '
+                    'e.g. "Current", "2024 Financials", "2023 Actuals", "Trailing 12". '
+                    'Null if no current-period column exists.',
+        json_schema_extra={"cite": False},
+    )
+    detected_year1_column_label: Optional[str] = Field(
+        default=None,
+        description='Exact header text of the Year-1 projections column, '
+                    'e.g. "Year 1", "Year-One", "Year 1 Projected".',
+        json_schema_extra={"cite": False},
+    )
+    detected_has_current_column: Optional[bool] = Field(
+        default=None,
+        description='True if the operating statement has a current-operations column '
+                    'alongside the Year-1 column.',
+        json_schema_extra={"cite": False},
+    )
+    detected_expense_format: Optional[str] = Field(
+        default=None,
+        description='"absolute" if expense line items are dollar totals. '
+                    '"per_sqft" if shown as $/sqft (multiply by rentable_sqft for annual). '
+                    '"mixed" if both formats appear.',
+        json_schema_extra={"cite": False},
+    )
+    detected_income_period_label: Optional[str] = Field(
+        default=None,
+        description='Period the current column covers: "T-12", "T-6", "2024", '
+                    '"Trailing 12", "2023 Actuals", etc. Null if not stated.',
+        json_schema_extra={"cite": False},
+    )
+
     # ── Identity ──────────────────────────────────────────────────────────────
     name:    Optional[str]   = Field(default=None, description="property name",    json_schema_extra={"cite": False})
     address: Optional[str]   = Field(default=None, description="property address", json_schema_extra={"cite": False})
 
     # ── Acquisition ───────────────────────────────────────────────────────────
     purchase_price:           Optional[float] = Field(default=None, description="asking or listing price",       json_schema_extra={"cite": True})
-    closing_cost_pct:         Optional[float] = Field(default=None, description="decimal e.g. 0.02",             json_schema_extra={"cite": False})
-    capex_reserve_per_unit:   Optional[float] = Field(default=None, description="capex reserve per unit",        json_schema_extra={"cite": False})
+    closing_cost_pct:         Optional[float] = Field(default=None, description="decimal e.g. 0.02",             json_schema_extra={"cite": True})
+    capex_reserve_per_unit:   Optional[float] = Field(default=None, description="capex reserve per unit",        json_schema_extra={"cite": True})
     market_cap_rate_purchase: Optional[float] = Field(default=None, description="decimal e.g. 0.0625",          json_schema_extra={"cite": True})
+    market_cap_rate_purchase_basis_period: Optional[str] = Field(
+        default=None,
+        description=(
+            '"current" | "year1" | "going_in" | "stabilized" | "pro_forma" | "unknown"; '
+            "period/basis label for market_cap_rate_purchase."
+        ),
+        json_schema_extra={"cite": False},
+    )
 
     # ── Property ──────────────────────────────────────────────────────────────
     num_units:      Optional[int]   = Field(default=None, description="total unit count",        json_schema_extra={"cite": True})
@@ -51,7 +104,7 @@ class OMExtraction(BaseModel):
     # ── Market / Demographics ─────────────────────────────────────────────────
     nearby_storage_count_1mi:    Optional[int]   = Field(default=None, description="competing storage facilities within 1 mile",  json_schema_extra={"cite": True})
     nearby_storage_count_3mi:    Optional[int]   = Field(default=None, description="competing storage facilities within 3 miles", json_schema_extra={"cite": True})
-    nearby_storage_count_5mi:    Optional[int]   = Field(default=None, description="competing storage facilities within 5 miles", json_schema_extra={"cite": False})
+    nearby_storage_count_5mi:    Optional[int]   = Field(default=None, description="competing storage facilities within 5 miles", json_schema_extra={"cite": True})
     population_3mi:              Optional[int]   = Field(default=None, description="population within 3-mile radius",             json_schema_extra={"cite": True})
     avg_household_income_3mi:    Optional[float] = Field(default=None, description="average household income within 3 miles",     json_schema_extra={"cite": True})
     storage_sqft_per_capita_3mi: Optional[float] = Field(default=None, description="storage sqft per capita within 3 miles",     json_schema_extra={"cite": True})
@@ -74,22 +127,31 @@ class OMExtraction(BaseModel):
     noi_projected:         Optional[float] = Field(default=None, description="projected net operating income",     json_schema_extra={"cite": True})
     mgmt_fee_pct:          Optional[float] = Field(default=None, description="decimal e.g. 0.08",                  json_schema_extra={"cite": True})
     opex_growth_pct:       Optional[float] = Field(default=None, description="decimal e.g. 0.02",                  json_schema_extra={"cite": True})
-    property_tax_growth_pct: Optional[float] = Field(default=None, description="decimal e.g. 0.04",               json_schema_extra={"cite": False})
-    mil_rate:              Optional[float] = Field(default=None, description="property tax mill rate",             json_schema_extra={"cite": True})
+    property_tax_growth_pct: Optional[float] = Field(default=None, description="decimal e.g. 0.04",               json_schema_extra={"cite": True})
+    property_tax_value_basis_amount: Optional[float] = Field(default=None, description="property tax value basis amount explicitly used for tax calculation, such as appraised value, fair cash value, or purchase-price tax basis", json_schema_extra={"cite": True})
+    property_tax_assessed_value: Optional[float] = Field(default=None, description="property tax assessed or taxable assessed value after any assessment ratio, if explicitly stated", json_schema_extra={"cite": True})
+    property_tax_assessment_ratio: Optional[float] = Field(default=None, description="property tax assessment ratio as a decimal, e.g. 0.11", json_schema_extra={"cite": True})
+    property_tax_millage_rate: Optional[float] = Field(default=None, description="property tax millage rate in true mills per $1,000 of assessed value, e.g. 111.61", json_schema_extra={"cite": True})
+    property_tax_rate_per_assessed_dollar: Optional[float] = Field(default=None, description="property tax rate per $1 of assessed value, e.g. 0.11161", json_schema_extra={"cite": True})
     expense_ratio_pro_forma: Optional[float] = Field(default=None, description="decimal e.g. 0.35",               json_schema_extra={"cite": True})
 
     # ── Individual expense line items (Year 1 column preferred) ───────────────
-    expense_office_admin_annual:        Optional[float] = Field(default=None, description="Office & Admin annual, Year 1 column preferred",  json_schema_extra={"cite": False})
-    expense_bank_fees_annual:           Optional[float] = Field(default=None, description="Bank & Credit Card Fees annual",                  json_schema_extra={"cite": False})
-    expense_contract_services_annual:   Optional[float] = Field(default=None, description="Contract Services annual",                        json_schema_extra={"cite": False})
-    expense_miscellaneous_annual:       Optional[float] = Field(default=None, description="Miscellaneous annual",                            json_schema_extra={"cite": False})
-    expense_utilities_annual:           Optional[float] = Field(default=None, description="Utilities & Trash annual",                        json_schema_extra={"cite": True})
-    expense_telephone_annual:           Optional[float] = Field(default=None, description="Telephone & Communications annual",               json_schema_extra={"cite": False})
-    expense_marketing_annual:           Optional[float] = Field(default=None, description="Marketing & Promotion annual",                    json_schema_extra={"cite": True})
-    expense_repairs_maintenance_annual: Optional[float] = Field(default=None, description="Repairs, Maintenance & Reserves annual",          json_schema_extra={"cite": True})
-    expense_insurance_annual:           Optional[float] = Field(default=None, description="Property Insurance annual",                       json_schema_extra={"cite": True})
-    expense_payroll_annual:             Optional[float] = Field(default=None, description="Salaries, Taxes & Benefits annual",               json_schema_extra={"cite": True})
-    expense_property_tax_annual:        Optional[float] = Field(default=None, description="Property Taxes annual",                           json_schema_extra={"cite": True})
+    expense_office_admin_annual:        Optional[float] = Field(default=None, description="Office & Admin annual, Year 1 column preferred",  json_schema_extra={"cite": True})
+    expense_bank_fees_annual:           Optional[float] = Field(default=None, description="Bank & Credit Card Fees annual",                  json_schema_extra={"cite": True})
+    expense_contract_services_annual:   Optional[float] = Field(default=None, description="Contract Services annual",                        json_schema_extra={"cite": True})
+    expense_miscellaneous_annual:       Optional[float] = Field(default=None, description="Miscellaneous annual",                            json_schema_extra={"cite": True})
+    expense_telephone_annual:                     Optional[float] = Field(default=None, description="Telephone & Communications annual",               json_schema_extra={"cite": True})
+    expense_payroll_annual:                       Optional[float] = Field(default=None, description="Salaries, Taxes & Benefits annual",               json_schema_extra={"cite": True})
+    expense_property_tax_annual_year1:            Optional[float] = Field(default=None, description="Property Taxes – Year 1 broker-adjusted annual figure",   json_schema_extra={"cite": True})
+    expense_property_tax_annual_current:          Optional[float] = Field(default=None, description="Property Taxes – Current assessed annual figure",           json_schema_extra={"cite": True})
+    expense_insurance_annual_year1:               Optional[float] = Field(default=None, description="Property Insurance – Year 1 broker-adjusted annual figure", json_schema_extra={"cite": True})
+    expense_insurance_annual_current:             Optional[float] = Field(default=None, description="Property Insurance – Current annual figure",                json_schema_extra={"cite": True})
+    expense_repairs_maintenance_annual_year1:     Optional[float] = Field(default=None, description="Repairs, Maintenance & Reserves – Year 1 adjusted annual", json_schema_extra={"cite": True})
+    expense_repairs_maintenance_annual_current:   Optional[float] = Field(default=None, description="Repairs, Maintenance & Reserves – Current annual",         json_schema_extra={"cite": True})
+    expense_marketing_annual_year1:               Optional[float] = Field(default=None, description="Marketing & Promotion – Year 1 adjusted annual",           json_schema_extra={"cite": True})
+    expense_marketing_annual_current:             Optional[float] = Field(default=None, description="Marketing & Promotion – Current annual",                   json_schema_extra={"cite": True})
+    expense_utilities_annual_year1:               Optional[float] = Field(default=None, description="Utilities & Trash – Year 1 adjusted annual",               json_schema_extra={"cite": True})
+    expense_utilities_annual_current:             Optional[float] = Field(default=None, description="Utilities & Trash – Current annual",                       json_schema_extra={"cite": True})
     expense_mgmt_fee_annual:            Optional[float] = Field(default=None, description="Third Party Management annual",                   json_schema_extra={"cite": False})
     expense_total_annual:               Optional[float] = Field(default=None, description="Total Operating Expenses annual",                 json_schema_extra={"cite": False})
     noi_year_one_stated:                Optional[float] = Field(default=None, description="NOI from Year 1 column",                         json_schema_extra={"cite": False})
@@ -99,16 +161,16 @@ class OMExtraction(BaseModel):
     ltv_pct:             Optional[float] = Field(default=None, description="decimal e.g. 0.70",      json_schema_extra={"cite": True})
     interest_rate_pct:   Optional[float] = Field(default=None, description="decimal e.g. 0.065",     json_schema_extra={"cite": True})
     amortization_years:  Optional[int]   = Field(default=None, description="loan amortization years", json_schema_extra={"cite": True})
-    loan_term_years:     Optional[int]   = Field(default=None, description="loan term years",         json_schema_extra={"cite": False})
+    loan_term_years:     Optional[int]   = Field(default=None, description="loan term years",         json_schema_extra={"cite": True})
     exit_cap_rate:       Optional[float] = Field(default=None, description="decimal e.g. 0.065",      json_schema_extra={"cite": True})
-    market_cap_rate_sale: Optional[float] = Field(default=None, description="decimal e.g. 0.0675",   json_schema_extra={"cite": False})
+    market_cap_rate_sale: Optional[float] = Field(default=None, description="decimal e.g. 0.0675",   json_schema_extra={"cite": True})
     hold_period_years:   Optional[int]   = Field(default=None, description="investment hold period",  json_schema_extra={"cite": True})
     selling_cost_pct:    Optional[float] = Field(default=None, description="decimal e.g. 0.03",       json_schema_extra={"cite": True})
 
     # ── Investment Criteria (when stated in OM) ───────────────────────────────
-    target_irr:             Optional[float] = Field(default=None, description="decimal e.g. 0.15", json_schema_extra={"cite": False})
-    target_cash_on_cash:    Optional[float] = Field(default=None, description="decimal",           json_schema_extra={"cite": False})
-    target_equity_multiple: Optional[float] = Field(default=None, description="equity multiple",   json_schema_extra={"cite": False})
+    target_irr:             Optional[float] = Field(default=None, description="decimal e.g. 0.15", json_schema_extra={"cite": True})
+    target_cash_on_cash:    Optional[float] = Field(default=None, description="decimal",           json_schema_extra={"cite": True})
+    target_equity_multiple: Optional[float] = Field(default=None, description="equity multiple",   json_schema_extra={"cite": True})
 
     # ── Value-Add Evidence ────────────────────────────────────────────────────
     income_basis_months:         Optional[int]   = Field(default=None, description="6 or 12, when income period is stated",        json_schema_extra={"cite": True})
@@ -116,9 +178,9 @@ class OMExtraction(BaseModel):
     physical_occupancy_pct:      Optional[float] = Field(default=None, description="decimal, stated occupancy e.g. 0.91",          json_schema_extra={"cite": True})
     price_per_rentable_sqft:     Optional[float] = Field(default=None, description="stated price per sqft if present",             json_schema_extra={"cite": False})
     below_market_tenant_pct:     Optional[float] = Field(default=None, description="decimal, e.g. 0.36 for 36%",                  json_schema_extra={"cite": True})
-    below_market_monthly_variance: Optional[float] = Field(default=None, description="total monthly rent gap in dollars",         json_schema_extra={"cite": False})
+    below_market_monthly_variance: Optional[float] = Field(default=None, description="total monthly rent gap in dollars",         json_schema_extra={"cite": True})
     below_market_annual_upside:  Optional[float] = Field(default=None, description="annual dollar upside from below-market tenants", json_schema_extra={"cite": True})
-    value_add_notes:             Optional[str]   = Field(default=None, description="free text expansion or value-add narrative",   json_schema_extra={"cite": False})
+    value_add_notes:             Optional[str]   = Field(default=None, description="free text expansion or value-add narrative",   json_schema_extra={"cite": True})
 
     # ── Complex types (not scalar — excluded from registry derivation) ─────────
     unit_mix:   list[UnitMixRow]  = Field(default_factory=list)
@@ -185,36 +247,155 @@ _OM_REGISTRY: dict = om_field_registry()
 
 
 class T12Extraction(BaseModel):
-    """Structured data extracted from a T-12 or T-6 operating statement."""
+    """Structured data extracted from a T-12 or T-6 operating statement.
 
-    gpr_annual_actual: Optional[float] = None
-    vacancy_credit_loss_pct_actual: Optional[float] = None
-    expense_ratio_actual: Optional[float] = None
-    other_income_annual: Optional[float] = None
-    bad_debt_annual: Optional[float] = None
-    corrections_collections_annual: Optional[float] = None
-    property_tax_annual: Optional[float] = None
-    insurance_annual: Optional[float] = None
-    mgmt_fee_pct_actual: Optional[float] = None
-    payroll_annual: Optional[float] = None
-    repairs_maintenance_annual: Optional[float] = None
-    utilities_annual: Optional[float] = None
-    marketing_annual: Optional[float] = None
-    other_opex_annual: Optional[float] = None
-    noi_actual: Optional[float] = None
-    period_months: Optional[int] = None  # 12 or 6 — used to annualise T-6 (× 12/period_months)
+    Every scalar field carries:
+      - description: used in the LLM tool schema and Phase-2 prompt schema
+      - json_schema_extra={"cite": True/False}: True → field gets citation companions
+
+    Add Field(description=..., json_schema_extra={"cite": bool}) to new fields
+    and they are automatically included in the schema, cited-field list, and
+    prompt — no other files need updating.
+    """
+
+    gpr_annual_actual:               Optional[float] = Field(default=None, description="Gross Potential Rent for the statement period",           json_schema_extra={"cite": True})
+    vacancy_credit_loss_pct_actual:  Optional[float] = Field(default=None, description="vacancy / credit loss as decimal e.g. 0.08",              json_schema_extra={"cite": True})
+    expense_ratio_actual:            Optional[float] = Field(default=None, description="total expenses / EGI as decimal",                          json_schema_extra={"cite": True})
+    other_income_annual:             Optional[float] = Field(default=None, description="all non-rental income for the period",                     json_schema_extra={"cite": True})
+    bad_debt_annual:                 Optional[float] = Field(default=None, description="bad debt write-offs for the period",                       json_schema_extra={"cite": True})
+    corrections_collections_annual:  Optional[float] = Field(default=None, description="collections or prior-period adjustments",                  json_schema_extra={"cite": True})
+    property_tax_annual:             Optional[float] = Field(default=None, description="property taxes for the period",                            json_schema_extra={"cite": True})
+    insurance_annual:                Optional[float] = Field(default=None, description="property insurance for the period",                        json_schema_extra={"cite": True})
+    mgmt_fee_pct_actual:             Optional[float] = Field(default=None, description="management fee percentage as decimal e.g. 0.08",           json_schema_extra={"cite": True})
+    payroll_annual:                  Optional[float] = Field(default=None, description="payroll and benefits for the period",                      json_schema_extra={"cite": True})
+    repairs_maintenance_annual:      Optional[float] = Field(default=None, description="repairs and maintenance for the period",                   json_schema_extra={"cite": True})
+    utilities_annual:                Optional[float] = Field(default=None, description="utilities for the period",                                 json_schema_extra={"cite": True})
+    marketing_annual:                Optional[float] = Field(default=None, description="marketing and advertising for the period",                 json_schema_extra={"cite": True})
+    other_opex_annual:               Optional[float] = Field(default=None, description="all other operating expenses for the period",              json_schema_extra={"cite": False})
+    noi_actual:                      Optional[float] = Field(default=None, description="net operating income for the period",                      json_schema_extra={"cite": True})
+    period_months:                   Optional[int]   = Field(default=None, description="12 or 6 — used to annualise T-6 (× 12/period_months)",    json_schema_extra={"cite": False})
+
+
+def t12_field_registry() -> dict:
+    """Derive field lists and schemas from T12Extraction metadata.
+
+    Returns same shape as om_field_registry() for consistency.
+    """
+    scalar_fields: list[str] = []
+    cited_scalar_fields: list[str] = []
+    t12_fields_for_prompt: list[dict] = []
+    t12_schema_for_tool: dict = {}
+
+    for field_name, field_info in T12Extraction.model_fields.items():
+        if field_name in _T12_COMPLEX_FIELD_NAMES:
+            continue
+
+        annotation = field_info.annotation
+        args = get_args(annotation)
+        py_type = next((a for a in args if a is not type(None)), annotation)
+
+        if py_type is str:
+            json_type = "string"
+            prompt_type = "str | null"
+        elif py_type is int:
+            json_type = "integer"
+            prompt_type = "int | null"
+        else:
+            json_type = "number"
+            prompt_type = "float | null"
+
+        description: str = field_info.description or ""
+        extra: dict = field_info.json_schema_extra or {}
+
+        scalar_fields.append(field_name)
+        if extra.get("cite"):
+            cited_scalar_fields.append(field_name)
+
+        prompt_type_str = f"{prompt_type} ({description})" if description else prompt_type
+        t12_fields_for_prompt.append({"name": field_name, "type": prompt_type_str})
+
+        schema_entry: dict = {"type": json_type}
+        if description:
+            schema_entry["description"] = description
+        t12_schema_for_tool[field_name] = schema_entry
+
+    return {
+        "scalar_fields": scalar_fields,
+        "cited_scalar_fields": cited_scalar_fields,
+        "t12_fields_for_prompt": t12_fields_for_prompt,
+        "t12_schema_for_tool": t12_schema_for_tool,
+    }
+
+
+_T12_REGISTRY: dict = t12_field_registry()
 
 
 class RentRollExtraction(BaseModel):
-    """Structured data extracted from a Rent Roll."""
+    """Structured data extracted from a Rent Roll.
 
-    num_units_actual: Optional[int] = None
-    physical_occupancy_pct: Optional[float] = None
-    avg_in_place_rent_per_unit_monthly: Optional[float] = None
-    avg_market_rent_per_unit_monthly: Optional[float] = None
-    unit_mix: list[UnitMixRow] = Field(default_factory=list)
+    Every scalar field carries:
+      - description: used in the LLM tool schema and Phase-2 prompt schema
+      - json_schema_extra={"cite": True/False}: True → field gets citation companions
+    """
+
+    num_units_actual:                 Optional[int]   = Field(default=None, description="total unit count including occupied and vacant",          json_schema_extra={"cite": True})
+    physical_occupancy_pct:           Optional[float] = Field(default=None, description="occupied / total units as decimal e.g. 0.91",             json_schema_extra={"cite": True})
+    avg_in_place_rent_per_unit_monthly: Optional[float] = Field(default=None, description="average monthly in-place rent per occupied unit",       json_schema_extra={"cite": True})
+    avg_market_rent_per_unit_monthly: Optional[float] = Field(default=None, description="average monthly market rent per unit, null if no market column", json_schema_extra={"cite": False})
+    rent_growth_pct:                  Optional[float] = Field(default=None, description="annual rent growth as decimal, only if explicitly stated", json_schema_extra={"cite": False})
+    unit_mix:    list[UnitMixRow]   = Field(default_factory=list)
     lease_records: list[LeaseRecord] = Field(default_factory=list)
-    rent_growth_pct: Optional[float] = None
+
+
+def rent_roll_field_registry() -> dict:
+    """Derive field lists and schemas from RentRollExtraction metadata."""
+    scalar_fields: list[str] = []
+    cited_scalar_fields: list[str] = []
+    rr_fields_for_prompt: list[dict] = []
+    rr_schema_for_tool: dict = {}
+
+    for field_name, field_info in RentRollExtraction.model_fields.items():
+        if field_name in _RENT_ROLL_COMPLEX_FIELD_NAMES:
+            continue
+
+        annotation = field_info.annotation
+        args = get_args(annotation)
+        py_type = next((a for a in args if a is not type(None)), annotation)
+
+        if py_type is str:
+            json_type = "string"
+            prompt_type = "str | null"
+        elif py_type is int:
+            json_type = "integer"
+            prompt_type = "int | null"
+        else:
+            json_type = "number"
+            prompt_type = "float | null"
+
+        description: str = field_info.description or ""
+        extra: dict = field_info.json_schema_extra or {}
+
+        scalar_fields.append(field_name)
+        if extra.get("cite"):
+            cited_scalar_fields.append(field_name)
+
+        prompt_type_str = f"{prompt_type} ({description})" if description else prompt_type
+        rr_fields_for_prompt.append({"name": field_name, "type": prompt_type_str})
+
+        schema_entry: dict = {"type": json_type}
+        if description:
+            schema_entry["description"] = description
+        rr_schema_for_tool[field_name] = schema_entry
+
+    return {
+        "scalar_fields": scalar_fields,
+        "cited_scalar_fields": cited_scalar_fields,
+        "rr_fields_for_prompt": rr_fields_for_prompt,
+        "rr_schema_for_tool": rr_schema_for_tool,
+    }
+
+
+_RENT_ROLL_REGISTRY: dict = rent_roll_field_registry()
 
 
 class CondensedField(BaseModel):
@@ -244,4 +425,5 @@ class ExtractedDocResult(BaseModel):
     field_citations: dict = Field(default_factory=dict)
     # "S{source_index}:p{page}" → {page, filename, document_id, source_index, bbox?}
     citation_context: dict = Field(default_factory=dict)
+    extraction_metadata: dict = Field(default_factory=dict)
     error: Optional[str] = None  # set if optional doc extraction failed

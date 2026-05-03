@@ -1,0 +1,7 @@
+{
+  "enabledPlugins": {
+    "ruflo-adr@ruflo": true,
+    "ruflo-workflows@ruflo": true,
+    "ruflo-docs@ruflo": true
+  }
+}

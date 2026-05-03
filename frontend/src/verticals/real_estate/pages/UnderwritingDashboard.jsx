@@ -4,7 +4,9 @@
  */
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Building2, MapPin, Plus, Search, Trash2, TrendingUp } from 'lucide-react';
+import { Building2, Loader2, MapPin, Pencil, Plus, Search, Trash2, TrendingUp } from 'lucide-react';
+import { Input } from '@/components/ui/input';
+import { toast } from 'sonner';
 import {
   AlertDialog,
   AlertDialogAction,
@@ -21,8 +23,9 @@ import { Skeleton } from '@/components/ui/skeleton';
 import AppLayout from '../../../components/layout/AppLayout';
 import { useAppAuth } from '../../../hooks/useAppAuth';
 import { useUnderwriting, useUnderwritingActions } from '../../../store';
-import { deleteUnderwritingRun } from '../../../api/re-underwriting';
+import { deleteUnderwritingRun, updateUnderwritingRunMetadata } from '../../../api/re-underwriting';
 import {
+  UnderwritingDefaultsModal,
   UnderwritingEmptyState,
   UnderwritingMetricCard,
   UnderwritingStatusBadge,
@@ -58,46 +61,159 @@ function getStatusMeta(status) {
 
 function getVerdictMeta(verdict) {
   if (verdict === 'worth_pursuing') return { tone: 'success', label: 'Passes Screen' };
-  if (verdict === 'needs_review') return { tone: 'warning', label: 'Review Needed' };
+  if (verdict === 'needs_review') return { tone: 'warning', label: 'Passes With Conditions' };
   if (verdict) return { tone: 'danger', label: 'Below Screen' };
   return null;
+}
+
+function EditNameAddressForm({ initialName, initialAddress, onSave, onCancel, saving, error }) {
+  const [name, setName] = useState(initialName || '');
+  const [address, setAddress] = useState(initialAddress || '');
+
+  const trimmedName = name.trim();
+  const trimmedAddress = address.trim();
+
+  function handleKeyDown(e) {
+    if (e.key === 'Escape') onCancel();
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      if (trimmedName) onSave(trimmedName, trimmedAddress);
+    }
+  }
+
+  return (
+    <div className="flex flex-col gap-1.5" onKeyDown={handleKeyDown}>
+      <Input
+        autoFocus
+        value={name}
+        onChange={(e) => setName(e.target.value)}
+        placeholder="Deal name or property name"
+        className="h-8 text-base font-semibold"
+        disabled={saving}
+      />
+      <Input
+        value={address}
+        onChange={(e) => setAddress(e.target.value)}
+        placeholder="Property address (optional)"
+        className="h-7 text-sm"
+        disabled={saving}
+      />
+      {error && <p className="text-destructive text-xs">{error}</p>}
+      <div className="flex items-center gap-2 pt-0.5">
+        <Button
+          size="sm"
+          onClick={() => { if (trimmedName) onSave(trimmedName, trimmedAddress); }}
+          disabled={saving || !trimmedName}
+        >
+          {saving && <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />}
+          Save
+        </Button>
+        <Button size="sm" variant="ghost" onClick={onCancel} disabled={saving}>
+          Cancel
+        </Button>
+      </div>
+    </div>
+  );
 }
 
 function RunRow({ run, onOpen, onDelete }) {
   const status = getStatusMeta(run.status);
   const verdict = getVerdictMeta(run.result_artifact?.verdict?.status);
+  const { getToken } = useAppAuth();
+  const { updateRunInList } = useUnderwritingActions();
+
+  const [editMode, setEditMode] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState(null);
+
+  function enterEditMode(e) {
+    e.stopPropagation();
+    setSaveError(null);
+    setEditMode(true);
+  }
+
+  function cancelEdit() {
+    setEditMode(false);
+    setSaveError(null);
+  }
+
+  async function handleSave(name, address) {
+    setSaving(true);
+    setSaveError(null);
+    try {
+      await updateUnderwritingRunMetadata(getToken, run.id, { name, address: address || null });
+      updateRunInList(run.id, { name, address: address || null });
+      setEditMode(false);
+      toast.success('Deal name saved');
+    } catch {
+      setSaveError('Failed to save — please try again');
+    } finally {
+      setSaving(false);
+    }
+  }
 
   return (
-    <div className="underwriting-panel p-4 sm:p-5">
+    <div className="underwriting-panel p-4 sm:p-5 group">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
-        <button
-          type="button"
-          onClick={onOpen}
-          className="min-w-0 flex-1 text-left"
-        >
-          <div className="flex flex-wrap items-center gap-2">
-            <p className="font-display text-xl font-semibold tracking-tight text-foreground">
-              {run.name || 'Untitled analysis'}
-            </p>
-            <UnderwritingStatusBadge tone={status.tone}>{status.label}</UnderwritingStatusBadge>
-            {verdict ? <UnderwritingStatusBadge tone={verdict.tone}>{verdict.label}</UnderwritingStatusBadge> : null}
-          </div>
-          <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2 text-sm text-muted-foreground">
-            <span className="inline-flex items-center gap-1.5">
-              <MapPin className="h-3.5 w-3.5" />
-              {run.address || 'Address not added'}
-            </span>
-            <span>{run.asset_type?.replaceAll('_', ' ') || 'Asset type not set'}</span>
-          </div>
-        </button>
 
-        <div className="flex shrink-0 items-center gap-2 self-start">
+        {/* LEFT: identity */}
+        <div className="min-w-0 flex-1">
+          {editMode ? (
+            <EditNameAddressForm
+              initialName={run.name}
+              initialAddress={run.address}
+              onSave={handleSave}
+              onCancel={cancelEdit}
+              saving={saving}
+              error={saveError}
+            />
+          ) : (
+            <>
+              {/* Name row — not a button; pencil appears on hover */}
+              <div className="flex flex-wrap items-center gap-2">
+                <p className="font-display text-xl font-semibold tracking-tight text-foreground">
+                  {run.name || 'Untitled analysis'}
+                </p>
+                <button
+                  type="button"
+                  onClick={enterEditMode}
+                  aria-label="Edit deal name"
+                  className="rounded-sm p-0.5 text-muted-foreground opacity-0 transition-opacity hover:bg-muted hover:text-foreground group-hover:opacity-100 focus:opacity-100"
+                >
+                  <Pencil className="h-3.5 w-3.5" />
+                </button>
+                <UnderwritingStatusBadge tone={status.tone}>{status.label}</UnderwritingStatusBadge>
+                {verdict ? <UnderwritingStatusBadge tone={verdict.tone}>{verdict.label}</UnderwritingStatusBadge> : null}
+              </div>
+
+              {/* Address + asset type row — clicking this opens the deal */}
+              <button
+                type="button"
+                onClick={onOpen}
+                className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-2 text-left text-sm text-muted-foreground hover:text-foreground transition-colors"
+              >
+                <span className="inline-flex items-center gap-1.5">
+                  <MapPin className="h-3.5 w-3.5" />
+                  {run.address || 'Address not added'}
+                </span>
+                <span>{run.asset_type?.replaceAll('_', ' ') || 'Asset type not set'}</span>
+              </button>
+            </>
+          )}
+        </div>
+
+        {/* RIGHT: Open + Delete */}
+        <div className={`flex shrink-0 items-center gap-2 self-start ${saving ? 'pointer-events-none opacity-50' : ''}`}>
           <Button variant="outline" size="sm" onClick={onOpen}>
             Open
           </Button>
           <AlertDialog>
             <AlertDialogTrigger asChild>
-              <Button variant="ghost" size="icon" className="h-9 w-9 rounded-full text-destructive hover:bg-destructive/10 hover:text-destructive">
+              <Button
+                variant="ghost"
+                size="icon"
+                className="h-9 w-9 rounded-full text-destructive hover:bg-destructive/10 hover:text-destructive"
+              >
                 <Trash2 className="h-4 w-4" />
               </Button>
             </AlertDialogTrigger>
@@ -110,7 +226,10 @@ function RunRow({ run, onOpen, onDelete }) {
               </AlertDialogHeader>
               <AlertDialogFooter>
                 <AlertDialogCancel>Cancel</AlertDialogCancel>
-                <AlertDialogAction onClick={onDelete} className="bg-destructive hover:bg-destructive/90">
+                <AlertDialogAction
+                  onClick={onDelete}
+                  className="bg-destructive hover:bg-destructive/90"
+                >
                   Delete
                 </AlertDialogAction>
               </AlertDialogFooter>
@@ -119,12 +238,19 @@ function RunRow({ run, onOpen, onDelete }) {
         </div>
       </div>
 
+      {/* Metrics grid */}
       <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <UnderwritingMetricCard
           label="IRR"
           value={formatPercent(run.irr)}
           detail="Target return"
-          tone={run.result_artifact?.verdict?.status === 'worth_pursuing' ? 'success' : run.result_artifact?.verdict?.status === 'needs_review' ? 'warning' : 'default'}
+          tone={
+            run.result_artifact?.verdict?.status === 'worth_pursuing'
+              ? 'success'
+              : run.result_artifact?.verdict?.status === 'needs_review'
+              ? 'warning'
+              : 'default'
+          }
           className="p-4"
         />
         <UnderwritingMetricCard
@@ -182,10 +308,13 @@ export default function UnderwritingDashboard() {
   };
 
   const newAnalysisBtn = (
-    <Button onClick={() => navigate('/app/re/underwriting/new')}>
-      <Plus className="mr-1.5 h-4 w-4" />
-      New Analysis
-    </Button>
+    <div className="flex items-center gap-2">
+      <UnderwritingDefaultsModal getToken={getToken} />
+      <Button onClick={() => navigate('/app/re/underwriting/new')}>
+        <Plus className="mr-1.5 h-4 w-4" />
+        New Analysis
+      </Button>
+    </div>
   );
 
   const pageHeader = {
