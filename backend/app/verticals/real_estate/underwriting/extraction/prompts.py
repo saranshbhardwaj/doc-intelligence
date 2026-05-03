@@ -396,8 +396,20 @@ CHUNK TYPES (indicated in each chunk header):
 - Table Chunk: High confidence — extract every numeric column and row.
 - Narrative: Extract only explicitly stated figures (e.g. "$485,000 annual rent"). Skip vague descriptions.
 
-MULTI-COLUMN TABLES: When a table row has values across multiple columns
-(e.g. Current | Year 1 | Pro Forma, or 2024 Actuals | Year 1 Projected | Year 2):
+MULTI-COLUMN TABLES: When a table row has values across multiple period/scenario
+columns, extract a SEPARATE field entry for each column's value. Common self-storage
+OM layouts include:
+- Current | Year 1 | Pro Forma
+- Current | Year-One | Stabilized
+- Actual | Budget | Pro Forma
+- Current | Estimated | Pro Forma
+- 2024 Actuals | Year 1 Projected | Year 2
+
+Normalize the first actual/in-place column as _current. Normalize Year 1, Year-One,
+Yr 1, Year One, Budget, Estimated, or Projected as _year1 only when it is the first
+forward-looking operating column after Current/Actuals. Normalize Pro Forma or
+Stabilized separately; do not collapse them into Year 1.
+
 - Extract a SEPARATE field entry for each column's value for expense line items.
 - Suffix the field name with a normalized column label:
     {"field": "property_taxes_current", "value": "6139", "citations": [...], "source_text": "..."}
@@ -488,8 +500,9 @@ _RENT_ROLL_FIELDS = _rr_reg["rr_fields_for_prompt"] + [
 
 _OM_PHASE2_RULES = """OM MAPPING RULES:
 - "purchase price", "asking price", "listing price" -> purchase_price
-- "current cap rate", "in-place cap rate", "going-in cap rate", and cap rate stated at the asking or purchase basis -> market_cap_rate_purchase
-- "pro forma cap rate", "stabilized cap rate", "exit cap", "going-out cap", "terminal cap" -> exit_cap_rate
+- "current cap rate", "in-place cap rate", "going-in cap rate", and cap rate stated at the asking or purchase basis -> market_cap_rate_purchase. Also set market_cap_rate_purchase_basis_period to "current" for Current/In-Place labels and "going_in" for Going-In labels; this field records the basis period.
+- "year 1 cap rate", "year-one cap rate", or first-year cap rate -> market_cap_rate_purchase only when it is clearly the acquisition/year-one basis. Set market_cap_rate_purchase_basis_period to "year1".
+- "pro forma cap rate", "stabilized cap rate", "exit cap", "going-out cap", "terminal cap" -> exit_cap_rate. Do not map stabilized or pro forma cap rates into market_cap_rate_purchase unless the document explicitly says it is the acquisition basis.
 - "mill rate", "mill levy", "millage", and "$X per $1,000 assessed value" -> property_tax_millage_rate
 - "current tax rate", "tax rate", and "$X per assessed dollar" -> property_tax_rate_per_assessed_dollar only when the unit is clear
 - Property-tax assumptions and footnotes can support explicit tax mechanics. Example: "Y2 has been calculated using the current tax rate ($0.11161)" -> property_tax_rate_per_assessed_dollar = 0.11161
@@ -510,6 +523,7 @@ _OM_PHASE2_RULES = """OM MAPPING RULES:
   _current and _year1 suffixes (e.g. property_taxes_current, property_taxes_year1,
   insurance_current, insurance_year1, repairs_maintenance_current, etc.). Map these
   directly to the schema's corresponding _current and _year1 fields.
+- Period semantics override exact labels. "Budget", "Estimated", or "Projected" can map to Year-1 only when the table structure shows it is the first forward-looking column after Current/Actuals. "Stabilized" and "Pro Forma" are not Year-1 by default.
 - Phase 1 also emitted structure metadata fields. Use them to fill the six detected_*
   schema fields:
     operating_statement_column_structure -> parse into detected_current_column_label

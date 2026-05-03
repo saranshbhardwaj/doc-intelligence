@@ -87,6 +87,14 @@ class OMExtraction(BaseModel):
     closing_cost_pct:         Optional[float] = Field(default=None, description="decimal e.g. 0.02",             json_schema_extra={"cite": True})
     capex_reserve_per_unit:   Optional[float] = Field(default=None, description="capex reserve per unit",        json_schema_extra={"cite": True})
     market_cap_rate_purchase: Optional[float] = Field(default=None, description="decimal e.g. 0.0625",          json_schema_extra={"cite": True})
+    market_cap_rate_purchase_basis_period: Optional[str] = Field(
+        default=None,
+        description=(
+            '"current" | "year1" | "going_in" | "stabilized" | "pro_forma" | "unknown"; '
+            "period/basis label for market_cap_rate_purchase."
+        ),
+        json_schema_extra={"cite": False},
+    )
 
     # ── Property ──────────────────────────────────────────────────────────────
     num_units:      Optional[int]   = Field(default=None, description="total unit count",        json_schema_extra={"cite": True})

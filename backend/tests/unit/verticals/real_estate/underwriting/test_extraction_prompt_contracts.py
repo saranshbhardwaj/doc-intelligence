@@ -77,6 +77,41 @@ def test_rent_roll_prompt_uses_schema_lease_expiration_field():
     assert "lease_end" not in prompt
 
 
+def test_om_schema_exposes_purchase_cap_rate_basis_period():
+    """OM schema should let Phase 2 report whether purchase cap rate is Current/Year-1/etc."""
+    from app.verticals.real_estate.underwriting.extraction.schemas import OMExtraction
+
+    fields = OMExtraction.model_fields
+
+    assert "market_cap_rate_purchase_basis_period" in fields
+    assert fields["market_cap_rate_purchase_basis_period"].json_schema_extra == {"cite": False}
+
+
+def test_phase1_prompt_names_period_semantics_for_self_storage_oms():
+    from app.verticals.real_estate.underwriting.extraction.prompts import (
+        PHASE1_CONDENSATION_SYSTEM_PROMPT,
+    )
+
+    prompt = PHASE1_CONDENSATION_SYSTEM_PROMPT.lower()
+
+    assert "current | year 1 | pro forma" in prompt
+    assert "actual | budget | pro forma" in prompt
+    assert "current | estimated | pro forma" in prompt
+    assert "separate field entry for each column" in prompt
+    assert "never collapse multiple columns" in prompt
+
+
+def test_phase2_prompt_requires_cap_rate_basis_period():
+    from app.verticals.real_estate.underwriting.extraction.prompts import create_phase2_om_prompt
+
+    prompt = create_phase2_om_prompt("[]").lower()
+
+    assert "market_cap_rate_purchase_basis_period" in prompt
+    assert "current cap rate" in prompt
+    assert "basis period" in prompt
+    assert "do not use stabilized" in prompt or "do not map stabilized" in prompt
+
+
 def test_om_tool_schema_has_detection_fields_before_extraction_fields():
     """Detection fields must exist in tool schema and appear before extraction fields."""
     props = REExtractionLLMService._TOOL_SCHEMAS["om"]["properties"]
