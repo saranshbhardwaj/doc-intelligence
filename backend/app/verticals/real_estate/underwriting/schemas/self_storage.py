@@ -10,7 +10,7 @@ from __future__ import annotations
 
 from typing import Literal, Optional
 
-from pydantic import BaseModel, Field, ConfigDict
+from pydantic import BaseModel, Field, ConfigDict, model_validator
 
 
 # ── INPUTS ───────────────────────────────────────────────────────────────────
@@ -482,6 +482,11 @@ class FormulaComputedValues(BaseModel):
     """Numeric values that went into producing a metric — for tooltip display."""
 
     model_config = ConfigDict(extra="allow")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _round_floats(cls, data: dict) -> dict:
+        return {k: round(v, 3) if isinstance(v, float) else v for k, v in data.items()}
 
 
 class FormulaMetadata(BaseModel):
