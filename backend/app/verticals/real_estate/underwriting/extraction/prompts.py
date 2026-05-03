@@ -172,7 +172,7 @@ EXTRACT (as JSON):
 - Financing: loan_amount, interest_rate, loan_term_years, amortization_years, loan_type if stated
 - Exit: hold_period_years, exit_cap_rate, selling_cost_pct, market_cap_rate_sale if stated
 - Broker metrics: broker_cap_rate, broker_noi if stated
-- Unit mix: when a unit-mix overview table is present, extract one row per size/type bucket with section, unit_type, size, standard_sqft, num_units, occupied_units, occupancy_pct, current_rent, market_rent if explicitly separate, rent_per_sqft, potential_rent, occupied_sqft, total_sqft, pct_of_total_sqft
+- Unit mix: when a unit-mix overview table is present, extract one row per size/type bucket with size, standard_sqft, num_units, occupied_units, occupancy_pct, current_rent, market_rent if explicitly separate, rent_per_sqft, potential_rent, occupied_sqft, total_sqft, pct_of_total_sqft
 - Rent comps: when the OM includes a competitive set or nearby facility rent table, extract one row per facility/size bucket with facility, size, asking_rent, rent_per_sqft, distance_mi, and notes for address, year built, square footage, missing data, or specials
 - Never collapse multiple size buckets into one rent_comps row. If a facility lists 5 x 10, 10 x 10, 10 x 15, and 10 x 20, emit four separate rows repeating the same facility, distance, and notes.
 - The size field must contain exactly one size bucket such as "10 x 10". Never place comma-separated sizes, addresses, year built, or square footage in size.
@@ -199,8 +199,8 @@ EXAMPLE OUTPUT (partial — missing fields omitted for brevity):
   "other_income_insurance_annual": 12000.0,
   "other_income_late_fees_annual": 6400.0,
   "unit_mix": [
-    {"section": "Non-Climate", "unit_type": "Non-Climate", "size": "10 x 10", "standard_sqft": 100, "num_units": 48, "occupied_units": 44, "occupancy_pct": 0.917, "current_rent": 89.0, "market_rent": 95.0, "climate_type": "NC", "unit_category": "storage"},
-    {"section": "Non-Climate", "unit_type": "Non-Climate", "size": "10 x 20", "standard_sqft": 200, "num_units": 24, "occupied_units": 21, "occupancy_pct": 0.875, "current_rent": 149.0, "market_rent": 159.0, "climate_type": "NC", "unit_category": "storage"}
+    {"size": "10 x 10", "standard_sqft": 100, "num_units": 48, "occupied_units": 44, "occupancy_pct": 0.917, "current_rent": 89.0, "market_rent": 95.0, "climate_type": "NC", "unit_category": "storage"},
+    {"size": "10 x 20", "standard_sqft": 200, "num_units": 24, "occupied_units": 21, "occupancy_pct": 0.875, "current_rent": 149.0, "market_rent": 159.0, "climate_type": "NC", "unit_category": "storage"}
   ],
   "rent_comps": [
     {"facility": "StoreSmart Dallas", "size": "10 x 10", "asking_rent": 99.0, "rent_per_sqft": 0.99, "distance_mi": 0.8, "climate_type": "NC", "standard_sqft": 100, "notes": "2018 build, drive-up"},
@@ -235,8 +235,6 @@ SUMMARY SCALARS:
 UNIT MIX:
 When a unit-type summary, occupancy-by-size table, or row-level unit list is present, extract one
 row per size/type bucket:
-- section: source section label, such as "Climate Controlled", "Non-Climate", "Parking".
-- unit_type: more specific type if shown; otherwise repeat section.
 - size: exactly one size bucket such as "5 x 10", "10 x 10", or "10 x 20".
 - standard_sqft: numeric area in square feet, e.g. 10 x 10 -> 100.
 - num_units: total units in the bucket.
@@ -267,8 +265,8 @@ EXAMPLE OUTPUT (partial — missing fields omitted for brevity):
   "physical_occupancy_pct": 0.891,
   "avg_in_place_rent_per_unit_monthly": 97.40,
   "unit_mix": [
-    {"section": "Climate Controlled", "unit_type": "Climate Controlled", "size": "5 x 10", "standard_sqft": 50, "num_units": 30, "occupied_units": 27, "occupancy_pct": 0.9, "current_rent": 79.0, "market_rent": 85.0, "climate_type": "CC", "unit_category": "storage"},
-    {"section": "Climate Controlled", "unit_type": "Climate Controlled", "size": "10 x 10", "standard_sqft": 100, "num_units": 40, "occupied_units": 35, "occupancy_pct": 0.875, "current_rent": 109.0, "market_rent": 119.0, "climate_type": "CC", "unit_category": "storage"}
+    {"size": "5 x 10", "standard_sqft": 50, "num_units": 30, "occupied_units": 27, "occupancy_pct": 0.9, "current_rent": 79.0, "market_rent": 85.0, "climate_type": "CC", "unit_category": "storage"},
+    {"size": "10 x 10", "standard_sqft": 100, "num_units": 40, "occupied_units": 35, "occupancy_pct": 0.875, "current_rent": 109.0, "market_rent": 119.0, "climate_type": "CC", "unit_category": "storage"}
   ],
   "lease_records": [
     {"unit_id": "CC-101", "monthly_rent": 109.0, "lease_expiration": "2025-09-30", "sqft": 100},
@@ -461,7 +459,7 @@ _OM_FIELDS = _om_reg["om_fields_for_prompt"] + [
     {
         "name": "unit_mix",
         "type": (
-            'array of {section, unit_type, size, standard_sqft, num_units, occupied_units, '
+            'array of {size, standard_sqft, num_units, occupied_units, '
             'occupancy_pct, current_rent, market_rent, rent_per_sqft, potential_rent, '
             'occupied_sqft, total_sqft, pct_of_total_sqft, '
             'climate_type ("CC"|"NC"|"UNKNOWN"), '

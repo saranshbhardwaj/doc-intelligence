@@ -361,8 +361,6 @@ def test_om_unit_mix_passes_through_to_merged_inputs():
             purchase_price=1_250_000.0,
             unit_mix=[
                 UnitMixRow(
-                    section="NON-CLIMATE",
-                    unit_type="NON-CLIMATE",
                     size="10 x 10",
                     num_units=64,
                     occupied_units=57,
@@ -370,6 +368,8 @@ def test_om_unit_mix_passes_through_to_merged_inputs():
                     current_rent=110.0,
                     rent_per_sqft=1.10,
                     total_sqft=6400.0,
+                    climate_type="NC",
+                    unit_category="storage",
                 )
             ],
         )
@@ -378,7 +378,6 @@ def test_om_unit_mix_passes_through_to_merged_inputs():
     merged, _ = merge_extractions(results)
 
     assert len(merged["unit_mix"]) == 1
-    assert merged["unit_mix"][0]["section"] == "NON-CLIMATE"
     assert merged["unit_mix"][0]["size"] == "10 x 10"
     assert merged["unit_mix"][0]["num_units"] == 64
     assert merged["unit_mix"][0]["occupied_units"] == 57
@@ -390,8 +389,6 @@ def test_rent_roll_unit_mix_beats_om_unit_mix():
             purchase_price=1_250_000.0,
             unit_mix=[
                 UnitMixRow(
-                    section="NON-CLIMATE",
-                    unit_type="10 x 10",
                     size="10 x 10",
                     num_units=64,
                     occupied_units=57,
@@ -402,8 +399,6 @@ def test_rent_roll_unit_mix_beats_om_unit_mix():
             num_units_actual=62,
             unit_mix=[
                 UnitMixRow(
-                    section="NON-CLIMATE",
-                    unit_type="10 x 10",
                     size="10 x 10",
                     num_units=62,
                     occupied_units=59,

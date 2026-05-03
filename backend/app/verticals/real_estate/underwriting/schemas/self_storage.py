@@ -231,14 +231,6 @@ class InvestmentCriteria(BaseModel):
 class UnitMixRow(BaseModel):
     """One row from a self-storage unit-mix schedule."""
 
-    section: Optional[str] = Field(
-        default=None,
-        description="High-level bucket such as NON-CLIMATE, COVERED PARKING, or RESIDENTIAL LEASE.",
-    )
-    unit_type: Optional[str] = Field(
-        default=None,
-        description="Human-readable unit category displayed in result tables.",
-    )
     size: Optional[str] = Field(
         default=None,
         description='Unit size label such as "10 x 10".',

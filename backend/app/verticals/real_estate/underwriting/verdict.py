@@ -242,18 +242,10 @@ def _build_unit_mix_gpr_warning(inputs) -> VerdictWarning | None:
 
 def _row_label(row) -> str:
     if isinstance(row, dict):
-        parts = [
-            row.get("unit_category"),
-            row.get("section"),
-            row.get("unit_type"),
-        ]
+        part = row.get("unit_category")
     else:
-        parts = [
-            getattr(row, "unit_category", None),
-            getattr(row, "section", None),
-            getattr(row, "unit_type", None),
-        ]
-    return " ".join(str(part).strip().lower() for part in parts if part).strip()
+        part = getattr(row, "unit_category", None)
+    return str(part).strip().lower() if part else ""
 
 
 def _is_non_storage_row(row) -> bool:

@@ -15,7 +15,7 @@ function getExpenseBasisTone(source) {
 }
 
 function getUnitTypeBadge(row) {
-  const label = `${row.unit_category || ''} ${row.section || ''} ${row.unit_type || ''}`.toLowerCase();
+  const label = `${row.unit_category || ''}`.toLowerCase();
   if (label.includes('parking')) return <UnderwritingStatusBadge tone="warning">Parking</UnderwritingStatusBadge>;
   if (label.includes('residential')) return <UnderwritingStatusBadge tone="neutral">Residential</UnderwritingStatusBadge>;
   if (label.includes('non-climate') || label.includes('non climate')) {
@@ -36,7 +36,7 @@ function UnitMixStat({ label, value, detail }) {
 }
 
 function unitMixCategory(row) {
-  const label = `${row?.unit_category || ''} ${row?.section || ''} ${row?.unit_type || ''}`.toLowerCase();
+  const label = `${row?.unit_category || ''}`.toLowerCase();
   if (label.includes('residential') || label.includes('apartment')) return 'residential';
   if (label.includes('parking')) return 'parking';
   if (label.includes('office') || label.includes('commercial')) return 'other';
