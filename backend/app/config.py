@@ -43,11 +43,12 @@ class Settings(BaseSettings):
     re_uw_discrepancy_threshold_pct: float = 0.10  # flag if sources differ by > 10%
     re_uw_task_soft_time_limit_seconds: int = 600  # 10 min → SoftTimeLimitExceeded → mark_error
     re_uw_stale_job_timeout_minutes: int = 20  # periodic_cleanup sweeps runs stuck here
-    re_uw_om_context_selector_enabled: bool = True
+    re_uw_om_context_selector_enabled: bool = False
     re_uw_om_context_selector_min_chars: int = 25_000
     re_uw_om_context_max_chars: int = 24_000
     re_uw_om_initial_output_max_tokens: int = 16_000
     re_uw_om_retry_output_max_tokens: int = 32_000
+    re_uw_om_two_call_enabled: bool = True
 
     # ===== EXCEL TEMPLATE MAPPING CONFIGURATION =====
     # Schema-based mapping system for known Excel templates

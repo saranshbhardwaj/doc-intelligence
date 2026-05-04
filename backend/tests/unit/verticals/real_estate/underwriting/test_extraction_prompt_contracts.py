@@ -194,6 +194,7 @@ def test_discrepancy_includes_model_used_and_preferred_source_reason():
 
 def test_om_extraction_uses_initial_output_token_cap(monkeypatch):
     monkeypatch.setattr(settings, "re_uw_om_initial_output_max_tokens", 16_000)
+    monkeypatch.setattr(settings, "re_uw_om_two_call_enabled", False)
     payload = {
         "purchase_price": 2_500_000,
         "purchase_price_citations": ["S1:p1"],
@@ -211,6 +212,7 @@ def test_om_extraction_uses_initial_output_token_cap(monkeypatch):
 def test_om_extraction_retries_with_larger_cap_when_truncated(monkeypatch):
     monkeypatch.setattr(settings, "re_uw_om_initial_output_max_tokens", 16_000)
     monkeypatch.setattr(settings, "re_uw_om_retry_output_max_tokens", 32_000)
+    monkeypatch.setattr(settings, "re_uw_om_two_call_enabled", False)
     payload = {
         "purchase_price": 2_500_000,
         "purchase_price_citations": ["S1:p1"],
@@ -228,7 +230,8 @@ def test_om_extraction_retries_with_larger_cap_when_truncated(monkeypatch):
     assert fake_client.client.messages.max_tokens_seen == [16_000, 32_000]
 
 
-def test_om_extraction_caps_verbose_notes_and_source_text():
+def test_om_extraction_caps_verbose_notes_and_source_text(monkeypatch):
+    monkeypatch.setattr(settings, "re_uw_om_two_call_enabled", False)
     long_note = "A" * 200
     long_source = "Purchase price source text that is much longer than forty characters"
     payload = {
@@ -291,9 +294,10 @@ def test_om_prompt_instructs_zero_current_not_omitted():
            "do not omit it" in prompt
 
 
-def test_om_extraction_populates_year1_expense_fields_from_three_column_statement():
+def test_om_extraction_populates_year1_expense_fields_from_three_column_statement(monkeypatch):
     """When the LLM returns Year-1 and Current values for all five adjustable
     expense line items, the extraction service must surface them in scalars."""
+    monkeypatch.setattr(settings, "re_uw_om_two_call_enabled", False)
     payload = {
         "detected_deal_subtype": "stabilized",
         "detected_current_column_label": "Current",
@@ -365,8 +369,9 @@ def test_om_extraction_populates_year1_expense_fields_from_three_column_statemen
     assert scalars["detected_has_current_column"] is True
 
 
-def test_om_extraction_handles_no_current_column():
+def test_om_extraction_handles_no_current_column(monkeypatch):
     """When detected_has_current_column=False, _current fields absent, _year1 present."""
+    monkeypatch.setattr(settings, "re_uw_om_two_call_enabled", False)
     payload = {
         "detected_deal_subtype": "value_add",
         "detected_current_column_label": None,
@@ -441,3 +446,51 @@ def test_phase2_om_rules_map_suffixed_fields_and_structure_metadata():
     # Must handle explicit $0
     assert "_current=0.0" in prompt or "map it as 0.0" in prompt or \
            "do not omit" in prompt
+
+
+def test_om_structure_detection_prompt_exists_and_mentions_all_six_fields():
+    from app.verticals.real_estate.underwriting.extraction.prompts import OM_STRUCTURE_DETECTION_PROMPT
+    for field in (
+        "detected_deal_subtype",
+        "detected_current_column_label",
+        "detected_year1_column_label",
+        "detected_has_current_column",
+        "detected_expense_format",
+        "detected_income_period_label",
+    ):
+        assert field in OM_STRUCTURE_DETECTION_PROMPT, f"Missing: {field}"
+
+
+def test_create_om_user_prompt_returns_list_of_blocks():
+    from app.verticals.real_estate.underwriting.extraction.prompts import create_om_user_prompt
+    result = create_om_user_prompt("DOC_TEXT")
+    assert isinstance(result, list)
+    assert any(b.get("text") == "DOC_TEXT" for b in result)
+    texts = " ".join(b.get("text", "") for b in result)
+    assert "DETECTED STRUCTURE" not in texts
+
+
+def test_create_om_user_prompt_with_detection_context_injects_block():
+    from app.verticals.real_estate.underwriting.extraction.prompts import create_om_user_prompt
+    ctx = {
+        "detected_deal_subtype": "value_add",
+        "detected_current_column_label": "Current",
+        "detected_year1_column_label": "Year-One",
+        "detected_has_current_column": True,
+        "detected_expense_format": "absolute",
+        "detected_income_period_label": "T-12",
+    }
+    result = create_om_user_prompt("DOC_TEXT", detection_context=ctx)
+    assert isinstance(result, list)
+    texts = " ".join(b.get("text", "") for b in result)
+    assert "DETECTED STRUCTURE" in texts
+    assert "Year-One" in texts
+    # Document block must have cache_control
+    doc_block = next(b for b in result if b.get("text") == "DOC_TEXT")
+    assert "cache_control" in doc_block
+
+
+def test_om_extraction_prompt_no_longer_has_step1_detect_block():
+    from app.verticals.real_estate.underwriting.extraction.prompts import OM_EXTRACTION_SYSTEM_PROMPT
+    assert "STEP 1 — DETECT STRUCTURE" not in OM_EXTRACTION_SYSTEM_PROMPT
+    assert "DETECTED STRUCTURE" in OM_EXTRACTION_SYSTEM_PROMPT

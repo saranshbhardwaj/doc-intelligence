@@ -8,6 +8,43 @@ Three system prompts (100% static, cacheable with Anthropic ephemeral cache):
 
 import json as _json
 
+OM_STRUCTURE_DETECTION_PROMPT = """You are reading a self-storage Offering Memorandum operating statement.
+Your ONLY task is to detect the column structure of the financial table.
+
+Fill exactly these six fields — nothing else:
+
+detected_deal_subtype
+  "stabilized"  — existing operations; Year-1 column reflects post-sale adjustments
+                  (tax reassessment, institutional management).
+  "value_add"   — owner-operated Current column with $0 management/payroll/marketing;
+                  Year-1 adds professional management costs.
+  "unsupported" — ground-up development, non-self-storage asset, or structure unclear.
+
+detected_current_column_label
+  Exact header text of the column representing current operations.
+  Examples: "Current", "2024 Financials", "2023 Actuals", "Trailing 12".
+  Null when no current-period column exists.
+
+detected_year1_column_label
+  Exact header text of the Year-1 projections column.
+  Examples: "Year 1", "Year-One", "Year 1 Projected".
+  Null when absent.
+
+detected_has_current_column
+  true  — a current-operations column exists alongside Year-1.
+  false — Year-1 is the only financial column.
+
+detected_expense_format
+  "absolute" — expense line items are dollar totals.
+  "per_sqft" — expenses are shown as $/sqft rates.
+  "mixed"    — both formats appear.
+
+detected_income_period_label
+  Period the current column covers, exactly as written: "T-12", "T-6",
+  "2024 Actuals", "Trailing 12". Null if not stated.
+
+Do not extract any other fields. Do not extract financial values."""
+
 OM_EXTRACTION_SYSTEM_PROMPT = """You are an expert CRE analyst extracting structured financial data from an Offering Memorandum (OM).
 
 CRITICAL RULES:
@@ -52,18 +89,21 @@ EXTRACT (as JSON):
       Always match by column header, not by picking the largest or middle value.
       Do not use Population Age 25+, Housing Units, or Occupied Units rows for population_3mi.
     - avg_household_income_3mi: average household income within the 3-mile trade area as a float
-      (e.g. "average household income … is $65,499" → 65,499.0). Apply the same radius-column
-      matching rules above. Use the 3-mile figure ONLY — do NOT use metro, MSA, submarket, or
-      city-level income figures even if they appear nearby. If the OM shows a demographics table
+      (e.g. "average household income … is $25,000" → 25,000.0). Apply the same radius-column
+      matching rules above. Use the 3-mile figure ONLY. If the OM shows a demographics table
       with multiple radii (1/3/5 mi), always pick the 3-mile column for this field.
     - storage_sqft_per_capita_3mi: square feet of storage per capita within 3 miles if stated. Apply the same radius-column matching rules above.
 - Acquisition: purchase_price (asking), closing_cost_pct if stated, capex_reserve_per_unit if stated, market_cap_rate_purchase if stated
-- Income (extract from the YEAR 1 column when a multi-column operating statement is present;
-  fall back to Current column only when Year 1 is absent):
+- Column anchors: The DETECTED STRUCTURE block at the top of the user message provides
+  the exact column labels to use. Treat current_column_label and year1_column_label as
+  literal header text anchors. If detected_deal_subtype is "unsupported", return only
+  the six detected_* fields and stop.
+- Income (extract from the year1_column_label column when present; fall back to
+  current_column_label only when year1_column_label is absent):
     - gross_potential_rent_annual: Year 1 Gross Potential Rent (annualised)
     - avg_in_place_rent_per_unit_monthly: average monthly in-place rent per unit ONLY if the OM
       states it as a single explicit aggregate figure (e.g. "Average In-Place Rent: $125/unit/mo"
-      or "Avg Monthly Rent Per Unit: $114"). Do NOT compute or derive this from individual unit-mix
+      or "Avg Monthly Rent Per Unit: $100"). Do NOT compute or derive this from individual unit-mix
       rows — omit if not explicitly stated as an aggregate
     - avg_market_rent_per_unit_monthly: average market rent per unit if explicitly stated; omit otherwise
     - vacancy_pct_projected: Year 1 total economic vacancy as a decimal. Economic vacancy combines
@@ -81,70 +121,41 @@ EXTRACT (as JSON):
         - other_income_misc_annual: "Miscellaneous Income" Year 1
     - rent_growth_pct: annual rent growth assumption if stated
 - Expenses (extract from the operating statement table when present):
-    Prefer the "Year 1" or "Year-One" column for all line items.
-    Use "Current" column only when Year 1 is absent.
-    Never use the "Pro Forma" column for base-case expense inputs.
+    Use year1_column_label for all line items. Never use "Pro Forma" column values.
     Extract each line item as an annual dollar amount (remove $ and commas):
-    - expense_office_admin_annual: "Office & Administrative"
-    - expense_bank_fees_annual: "Bank & Credit Card Fees"
-    - expense_contract_services_annual: "Contract Services (Fire, Security & Grounds)"
-    - expense_miscellaneous_annual: "Miscellaneous"
-    - expense_telephone_annual: "Telephone & Communications"
-    - expense_payroll_annual: "Salaries, Taxes & Benefits (On-Site)"
-    - STEP 1 — DETECT STRUCTURE: Before extracting any expense values, fill these fields:
-        detected_deal_subtype: "stabilized" (existing ops, Year-1 has post-sale adjustments
-          like tax reassessment) | "value_add" (owner-operated Current with $0 management/
-          payroll/marketing; Year-1 adds professional management costs) | "unsupported"
-          (ground-up development, non-self-storage, or unclear).
-        detected_current_column_label: exact column header for current operations —
-          "Current", a calendar year ("2024", "2023"), or a phrase ("2024 Financials",
-          "2023 Actuals", "Trailing 12"). Null if no current column exists.
-        detected_year1_column_label: exact column header for Year-1 projections —
-          "Year 1", "Year-One", "Year 1 Projected". Null if absent.
-        detected_has_current_column: true if a current-operations column exists
-          alongside Year-1, false otherwise.
-        detected_expense_format: "absolute" if expense line items are dollar totals;
-          "per_sqft" if shown as $/sqft (you must multiply by rentable_sqft to produce
-          the annual dollar total); "mixed" if both formats appear.
-        detected_income_period_label: period the current column covers as written —
-          "T-12", "T-6", "2024 Actuals", "Trailing 12". Null if not stated.
-    - STEP 2 — EXTRACT using your detected labels as anchors. For each of the five
-      adjustable expense line items, read _current from detected_current_column_label
-      and _year1 from detected_year1_column_label:
-        • If detected_has_current_column is false: emit only _year1 fields; omit _current.
-        • If detected_expense_format is "per_sqft": multiply rate × rentable_sqft first.
-        • When Current is explicitly $0 (owner-operated): emit _current=0.0 — never omit it.
-        • Never emit only one of the pair when both columns exist. If Year-1 and Current
-          are identical, still emit both.
-        • For tables with more than 3 columns (Year 2, Year 3 ...): ignore beyond Year-1.
-        • If detected_deal_subtype is "unsupported": return only the six detected_* fields.
+    - expense_office_admin_annual: "Office & Administrative" from year1_column_label column
+    - expense_bank_fees_annual: "Bank & Credit Card Fees" from year1_column_label column
+    - expense_contract_services_annual: "Contract Services (Fire, Security & Grounds)" from year1_column_label column
+    - expense_miscellaneous_annual: "Miscellaneous" from year1_column_label column
+    - expense_telephone_annual: "Telephone & Communications" from year1_column_label column
+    - expense_payroll_annual: "Salaries, Taxes & Benefits (On-Site)" from year1_column_label column
+    - Five adjustable expense pairs — emit BOTH _current and _year1 when has_current_column is true:
+        • Read _current from the current_column_label column; read _year1 from the year1_column_label column.
+        • If has_current_column is false: emit only _year1 fields.
+        • If expense_format is "per_sqft": multiply rate × rentable_sqft first.
+        • When Current is explicitly $0: emit _current=0.0 — never omit it.
+        • Never emit only one of the pair when both columns exist (even if values are identical).
+        • Ignore columns beyond Year-1 (Year 2, Year 3, Pro Forma).
+        • COLUMN POSITION RULE: column headers may vary by section. Use column position
+          (second data column in a 3-column table; first projection column in a 6-column table)
+          to identify Year-1 when header text differs from year1_column_label.
       - expense_property_tax_annual_year1 / expense_property_tax_annual_current:
-          "Property Taxes". Extract the dollar amount directly from each column —
-          do not compute from assessed value or tax rate.
-      - expense_insurance_annual_year1 / expense_insurance_annual_current:
-          "Property Insurance".
-      - expense_repairs_maintenance_annual_year1 / expense_repairs_maintenance_annual_current:
-          "Repairs, Maintenance & Reserves".
-      - expense_marketing_annual_year1 / expense_marketing_annual_current:
-          "Marketing & Promotion".
-      - expense_utilities_annual_year1 / expense_utilities_annual_current:
-          "Utilities & Trash".
-      EXPECTED OUTPUT SHAPE (both fields required when detected_has_current_column is true):
-        expense_property_tax_annual_current        = [dollar amount from detected_current_column_label column]
-        expense_property_tax_annual_year1          = [dollar amount from detected_year1_column_label column]  ← DO NOT OMIT
-        expense_insurance_annual_current           = [dollar amount from detected_current_column_label column]
-        expense_insurance_annual_year1             = [dollar amount from detected_year1_column_label column]  ← DO NOT OMIT
-        expense_repairs_maintenance_annual_current = [dollar amount from detected_current_column_label column]
-        expense_repairs_maintenance_annual_year1   = [dollar amount from detected_year1_column_label column]  ← DO NOT OMIT
-        expense_marketing_annual_current           = [dollar amount from detected_current_column_label column]
-        expense_marketing_annual_year1             = [dollar amount from detected_year1_column_label column]  ← DO NOT OMIT
-        expense_utilities_annual_current           = [dollar amount from detected_current_column_label column]
-        expense_utilities_annual_year1             = [dollar amount from detected_year1_column_label column]  ← DO NOT OMIT
-      COLUMN POSITION RULE: Within a single document, column headers may vary by section.
-        The expense table may label Year-1 as "Estimated" or "Projected" rather than the
-        exact detected_year1_column_label text. Use column position (second data column in
-        a 3-column table; first projection column in a 6-column table) to identify Year-1,
-        not header text matching.
+          "Property Taxes". Extract dollar amount directly — do not compute from assessed value or tax rate.
+      - expense_insurance_annual_year1 / expense_insurance_annual_current: "Property Insurance".
+      - expense_repairs_maintenance_annual_year1 / expense_repairs_maintenance_annual_current: "Repairs, Maintenance & Reserves".
+      - expense_marketing_annual_year1 / expense_marketing_annual_current: "Marketing & Promotion".
+      - expense_utilities_annual_year1 / expense_utilities_annual_current: "Utilities & Trash".
+      REQUIRED OUTPUT (when has_current_column is true — DO NOT OMIT _year1 fields):
+        expense_property_tax_annual_current        = [$ from current_column_label]
+        expense_property_tax_annual_year1          = [$ from year1_column_label]
+        expense_insurance_annual_current           = [$ from current_column_label]
+        expense_insurance_annual_year1             = [$ from year1_column_label]
+        expense_repairs_maintenance_annual_current = [$ from current_column_label]
+        expense_repairs_maintenance_annual_year1   = [$ from year1_column_label]
+        expense_marketing_annual_current           = [$ from current_column_label]
+        expense_marketing_annual_year1             = [$ from year1_column_label]
+        expense_utilities_annual_current           = [$ from current_column_label]
+        expense_utilities_annual_year1             = [$ from year1_column_label]
     - expense_mgmt_fee_annual: "Third Party Management (Off-Site)"
     - expense_total_annual: "Total Operating Expenses"
     - noi_year_one_stated: "Net Operating Income" from Year 1 column
@@ -355,13 +366,36 @@ EXAMPLE OUTPUT (partial — missing fields omitted for brevity):
 Return as valid JSON only. No explanations."""
 
 
-def create_om_user_prompt(document_text: str) -> str:
-    """Wrap document text for OM extraction."""
-    return f"""Extract underwriting data from this Offering Memorandum:
+def create_om_user_prompt(
+    document_text: str,
+    detection_context: dict | None = None,
+) -> list[dict]:
+    """Build user message content blocks for OM extraction.
 
-{document_text}
+    The document text is always in a separate cached block so Call 2
+    gets a cache hit when called after _detect_om_structure.
+    """
+    if detection_context:
+        dc = detection_context
+        has_current = dc.get("detected_has_current_column")
+        preamble = (
+            "DETECTED STRUCTURE (copy verbatim into output fields — do not re-derive):\n"
+            f"  deal_subtype         = {dc.get('detected_deal_subtype')}\n"
+            f"  current_column_label = {dc.get('detected_current_column_label')}\n"
+            f"  year1_column_label   = {dc.get('detected_year1_column_label')}\n"
+            f"  has_current_column   = {str(has_current).lower() if has_current is not None else 'null'}\n"
+            f"  expense_format       = {dc.get('detected_expense_format')}\n"
+            f"  income_period_label  = {dc.get('detected_income_period_label')}\n"
+            "\nUsing these column labels, extract underwriting data from this Offering Memorandum:"
+        )
+    else:
+        preamble = "Extract underwriting data from this Offering Memorandum:"
 
-Return extracted data as JSON."""
+    return [
+        {"type": "text", "text": preamble},
+        {"type": "text", "text": document_text, "cache_control": {"type": "ephemeral"}},
+        {"type": "text", "text": "\nReturn extracted data as JSON."},
+    ]
 
 
 def create_rent_roll_user_prompt(document_text: str) -> str:

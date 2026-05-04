@@ -10,6 +10,7 @@ from app.utils.metrics import (
 )
 from app.utils.costs import compute_llm_cost
 from .prompts import (
+    OM_STRUCTURE_DETECTION_PROMPT,
     OM_EXTRACTION_SYSTEM_PROMPT,
     RENT_ROLL_EXTRACTION_SYSTEM_PROMPT,
     T12_EXTRACTION_SYSTEM_PROMPT,
@@ -24,6 +25,15 @@ from .prompts import (
 )
 from .rent_comp_repair import repair_om_rent_comp_rows
 from .schemas import OMExtraction, T12Extraction, RentRollExtraction, CondensedBatchExtraction, _OM_REGISTRY
+
+_OM_DETECTION_FIELD_NAMES: tuple[str, ...] = (
+    "detected_deal_subtype",
+    "detected_current_column_label",
+    "detected_year1_column_label",
+    "detected_has_current_column",
+    "detected_expense_format",
+    "detected_income_period_label",
+)
 
 
 class REExtractionLLMService:
@@ -66,11 +76,113 @@ class REExtractionLLMService:
         except Exception as e:
             logger.warning(f"Failed to record RE underwriting LLM metrics ({stage}): {e}")
 
+    def _detect_om_structure(self, document_text: str) -> dict | None:
+        """Call 1 of the two-call OM flow — detects column structure only.
+
+        Returns dict with the 6 detected_* keys, or None on failure.
+        The document_text block is cached (cache_control: ephemeral) so that
+        Call 2 (_extract) gets a cache hit when it sends the same block.
+        """
+        t0 = time.time()
+        try:
+            message = self.client.messages.create(
+                model=self.model,
+                max_tokens=512,
+                temperature=0.0,
+                system=[
+                    {
+                        "type": "text",
+                        "text": OM_STRUCTURE_DETECTION_PROMPT,
+                        "cache_control": {"type": "ephemeral"},
+                    }
+                ],
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": "Detect the column structure of this Offering Memorandum:"},
+                            {"type": "text", "text": document_text, "cache_control": {"type": "ephemeral"}},
+                            {"type": "text", "text": "Return only the six detection fields."},
+                        ],
+                    }
+                ],
+                tools=[
+                    {
+                        "name": "detect_om_structure",
+                        "description": "Detect the column structure of a self-storage OM operating statement.",
+                        "input_schema": self._TOOL_SCHEMAS["om_detection"],
+                    }
+                ],
+                tool_choice={"type": "tool", "name": "detect_om_structure"},
+            )
+
+            tool_block = next((b for b in message.content if b.type == "tool_use"), None)
+            if tool_block is None:
+                logger.warning(
+                    "OM structure detection: no tool_use block returned",
+                    extra={"run_id": self.run_id},
+                )
+                return None
+
+            raw: dict = tool_block.input
+            detection = {k: raw.get(k) for k in _OM_DETECTION_FIELD_NAMES}
+
+            usage = message.usage
+            input_tokens = usage.input_tokens or 0
+            output_tokens = usage.output_tokens or 0
+            cache_write = getattr(usage, "cache_creation_input_tokens", 0) or 0
+            cache_read = getattr(usage, "cache_read_input_tokens", 0) or 0
+            logger.info(
+                f"OM structure detection: deal_subtype={detection.get('detected_deal_subtype')!r} "
+                f"year1_col={detection.get('detected_year1_column_label')!r} "
+                f"has_current={detection.get('detected_has_current_column')} "
+                f"tokens in={input_tokens} out={output_tokens} "
+                f"cache_read={cache_read} cache_write={cache_write} "
+                f"duration={int((time.time() - t0) * 1000)}ms",
+                extra={"run_id": self.run_id},
+            )
+            self._record_llm_metrics(
+                input_tokens, output_tokens, cache_read, cache_write,
+                stage="detect_om_structure",
+            )
+            return detection
+
+        except Exception as e:
+            logger.error(
+                f"OM structure detection failed: {e}",
+                extra={"run_id": self.run_id},
+            )
+            return None
+
     def extract_om(self, document_text: str) -> dict:
-        """Extract from Offering Memorandum. Returns {scalars, field_citations}."""
+        """Extract from Offering Memorandum using two sequential LLM calls.
+
+        Call 1 detects column structure. Call 2 extracts with detected structure
+        injected as explicit context. The document text block is cached across
+        both calls for ~10x cost savings on Call 2's input tokens.
+
+        Falls back to single-call if Call 1 fails.
+        """
+        detection_context: dict | None = None
+
+        if settings.re_uw_om_two_call_enabled:
+            detection_context = self._detect_om_structure(document_text)
+            if detection_context is None:
+                logger.warning(
+                    "OM structure detection returned None — falling back to single-call extraction",
+                    extra={"run_id": self.run_id},
+                )
+            elif detection_context.get("detected_deal_subtype") == "unsupported":
+                logger.info(
+                    "OM detected as unsupported deal subtype — returning detection fields only",
+                    extra={"run_id": self.run_id},
+                )
+                result = OMExtraction(**detection_context).model_dump()
+                return {"scalars": result, "field_citations": {}}
+
         return self._extract(
             system_prompt=OM_EXTRACTION_SYSTEM_PROMPT,
-            user_prompt=create_om_user_prompt(document_text),
+            user_prompt=create_om_user_prompt(document_text, detection_context),
             doc_type="om",
             schema_cls=OMExtraction,
             source_context=document_text,
@@ -197,6 +309,54 @@ class REExtractionLLMService:
         return {"type": "object", "properties": base}
 
     @classmethod
+    def _build_detection_schema(cls) -> dict:
+        """Minimal tool schema for Call 1 — only the 6 structural detection fields."""
+        return {
+            "type": "object",
+            "properties": {
+                "detected_deal_subtype": {
+                    "type": "string",
+                    "description": (
+                        '"stabilized" | "value_add" | "unsupported". '
+                        "stabilized = existing ops with Year-1 post-sale adjustments. "
+                        "value_add = owner-operated Current, Year-1 adds pro management. "
+                        "unsupported = development, non-self-storage, or unclear."
+                    ),
+                },
+                "detected_current_column_label": {
+                    "type": "string",
+                    "description": (
+                        'Exact header text of the current-operations column. '
+                        'e.g. "Current", "2024 Financials", "Trailing 12". '
+                        "Null if no current-period column exists."
+                    ),
+                },
+                "detected_year1_column_label": {
+                    "type": "string",
+                    "description": (
+                        'Exact header text of the Year-1 projections column. '
+                        'e.g. "Year 1", "Year-One", "Year 1 Projected".'
+                    ),
+                },
+                "detected_has_current_column": {
+                    "type": "boolean",
+                    "description": "True if a current-operations column exists alongside Year-1.",
+                },
+                "detected_expense_format": {
+                    "type": "string",
+                    "description": '"absolute" | "per_sqft" | "mixed".',
+                },
+                "detected_income_period_label": {
+                    "type": "string",
+                    "description": (
+                        'Period the current column covers as written: '
+                        '"T-12", "T-6", "2024 Actuals", "Trailing 12". Null if not stated.'
+                    ),
+                },
+            },
+        }
+
+    @classmethod
     def _build_rent_roll_schema(cls) -> dict:
         base = {
             "num_units_actual":       {"type": "integer"},
@@ -273,7 +433,7 @@ class REExtractionLLMService:
     def _extract(
         self,
         system_prompt: str,
-        user_prompt: str,
+        user_prompt: str | list[dict],
         doc_type: str,
         schema_cls,
         source_context: str | None = None,
@@ -301,7 +461,10 @@ class REExtractionLLMService:
                             "cache_control": {"type": "ephemeral"},
                         }
                     ],
-                    messages=[{"role": "user", "content": user_prompt}],
+                    messages=[{
+                        "role": "user",
+                        "content": user_prompt if isinstance(user_prompt, list) else [{"type": "text", "text": user_prompt}],
+                    }],
                     tools=[{
                         "name": tool_name,
                         "description": f"Extract structured underwriting data from this {doc_type.upper()} document.",
@@ -645,7 +808,8 @@ class REExtractionLLMService:
 
 # Populate _TOOL_SCHEMAS after class definition so classmethods are available
 REExtractionLLMService._TOOL_SCHEMAS = {
-    "om":        REExtractionLLMService._build_om_schema(),
-    "t12":       REExtractionLLMService._build_t12_schema(),
-    "rent_roll": REExtractionLLMService._build_rent_roll_schema(),
+    "om":           REExtractionLLMService._build_om_schema(),
+    "t12":          REExtractionLLMService._build_t12_schema(),
+    "rent_roll":    REExtractionLLMService._build_rent_roll_schema(),
+    "om_detection": REExtractionLLMService._build_detection_schema(),
 }
