@@ -101,6 +101,18 @@ def test_phase1_prompt_names_period_semantics_for_self_storage_oms():
     assert "never collapse multiple columns" in prompt
 
 
+def test_phase1_prompt_extracts_demographic_market_chunks_concisely():
+    from app.verticals.real_estate.underwriting.extraction.prompts import (
+        PHASE1_CONDENSATION_SYSTEM_PROMPT,
+    )
+
+    prompt = PHASE1_CONDENSATION_SYSTEM_PROMPT.lower()
+
+    assert "demographic, market, competition" in prompt
+    assert "preserve radius labels" in prompt
+    assert prompt.count("1 mile | 3 miles | 5 miles") == 0
+
+
 def test_phase2_prompt_requires_cap_rate_basis_period():
     from app.verticals.real_estate.underwriting.extraction.prompts import create_phase2_om_prompt
 
@@ -264,14 +276,15 @@ def test_om_prompt_requires_year1_fields_from_three_column_statement():
     """Prompt must use detection-first approach for dual _year1/_current fields."""
     prompt = OM_EXTRACTION_SYSTEM_PROMPT
 
-    # Detection-first anchors must be present
-    assert "detected_current_column_label" in prompt
-    assert "detected_year1_column_label" in prompt
-    assert "detected_has_current_column" in prompt
+    # Detection-first anchors must be present in normalized form.
+    assert "DETECTED STRUCTURE" in prompt
+    assert "current_column_label" in prompt
+    assert "year1_column_label" in prompt
+    assert "has_current_column" in prompt
     assert "detected_deal_subtype" in prompt
 
     # Must explicitly handle no-current-column case
-    assert "detected_has_current_column is false" in prompt.lower()
+    assert "if has_current_column is false" in prompt.lower()
 
     # Per-sqft handling must be mentioned
     assert "per_sqft" in prompt
@@ -488,6 +501,37 @@ def test_create_om_user_prompt_with_detection_context_injects_block():
     # Document block must have cache_control
     doc_block = next(b for b in result if b.get("text") == "DOC_TEXT")
     assert "cache_control" in doc_block
+
+
+def test_om_user_prompt_routes_call2_demographic_context():
+    from app.verticals.real_estate.underwriting.extraction.prompts import create_om_user_prompt
+
+    ctx = {
+        "detected_deal_subtype": "stabilized",
+        "detected_current_column_label": "Current",
+        "detected_year1_column_label": "Year 1",
+        "detected_has_current_column": True,
+        "detected_expense_format": "absolute",
+        "detected_income_period_label": "T-12",
+    }
+
+    blocks = create_om_user_prompt("TABLE_KV_PAGE1_DEMOGRAPHIC_CONTEXT", detection_context=ctx)
+    text = " ".join(block.get("text", "") for block in blocks if isinstance(block, dict))
+
+    assert "Use detected structure for operating statement fields" in text
+    assert "demographic, market, competition" in text
+    assert text.count("3-mile") <= 1
+
+
+def test_create_om_user_prompt_with_supplemental_context_adds_extra_block():
+    from app.verticals.real_estate.underwriting.extraction.prompts import create_om_user_prompt
+
+    result = create_om_user_prompt("DOC_TEXT", supplemental_context="PAGE_1_TEXT")
+
+    texts = " ".join(b.get("text", "") for b in result)
+    assert "DOC_TEXT" in texts
+    assert "PAGE_1_TEXT" in texts
+    assert "Additional page-1 OM context" in texts
 
 
 def test_om_extraction_prompt_no_longer_has_step1_detect_block():

@@ -14,6 +14,7 @@ from .prompts import (
     OM_EXTRACTION_SYSTEM_PROMPT,
     RENT_ROLL_EXTRACTION_SYSTEM_PROMPT,
     T12_EXTRACTION_SYSTEM_PROMPT,
+    create_om_detection_user_prompt,
     create_om_user_prompt,
     create_rent_roll_user_prompt,
     create_t12_user_prompt,
@@ -80,8 +81,8 @@ class REExtractionLLMService:
         """Call 1 of the two-call OM flow — detects column structure only.
 
         Returns dict with the 6 detected_* keys, or None on failure.
-        The document_text block is cached (cache_control: ephemeral) so that
-        Call 2 (_extract) gets a cache hit when it sends the same block.
+        The detection text block is cached (cache_control: ephemeral). When
+        Call 2 sends the same text, Anthropic can reuse that cached block.
         """
         t0 = time.time()
         try:
@@ -99,11 +100,7 @@ class REExtractionLLMService:
                 messages=[
                     {
                         "role": "user",
-                        "content": [
-                            {"type": "text", "text": "Detect the column structure of this Offering Memorandum:"},
-                            {"type": "text", "text": document_text, "cache_control": {"type": "ephemeral"}},
-                            {"type": "text", "text": "Return only the six detection fields."},
-                        ],
+                        "content": create_om_detection_user_prompt(document_text),
                     }
                 ],
                 tools=[
@@ -154,19 +151,28 @@ class REExtractionLLMService:
             )
             return None
 
-    def extract_om(self, document_text: str) -> dict:
+    def extract_om(
+        self,
+        document_text: str,
+        supplemental_context: str | None = None,
+        structure_context: str | None = None,
+    ) -> dict:
         """Extract from Offering Memorandum using two sequential LLM calls.
 
-        Call 1 detects column structure. Call 2 extracts with detected structure
-        injected as explicit context. The document text block is cached across
-        both calls for ~10x cost savings on Call 2's input tokens.
+        Call 1 detects column structure from structure_context when provided,
+        otherwise from document_text. Call 2 extracts from document_text with
+        detected structure injected as explicit context.
 
         Falls back to single-call if Call 1 fails.
         """
         detection_context: dict | None = None
+        detection_source_context = structure_context or document_text
+        source_context = document_text
+        if supplemental_context:
+            source_context = f"{supplemental_context}\n\n{document_text}"
 
         if settings.re_uw_om_two_call_enabled:
-            detection_context = self._detect_om_structure(document_text)
+            detection_context = self._detect_om_structure(detection_source_context)
             if detection_context is None:
                 logger.warning(
                     "OM structure detection returned None — falling back to single-call extraction",
@@ -182,10 +188,14 @@ class REExtractionLLMService:
 
         return self._extract(
             system_prompt=OM_EXTRACTION_SYSTEM_PROMPT,
-            user_prompt=create_om_user_prompt(document_text, detection_context),
+            user_prompt=create_om_user_prompt(
+                document_text,
+                detection_context,
+                supplemental_context=supplemental_context,
+            ),
             doc_type="om",
             schema_cls=OMExtraction,
-            source_context=document_text,
+            source_context=source_context,
             max_tokens=settings.re_uw_om_initial_output_max_tokens,
             retry_max_tokens=settings.re_uw_om_retry_output_max_tokens,
         )

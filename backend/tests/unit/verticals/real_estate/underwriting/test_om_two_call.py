@@ -124,10 +124,19 @@ def test_extract_om_two_calls_detection_then_extraction(mock_settings):
         _make_message(extraction_fields),
     ]
 
-    result = svc.extract_om("doc text")
+    result = svc.extract_om(
+        "page 1 narrative\n\nkv and demographic context",
+        structure_context="operating statement table context",
+    )
 
     assert svc.client.messages.create.call_count == 2
     assert result["scalars"]["detected_year1_column_label"] == "Year-One"
+
+    call1 = svc.client.messages.create.call_args_list[0]
+    call1_content = call1[1]["messages"][0]["content"]
+    call1_text = " ".join(b.get("text", "") for b in call1_content if isinstance(b, dict))
+    assert "operating statement table context" in call1_text
+    assert "kv and demographic context" not in call1_text
 
     # Call 2 user message must contain DETECTED STRUCTURE
     call2 = svc.client.messages.create.call_args_list[1]
@@ -136,6 +145,41 @@ def test_extract_om_two_calls_detection_then_extraction(mock_settings):
     all_text = " ".join(b.get("text", "") for b in content if isinstance(b, dict))
     assert "DETECTED STRUCTURE" in all_text
     assert "Year-One" in all_text
+    assert "kv and demographic context" in all_text
+    assert "operating statement table context" not in all_text
+    assert "page 1 narrative" in all_text
+
+
+@patch("app.verticals.real_estate.underwriting.extraction.llm_service.settings")
+def test_extract_om_uses_document_text_for_detection_when_structure_context_absent(mock_settings):
+    mock_settings.re_uw_om_two_call_enabled = True
+    mock_settings.re_uw_om_initial_output_max_tokens = 16000
+    mock_settings.re_uw_om_retry_output_max_tokens = 32000
+
+    svc = _make_service()
+    detection_fields = {
+        "detected_deal_subtype": "stabilized",
+        "detected_current_column_label": "Current",
+        "detected_year1_column_label": "Year 1",
+        "detected_has_current_column": True,
+        "detected_expense_format": "absolute",
+        "detected_income_period_label": "T-12",
+    }
+    extraction_fields = {
+        **detection_fields,
+        "purchase_price": 2500000.0,
+    }
+    svc.client.messages.create.side_effect = [
+        _make_message(detection_fields),
+        _make_message(extraction_fields),
+    ]
+
+    svc.extract_om("same context for both calls")
+
+    call1 = svc.client.messages.create.call_args_list[0]
+    call1_content = call1[1]["messages"][0]["content"]
+    call1_text = " ".join(b.get("text", "") for b in call1_content if isinstance(b, dict))
+    assert "same context for both calls" in call1_text
 
 
 @patch("app.verticals.real_estate.underwriting.extraction.llm_service.settings")

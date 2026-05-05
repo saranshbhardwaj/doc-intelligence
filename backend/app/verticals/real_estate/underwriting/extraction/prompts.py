@@ -366,9 +366,19 @@ EXAMPLE OUTPUT (partial — missing fields omitted for brevity):
 Return as valid JSON only. No explanations."""
 
 
+def create_om_detection_user_prompt(document_text: str) -> list[dict]:
+  """Build user message content blocks for OM structure detection."""
+  return [
+    {"type": "text", "text": "Detect the column structure of this Offering Memorandum:"},
+    {"type": "text", "text": document_text, "cache_control": {"type": "ephemeral"}},
+    {"type": "text", "text": "Return only the six detection fields."},
+  ]
+
+
 def create_om_user_prompt(
-    document_text: str,
-    detection_context: dict | None = None,
+  document_text: str,
+  detection_context: dict | None = None,
+  supplemental_context: str | None = None,
 ) -> list[dict]:
     """Build user message content blocks for OM extraction.
 
@@ -386,16 +396,24 @@ def create_om_user_prompt(
             f"  has_current_column   = {str(has_current).lower() if has_current is not None else 'null'}\n"
             f"  expense_format       = {dc.get('detected_expense_format')}\n"
             f"  income_period_label  = {dc.get('detected_income_period_label')}\n"
-            "\nUsing these column labels, extract underwriting data from this Offering Memorandum:"
+            "\nUse detected structure for operating statement fields. Use demographic, market, competition, rent-comp, and trade-area context for demographic fields. Extract underwriting data from this Offering Memorandum:"
         )
     else:
         preamble = "Extract underwriting data from this Offering Memorandum:"
 
-    return [
+    blocks = [
         {"type": "text", "text": preamble},
         {"type": "text", "text": document_text, "cache_control": {"type": "ephemeral"}},
-        {"type": "text", "text": "\nReturn extracted data as JSON."},
     ]
+    if supplemental_context:
+      blocks.extend(
+        [
+          {"type": "text", "text": "\nAdditional page-1 OM context:"},
+          {"type": "text", "text": supplemental_context},
+        ]
+      )
+    blocks.append({"type": "text", "text": "\nReturn extracted data as JSON."})
+    return blocks
 
 
 def create_rent_roll_user_prompt(document_text: str) -> str:
@@ -427,6 +445,8 @@ CHUNK TYPES (indicated in each chunk header):
 - KV Pair: Highest confidence — data is already structured. Extract exactly as shown.
 - Table Chunk: High confidence — extract every numeric column and row.
 - Narrative: Extract only explicitly stated figures (e.g. "$485,000 annual rent"). Skip vague descriptions.
+
+DEMOGRAPHIC / MARKET CHUNKS: For demographic, market, competition, and trade-area chunks, extract explicit population, household income, storage-square-foot-per-capita, and nearby facility counts. Preserve radius labels and source text.
 
 MULTI-COLUMN TABLES: When a table row has values across multiple period/scenario
 columns, extract a SEPARATE field entry for each column's value. Common self-storage
