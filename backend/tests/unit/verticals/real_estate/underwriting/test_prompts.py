@@ -45,6 +45,9 @@ def test_om_prompt_uses_three_mile_column_for_demographics():
     # Header-matching rule, not value-picking
     assert "match by" in prompt or "match the column" in prompt
     assert "do not" in prompt and ("largest" in prompt or "middle value" in prompt)
+    assert "selected geography" in prompt
+    assert "radius-labeled tables override" in prompt
+    assert "explicitly label" in prompt and "3-mile" in prompt
     # Exclude non-population rows
     assert "do not use population age 25+" in prompt or "do not use age-25+" in prompt
     # Variant layouts
@@ -54,5 +57,10 @@ def test_om_prompt_uses_three_mile_column_for_demographics():
     assert "omit population_3mi" in prompt
     # Income and sqft fields follow the same rule
     assert "avg_household_income_3mi" in prompt
+    assert "average household income" in prompt
+    assert "median household income" in prompt
+    assert "per capita income" in prompt
+    assert "income distribution" in prompt
+    assert "narrative income summaries" in prompt
     assert "storage_sqft_per_capita_3mi" in prompt
     assert "same radius-column matching rules" in prompt or "same" in prompt and "radius" in prompt

@@ -339,7 +339,7 @@ def test_om_two_call_splits_structure_and_extraction_contexts(monkeypatch):
         _make_chunk("Cover page property overview", page=1),
         _make_chunk("Purchase Price: $2,500,000", page=2, section_type="key_value"),
         _make_chunk("Operating Statement | Current | Year 1 | Pro Forma | NOI", page=4, is_tabular=True),
-        _make_chunk("Population demographics household income square feet per capita", page=7),
+        _make_chunk("3-mile Population demographics household income square feet per capita", page=7),
     ]
 
     class FakeService:
@@ -390,6 +390,8 @@ def test_om_two_call_splits_structure_and_extraction_contexts(monkeypatch):
     assert metadata["source"] == "split_contexts"
     assert metadata["structure_chunk_count"] == 1
     assert metadata["extraction_chunk_count"] == 4
+    assert metadata["structure_char_count"] > 0
+    assert metadata["extraction_char_count"] > metadata["structure_char_count"]
     assert metadata["structure_used_fallback"] is False
     assert metadata["extraction_used_fallback"] is False
 
@@ -436,7 +438,58 @@ def test_om_two_call_call1_falls_back_when_no_tables(monkeypatch):
     assert "Cover page" in structure_context
     assert "Purchase Price" in structure_context
     assert "Population demographics" in structure_context
-    assert "Population demographics" in context
+    assert "Population demographics" not in context
     assert result.om.purchase_price == 2_500_000.0
     metadata = result.extraction_metadata["om_two_call_contexts"]
     assert metadata["structure_used_fallback"] is True
+
+
+def test_om_two_call_excludes_generic_selected_geography_narrative(monkeypatch):
+    monkeypatch.setattr(settings, "re_uw_om_two_call_enabled", True)
+
+    chunks = [
+        _make_chunk("Cover page property overview", page=1),
+        _make_chunk("Purchase Price: $2,500,000", page=2, section_type="key_value"),
+        _make_chunk("Operating Statement | Current | Year 1 | NOI", page=4, is_tabular=True),
+        _make_chunk(
+            "In 2023, the population in your selected geography is 153,689. "
+            "The current year's average household income in your area is $65,499.",
+            page=26,
+        ),
+        _make_chunk(
+            "Within 3 miles, the population is 63,110 and average household income is $49,306.",
+            page=27,
+        ),
+    ]
+
+    class FakeService:
+        def __init__(self):
+            self.calls = []
+
+        def extract_om(self, context, supplemental_context=None, structure_context=None):
+            self.calls.append(context)
+            return {
+                "scalars": {
+                    "purchase_price": 2_500_000.0,
+                    "num_units": 205,
+                    "gpr_annual_projected": 285_740.0,
+                    "rentable_sqft": 21_017.0,
+                    "market_cap_rate_purchase": 0.0811,
+                    "vacancy_pct_projected": 0.1278,
+                    "other_income_annual": 34_278.0,
+                    "expense_ratio_pro_forma": 0.2778,
+                    "noi_year_one_stated": 202_790.0,
+                    "rent_comps": [],
+                    "unit_mix": [],
+                },
+                "field_citations": {},
+            }
+
+    service = FakeService()
+    result = extract_document("run-1", "job-1", "om", chunks, service)
+
+    extraction_context = service.calls[0]
+    assert "selected geography is 153,689" not in extraction_context
+    assert "population is 63,110" in extraction_context
+    metadata = result.extraction_metadata["om_two_call_contexts"]
+    assert metadata["extraction_chunk_count"] == 4

@@ -109,15 +109,26 @@ _OM_FINANCIAL_TABLE_KEYWORDS = (
     "stabilized",
 )
 
-_OM_DEMOGRAPHIC_MARKET_KEYWORDS = (
+_OM_DEMOGRAPHIC_KEYWORDS = (
     "demographic",
     "population",
     "household income",
     "average household income",
     "storage sqft",
     "square feet per capita",
-    "trade area",
-    "market overview",
+)
+
+_OM_DEMOGRAPHIC_RADIUS_KEYWORDS = (
+    "3 mile",
+    "3-mile",
+    "3 miles",
+    "3-miles",
+    "within 3",
+    "1 mile | 3 miles | 5 miles",
+    "1 mile 3 miles 5 miles",
+)
+
+_OM_MARKET_COMPETITION_KEYWORDS = (
     "competition",
     "competitive",
     "competitor",
@@ -125,6 +136,7 @@ _OM_DEMOGRAPHIC_MARKET_KEYWORDS = (
     "facility",
     "rent comp",
     "rent comparable",
+    "storage supply",
 )
 
 
@@ -159,8 +171,18 @@ def _is_om_financial_table_chunk(chunk) -> bool:
     )
 
 
+def _is_om_demographic_market_haystack(haystack: str) -> bool:
+    has_demographics = _has_any_keyword(haystack, _OM_DEMOGRAPHIC_KEYWORDS)
+    has_radius = _has_any_keyword(haystack, _OM_DEMOGRAPHIC_RADIUS_KEYWORDS)
+    has_market_competition = _has_any_keyword(haystack, _OM_MARKET_COMPETITION_KEYWORDS)
+
+    if has_demographics:
+        return has_radius or has_market_competition
+    return has_market_competition
+
+
 def _is_om_demographic_market_chunk(chunk) -> bool:
-    return _has_any_keyword(_chunk_haystack(chunk), _OM_DEMOGRAPHIC_MARKET_KEYWORDS)
+    return _is_om_demographic_market_haystack(_chunk_haystack(chunk))
 
 
 def build_chunk_context(chunks: list, source_index: int) -> str:
@@ -219,7 +241,7 @@ def _build_om_two_call_contexts(chunks: list, source_index: int) -> tuple[str, s
             page_one_indexes.add(index)
         if section_type in {"key_value_pairs", "key_value"}:
             kv_indexes.add(index)
-        if _has_any_keyword(haystack, _OM_DEMOGRAPHIC_MARKET_KEYWORDS):
+        if _is_om_demographic_market_haystack(haystack):
             demographic_market_indexes.add(index)
 
     structure_indexes = sorted(financial_table_indexes or table_indexes)
@@ -275,6 +297,8 @@ def _build_om_two_call_contexts(chunks: list, source_index: int) -> tuple[str, s
         "original_chunk_count": len(chunks),
         "structure_chunk_count": len(structure_chunks),
         "extraction_chunk_count": len(extraction_chunks),
+        "structure_char_count": len(structure_context),
+        "extraction_char_count": len(extraction_context),
         "structure_used_fallback": structure_used_fallback,
         "extraction_used_fallback": extraction_used_fallback,
         "structure_source_tokens": [
@@ -521,6 +545,18 @@ def _direct_extract(
                     extraction_context,
                     om_context_metadata,
                 ) = _build_om_two_call_contexts(chunks, source_index)
+                logger.info(
+                    "OM two-call contexts: structure_chunks=%s extraction_chunks=%s "
+                    "structure_chars=%s extraction_chars=%s structure_reasons=%s "
+                    "extraction_reasons=%s",
+                    om_context_metadata["structure_chunk_count"],
+                    om_context_metadata["extraction_chunk_count"],
+                    om_context_metadata["structure_char_count"],
+                    om_context_metadata["extraction_char_count"],
+                    om_context_metadata["structure_reason_counts"],
+                    om_context_metadata["extraction_reason_counts"],
+                    extra={"run_id": run_id, "doc_type": doc_type},
+                )
                 extracted = service.extract_om(
                     extraction_context,
                     structure_context=structure_context,

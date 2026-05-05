@@ -87,11 +87,18 @@ EXTRACT (as JSON):
         • "1 Mile | 5 Miles" (no 3-mile column) → omit population_3mi.
         • Single-radius tables (e.g. "3-Mile Radius" header) → use that value directly.
       Always match by column header, not by picking the largest or middle value.
+      If a demographics radius table is present, radius-labeled tables override
+      narrative summaries such as "selected geography", "your area", or
+      "selected area" for *_3mi fields. Use those narrative summaries only when
+      they explicitly label the geography as 3-mile.
       Do not use Population Age 25+, Housing Units, or Occupied Units rows for population_3mi.
     - avg_household_income_3mi: average household income within the 3-mile trade area as a float
       (e.g. "average household income … is $25,000" → 25,000.0). Apply the same radius-column
       matching rules above. Use the 3-mile figure ONLY. If the OM shows a demographics table
       with multiple radii (1/3/5 mi), always pick the 3-mile column for this field.
+      Use only rows explicitly labeled "Average Household Income" or
+      "Average (Mean) Household Income". Do not use Median Household Income,
+      Per Capita Income, household-income distribution buckets, or narrative income summaries unless explicitly labeled 3-mile average household income.
     - storage_sqft_per_capita_3mi: square feet of storage per capita within 3 miles if stated. Apply the same radius-column matching rules above.
 - Acquisition: purchase_price (asking), closing_cost_pct if stated, capex_reserve_per_unit if stated, market_cap_rate_purchase if stated
 - Column anchors: The DETECTED STRUCTURE block at the top of the user message provides
@@ -564,7 +571,7 @@ _OM_PHASE2_RULES = """OM MAPPING RULES:
 - "hold period", "investment horizon" -> hold_period_years
 - Do not map annual property tax expense, property tax growth, appraised value, assessed value, or assessment ratio into tax-rate fields
 - Nearby competitor / facility counts -> nearby_storage_count_1mi, nearby_storage_count_3mi, nearby_storage_count_5mi. "No Competitors within 1-Mile" -> nearby_storage_count_1mi = 0. Count distinct facilities in rent-comp tables for nearby_storage_count_3mi if not explicitly stated
-- Population within 3 miles -> population_3mi (integer). Average household income within 3 miles -> avg_household_income_3mi (float). Square feet per capita -> storage_sqft_per_capita_3mi. Extract these even when they appear on a demographics or market overview page separate from the operating statement. For all *_3mi fields, match by the column whose header is closest to 3 miles — do not pick the largest or middle value blindly. "1 Mile | 3 Miles | 5 Miles" → middle column; "1 Mile | 2 Miles | 3 Miles" → last column; "3 Miles | 5 Miles" → first column; "1 Mile | 5 Miles" → omit; single-radius table with 3-mile header → use directly. Example: "2023 Estimate 10,509 63,110 153,689" in a 1/3/5 table → population_3mi = 63,110. Do not use age-25+, housing-unit, or occupied-unit rows for population_3mi.
+- Population within 3 miles -> population_3mi (integer). Average household income within 3 miles -> avg_household_income_3mi (float). Square feet per capita -> storage_sqft_per_capita_3mi. Extract these even when they appear on a demographics or market overview page separate from the operating statement. For all *_3mi fields, match by the column whose header is closest to 3 miles — do not pick the largest or middle value blindly. "1 Mile | 3 Miles | 5 Miles" → middle column; "1 Mile | 2 Miles | 3 Miles" → last column; "3 Miles | 5 Miles" → first column; "1 Mile | 5 Miles" → omit; single-radius table with 3-mile header → use directly. Example: "2023 Estimate 10,509 63,110 153,689" in a 1/3/5 table → population_3mi = 63,110. For avg_household_income_3mi, use only rows explicitly labeled "Average Household Income" or "Average (Mean) Household Income"; do not use Median Household Income, Per Capita Income, income distribution buckets, or narrative income summaries unless explicitly labeled 3-mile average household income. Radius-labeled tables override narrative summaries such as "selected geography", "your area", or "selected area" for *_3mi fields unless the narrative explicitly labels the geography as 3-mile. Do not use age-25+, housing-unit, or occupied-unit rows for population_3mi.
 - For OM unit-mix tables, preserve one row per bucket. Use the section header (for example NON-CLIMATE or COVERED PARKING) in both section and unit_type when no more specific type label exists.
 - For OM competitive-set rent tables, preserve one row per facility and size bucket in rent_comps. Use asking_rent for Rent/Unit, rent_per_sqft for Rent/Sq.Ft., and keep notes for address, year built, square footage, blanks like "no data", or specials.
 - Never collapse multiple size buckets into one rent_comps row. Repeat facility, distance, and notes across separate rows when a facility lists multiple sizes.
