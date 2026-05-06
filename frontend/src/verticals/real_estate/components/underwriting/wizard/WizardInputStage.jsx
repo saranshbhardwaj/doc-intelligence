@@ -17,13 +17,27 @@ import {
   FieldGroup,
   NumericField,
   OperationsIncomeBasisStrip,
+  OperationsModelBasisPanel,
   ValueAddEvidence,
 } from './WizardFields';
+
+function humanizeFieldName(field) {
+  if (!field) return null;
+  return field.replace(/^expense_/, '').replace(/_/g, ' ');
+}
 
 function ExpenseHint({ citation }) {
   if (!citation) return null;
 
-  const { doc_type, formula, original_value } = citation;
+  const {
+    doc_type,
+    formula,
+    original_value,
+    selection_note,
+    annualized_from_months,
+    annualization_factor,
+    overridden_source_field,
+  } = citation;
 
   if (doc_type === 'derived' && formula) {
     return (
@@ -37,9 +51,29 @@ function ExpenseHint({ citation }) {
   }
 
   if (doc_type === 'benchmark' && original_value != null) {
+    const overriddenField = humanizeFieldName(overridden_source_field);
     return (
       <p className="text-xs text-amber-600 mt-0.5">
-        Raised to benchmark floor ({formula}) — OM: ${original_value.toLocaleString()}
+        Raised to benchmark floor ({formula})
+        {overriddenField ? ` — ${overriddenField}: ` : ' — '}
+        ${original_value.toLocaleString()}
+      </p>
+    );
+  }
+
+  if (annualized_from_months && formula) {
+    return (
+      <p className="text-xs text-muted-foreground mt-0.5">
+        Annualized from {annualized_from_months}-month T-12 ({formula})
+        {Number.isFinite(Number(annualization_factor)) ? ` · factor ${Number(annualization_factor).toFixed(2)}x` : ''}
+      </p>
+    );
+  }
+
+  if (selection_note) {
+    return (
+      <p className="text-xs text-muted-foreground mt-0.5">
+        {selection_note}
       </p>
     );
   }
@@ -106,23 +140,33 @@ export default function WizardInputStage({
           </div>
         );
       case 'operations':
+        const expenseBasis = currentRun?.result_artifact?.expense_basis;
+        const driverFields = new Set(expenseBasis?.driver_fields ?? []);
+        const hasBasis = Boolean(expenseBasis);
+        const isDriver = (field) => !hasBasis || driverFields.has(field);
+        const driverBadge = (field) => (isDriver(field) ? 'Drives model' : 'Evidence');
+        const driverNote = (field) => (isDriver(field) ? null : 'Not driving model under current basis.');
         return (
           <div className="fields-grid">
             <OperationsIncomeBasisStrip inputs={inputs} currentRun={currentRun} />
-            <FieldGroup label="Revenue" />
-            <NumericField label="Gross Potential Rent (Annual)" value={inputs.operational.gross_potential_rent_annual} onChange={(v) => patchOp('gross_potential_rent_annual', v)} placeholder="600,000" prefix="$" citation={getCitation('gross_potential_rent_annual')} onOpenSource={handleOpenSource} />
-            <NumericField label="Avg Current Rent / Door / Mo" value={inputs.operational.avg_in_place_rent_per_unit_monthly} onChange={(v) => patchOp('avg_in_place_rent_per_unit_monthly', v)} placeholder="115" prefix="$" citation={getCitation('avg_in_place_rent_per_unit_monthly')} onOpenSource={handleOpenSource} />
-            <NumericField label="Avg Market Rent / Door / Mo" value={inputs.operational.avg_market_rent_per_unit_monthly} onChange={(v) => patchOp('avg_market_rent_per_unit_monthly', v)} placeholder="132" prefix="$" citation={getCitation('avg_market_rent_per_unit_monthly')} onOpenSource={handleOpenSource} />
-            <NumericField label="Other Income (Annual)" value={inputs.operational.other_income_annual} onChange={(v) => patchOp('other_income_annual', v)} placeholder="0" prefix="$" citation={getCitation('other_income_annual')} onOpenSource={handleOpenSource} />
-            <NumericField label="Vacancy & Credit Loss" value={inputs.operational.vacancy_credit_loss_pct} onChange={(v) => patchOp('vacancy_credit_loss_pct', v)} placeholder="10" suffix="%" citation={getCitation('vacancy_credit_loss_pct')} onOpenSource={handleOpenSource} />
-            <NumericField label="Current Expense Ratio" value={inputs.operational.expense_ratio_current} onChange={(v) => patchOp('expense_ratio_current', v)} placeholder="41" suffix="%" citation={getCitation('expense_ratio_current')} onOpenSource={handleOpenSource} />
-            <NumericField label="Pro Forma Expense Ratio" value={inputs.operational.expense_ratio_pro_forma} onChange={(v) => patchOp('expense_ratio_pro_forma', v)} placeholder="34" suffix="%" citation={getCitation('expense_ratio_pro_forma')} onOpenSource={handleOpenSource} />
-            <NumericField label="Bad Debt (Annual)" value={inputs.operational.bad_debt_annual} onChange={(v) => patchOp('bad_debt_annual', v)} placeholder="0" prefix="$" citation={getCitation('bad_debt_annual')} onOpenSource={handleOpenSource} />
-            <NumericField label="Corrections / Collections" value={inputs.operational.corrections_collections_annual} onChange={(v) => patchOp('corrections_collections_annual', v)} placeholder="0" prefix="$" citation={getCitation('corrections_collections_annual')} onOpenSource={handleOpenSource} />
-            <NumericField label="Rent Growth" value={inputs.operational.rent_growth_pct} onChange={(v) => patchOp('rent_growth_pct', v)} placeholder="3" suffix="%" citation={getCitation('rent_growth_pct')} onOpenSource={handleOpenSource} />
-            <FieldGroup label="Operating Expenses" />
+            <OperationsModelBasisPanel expenseBasis={expenseBasis} />
+            <FieldGroup label="Revenue Drivers" />
+            <NumericField label="Gross Potential Rent (Annual)" value={inputs.operational.gross_potential_rent_annual} onChange={(v) => patchOp('gross_potential_rent_annual', v)} placeholder="600,000" prefix="$" citation={getCitation('gross_potential_rent_annual')} onOpenSource={handleOpenSource} badge={driverBadge('gross_potential_rent_annual')} note={driverNote('gross_potential_rent_annual')} disabled={!isDriver('gross_potential_rent_annual')} />
+            <NumericField label="Other Income (Annual)" value={inputs.operational.other_income_annual} onChange={(v) => patchOp('other_income_annual', v)} placeholder="0" prefix="$" citation={getCitation('other_income_annual')} onOpenSource={handleOpenSource} badge={driverBadge('other_income_annual')} note={driverNote('other_income_annual')} disabled={!isDriver('other_income_annual')} />
+            <NumericField label="Vacancy & Credit Loss" value={inputs.operational.vacancy_credit_loss_pct} onChange={(v) => patchOp('vacancy_credit_loss_pct', v)} placeholder="10" suffix="%" citation={getCitation('vacancy_credit_loss_pct')} onOpenSource={handleOpenSource} badge={driverBadge('vacancy_credit_loss_pct')} note={driverNote('vacancy_credit_loss_pct')} disabled={!isDriver('vacancy_credit_loss_pct')} />
+            <NumericField label="Rent Growth" value={inputs.operational.rent_growth_pct} onChange={(v) => patchOp('rent_growth_pct', v)} placeholder="3" suffix="%" citation={getCitation('rent_growth_pct')} onOpenSource={handleOpenSource} badge={driverBadge('rent_growth_pct')} note={driverNote('rent_growth_pct')} disabled={!isDriver('rent_growth_pct')} />
+            {expenseBasis?.method === 'expense_ratio' ? (
+              <>
+                <FieldGroup label="Expense Ratio Driver" />
+                <NumericField label="T-12 Expense Ratio" value={inputs.operational.expense_ratio_t12} onChange={(v) => patchOp('expense_ratio_t12', v)} placeholder="40" suffix="%" citation={getCitation('expense_ratio_t12')} onOpenSource={handleOpenSource} badge={driverBadge('expense_ratio_t12')} note={driverNote('expense_ratio_t12')} disabled={!isDriver('expense_ratio_t12')} />
+                <NumericField label="Current Expense Ratio" value={inputs.operational.expense_ratio_current} onChange={(v) => patchOp('expense_ratio_current', v)} placeholder="41" suffix="%" citation={getCitation('expense_ratio_current')} onOpenSource={handleOpenSource} badge={driverBadge('expense_ratio_current')} note={driverNote('expense_ratio_current')} disabled={!isDriver('expense_ratio_current')} />
+                <NumericField label="Year 1 Expense Ratio" value={inputs.operational.expense_ratio_year1} onChange={(v) => patchOp('expense_ratio_year1', v)} placeholder="28.5" suffix="%" citation={getCitation('expense_ratio_year1')} onOpenSource={handleOpenSource} badge={driverBadge('expense_ratio_year1')} note={driverNote('expense_ratio_year1')} disabled={!isDriver('expense_ratio_year1')} />
+                <NumericField label="Pro Forma Expense Ratio" value={inputs.operational.expense_ratio_pro_forma} onChange={(v) => patchOp('expense_ratio_pro_forma', v)} placeholder="27.8" suffix="%" citation={getCitation('expense_ratio_pro_forma')} onOpenSource={handleOpenSource} badge={driverBadge('expense_ratio_pro_forma')} note={driverNote('expense_ratio_pro_forma')} disabled={!isDriver('expense_ratio_pro_forma')} />
+              </>
+            ) : null}
+            <FieldGroup label="Expense Drivers" />
             <div>
-              <NumericField label="Property Tax (Year 1)" value={inputs.operational.property_tax_annual} onChange={(v) => patchOp('property_tax_annual', v)} placeholder="0" prefix="$" citation={getCitation('property_tax_annual')} onOpenSource={handleOpenSource} />
+              <NumericField label="Property Tax (Year 1)" value={inputs.operational.property_tax_annual} onChange={(v) => patchOp('property_tax_annual', v)} placeholder="0" prefix="$" citation={getCitation('property_tax_annual')} onOpenSource={handleOpenSource} badge={driverBadge('property_tax_annual')} note={driverNote('property_tax_annual')} disabled={!isDriver('property_tax_annual')} />
               <ExpenseHint citation={getCitation('property_tax_annual')} />
               {getCitation('property_tax_annual')?.field === 'expense_property_tax_annual_current'
                 && currentRun?.result_artifact?.om_data?.detected_has_current_column !== false && (
@@ -132,32 +176,46 @@ export default function WizardInputStage({
                 </p>
               )}
             </div>
-            <NumericField label="Property Tax Growth" value={inputs.operational.property_tax_growth_pct} onChange={(v) => patchOp('property_tax_growth_pct', v)} placeholder="4" suffix="%" citation={getCitation('property_tax_growth_pct')} onOpenSource={handleOpenSource} />
-            <NumericField label="Tax Value Basis" value={inputs.operational.property_tax_value_basis_amount} onChange={(v) => patchOp('property_tax_value_basis_amount', v)} placeholder="2,500,000" prefix="$" citation={getCitation('property_tax_value_basis_amount')} onOpenSource={handleOpenSource} />
-            <NumericField label="Assessed Value" value={inputs.operational.property_tax_assessed_value} onChange={(v) => patchOp('property_tax_assessed_value', v)} placeholder="275,000" prefix="$" citation={getCitation('property_tax_assessed_value')} onOpenSource={handleOpenSource} />
-            <NumericField label="Assessment Ratio" value={inputs.operational.property_tax_assessment_ratio} onChange={(v) => patchOp('property_tax_assessment_ratio', v)} placeholder="11" suffix="%" citation={getCitation('property_tax_assessment_ratio')} onOpenSource={handleOpenSource} />
-            <NumericField label="Millage Rate" value={inputs.operational.property_tax_millage_rate} onChange={(v) => patchOp('property_tax_millage_rate', v)} placeholder="111.61" suffix="mills" citation={getCitation('property_tax_millage_rate')} onOpenSource={handleOpenSource} />
-            <NumericField label="Tax Rate / Assessed $" value={inputs.operational.property_tax_rate_per_assessed_dollar} onChange={(v) => patchOp('property_tax_rate_per_assessed_dollar', v)} placeholder="0.11161" citation={getCitation('property_tax_rate_per_assessed_dollar')} onOpenSource={handleOpenSource} />
+            <NumericField label="Property Tax Growth" value={inputs.operational.property_tax_growth_pct} onChange={(v) => patchOp('property_tax_growth_pct', v)} placeholder="4" suffix="%" citation={getCitation('property_tax_growth_pct')} onOpenSource={handleOpenSource} badge={driverBadge('property_tax_growth_pct')} note={driverNote('property_tax_growth_pct')} disabled={!isDriver('property_tax_growth_pct')} />
             <div>
-              <NumericField label="Insurance (Year 1)" value={inputs.operational.insurance_annual} onChange={(v) => patchOp('insurance_annual', v)} placeholder="0" prefix="$" citation={getCitation('insurance_annual')} onOpenSource={handleOpenSource} />
+              <NumericField label="Insurance (Year 1)" value={inputs.operational.insurance_annual} onChange={(v) => patchOp('insurance_annual', v)} placeholder="0" prefix="$" citation={getCitation('insurance_annual')} onOpenSource={handleOpenSource} badge={driverBadge('insurance_annual')} note={driverNote('insurance_annual')} disabled={!isDriver('insurance_annual')} />
               <ExpenseHint citation={getCitation('insurance_annual')} />
             </div>
-            <NumericField label="Mgmt Fee" value={inputs.operational.mgmt_fee_pct} onChange={(v) => patchOp('mgmt_fee_pct', v)} placeholder="8" suffix="%" citation={getCitation('mgmt_fee_pct')} onOpenSource={handleOpenSource} />
-            <NumericField label="Payroll (Annual)" value={inputs.operational.payroll_annual} onChange={(v) => patchOp('payroll_annual', v)} placeholder="0" prefix="$" citation={getCitation('payroll_annual')} onOpenSource={handleOpenSource} />
+            <NumericField label="Mgmt Fee" value={inputs.operational.mgmt_fee_pct} onChange={(v) => patchOp('mgmt_fee_pct', v)} placeholder="8" suffix="%" citation={getCitation('mgmt_fee_pct')} onOpenSource={handleOpenSource} badge={driverBadge('mgmt_fee_pct')} note={driverNote('mgmt_fee_pct')} disabled={!isDriver('mgmt_fee_pct')} />
+            <NumericField label="Payroll (Annual)" value={inputs.operational.payroll_annual} onChange={(v) => patchOp('payroll_annual', v)} placeholder="0" prefix="$" citation={getCitation('payroll_annual')} onOpenSource={handleOpenSource} badge={driverBadge('payroll_annual')} note={driverNote('payroll_annual')} disabled={!isDriver('payroll_annual')} />
             <div>
-              <NumericField label="Repairs & Maintenance (Year 1)" value={inputs.operational.repairs_maintenance_annual} onChange={(v) => patchOp('repairs_maintenance_annual', v)} placeholder="0" prefix="$" citation={getCitation('repairs_maintenance_annual')} onOpenSource={handleOpenSource} />
+              <NumericField label="Repairs & Maintenance (Year 1)" value={inputs.operational.repairs_maintenance_annual} onChange={(v) => patchOp('repairs_maintenance_annual', v)} placeholder="0" prefix="$" citation={getCitation('repairs_maintenance_annual')} onOpenSource={handleOpenSource} badge={driverBadge('repairs_maintenance_annual')} note={driverNote('repairs_maintenance_annual')} disabled={!isDriver('repairs_maintenance_annual')} />
               <ExpenseHint citation={getCitation('repairs_maintenance_annual')} />
             </div>
             <div>
-              <NumericField label="Utilities (Year 1)" value={inputs.operational.utilities_annual} onChange={(v) => patchOp('utilities_annual', v)} placeholder="0" prefix="$" citation={getCitation('utilities_annual')} onOpenSource={handleOpenSource} />
+              <NumericField label="Utilities (Year 1)" value={inputs.operational.utilities_annual} onChange={(v) => patchOp('utilities_annual', v)} placeholder="0" prefix="$" citation={getCitation('utilities_annual')} onOpenSource={handleOpenSource} badge={driverBadge('utilities_annual')} note={driverNote('utilities_annual')} disabled={!isDriver('utilities_annual')} />
               <ExpenseHint citation={getCitation('utilities_annual')} />
             </div>
             <div>
-              <NumericField label="Marketing (Year 1)" value={inputs.operational.marketing_annual} onChange={(v) => patchOp('marketing_annual', v)} placeholder="0" prefix="$" citation={getCitation('marketing_annual')} onOpenSource={handleOpenSource} />
+              <NumericField label="Marketing (Year 1)" value={inputs.operational.marketing_annual} onChange={(v) => patchOp('marketing_annual', v)} placeholder="0" prefix="$" citation={getCitation('marketing_annual')} onOpenSource={handleOpenSource} badge={driverBadge('marketing_annual')} note={driverNote('marketing_annual')} disabled={!isDriver('marketing_annual')} />
               <ExpenseHint citation={getCitation('marketing_annual')} />
             </div>
-            <NumericField label="Other OpEx (Annual)" value={inputs.operational.other_opex_annual} onChange={(v) => patchOp('other_opex_annual', v)} placeholder="0" prefix="$" citation={getCitation('other_opex_annual')} onOpenSource={handleOpenSource} />
-            <NumericField label="OpEx Growth" value={inputs.operational.opex_growth_pct} onChange={(v) => patchOp('opex_growth_pct', v)} placeholder="2" suffix="%" citation={getCitation('opex_growth_pct')} onOpenSource={handleOpenSource} />
+            <NumericField label="Other OpEx (Annual)" value={inputs.operational.other_opex_annual} onChange={(v) => patchOp('other_opex_annual', v)} placeholder="0" prefix="$" citation={getCitation('other_opex_annual')} onOpenSource={handleOpenSource} badge={driverBadge('other_opex_annual')} note={driverNote('other_opex_annual')} disabled={!isDriver('other_opex_annual')} />
+            <NumericField label="OpEx Growth" value={inputs.operational.opex_growth_pct} onChange={(v) => patchOp('opex_growth_pct', v)} placeholder="2" suffix="%" citation={getCitation('opex_growth_pct')} onOpenSource={handleOpenSource} badge={driverBadge('opex_growth_pct')} note={driverNote('opex_growth_pct')} disabled={!isDriver('opex_growth_pct')} />
+
+            <FieldGroup label="Supporting Evidence" />
+            <NumericField label="Avg Current Rent / Door / Mo" value={inputs.operational.avg_in_place_rent_per_unit_monthly} onChange={() => {}} placeholder="115" prefix="$" citation={getCitation('avg_in_place_rent_per_unit_monthly')} onOpenSource={handleOpenSource} disabled badge="Evidence" note="Displayed for analyst context; GPR drives revenue." />
+            <NumericField label="Avg Market Rent / Door / Mo" value={inputs.operational.avg_market_rent_per_unit_monthly} onChange={() => {}} placeholder="132" prefix="$" citation={getCitation('avg_market_rent_per_unit_monthly')} onOpenSource={handleOpenSource} disabled badge="Evidence" note="Displayed for rent-position context; not a direct NOI driver." />
+            {expenseBasis?.method !== 'expense_ratio' ? (
+              <>
+                <NumericField label="T-12 Expense Ratio" value={inputs.operational.expense_ratio_t12} onChange={() => {}} placeholder="40" suffix="%" citation={getCitation('expense_ratio_t12')} onOpenSource={handleOpenSource} disabled badge="Evidence" note="Not driving model under current basis." />
+                <NumericField label="Current Expense Ratio" value={inputs.operational.expense_ratio_current} onChange={() => {}} placeholder="41" suffix="%" citation={getCitation('expense_ratio_current')} onOpenSource={handleOpenSource} disabled badge="Evidence" note="Not driving model under current basis." />
+                <NumericField label="Year 1 Expense Ratio" value={inputs.operational.expense_ratio_year1} onChange={() => {}} placeholder="28.5" suffix="%" citation={getCitation('expense_ratio_year1')} onOpenSource={handleOpenSource} disabled badge="Evidence" note="Shown as a cross-check against line-item OpEx." />
+                <NumericField label="Pro Forma Expense Ratio" value={inputs.operational.expense_ratio_pro_forma} onChange={() => {}} placeholder="27.8" suffix="%" citation={getCitation('expense_ratio_pro_forma')} onOpenSource={handleOpenSource} disabled badge="Evidence" note="Broker/stabilized evidence only unless basis changes." />
+              </>
+            ) : null}
+            <NumericField label="Bad Debt (Annual)" value={inputs.operational.bad_debt_annual} onChange={() => {}} placeholder="0" prefix="$" citation={getCitation('bad_debt_annual')} onOpenSource={handleOpenSource} disabled badge="Evidence" />
+            <NumericField label="Corrections / Collections" value={inputs.operational.corrections_collections_annual} onChange={() => {}} placeholder="0" prefix="$" citation={getCitation('corrections_collections_annual')} onOpenSource={handleOpenSource} disabled badge="Evidence" />
+            <NumericField label="Tax Value Basis" value={inputs.operational.property_tax_value_basis_amount} onChange={() => {}} placeholder="2,500,000" prefix="$" citation={getCitation('property_tax_value_basis_amount')} onOpenSource={handleOpenSource} disabled badge="Tax evidence" />
+            <NumericField label="Assessed Value" value={inputs.operational.property_tax_assessed_value} onChange={() => {}} placeholder="275,000" prefix="$" citation={getCitation('property_tax_assessed_value')} onOpenSource={handleOpenSource} disabled badge="Tax evidence" />
+            <NumericField label="Assessment Ratio" value={inputs.operational.property_tax_assessment_ratio} onChange={() => {}} placeholder="11" suffix="%" citation={getCitation('property_tax_assessment_ratio')} onOpenSource={handleOpenSource} disabled badge="Tax evidence" />
+            <NumericField label="Millage Rate" value={inputs.operational.property_tax_millage_rate} onChange={() => {}} placeholder="111.61" suffix="mills" citation={getCitation('property_tax_millage_rate')} onOpenSource={handleOpenSource} disabled badge="Tax evidence" />
+            <NumericField label="Tax Rate / Assessed $" value={inputs.operational.property_tax_rate_per_assessed_dollar} onChange={() => {}} placeholder="0.11161" citation={getCitation('property_tax_rate_per_assessed_dollar')} onOpenSource={handleOpenSource} disabled badge="Tax evidence" />
 
             <div className="col-span-full">
               <button

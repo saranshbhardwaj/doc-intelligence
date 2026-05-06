@@ -297,8 +297,12 @@ def _build_expense_ratio_benchmark_warning(result: SelfStorageResult, inputs) ->
     ratio = None
     if expense_basis is not None and expense_basis.ratio is not None:
         ratio = expense_basis.ratio
+    elif getattr(op, "expense_ratio_t12", None) is not None:
+        ratio = op.expense_ratio_t12
     elif op.expense_ratio_current is not None:
         ratio = op.expense_ratio_current
+    elif getattr(op, "expense_ratio_year1", None) is not None:
+        ratio = op.expense_ratio_year1
     elif op.expense_ratio_pro_forma is not None:
         ratio = op.expense_ratio_pro_forma
     if ratio is None or ratio <= 0:
@@ -438,7 +442,7 @@ def _build_warnings(
             )
         elif expense_basis.source == "om_noi":
             pass
-        elif expense_basis.source == "expense_ratio_pro_forma":
+        elif expense_basis.method == "expense_ratio" and expense_basis.period == "pro_forma":
             warnings.append(
                 VerdictWarning(
                     key="expenses_ratio_fallback",
@@ -449,12 +453,12 @@ def _build_warnings(
                     severity="warning",
                 )
             )
-        elif expense_basis.source == "expense_ratio_current":
+        elif expense_basis.method == "expense_ratio":
             warnings.append(
                 VerdictWarning(
                     key="expenses_ratio_fallback",
                     message=(
-                        "Operating expenses are modeled from the current/T-12 expense ratio because "
+                        f"Operating expenses are modeled from the {expense_basis.label.lower()} because "
                         "detailed expense line items were missing or incomplete."
                     ),
                     severity="info",

@@ -167,7 +167,11 @@ EXTRACT (as JSON):
     - expense_total_annual: "Total Operating Expenses"
     - noi_year_one_stated: "Net Operating Income" from Year 1 column
     - noi_current_stated: "Net Operating Income" from Current column
-    - expense_ratio_pro_forma: "Expenses % EGI" — prefer Year 1 value
+    - expense_ratio_current: "Expenses % EGI" from Current/In-Place column only
+    - expense_ratio_year1: "Expenses % EGI" from Year 1 column only
+    - expense_ratio_pro_forma: "Expenses % EGI" from Pro Forma/Stabilized column only
+      Do not move a Pro Forma percentage into Current or Year 1. If the OM shows
+      Current | Year 1 | Pro Forma, extract all three ratios into their matching fields.
     - mgmt_fee_pct: if the OM explicitly states the management fee as a percentage in text
       (e.g. "Third Party Management: 5% of GPR" or "Management Fee: 8%"), extract as decimal
       (0.05). Do NOT compute from expense_mgmt_fee_annual ÷ revenue. Only extract when a
@@ -568,6 +572,7 @@ _OM_PHASE2_RULES = """OM MAPPING RULES:
 - "111.61 mills" -> property_tax_millage_rate = 111.61
 - If the tax-rate unit is ambiguous, omit both tax-rate fields rather than guessing
 - "gross potential rent", "GPR", "scheduled rent" -> gpr_annual_projected (annual)
+- "Expenses % EGI" / "Expense Ratio" in a Current/In-Place column -> expense_ratio_current; in a Year 1 column -> expense_ratio_year1; in a Pro Forma/Stabilized column -> expense_ratio_pro_forma. Do not collapse these period-specific ratios into one field.
 - "hold period", "investment horizon" -> hold_period_years
 - Do not map annual property tax expense, property tax growth, appraised value, assessed value, or assessment ratio into tax-rate fields
 - Nearby competitor / facility counts -> nearby_storage_count_1mi, nearby_storage_count_3mi, nearby_storage_count_5mi. "No Competitors within 1-Mile" -> nearby_storage_count_1mi = 0. Count distinct facilities in rent-comp tables for nearby_storage_count_3mi if not explicitly stated

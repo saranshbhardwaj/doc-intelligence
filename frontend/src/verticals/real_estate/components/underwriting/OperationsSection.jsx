@@ -9,10 +9,26 @@ import SourceSupportActions from './SourceSupportActions';
 import { formatCompactCurrency, formatCurrency, formatPercent } from './formatters';
 
 function getExpenseBasisTone(source) {
-  if (source === 'line_items' || source === 'expense_ratio_current') return 'success';
-  if (source === 'expense_ratio_pro_forma' || source === 'om_noi') return 'warning';
+  if (source === 't12_line_items' || source === 't12_expense_ratio' || source === 'om_year1_line_items') return 'success';
+  if (source?.includes?.('expense_ratio') || source === 'om_noi') return 'warning';
   return 'danger';
 }
+
+const periodLabel = {
+  t12: 'T-12',
+  current: 'Current',
+  year1: 'Year 1',
+  pro_forma: 'Pro Forma',
+  mixed: 'Mixed period',
+  unknown: 'Unknown',
+};
+
+const methodLabel = {
+  line_items: 'Line items',
+  expense_ratio: 'Expense ratio',
+  noi: 'OM NOI',
+  missing: 'Missing',
+};
 
 function getUnitTypeBadge(row) {
   const label = `${row.unit_category || ''}`.toLowerCase();
@@ -244,17 +260,34 @@ export default function OperationsSection({
                     {expenseBasis.source !== 'om_noi' ? (
                       <div className="mt-3 grid gap-3 sm:grid-cols-3">
                         <div>
-                          <p className="text-xs text-muted-foreground">Line-item OpEx</p>
-                          <p className="mt-1 font-semibold text-foreground">{formatCompactCurrency(expenseBasis.year1_line_item_opex)}</p>
+                          <p className="text-xs text-muted-foreground">Period</p>
+                          <p className="mt-1 font-semibold text-foreground">{periodLabel[expenseBasis.period] ?? 'Unknown'}</p>
                         </div>
                         <div>
-                          <p className="text-xs text-muted-foreground">Ratio-implied OpEx</p>
-                          <p className="mt-1 font-semibold text-foreground">{formatCompactCurrency(expenseBasis.year1_ratio_opex)}</p>
+                          <p className="text-xs text-muted-foreground">Method</p>
+                          <p className="mt-1 font-semibold text-foreground">{methodLabel[expenseBasis.method] ?? expenseBasis.method ?? '—'}</p>
                         </div>
                         <div>
-                          <p className="text-xs text-muted-foreground">Expense ratio used</p>
-                          <p className="mt-1 font-semibold text-foreground">{formatPercent(expenseBasis.ratio)}</p>
+                          <p className="text-xs text-muted-foreground">Expense ratio</p>
+                          <p className="mt-1 font-semibold text-foreground">{formatPercent(expenseBasis.expense_ratio ?? expenseBasis.ratio)}</p>
                         </div>
+                        <div>
+                          <p className="text-xs text-muted-foreground">Modeled EGI</p>
+                          <p className="mt-1 font-semibold text-foreground">{formatCompactCurrency(expenseBasis.modeled_egi)}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-muted-foreground">Modeled OpEx</p>
+                          <p className="mt-1 font-semibold text-foreground">{formatCompactCurrency(expenseBasis.modeled_total_expenses ?? expenseBasis.year1_line_item_opex)}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-muted-foreground">Modeled NOI</p>
+                          <p className="mt-1 font-semibold text-foreground">{formatCompactCurrency(expenseBasis.modeled_noi)}</p>
+                        </div>
+                      </div>
+                    ) : null}
+                    {Array.isArray(expenseBasis.warnings) && expenseBasis.warnings.length ? (
+                      <div className="mt-3 rounded-xl border border-warning/30 bg-warning/10 px-3 py-2 text-sm leading-6 text-muted-foreground">
+                        {expenseBasis.warnings.join(' ')}
                       </div>
                     ) : null}
                     {expenseBasisFormula ? (
@@ -265,7 +298,9 @@ export default function OperationsSection({
                   </div>
                 ) : null}
                 <KeyValueList rows={[
-                  { label: 'Expense ratio (T-12 actual)', value: formatPercent(currentExpenseRatio) },
+                  { label: 'Expense ratio (T-12 actual)', value: formatPercent(currentExpenseRatio ?? operational?.expense_ratio_t12) },
+                  { label: 'Expense ratio (OM current)', value: formatPercent(operational?.expense_ratio_current) },
+                  { label: 'Expense ratio (OM Year 1)', value: formatPercent(operational?.expense_ratio_year1) },
                   { label: 'Expense ratio (OM pro forma)', value: formatPercent(proFormaExpenseRatio) },
                   {
                     label: 'Expense ratio delta',

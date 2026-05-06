@@ -139,15 +139,67 @@ class TestCalculatorHappyPath:
         inputs.operational.marketing_annual = 0
         inputs.operational.other_opex_annual = 0
         inputs.operational.mgmt_fee_pct = 0
-        inputs.operational.expense_ratio_current = 0.40
+        inputs.operational.expense_ratio_t12 = 0.40
+        inputs.operational.operating_statement_period = "t12"
 
         result = calculate(inputs)
 
         year_one = result.projections[0]
-        assert result.expense_basis.source == "expense_ratio_current"
+        assert result.expense_basis.source == "t12_expense_ratio"
+        assert result.expense_basis.period == "t12"
+        assert result.expense_basis.method == "expense_ratio"
+        assert result.expense_basis.expense_ratio == pytest.approx(0.40)
         assert year_one.egi == pytest.approx(540_000)
         assert year_one.opex == pytest.approx(216_000)
         assert year_one.noi == pytest.approx(324_000)
+
+    def test_ratio_fallback_respects_selected_operating_period(self):
+        """When OM Year 1 is selected, ratio fallback uses Year 1 before other evidence."""
+        inputs = VALID_INPUTS.model_copy(deep=True)
+        inputs.operational.property_tax_annual = 0
+        inputs.operational.insurance_annual = 0
+        inputs.operational.payroll_annual = 0
+        inputs.operational.repairs_maintenance_annual = 0
+        inputs.operational.utilities_annual = 0
+        inputs.operational.marketing_annual = 0
+        inputs.operational.other_opex_annual = 0
+        inputs.operational.mgmt_fee_pct = 0
+        inputs.operational.expense_ratio_t12 = 0.40
+        inputs.operational.expense_ratio_current = 0.35
+        inputs.operational.expense_ratio_year1 = 0.30
+        inputs.operational.expense_ratio_pro_forma = 0.25
+        inputs.operational.operating_statement_period = "year1"
+
+        result = calculate(inputs)
+
+        year_one = result.projections[0]
+        assert result.expense_basis.source == "om_year1_expense_ratio"
+        assert result.expense_basis.period == "year1"
+        assert result.expense_basis.method == "expense_ratio"
+        assert result.expense_basis.expense_ratio == pytest.approx(0.30)
+        assert year_one.egi == pytest.approx(540_000)
+        assert year_one.opex == pytest.approx(162_000)
+        assert year_one.noi == pytest.approx(378_000)
+
+    def test_om_year1_line_items_emit_senior_analyst_basis_metadata(self):
+        inputs = VALID_INPUTS.model_copy(deep=True)
+        inputs.operational.expense_ratio_year1 = 0.2847
+        inputs.operational.expense_ratio_pro_forma = 0.2778
+        inputs.operational.operating_statement_period = "year1"
+        inputs.operational.operating_statement_warnings = ["Property tax uses Current fallback."]
+
+        result = calculate(inputs)
+
+        assert result.expense_basis.source == "om_year1_line_items"
+        assert result.expense_basis.period == "mixed"
+        assert result.expense_basis.method == "line_items"
+        assert result.expense_basis.modeled_egi == pytest.approx(result.projections[0].egi)
+        assert result.expense_basis.modeled_total_expenses == pytest.approx(result.projections[0].opex)
+        assert result.expense_basis.modeled_noi == pytest.approx(result.projections[0].noi)
+        assert result.expense_basis.expense_ratio == pytest.approx(result.projections[0].opex / result.projections[0].egi)
+        assert "property_tax_annual" in result.expense_basis.driver_fields
+        assert "expense_ratio_pro_forma" in result.expense_basis.inactive_fields
+        assert result.expense_basis.warnings == ["Property tax uses Current fallback."]
 
     def test_rent_position_analysis_matches_unit_mix_to_comps(self):
         inputs = VALID_INPUTS.model_copy(deep=True)
@@ -468,7 +520,7 @@ class TestOMNOIMode:
 
         result = calculate(inputs)
 
-        assert result.expense_basis.source == "line_items"
+        assert result.expense_basis.source == "om_year1_line_items"
 
     def test_om_noi_mode_wins_when_expenses_exist_but_revenue_missing(self):
         inputs = self.OM_NOI_INPUTS.model_copy(deep=True)
@@ -498,7 +550,8 @@ class TestOMNOIMode:
         rather than silently receiving a quick screen backed by no real data.
         """
         inputs = self.OM_NOI_INPUTS.model_copy(deep=True)
-        inputs.operational.expense_ratio_current = 0.40  # T-12 supplied this
+        inputs.operational.expense_ratio_t12 = 0.40  # T-12 supplied this
+        inputs.operational.operating_statement_period = "t12"
 
         result = calculate(inputs)
 

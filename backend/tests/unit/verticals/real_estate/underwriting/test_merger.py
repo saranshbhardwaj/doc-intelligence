@@ -180,7 +180,7 @@ def test_additional_analyst_fields_merge_from_documents():
     assert merged["project"]["storage_sqft_per_capita_3mi"] == 9.4
     assert merged["operational"]["avg_in_place_rent_per_unit_monthly"] == 118.0
     assert merged["operational"]["avg_market_rent_per_unit_monthly"] == 142.0
-    assert merged["operational"]["expense_ratio_current"] == 0.41
+    assert merged["operational"]["expense_ratio_t12"] == 0.41
     assert merged["operational"]["expense_ratio_pro_forma"] == 0.34
     assert merged["operational"]["bad_debt_annual"] == 12_000.0
     assert merged["operational"]["corrections_collections_annual"] == 8_500.0
@@ -215,12 +215,49 @@ def test_computed_t12_expense_ratio_has_formula_metadata():
 
     merged, citations = merge_extractions(results)
 
-    assert merged["operational"]["expense_ratio_current"] == pytest.approx(455_000.0 / 1_100_000.0)
-    citation = citations["expense_ratio_current"]
+    assert merged["operational"]["expense_ratio_t12"] == pytest.approx(455_000.0 / 1_100_000.0)
+    citation = citations["expense_ratio_t12"]
     assert citation["doc_type"] == "t12"
     assert citation["is_computed"] is True
+    assert citation["provenance_kind"] == "computed"
+    assert citation["source_field"] == "expense_ratio_actual"
     assert "formula" in citation
     assert "total revenue" in citation["formula"]
+
+
+def test_om_year1_expense_ratio_uses_true_egi_and_keeps_pro_forma_separate():
+    results = [
+        _om_result(
+            purchase_price=2_500_000.0,
+            gpr_annual_projected=285_740.0,
+            vacancy_pct_projected=0.1278,
+            other_income_annual=34_278.0,
+            expense_property_tax_annual_year1=15_346.0,
+            expense_insurance_annual_year1=11_840.0,
+            expense_payroll_annual=17_250.0,
+            expense_repairs_maintenance_annual_year1=2_102.0,
+            expense_utilities_annual_year1=6_868.0,
+            expense_marketing_annual_year1=4_203.0,
+            expense_office_admin_annual=4_000.0,
+            expense_bank_fees_annual=2_500.0,
+            expense_contract_services_annual=1_500.0,
+            expense_miscellaneous_annual=914.0,
+            expense_mgmt_fee_annual=14_174.0,
+            expense_ratio_pro_forma=0.2778,
+            noi_year_one_stated=202_790.0,
+        )
+    ]
+
+    merged, citations = merge_extractions(results)
+
+    expected_egi = 202_790.0 + 80_697.0
+    expected_opex = 80_697.0
+    assert expected_egi == pytest.approx(283_487.0)
+    assert merged["operational"]["expense_ratio_year1"] == pytest.approx(expected_opex / expected_egi)
+    assert merged["operational"]["expense_ratio_pro_forma"] == pytest.approx(0.2778)
+    assert merged["operational"]["expense_ratio_current"] is None
+    assert "EGI" in citations["expense_ratio_year1"]["formula"]
+    assert "$283,487" in citations["expense_ratio_year1"]["formula"]
 
 
 def test_om_only_run_uses_om_expense_lines_when_t12_missing():
@@ -244,19 +281,61 @@ def test_om_only_run_uses_om_expense_lines_when_t12_missing():
         )
     ]
 
-    merged, _ = merge_extractions(results)
+    merged, citations = merge_extractions(results)
 
     assert merged["operational"]["property_tax_annual"] == 52_000.0
     assert merged["operational"]["insurance_annual"] == 18_500.0
     assert merged["operational"]["payroll_annual"] == 61_000.0
     assert merged["operational"]["repairs_maintenance_annual"] == 27_000.0
     assert merged["operational"]["utilities_annual"] == 15_500.0
-    # marketing_annual is raised from 9_500 to the benchmark floor (3% of GPR = 14_400)
-    assert merged["operational"]["marketing_annual"] == pytest.approx(14_400.0)
+    # Complete OM Year-1 expense packages are not silently raised to benchmark floors.
+    assert merged["operational"]["marketing_annual"] == pytest.approx(9_500.0)
     assert merged["operational"]["other_opex_annual"] == 22_500.0
     assert merged["operational"]["mgmt_fee_pct"] == pytest.approx(0.05)
-    # expense_ratio_current is derived from stated OM lines before floor adjustment
-    assert merged["operational"]["expense_ratio_current"] == pytest.approx(0.4587301587)
+    # expense_ratio_year1 is derived from stated OM Year-1 lines and true EGI.
+    assert merged["operational"]["expense_ratio_year1"] == pytest.approx(0.4587301587)
+    assert citations["property_tax_annual"]["used_fallback_source"] is True
+    assert citations["property_tax_annual"]["source_field"] == "expense_property_tax_annual_year1"
+    assert citations["property_tax_annual"]["source_period"] == "year1"
+    assert citations["property_tax_annual"]["source_method"] == "line_item"
+    assert citations["marketing_annual"]["doc_type"] == "om"
+    assert citations["marketing_annual"]["source_field"] == "expense_marketing_annual_year1"
+    assert citations["marketing_annual"]["source_period"] == "year1"
+    assert citations["marketing_annual"]["source_method"] == "line_item"
+
+
+def test_marketing_falls_back_to_current_when_year1_missing():
+    results = [
+        _om_result(
+            expense_marketing_annual_current=3_847.0,
+            gpr_annual_projected=100_000.0,
+        )
+    ]
+
+    merged, citations = merge_extractions(results)
+
+    assert merged["operational"]["marketing_annual"] == pytest.approx(3_847.0)
+    assert citations["marketing_annual"]["doc_type"] == "om"
+    assert citations["marketing_annual"]["source_field"] == "expense_marketing_annual_current"
+    assert citations["marketing_annual"]["source_period"] == "current"
+    assert citations["marketing_annual"]["source_method"] == "line_item"
+    assert citations["marketing_annual"]["used_fallback_source"] is True
+    assert citations["marketing_annual"]["preferred_sources_missing"] == ["T-12 marketing annual", "OM marketing annual year1"]
+
+
+def test_t6_gpr_citation_tracks_annualization_metadata():
+    results = [
+        _om_result(purchase_price=500_000.0),
+        _t12_result(gpr_annual_actual=240_000.0, period_months=6),
+    ]
+
+    merged, citations = merge_extractions(results)
+
+    assert merged["operational"]["gross_potential_rent_annual"] == pytest.approx(480_000.0)
+    assert citations["gross_potential_rent_annual"]["doc_type"] == "t12"
+    assert citations["gross_potential_rent_annual"]["annualized_from_months"] == 6
+    assert citations["gross_potential_rent_annual"]["annualization_factor"] == pytest.approx(2.0)
+    assert citations["gross_potential_rent_annual"]["formula"] == "$240,000 × (12 ÷ 6 months)"
 
 
 def test_om_other_opex_uses_combined_component_citations():
@@ -685,10 +764,23 @@ def test_utilities_prefers_year1_over_current():
 def test_repairs_benchmark_floor_applied_when_below():
     """Repairs below $0.10/sqft floor are raised to the floor."""
     results = [
-        _om_result(
-            rentable_sqft=21017.0,
-            expense_repairs_maintenance_annual_year1=1424.0,
-            expense_repairs_maintenance_annual_current=1424.0,
+        ExtractedDocResult(
+            run_id="r1",
+            job_id="j1",
+            doc_type="om",
+            om=OMExtraction(
+                rentable_sqft=21017.0,
+                expense_repairs_maintenance_annual_year1=1424.0,
+                expense_repairs_maintenance_annual_current=1424.0,
+            ),
+            field_citations={
+                "expense_repairs_maintenance_annual_year1": {
+                    "doc_type": "om",
+                    "confidence": 0.88,
+                    "citations": ["om:p12:repairs"],
+                    "source_text": "Repairs & Maintenance $1,424",
+                }
+            },
         )
     ]
     merged, citations = merge_extractions(results)
@@ -696,6 +788,11 @@ def test_repairs_benchmark_floor_applied_when_below():
     assert merged["operational"]["repairs_maintenance_annual"] == pytest.approx(expected_floor, rel=1e-4)
     assert citations["repairs_maintenance_annual"]["doc_type"] == "benchmark"
     assert citations["repairs_maintenance_annual"]["original_value"] == pytest.approx(1424.0)
+    assert citations["repairs_maintenance_annual"]["override_reason"] == "Raised to benchmark floor"
+    assert citations["repairs_maintenance_annual"]["overridden_source_field"] == "expense_repairs_maintenance_annual_year1"
+    assert citations["repairs_maintenance_annual"]["citations"] == ["om:p12:repairs"]
+    assert "confidence" not in citations["repairs_maintenance_annual"]
+    assert "source_text" not in citations["repairs_maintenance_annual"]
 
 
 def test_repairs_benchmark_floor_not_applied_when_above():

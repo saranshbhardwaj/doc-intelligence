@@ -332,9 +332,12 @@ class TestVerdictEvidenceQualityWarning:
     def test_low_expense_ratio_requires_review(self, passing_result, default_criteria):
         result = passing_result.model_copy(deep=True)
         result.expense_basis = ExpenseBasis(
-            source="line_items",
-            label="Detailed expense line items",
+            source="om_year1_line_items",
+            label="Year 1 OM line items",
             ratio=0.27,
+            period="year1",
+            method="line_items",
+            expense_ratio=0.27,
             reason="test",
         )
         inputs = SelfStorageInputs(
@@ -355,9 +358,12 @@ class TestVerdictEvidenceQualityWarning:
     def test_high_expense_ratio_requires_review(self, passing_result, default_criteria):
         result = passing_result.model_copy(deep=True)
         result.expense_basis = ExpenseBasis(
-            source="line_items",
-            label="Detailed expense line items",
+            source="om_year1_line_items",
+            label="Year 1 OM line items",
             ratio=0.49,
+            period="year1",
+            method="line_items",
+            expense_ratio=0.49,
             reason="test",
         )
         inputs = SelfStorageInputs(

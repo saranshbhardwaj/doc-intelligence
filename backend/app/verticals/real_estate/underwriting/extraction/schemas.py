@@ -133,7 +133,9 @@ class OMExtraction(BaseModel):
     property_tax_assessment_ratio: Optional[float] = Field(default=None, description="property tax assessment ratio as a decimal, e.g. 0.11", json_schema_extra={"cite": True})
     property_tax_millage_rate: Optional[float] = Field(default=None, description="property tax millage rate in true mills per $1,000 of assessed value, e.g. 111.61", json_schema_extra={"cite": True})
     property_tax_rate_per_assessed_dollar: Optional[float] = Field(default=None, description="property tax rate per $1 of assessed value, e.g. 0.11161", json_schema_extra={"cite": True})
-    expense_ratio_pro_forma: Optional[float] = Field(default=None, description="decimal e.g. 0.35",               json_schema_extra={"cite": True})
+    expense_ratio_current: Optional[float] = Field(default=None, description="Expenses % EGI from Current/In-Place column as decimal", json_schema_extra={"cite": True})
+    expense_ratio_year1: Optional[float] = Field(default=None, description="Expenses % EGI from Year 1 column as decimal", json_schema_extra={"cite": True})
+    expense_ratio_pro_forma: Optional[float] = Field(default=None, description="Expenses % EGI from Pro Forma/Stabilized column as decimal", json_schema_extra={"cite": True})
 
     # ── Individual expense line items (Year 1 column preferred) ───────────────
     expense_office_admin_annual:        Optional[float] = Field(default=None, description="Office & Admin annual, Year 1 column preferred",  json_schema_extra={"cite": True})

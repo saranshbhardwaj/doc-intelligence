@@ -187,29 +187,111 @@ def _resolve_expense_basis(
     """Choose the safest available OpEx basis and expose it for analyst review."""
 
     op = inputs.operational
+    selected_period = op.operating_statement_period or "year1"
+    warnings = list(op.operating_statement_warnings or [])
+
+    ratio_options = {
+        "t12": (
+            "t12_expense_ratio",
+            "T-12 expense ratio",
+            "expense_ratio_t12",
+            op.expense_ratio_t12,
+        ),
+        "current": (
+            "om_current_expense_ratio",
+            "Current OM expense ratio",
+            "expense_ratio_current",
+            op.expense_ratio_current,
+        ),
+        "year1": (
+            "om_year1_expense_ratio",
+            "Year 1 OM expense ratio",
+            "expense_ratio_year1",
+            op.expense_ratio_year1,
+        ),
+        "pro_forma": (
+            "om_pro_forma_expense_ratio",
+            "Pro Forma OM expense ratio",
+            "expense_ratio_pro_forma",
+            op.expense_ratio_pro_forma,
+        ),
+    }
+    ratio_fallback_order = {
+        "t12": ("t12", "year1", "current", "pro_forma"),
+        "current": ("current", "year1", "t12", "pro_forma"),
+        "year1": ("year1", "current", "t12", "pro_forma"),
+        "pro_forma": ("pro_forma", "year1", "current", "t12"),
+    }.get(selected_period, ("year1", "current", "t12", "pro_forma"))
+
     ratio_source = None
     ratio_label = None
+    ratio_period = selected_period
+    ratio_field = None
     ratio = None
-    if _positive_ratio(op.expense_ratio_current):
-        ratio_source = "expense_ratio_current"
-        ratio_label = "Current / T-12 expense ratio"
-        ratio = op.expense_ratio_current
-    elif _positive_ratio(op.expense_ratio_pro_forma):
-        ratio_source = "expense_ratio_pro_forma"
-        ratio_label = "OM pro forma expense ratio"
-        ratio = op.expense_ratio_pro_forma
+    for candidate_period in ratio_fallback_order:
+        source, label, field, value = ratio_options[candidate_period]
+        if _positive_ratio(value):
+            ratio_source = source
+            ratio_label = label
+            ratio_period = candidate_period
+            ratio_field = field
+            ratio = value
+            break
 
     ratio_opex = year1_egi * ratio if ratio is not None and year1_egi > 0 else None
     has_line_items = year1_line_item_opex > 0
     noi_stated = _stated_om_noi(inputs)
+    line_item_period = selected_period if selected_period in {"t12", "current", "year1", "pro_forma"} else "year1"
+    line_item_source = "t12_line_items" if line_item_period == "t12" else f"om_{line_item_period}_line_items"
+    line_item_label = {
+        "t12": "T-12 line items",
+        "current": "Current OM line items",
+        "year1": "Year 1 OM line items",
+        "pro_forma": "Pro Forma OM line items",
+    }.get(line_item_period, "Year 1 OM line items")
+    line_item_driver_fields = [
+        "gross_potential_rent_annual",
+        "vacancy_credit_loss_pct",
+        "other_income_annual",
+        "property_tax_annual",
+        "insurance_annual",
+        "mgmt_fee_pct",
+        "payroll_annual",
+        "repairs_maintenance_annual",
+        "utilities_annual",
+        "marketing_annual",
+        "other_opex_annual",
+        "rent_growth_pct",
+        "opex_growth_pct",
+    ]
+    available_ratio_fields = [
+        field for field, value in (
+            ("expense_ratio_t12", op.expense_ratio_t12),
+            ("expense_ratio_current", op.expense_ratio_current),
+            ("expense_ratio_year1", op.expense_ratio_year1),
+            ("expense_ratio_pro_forma", op.expense_ratio_pro_forma),
+        )
+        if value is not None
+    ]
 
     def om_noi_basis() -> ExpenseBasis:
+        period = "year1" if inputs.operational.noi_year_one_stated is not None else "current"
+        noi_field = "noi_year_one_stated" if period == "year1" else "noi_current_stated"
         return ExpenseBasis(
             source="om_noi",
             label="OM-stated NOI quick screen",
             ratio=None,
+            period=period,
+            method="noi",
+            modeled_egi=None,
+            modeled_total_expenses=None,
+            modeled_noi=noi_stated,
+            expense_ratio=None,
             year1_line_item_opex=year1_line_item_opex,
             year1_ratio_opex=None,
+            driver_fields=[noi_field, "rent_growth_pct"],
+            inactive_fields=line_item_driver_fields + available_ratio_fields,
+            warnings=warnings,
             reason=(
                 f"No reliable GPR/expense build-up is available. Projections use OM-stated NOI "
                 f"(${noi_stated or 0:,.0f}) grown at the assumed rent growth rate. "
@@ -223,8 +305,24 @@ def _resolve_expense_basis(
                 source=ratio_source,
                 label=ratio_label,
                 ratio=ratio,
+                period=ratio_period,
+                method="expense_ratio",
+                modeled_egi=year1_egi,
+                modeled_total_expenses=ratio_opex,
+                modeled_noi=year1_egi - ratio_opex if ratio_opex is not None else None,
+                expense_ratio=ratio,
                 year1_line_item_opex=year1_line_item_opex,
                 year1_ratio_opex=ratio_opex,
+                driver_fields=[
+                    "gross_potential_rent_annual",
+                    "vacancy_credit_loss_pct",
+                    "other_income_annual",
+                    ratio_field,
+                    "rent_growth_pct",
+                    "opex_growth_pct",
+                ],
+                inactive_fields=line_item_driver_fields,
+                warnings=warnings,
                 reason="Detailed expense line items were missing, so the model used the stated expense ratio.",
             )
         if year1_line_item_opex < ratio_opex * LINE_ITEMS_VS_RATIO_CUTOFF:
@@ -232,8 +330,24 @@ def _resolve_expense_basis(
                 source=ratio_source,
                 label=ratio_label,
                 ratio=ratio,
+                period=ratio_period,
+                method="expense_ratio",
+                modeled_egi=year1_egi,
+                modeled_total_expenses=ratio_opex,
+                modeled_noi=year1_egi - ratio_opex if ratio_opex is not None else None,
+                expense_ratio=ratio,
                 year1_line_item_opex=year1_line_item_opex,
                 year1_ratio_opex=ratio_opex,
+                driver_fields=[
+                    "gross_potential_rent_annual",
+                    "vacancy_credit_loss_pct",
+                    "other_income_annual",
+                    ratio_field,
+                    "rent_growth_pct",
+                    "opex_growth_pct",
+                ],
+                inactive_fields=line_item_driver_fields,
+                warnings=warnings,
                 reason=(
                     "Detailed expense line items were materially below the ratio-implied expense load, "
                     "so the model used the more conservative expense ratio."
@@ -244,12 +358,22 @@ def _resolve_expense_basis(
         return om_noi_basis()
 
     if has_line_items:
+        expense_ratio = year1_line_item_opex / year1_egi if year1_egi > 0 else None
         return ExpenseBasis(
-            source="line_items",
-            label="Detailed expense line items",
+            source=line_item_source,
+            label=line_item_label,
+            period="mixed" if warnings else line_item_period,
+            method="line_items",
+            modeled_egi=year1_egi,
+            modeled_total_expenses=year1_line_item_opex,
+            modeled_noi=year1_egi - year1_line_item_opex,
+            expense_ratio=expense_ratio,
             year1_line_item_opex=year1_line_item_opex,
             year1_ratio_opex=ratio_opex,
             ratio=ratio,
+            driver_fields=line_item_driver_fields,
+            inactive_fields=available_ratio_fields,
+            warnings=warnings,
             reason="Operating expenses were modeled from extracted or manually entered line items.",
         )
 
@@ -260,8 +384,17 @@ def _resolve_expense_basis(
         source="missing",
         label="Missing expense support",
         ratio=ratio,
+        period="unknown",
+        method="missing",
+        modeled_egi=year1_egi,
+        modeled_total_expenses=None,
+        modeled_noi=None,
+        expense_ratio=None,
         year1_line_item_opex=year1_line_item_opex,
         year1_ratio_opex=ratio_opex,
+        driver_fields=[],
+        inactive_fields=line_item_driver_fields + available_ratio_fields,
+        warnings=warnings,
         reason="No detailed expense line items or usable expense ratio were available.",
     )
 
@@ -386,7 +519,7 @@ def calculate(inputs: SelfStorageInputs) -> SelfStorageResult:
             other_income = op.other_income_annual * (1 + op.rent_growth_pct) ** (n - 1)
             egi = gpr - vacancy_loss + other_income
 
-            if expense_basis.source in ("expense_ratio_current", "expense_ratio_pro_forma"):
+            if expense_basis.method == "expense_ratio":
                 opex = (expense_basis.year1_ratio_opex or 0.0) * (1 + op.opex_growth_pct) ** (n - 1)
             else:
                 property_tax = op.property_tax_annual * (1 + property_tax_growth) ** (n - 1)
@@ -488,7 +621,7 @@ def calculate(inputs: SelfStorageInputs) -> SelfStorageResult:
     if expense_basis.source == "om_noi":
         break_even_occupancy_pct = None
     elif annual_debt_service > 0 and op.gross_potential_rent_annual > 0:
-        if expense_basis.source in ("expense_ratio_current", "expense_ratio_pro_forma") and expense_basis.ratio is not None:
+        if expense_basis.method == "expense_ratio" and expense_basis.ratio is not None:
             noi_margin = 1 - expense_basis.ratio
             if noi_margin > 0:
                 required_egi = annual_debt_service / noi_margin
@@ -526,7 +659,7 @@ def calculate(inputs: SelfStorageInputs) -> SelfStorageResult:
             "Break-even occupancy is not computed in OM-stated NOI quick-screen mode "
             "because GPR, vacancy, and expense components are not available."
         )
-    elif expense_basis.source in ("expense_ratio_current", "expense_ratio_pro_forma"):
+    elif expense_basis.method == "expense_ratio":
         break_even_description = (
             "Debt service ÷ (1 − expense ratio), adjusted for other income, then divided by GPR. "
             "Used when operating expenses are modeled from an expense-ratio fallback."

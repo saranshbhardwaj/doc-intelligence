@@ -26,9 +26,19 @@ def _increase_operating_expenses(inputs: SelfStorageInputs, multiplier: float) -
                     "marketing_annual": op.marketing_annual * multiplier,
                     "other_opex_annual": op.other_opex_annual * multiplier,
                     "mgmt_fee_pct": min(op.mgmt_fee_pct * multiplier, 1.0),
+                    "expense_ratio_t12": (
+                        min(op.expense_ratio_t12 * multiplier, 1.0)
+                        if op.expense_ratio_t12 is not None
+                        else None
+                    ),
                     "expense_ratio_current": (
                         min(op.expense_ratio_current * multiplier, 1.0)
                         if op.expense_ratio_current is not None
+                        else None
+                    ),
+                    "expense_ratio_year1": (
+                        min(op.expense_ratio_year1 * multiplier, 1.0)
+                        if op.expense_ratio_year1 is not None
                         else None
                     ),
                     "expense_ratio_pro_forma": (

@@ -236,7 +236,9 @@ export default function UnderwritingResult() {
     avg_in_place_rent_per_unit_monthly: getFieldCitation(fieldCitations, citationContext, 'avg_in_place_rent_per_unit_monthly'),
     avg_market_rent_per_unit_monthly: getFieldCitation(fieldCitations, citationContext, 'avg_market_rent_per_unit_monthly'),
     vacancy_credit_loss_pct: getFieldCitation(fieldCitations, citationContext, 'vacancy_credit_loss_pct'),
+    expense_ratio_t12: getFieldCitation(fieldCitations, citationContext, 'expense_ratio_t12'),
     expense_ratio_current: getFieldCitation(fieldCitations, citationContext, 'expense_ratio_current'),
+    expense_ratio_year1: getFieldCitation(fieldCitations, citationContext, 'expense_ratio_year1'),
     expense_ratio_pro_forma: getFieldCitation(fieldCitations, citationContext, 'expense_ratio_pro_forma'),
     property_tax_annual: getFieldCitation(fieldCitations, citationContext, 'property_tax_annual'),
     insurance_annual: getFieldCitation(fieldCitations, citationContext, 'insurance_annual'),
@@ -386,7 +388,7 @@ export default function UnderwritingResult() {
     (artifact.t12_data.summary.expense_ratio_actual != null || artifact.t12_data.summary.opex_ratio != null));
   const currentExpenseRatio = hasT12Data
     ? (artifact.t12_data.summary.expense_ratio_actual ?? t12OpexRatio)
-    : null;
+    : persistedInputs.operational?.expense_ratio_current ?? artifact.om_data?.expense_ratio_current ?? null;
   const proFormaExpenseRatio = persistedInputs.operational?.expense_ratio_pro_forma
     ?? artifact.om_data?.expense_ratio_pro_forma
     ?? omOpexPct;
@@ -635,6 +637,12 @@ export default function UnderwritingResult() {
       label: 'Current expense ratio',
       value: formatEvidenceValue(formatPercent, persistedInputs.operational?.expense_ratio_current),
       citation: getFieldCitation(fieldCitations, citationContext, 'expense_ratio_current'),
+    },
+    {
+      key: 'expense_ratio_year1',
+      label: 'Year 1 expense ratio',
+      value: formatEvidenceValue(formatPercent, persistedInputs.operational?.expense_ratio_year1),
+      citation: getFieldCitation(fieldCitations, citationContext, 'expense_ratio_year1'),
     },
     {
       key: 'expense_ratio_pro_forma',

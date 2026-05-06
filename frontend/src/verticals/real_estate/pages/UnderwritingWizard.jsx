@@ -339,10 +339,8 @@ export default function UnderwritingWizard() {
       ?? fieldCitations[`rent_roll.${fieldKey}`]
       ?? null;
     if (!raw) return null;
-    if (raw.is_default) return { is_default: true };
-    if (raw.is_derived) return { is_derived: true, formula: raw.formula ?? null };
-    if (raw.is_uncited_extraction || !raw.citations?.length) {
-      return { is_uncited_extraction: true, doc_type: raw.doc_type };
+    if (raw.is_default || raw.is_derived || raw.is_uncited_extraction || !raw.citations?.length) {
+      return { ...raw };
     }
     const token = raw.citations?.[0];
     const ctx = token && citCtx ? citCtx[token] : null;

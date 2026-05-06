@@ -98,9 +98,17 @@ class OperationalInputs(BaseModel):
     vacancy_credit_loss_pct: float = Field(
         default=0.10, description="Vacancy + credit loss as % of GPR."
     )
+    expense_ratio_t12: Optional[float] = Field(
+        default=None,
+        description="T-12 actual operating expense ratio as a decimal.",
+    )
     expense_ratio_current: Optional[float] = Field(
         default=None,
-        description="Actual operating expense ratio as a decimal.",
+        description="OM current/in-place operating expense ratio as a decimal.",
+    )
+    expense_ratio_year1: Optional[float] = Field(
+        default=None,
+        description="OM Year-1 operating expense ratio as a decimal.",
     )
     expense_ratio_pro_forma: Optional[float] = Field(
         default=None,
@@ -124,6 +132,16 @@ class OperationalInputs(BaseModel):
     income_basis_note: Optional[str] = Field(
         default=None,
         description="Analyst-facing note about income statement basis from the source document.",
+    )
+    operating_statement_period: Optional[
+        Literal["t12", "current", "year1", "pro_forma", "mixed", "unknown"]
+    ] = Field(
+        default=None,
+        description="Operating statement period selected by extraction/merge.",
+    )
+    operating_statement_warnings: list[str] = Field(
+        default_factory=list,
+        description="Analyst-facing warnings about operating statement basis support.",
     )
     bad_debt_annual: Optional[float] = Field(
         default=None,
@@ -361,16 +379,30 @@ class ExpenseBasis(BaseModel):
     """How operating expenses were modeled for the projection."""
 
     source: Literal[
-        "line_items",
-        "expense_ratio_current",
-        "expense_ratio_pro_forma",
+        "t12_line_items",
+        "t12_expense_ratio",
+        "om_year1_line_items",
+        "om_year1_expense_ratio",
+        "om_current_line_items",
+        "om_current_expense_ratio",
+        "om_pro_forma_line_items",
+        "om_pro_forma_expense_ratio",
         "om_noi",
         "missing",
     ]
     label: str
     ratio: Optional[float] = None
+    period: Literal["t12", "current", "year1", "pro_forma", "mixed", "unknown"] = "unknown"
+    method: Literal["line_items", "expense_ratio", "noi", "missing"] = "missing"
+    modeled_egi: Optional[float] = None
+    modeled_total_expenses: Optional[float] = None
+    modeled_noi: Optional[float] = None
+    expense_ratio: Optional[float] = None
     year1_line_item_opex: Optional[float] = None
     year1_ratio_opex: Optional[float] = None
+    driver_fields: list[str] = Field(default_factory=list)
+    inactive_fields: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
     reason: str
 
 

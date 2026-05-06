@@ -124,6 +124,18 @@ def test_phase2_prompt_requires_cap_rate_basis_period():
     assert "do not use stabilized" in prompt or "do not map stabilized" in prompt
 
 
+def test_om_prompt_keeps_expense_ratios_period_specific():
+    prompt = create_phase2_om_prompt("[]").lower()
+
+    assert "expense_ratio_current" in prompt
+    assert "expense_ratio_year1" in prompt
+    assert "expense_ratio_pro_forma" in prompt
+    assert "do not collapse" in prompt
+    assert "current/in-place column" in prompt
+    assert "year 1 column" in prompt
+    assert "pro forma/stabilized column" in prompt
+
+
 def test_om_tool_schema_has_detection_fields_before_extraction_fields():
     """Detection fields must exist in tool schema and appear before extraction fields."""
     props = REExtractionLLMService._TOOL_SCHEMAS["om"]["properties"]
