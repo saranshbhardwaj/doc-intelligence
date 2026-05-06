@@ -123,6 +123,63 @@ export default function OperationsSection({
   ];
   const hasOtherOpex = otherOpexItems.some((item) => item.value != null);
   const revenueMix = getRevenueMix(unitMix);
+  const hasCitation = (field) => Boolean(sourceCitations?.[field]);
+  const hasSupportValue = (value) => value != null && value !== '—';
+  const modeledExpenseRatio = expenseBasis?.expense_ratio ?? expenseBasis?.ratio ?? null;
+  const t12ExpenseRatio = operational?.expense_ratio_t12;
+  const omCurrentExpenseRatio = operational?.expense_ratio_current;
+  const omYear1ExpenseRatio = operational?.expense_ratio_year1;
+  const omProFormaExpenseRatio = operational?.expense_ratio_pro_forma ?? proFormaExpenseRatio;
+  const expenseSupportRows = [
+    { label: 'Model expense ratio', value: formatPercent(modeledExpenseRatio) },
+    { label: 'T-12 expense ratio', value: formatPercent(t12ExpenseRatio) },
+    { label: 'OM current expense ratio', value: formatPercent(omCurrentExpenseRatio) },
+    { label: 'OM Year 1 expense ratio', value: formatPercent(omYear1ExpenseRatio) },
+    { label: 'OM pro forma expense ratio', value: formatPercent(omProFormaExpenseRatio) },
+    {
+      label: 'Model vs OM pro forma',
+      value: modeledExpenseRatio != null && omProFormaExpenseRatio != null
+        ? `${((modeledExpenseRatio - omProFormaExpenseRatio) * 100).toFixed(1)} pp`
+        : '—',
+    },
+  ].filter((row, index) => index === 0 || hasSupportValue(row.value));
+  const taxSupportRows = [
+    { label: 'Property tax (year 1)', value: formatCurrency(propertyTaxAnnual) },
+    { label: 'Tax value basis', value: formatCurrency(operational?.property_tax_value_basis_amount) },
+    { label: 'Tax assessed value', value: formatCurrency(operational?.property_tax_assessed_value) },
+    { label: 'Tax assessment ratio', value: formatPercent(operational?.property_tax_assessment_ratio) },
+    {
+      label: 'Tax millage rate',
+      value: operational?.property_tax_millage_rate != null
+        ? `${operational.property_tax_millage_rate.toFixed(2)} mills`
+        : '—',
+    },
+    {
+      label: 'Tax rate / assessed $',
+      value: operational?.property_tax_rate_per_assessed_dollar != null
+        ? operational.property_tax_rate_per_assessed_dollar.toFixed(5)
+        : '—',
+    },
+  ].filter((row) => hasSupportValue(row.value));
+  const growthAssumptionRows = [
+    { label: 'Property tax growth', value: formatPercent(propertyTaxGrowthPct) },
+  ].filter((row) => hasSupportValue(row.value));
+  const adjustmentRows = [
+    hasCitation('bad_debt_annual') || Number(badDebtAnnual) !== 0
+      ? { label: 'Bad debt', value: formatCurrency(badDebtAnnual) }
+      : null,
+    hasCitation('corrections_collections_annual') || Number(correctionsCollectionsAnnual) !== 0
+      ? { label: 'Corrections / collections', value: formatCurrency(correctionsCollectionsAnnual) }
+      : null,
+    {
+      label: 'Price / unit',
+      value: purchasePrice && totalUnits ? formatCurrency(Math.round(purchasePrice / totalUnits)) : '—',
+    },
+    {
+      label: 'Price / rentable sqft',
+      value: purchasePrice && rentableSqft ? `$${(purchasePrice / rentableSqft).toFixed(2)}` : '—',
+    },
+  ].filter((row) => row && hasSupportValue(row.value));
 
   return (
     <UnderwritingSection
@@ -298,43 +355,10 @@ export default function OperationsSection({
                   </div>
                 ) : null}
                 <KeyValueList rows={[
-                  { label: 'Expense ratio (T-12 actual)', value: formatPercent(currentExpenseRatio ?? operational?.expense_ratio_t12) },
-                  { label: 'Expense ratio (OM current)', value: formatPercent(operational?.expense_ratio_current) },
-                  { label: 'Expense ratio (OM Year 1)', value: formatPercent(operational?.expense_ratio_year1) },
-                  { label: 'Expense ratio (OM pro forma)', value: formatPercent(proFormaExpenseRatio) },
-                  {
-                    label: 'Expense ratio delta',
-                    value: currentExpenseRatio != null && proFormaExpenseRatio != null
-                      ? `${((currentExpenseRatio - proFormaExpenseRatio) * 100).toFixed(1)} pp`
-                      : '—',
-                  },
-                  { label: 'Property tax (year 1)', value: formatCurrency(propertyTaxAnnual) },
-                  { label: 'Property tax growth', value: formatPercent(propertyTaxGrowthPct) },
-                  { label: 'Tax value basis', value: formatCurrency(operational?.property_tax_value_basis_amount) },
-                  { label: 'Tax assessed value', value: formatCurrency(operational?.property_tax_assessed_value) },
-                  { label: 'Tax assessment ratio', value: formatPercent(operational?.property_tax_assessment_ratio) },
-                  {
-                    label: 'Tax millage rate',
-                    value: operational?.property_tax_millage_rate != null
-                      ? `${operational.property_tax_millage_rate.toFixed(2)} mills`
-                      : '—',
-                  },
-                  {
-                    label: 'Tax rate / assessed $',
-                    value: operational?.property_tax_rate_per_assessed_dollar != null
-                      ? operational.property_tax_rate_per_assessed_dollar.toFixed(5)
-                      : '—',
-                  },
-                  { label: 'Bad debt', value: formatCurrency(badDebtAnnual) },
-                  { label: 'Corrections / collections', value: formatCurrency(correctionsCollectionsAnnual) },
-                  {
-                    label: 'Price / unit',
-                    value: purchasePrice && totalUnits ? formatCurrency(Math.round(purchasePrice / totalUnits)) : '—',
-                  },
-                  {
-                    label: 'Price / rentable sqft',
-                    value: purchasePrice && rentableSqft ? `$${(purchasePrice / rentableSqft).toFixed(2)}` : '—',
-                  },
+                  ...expenseSupportRows,
+                  ...taxSupportRows,
+                  ...growthAssumptionRows,
+                  ...adjustmentRows,
                 ]} />
 
                 {hasOtherOpex && (
@@ -373,7 +397,9 @@ export default function OperationsSection({
                 )}
                 <SourceSupportActions
                   citations={[
+                    sourceCitations.expense_ratio_t12,
                     sourceCitations.expense_ratio_current,
+                    sourceCitations.expense_ratio_year1,
                     sourceCitations.expense_ratio_pro_forma,
                     sourceCitations.property_tax_annual,
                     sourceCitations.property_tax_growth_pct,

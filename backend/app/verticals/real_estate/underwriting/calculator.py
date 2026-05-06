@@ -189,6 +189,11 @@ def _resolve_expense_basis(
     op = inputs.operational
     selected_period = op.operating_statement_period or "year1"
     warnings = list(op.operating_statement_warnings or [])
+    if op.property_tax_annual is None:
+        warnings.append(
+            "Property tax not found in source documents — modeled as $0. "
+            "Verify with county assessor before relying on this analysis."
+        )
 
     ratio_options = {
         "t12": (
@@ -324,6 +329,34 @@ def _resolve_expense_basis(
                 inactive_fields=line_item_driver_fields,
                 warnings=warnings,
                 reason="Detailed expense line items were missing, so the model used the stated expense ratio.",
+            )
+        if warnings:
+            return ExpenseBasis(
+                source=ratio_source,
+                label=ratio_label,
+                ratio=ratio,
+                period=ratio_period,
+                method="expense_ratio",
+                modeled_egi=year1_egi,
+                modeled_total_expenses=ratio_opex,
+                modeled_noi=year1_egi - ratio_opex if ratio_opex is not None else None,
+                expense_ratio=ratio,
+                year1_line_item_opex=year1_line_item_opex,
+                year1_ratio_opex=ratio_opex,
+                driver_fields=[
+                    "gross_potential_rent_annual",
+                    "vacancy_credit_loss_pct",
+                    "other_income_annual",
+                    ratio_field,
+                    "rent_growth_pct",
+                    "opex_growth_pct",
+                ],
+                inactive_fields=line_item_driver_fields,
+                warnings=warnings,
+                reason=(
+                    "Detailed expense line items mix operating periods, so the model used "
+                    "the coherent stated expense ratio for the selected basis."
+                ),
             )
         if year1_line_item_opex < ratio_opex * LINE_ITEMS_VS_RATIO_CUTOFF:
             return ExpenseBasis(
@@ -478,6 +511,7 @@ def calculate(inputs: SelfStorageInputs) -> SelfStorageResult:
 
     # ── NOI buildup year-by-year ─────────────────────────────────────────────
     # Fixed opex components (before growth) at year 0:
+    property_tax_year1 = op.property_tax_annual or 0.0
     base_non_tax_opex = (
         op.insurance_annual
         + op.payroll_annual
@@ -495,7 +529,7 @@ def calculate(inputs: SelfStorageInputs) -> SelfStorageResult:
     year1_vacancy_loss = year1_gpr * op.vacancy_credit_loss_pct
     year1_other_income = op.other_income_annual
     year1_egi = year1_gpr - year1_vacancy_loss + year1_other_income
-    year1_fixed_opex = op.property_tax_annual + base_non_tax_opex
+    year1_fixed_opex = property_tax_year1 + base_non_tax_opex
     year1_line_item_opex = year1_fixed_opex + (year1_egi * op.mgmt_fee_pct)
     expense_basis = _resolve_expense_basis(inputs, year1_egi, year1_line_item_opex)
 
@@ -522,7 +556,7 @@ def calculate(inputs: SelfStorageInputs) -> SelfStorageResult:
             if expense_basis.method == "expense_ratio":
                 opex = (expense_basis.year1_ratio_opex or 0.0) * (1 + op.opex_growth_pct) ** (n - 1)
             else:
-                property_tax = op.property_tax_annual * (1 + property_tax_growth) ** (n - 1)
+                property_tax = property_tax_year1 * (1 + property_tax_growth) ** (n - 1)
                 other_fixed_opex = base_non_tax_opex * (1 + op.opex_growth_pct) ** (n - 1)
                 fixed_opex = property_tax + other_fixed_opex
                 mgmt_fee = egi * op.mgmt_fee_pct
@@ -630,7 +664,7 @@ def calculate(inputs: SelfStorageInputs) -> SelfStorageResult:
                     min(1.0, (required_egi - op.other_income_annual) / op.gross_potential_rent_annual),
                 )
         else:
-            fixed_opex_yr1 = op.property_tax_annual + base_non_tax_opex
+            fixed_opex_yr1 = property_tax_year1 + base_non_tax_opex
             mgmt_factor = 1 - op.mgmt_fee_pct
             adjusted_numerator = (
                 annual_debt_service + fixed_opex_yr1
@@ -652,7 +686,7 @@ def calculate(inputs: SelfStorageInputs) -> SelfStorageResult:
     # Build formula metadata — backend is the authority
     from .schemas.self_storage import FormulaMetadata, FormulaComputedValues
 
-    fixed_opex_yr1 = op.property_tax_annual + base_non_tax_opex
+    fixed_opex_yr1 = property_tax_year1 + base_non_tax_opex
     mgmt_factor_yr1 = 1 - op.mgmt_fee_pct
     if expense_basis.source == "om_noi":
         break_even_description = (
@@ -669,7 +703,10 @@ def calculate(inputs: SelfStorageInputs) -> SelfStorageResult:
 
     formula_metadata = {
         "irr": FormulaMetadata(
-            description="Annualized return on equity across the full hold, accounting for timing of every cash flow in and out.",
+            description=(
+                "Annualized return on equity across the full hold, accounting for timing of every cash flow in and out. "
+                "IRR uses the annual cash-flow schedule and exit proceeds; the summary below reconciles total proceeds."
+            ),
             computed_values=FormulaComputedValues(
                 entry_equity=float(total_equity),
                 total_distributions=float(annual_cash_flows_sum),
@@ -681,6 +718,7 @@ def calculate(inputs: SelfStorageInputs) -> SelfStorageResult:
         "cash_on_cash": FormulaMetadata(
             description="Year 1 cash flow after debt service ÷ total equity invested. Income yield only — excludes appreciation and principal paydown.",
             computed_values=FormulaComputedValues(
+                year1_noi=float(projections[0].noi) if projections else None,
                 year1_cash_flow=float(projections[0].cash_flow) if projections else None,
                 total_equity=float(total_equity),
                 annual_debt_service=float(annual_debt_service) if annual_debt_service > 0 else None,

@@ -86,6 +86,17 @@ class TestCalculatorHappyPath:
         expected_noi = year_1.egi - year_1.opex
         assert abs(year_1.noi - expected_noi) < 1  # Floating point tolerance
 
+    def test_return_tooltip_metadata_explains_irr_and_cash_on_cash_bridges(self):
+        result = calculate(VALID_INPUTS)
+
+        irr_meta = result.formula_metadata["irr"]
+        assert "annual cash-flow schedule and exit proceeds" in irr_meta.description
+
+        coc_meta = result.formula_metadata["cash_on_cash"]
+        assert coc_meta.computed_values.year1_noi == pytest.approx(result.projections[0].noi)
+        assert coc_meta.computed_values.year1_cash_flow == pytest.approx(result.projections[0].cash_flow)
+        assert coc_meta.computed_values.total_equity == pytest.approx(result.capital_structure.total_equity_invested)
+
     def test_projections_grow_by_rent_growth_pct(self):
         """Year-over-year GPR growth matches rent_growth_pct."""
         result = calculate(VALID_INPUTS)
@@ -181,7 +192,51 @@ class TestCalculatorHappyPath:
         assert year_one.opex == pytest.approx(162_000)
         assert year_one.noi == pytest.approx(378_000)
 
-    def test_om_year1_line_items_emit_senior_analyst_basis_metadata(self):
+    def test_missing_property_tax_does_not_block_ratio_basis(self):
+        """Missing property tax should not fail validation when ratio support exists."""
+        inputs_data = VALID_INPUTS.model_dump()
+        inputs_data["operational"]["property_tax_annual"] = None
+        inputs_data["operational"]["expense_ratio_year1"] = 0.30
+        inputs_data["operational"]["operating_statement_period"] = "year1"
+        for field in (
+            "insurance_annual",
+            "payroll_annual",
+            "repairs_maintenance_annual",
+            "utilities_annual",
+            "marketing_annual",
+            "other_opex_annual",
+        ):
+            inputs_data["operational"][field] = 0
+        inputs_data["operational"]["mgmt_fee_pct"] = 0
+
+        inputs = SelfStorageInputs(**inputs_data)
+        result = calculate(inputs)
+
+        assert result.expense_basis.source == "om_year1_expense_ratio"
+        assert result.expense_basis.method == "expense_ratio"
+        assert result.projections[0].opex == pytest.approx(162_000)
+
+    def test_mixed_line_items_prefer_coherent_ratio_basis(self):
+        """Mixed-period line items should yield to a coherent expense ratio."""
+        inputs = VALID_INPUTS.model_copy(deep=True)
+        inputs.operational.expense_ratio_year1 = 0.30
+        inputs.operational.operating_statement_period = "mixed"
+        inputs.operational.operating_statement_warnings = [
+            "Year 1 operating basis uses Current fallback for: property tax."
+        ]
+
+        result = calculate(inputs)
+
+        assert result.expense_basis.source == "om_year1_expense_ratio"
+        assert result.expense_basis.period == "year1"
+        assert result.expense_basis.method == "expense_ratio"
+        assert result.expense_basis.modeled_total_expenses == pytest.approx(162_000)
+        assert result.expense_basis.year1_line_item_opex == pytest.approx(228_200)
+        assert result.expense_basis.warnings == [
+            "Year 1 operating basis uses Current fallback for: property tax."
+        ]
+
+    def test_mixed_period_ratio_basis_emits_senior_analyst_metadata(self):
         inputs = VALID_INPUTS.model_copy(deep=True)
         inputs.operational.expense_ratio_year1 = 0.2847
         inputs.operational.expense_ratio_pro_forma = 0.2778
@@ -190,15 +245,15 @@ class TestCalculatorHappyPath:
 
         result = calculate(inputs)
 
-        assert result.expense_basis.source == "om_year1_line_items"
-        assert result.expense_basis.period == "mixed"
-        assert result.expense_basis.method == "line_items"
+        assert result.expense_basis.source == "om_year1_expense_ratio"
+        assert result.expense_basis.period == "year1"
+        assert result.expense_basis.method == "expense_ratio"
         assert result.expense_basis.modeled_egi == pytest.approx(result.projections[0].egi)
         assert result.expense_basis.modeled_total_expenses == pytest.approx(result.projections[0].opex)
         assert result.expense_basis.modeled_noi == pytest.approx(result.projections[0].noi)
-        assert result.expense_basis.expense_ratio == pytest.approx(result.projections[0].opex / result.projections[0].egi)
-        assert "property_tax_annual" in result.expense_basis.driver_fields
-        assert "expense_ratio_pro_forma" in result.expense_basis.inactive_fields
+        assert result.expense_basis.expense_ratio == pytest.approx(0.2847)
+        assert "expense_ratio_year1" in result.expense_basis.driver_fields
+        assert "property_tax_annual" in result.expense_basis.inactive_fields
         assert result.expense_basis.warnings == ["Property tax uses Current fallback."]
 
     def test_rent_position_analysis_matches_unit_mix_to_comps(self):

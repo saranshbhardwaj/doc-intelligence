@@ -18,7 +18,11 @@ def _increase_operating_expenses(inputs: SelfStorageInputs, multiplier: float) -
         update={
             "operational": op.model_copy(
                 update={
-                    "property_tax_annual": op.property_tax_annual * multiplier,
+                    "property_tax_annual": (
+                        op.property_tax_annual * multiplier
+                        if op.property_tax_annual is not None
+                        else None
+                    ),
                     "insurance_annual": op.insurance_annual * multiplier,
                     "payroll_annual": op.payroll_annual * multiplier,
                     "repairs_maintenance_annual": op.repairs_maintenance_annual * multiplier,

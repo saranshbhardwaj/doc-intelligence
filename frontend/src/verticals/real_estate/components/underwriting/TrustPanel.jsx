@@ -8,6 +8,7 @@ import {
 
 function docTone(docType) {
   if (docType === 't12' || docType === 'rent_roll') return 'success';
+  if (docType === 'om_computed') return 'active';
   if (docType === 'om') return 'warning';
   if (docType === 'derived') return 'active';
   return 'neutral';
@@ -16,6 +17,7 @@ function docTone(docType) {
 function docLabel(docType) {
   if (docType === 't12') return 'T-12 actual';
   if (docType === 'rent_roll') return 'Rent roll actual';
+  if (docType === 'om_computed') return 'OM computed';
   if (docType === 'om') return 'OM stated';
   if (docType === 'derived') return 'Derived';
   return null;
@@ -65,11 +67,18 @@ function MetricRow({ label, value, alert = false }) {
 
 function expenseBasisDriverLabel(expenseBasis) {
   switch (expenseBasis?.source) {
-    case 'line_items':
+    case 't12_line_items':
+    case 'om_year1_line_items':
+    case 'om_current_line_items':
+    case 'om_pro_forma_line_items':
       return expenseBasis?.label || 'Detailed expense line items';
-    case 'expense_ratio_current':
+    case 't12_expense_ratio':
       return 'T-12 expense ratio';
-    case 'expense_ratio_pro_forma':
+    case 'om_current_expense_ratio':
+      return 'Current OM expense ratio';
+    case 'om_year1_expense_ratio':
+      return 'Year 1 OM expense ratio';
+    case 'om_pro_forma_expense_ratio':
       return 'OM pro-forma ratio';
     case 'om_noi':
       return 'OM-NOI quick screen';
@@ -113,17 +122,17 @@ function NoiBridgeMini({ bridge }) {
 
 function WarningPill({ warning }) {
   const tone = warning.severity === 'critical'
-    ? 'border-destructive/30 bg-destructive/5 text-destructive'
+    ? 'border-destructive/30 bg-destructive/5 text-foreground'
     : warning.severity === 'warning'
-    ? 'border-warning/30 bg-warning/5 text-warning'
+    ? 'border-warning/35 bg-warning/10 text-foreground'
     : 'border-border/50 bg-muted/40 text-muted-foreground';
   const icon = warning.severity === 'critical'
     ? <AlertCircle className="h-3 w-3 shrink-0 text-destructive" />
     : warning.severity === 'warning'
     ? <AlertTriangle className="h-3 w-3 shrink-0 text-warning" />
     : <Info className="h-3 w-3 shrink-0 text-muted-foreground" />;
-  const text = warning.message.length > 100
-    ? `${warning.message.slice(0, 97)}…`
+  const text = warning.message.length > 140
+    ? `${warning.message.slice(0, 137)}…`
     : warning.message;
   return (
     <div className={`flex items-start gap-1 rounded-lg border px-2.5 py-2 text-xs leading-5 ${tone}`}>
@@ -162,19 +171,21 @@ export default function TrustPanel({
   expanded,
   onToggle,
 }) {
-  const occupancy = artifact?.rent_roll_data?.summary?.occupancy_pct;
   const isOmNoiMode = expenseBasis?.source === 'om_noi';
+  const avgRentDocType = sourceCitations?.avg_in_place_rent_per_unit_monthly?.doc_type
+    ?? (currentRentPerDoor != null ? 'derived' : null);
 
-  const expenseRatioValue = currentExpenseRatio ?? proFormaExpenseRatio;
-  // T-12/line items = actuals source; pro forma only = derived; no basis = unknown
-  const expenseRatioDocType =
-    isOmNoiMode
-      ? 'om'
-      : currentExpenseRatio != null
-      ? expenseBasis?.source === 'expense_ratio_current' || expenseBasis?.source === 'line_items'
-        ? 't12'
-        : 'derived'
-      : 'om';
+  const modeledExpenseRatio = expenseBasis?.expense_ratio ?? expenseBasis?.ratio ?? null;
+  const expenseRatioValue = modeledExpenseRatio ?? currentExpenseRatio ?? proFormaExpenseRatio;
+  const expenseRatioDocType = expenseBasis?.period === 't12'
+    ? 't12'
+    : expenseBasis?.source?.startsWith?.('om_') && expenseBasis?.method === 'line_items'
+      ? 'om_computed'
+      : expenseBasis?.source?.startsWith?.('om_') || isOmNoiMode
+        ? 'om'
+        : modeledExpenseRatio != null
+          ? 'derived'
+          : null;
 
   const revenueBasisDocType =
     revenueBasis?.source === 't12' ? 't12'
@@ -213,9 +224,9 @@ export default function TrustPanel({
       {expanded && (
         <div className="grid grid-cols-1 gap-3 px-4 pb-4 sm:px-6 md:grid-cols-3">
 
-          {/* Col 1: What came from docs */}
+          {/* Col 1: Source support */}
           <div className="rounded-xl border border-border/50 bg-card/80 p-3">
-            <p className="underwriting-kicker mb-2">What came from docs</p>
+            <p className="underwriting-kicker mb-2">Source support</p>
             <SourceRow
               label="Income basis"
               value={revenueBasis?.label}
@@ -232,17 +243,12 @@ export default function TrustPanel({
               docType={sourceCitations?.num_units?.doc_type}
             />
             <SourceRow
-              label="Occupancy"
-              value={occupancy != null ? formatPercent(occupancy) : null}
-              docType={occupancy != null ? 'rent_roll' : null}
-            />
-            <SourceRow
               label="Avg rent / door"
               value={formatCompactCurrency(currentRentPerDoor)}
-              docType={sourceCitations?.avg_in_place_rent_per_unit_monthly?.doc_type}
+              docType={avgRentDocType}
             />
             <SourceRow
-              label="Expense ratio"
+              label="Model expense ratio"
               value={expenseRatioValue != null ? formatPercent(expenseRatioValue) : null}
               docType={expenseRatioDocType}
             />

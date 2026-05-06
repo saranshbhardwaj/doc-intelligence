@@ -55,11 +55,11 @@ export default function ReturnsSection({
     >
       {show && (
         <div className="grid gap-4 xl:grid-cols-[1.7fr,1fr]">
-          {/* 5-year pro forma chart */}
+          {/* First 5 years chart */}
           <div className="underwriting-panel p-4 sm:p-5">
             <div className="mb-4">
               <div className="flex items-center gap-2">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">5-year pro forma</p>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">First 5 years</p>
                 {incomeBasisMonths != null && incomeBasisMonths < 12 ? (
                   <span className="rounded px-1.5 py-0.5 text-[10px] font-bold uppercase tracking-wide"
                     style={{ background: 'hsl(var(--uw-risk) / 0.12)', color: 'hsl(var(--uw-risk))' }}>
@@ -67,7 +67,7 @@ export default function ReturnsSection({
                   </span>
                 ) : null}
               </div>
-              <p className="mt-1 text-sm text-muted-foreground">NOI and cash flow after debt service.</p>
+              <p className="mt-1 text-sm text-muted-foreground">NOI and cash flow after debt service from the full hold-period projection.</p>
             </div>
             {proformaData.length > 0 ? (
               <ResponsiveContainer width="100%" height={280}>

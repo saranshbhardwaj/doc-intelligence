@@ -299,6 +299,13 @@ export default function UnderwritingResult() {
       ? `${verdict.rationale} Warning: ${derivedMixedRevenueWarning.message}`
       : verdict.rationale)
     : derivedMixedRevenueWarning?.message || null;
+  const leadSummary = verdictStatus === 'worth_pursuing'
+    ? 'Returns clear the configured screen based on the current underwriting assumptions.'
+    : verdictStatus === 'needs_review'
+      ? 'Returns clear the initial screen, but the source support needs analyst review before relying on this result.'
+      : verdictStatus
+        ? 'The current assumptions do not clear the configured screen. Review the failed metrics and source support before revising.'
+        : verdictRationale;
 
   const criticalWarningCount = verdictWarnings.filter((w) => w.severity === 'critical').length;
   const prioritizedWarnings = [
@@ -320,17 +327,20 @@ export default function UnderwritingResult() {
       label: warning.message,
       citations: [],
     })),
-  ].slice(0, Math.max(criticalWarningCount + 3, 3));
+  ].slice(0, Math.max(criticalWarningCount + 4, 4));
+  const leadWatchItems = watchItems.slice(0, 3);
+  const hiddenWatchCount = Math.max(watchItems.length - leadWatchItems.length, 0);
 
   const failedSet = new Set((verdict?.failures || []).map((f) => f.metric));
 
   const fm = artifact.formula_metadata || {};
-  function buildTooltip(key, valueFn, fallbackFn = null) {
+  function buildTooltip(key, valueFn, fallbackFn = null, descriptionOverride = null) {
     const meta = fm[key];
     if (meta) {
       const cv = meta.computed_values || {};
       const computed = valueFn ? valueFn(cv) : null;
-      return computed ? `${meta.description}\n\n${computed}` : meta.description;
+      const description = descriptionOverride || meta.description;
+      return computed ? `${description}\n\n${computed}` : description;
     }
     const fallback = fallbackFn ? fallbackFn() : null;
     return fallback || null;
@@ -352,7 +362,6 @@ export default function UnderwritingResult() {
     interest_rate_pct: persistedInputs.financing?.interest_rate_pct != null ? persistedInputs.financing.interest_rate_pct * 100 : null,
     purchase_price: persistedInputs.acquisition?.purchase_price || purchasePrice || null,
   };
-
   const totalUnits = artifact.rent_roll_data?.summary?.total_units || persistedInputs.project?.num_units;
   const gpr = persistedInputs.operational?.gross_potential_rent_annual;
   const derivedCurrentRentPerDoor = totalUnits && gpr ? gpr / totalUnits / 12 : null;
@@ -394,6 +403,15 @@ export default function UnderwritingResult() {
     ?? omOpexPct;
   const expenseBasis = artifact.expense_basis || null;
   const isOmNoiMode = expenseBasis?.source === 'om_noi';
+  const modelExpenseRatio = expenseBasis?.expense_ratio ?? expenseBasis?.ratio ?? null;
+  const decisionSnapshotRows = [
+    { label: 'NOI Y1', value: formatCompactCurrency(currentRun?.noi_year_one) },
+    { label: 'Cap rate Y1', value: formatPercent(currentRun?.cap_rate_year_one) },
+    { label: 'DSCR Y1', value: formatMultiple(currentRun?.dscr_year_one) },
+    { label: 'Basis', value: expenseBasis?.label || '—' },
+    { label: 'Current ask', value: formatCompactCurrency(purchasePrice) },
+    { label: 'Review items', value: `${prioritizedWarnings.length}` },
+  ];
   const expenseBasisFormula = buildTooltip('expense_basis',
     (cv) => {
       const lines = [];
@@ -502,6 +520,7 @@ export default function UnderwritingResult() {
             ? `Equity in: −${formatCompactCurrency(eq)}\nTotal out: ${formatCompactCurrency(em * eq)} = ${em.toFixed(2)}× equity`
             : `Equity in: −${formatCompactCurrency(eq)}`;
         },
+        'Annualized return on equity across the full hold, accounting for timing of every cash flow in and out. IRR uses the annual cash-flow schedule and exit proceeds; the summary below reconciles total proceeds.',
       ),
     },
     {
@@ -512,15 +531,27 @@ export default function UnderwritingResult() {
       formula: buildTooltip('cash_on_cash',
         (cv) => {
           if (cv.year1_cash_flow == null || cv.total_equity == null) return null;
-          const lines = [`Year-1 cash flow:  ${formatCompactCurrency(cv.year1_cash_flow)}`, `Equity invested:   ${formatCompactCurrency(cv.total_equity)}`];
-          if (cv.annual_debt_service != null) lines.splice(1, 0, `Debt service:      −${formatCompactCurrency(cv.annual_debt_service)}`);
+          const year1Noi = cv.year1_noi ?? currentRun?.noi_year_one;
+          const lines = [];
+          if (year1Noi != null) lines.push(`Year-1 NOI:                     ${formatCompactCurrency(year1Noi)}`);
+          if (cv.annual_debt_service != null) lines.push(`Debt service:                  −${formatCompactCurrency(cv.annual_debt_service)}`);
+          lines.push(`Cash flow after debt service:  ${formatCompactCurrency(cv.year1_cash_flow)}`);
+          lines.push(`Equity invested:               ${formatCompactCurrency(cv.total_equity)}`);
           return lines.join('\n');
         },
         () => {
           const eq = capitalStructure.total_equity_invested;
           const coc = currentRun?.cash_on_cash;
           if (!eq || !coc) return null;
-          return `Year-1 cash flow: ${formatCompactCurrency(coc * eq)}\nEquity invested:  ${formatCompactCurrency(eq)}`;
+          const cashFlow = coc * eq;
+          const lines = [];
+          if (currentRun?.noi_year_one != null) lines.push(`Year-1 NOI: ${formatCompactCurrency(currentRun.noi_year_one)}`);
+          if (currentRun?.noi_year_one != null && currentRun?.dscr_year_one) {
+            lines.push(`Debt service: −${formatCompactCurrency(currentRun.noi_year_one / currentRun.dscr_year_one)}`);
+          }
+          lines.push(`Cash flow after debt service: ${formatCompactCurrency(cashFlow)}`);
+          lines.push(`Equity invested: ${formatCompactCurrency(eq)}`);
+          return lines.join('\n');
         },
       ),
     },
@@ -865,9 +896,17 @@ export default function UnderwritingResult() {
                           <MapPin className="h-3.5 w-3.5 shrink-0" />
                           <span>{address || 'Address not provided'}</span>
                         </div>
-                        {verdictRationale ? (
-                          <p className="mt-3 max-w-3xl text-sm leading-6 text-muted-foreground">{verdictRationale}</p>
+                        {leadSummary ? (
+                          <p className="mt-3 max-w-3xl text-sm leading-6 text-muted-foreground">{leadSummary}</p>
                         ) : null}
+                        <div className="mt-5 grid max-w-3xl gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                          {decisionSnapshotRows.map((row) => (
+                            <div key={row.label} className="rounded-xl border border-border/50 bg-background/45 px-3 py-2">
+                              <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-muted-foreground">{row.label}</p>
+                              <p className="mt-1 truncate text-sm font-semibold text-foreground">{row.value}</p>
+                            </div>
+                          ))}
+                        </div>
                       </div>
 
                       {watchItems.length > 0 && (
@@ -877,7 +916,7 @@ export default function UnderwritingResult() {
                               {criticalWarningCount > 0 ? 'Critical items' : 'Watch items'}
                             </p>
                             <div className="mt-2.5">
-                              {watchItems.map((item) => (
+                              {leadWatchItems.map((item) => (
                                 <div key={item.id} className="uw-watch-item">
                                   <span
                                     className="uw-watch-item-dot"
@@ -887,7 +926,7 @@ export default function UnderwritingResult() {
                                         : 'hsl(var(--uw-risk))',
                                     }}
                                   />
-                                  <span className="min-w-0 capitalize">{item.label}</span>
+                                  <span className="min-w-0">{item.label}</span>
                                   {item.kind === 'failure' && item.gap != null ? (
                                     <span
                                       className="ml-auto shrink-0 rounded px-1.5 py-0.5 text-[10px] font-bold tabular-nums"
@@ -912,6 +951,15 @@ export default function UnderwritingResult() {
                                   ) : null}
                                 </div>
                               ))}
+                              {hiddenWatchCount > 0 ? (
+                                <button
+                                  type="button"
+                                  onClick={() => setShowTrustPanel(true)}
+                                  className="mt-2 text-xs font-semibold text-primary hover:underline"
+                                >
+                                  +{hiddenWatchCount} more in trust summary
+                                </button>
+                              ) : null}
                             </div>
                           </div>
                         </div>
@@ -928,20 +976,33 @@ export default function UnderwritingResult() {
                     rentCompCoverage={rentCompCoverage}
                   />
 
-                  {/* Below-market upside banner */}
-                  {artifact.om_data?.below_market_annual_upside ? (
+                  {/* Upside not in base case */}
+                  {artifact.om_data?.below_market_annual_upside || artifact.om_data?.value_add_notes ? (
                     <div className="uw-upside-banner mt-4">
-                      <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-uw-risk">Upside not in model</p>
-                      <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                        {artifact.om_data.below_market_tenant_pct
-                          ? `${(artifact.om_data.below_market_tenant_pct * 100).toFixed(0)}% of tenants are below street rate. ` : ''}
-                        Raising them to current rates could add{' '}
-                        <span className="font-semibold text-foreground">{formatCompactCurrency(artifact.om_data.below_market_annual_upside)}/year</span>
-                        {' '}in revenue — not reflected in the modeled returns.
-                      </p>
-                      {artifact.om_data.value_add_notes ? (
-                        <p className="mt-2 text-sm leading-6 text-muted-foreground">{artifact.om_data.value_add_notes}</p>
-                      ) : null}
+                      <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-uw-risk">Upside not in base case</p>
+                      <div className="mt-3 grid gap-3 md:grid-cols-2">
+                        {artifact.om_data?.below_market_annual_upside ? (
+                          <div className="rounded-xl border border-border/50 bg-background/50 p-3">
+                            <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-muted-foreground">Rent mark-to-market</p>
+                            <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                              {artifact.om_data.below_market_tenant_pct
+                                ? `${(artifact.om_data.below_market_tenant_pct * 100).toFixed(0)}% of tenants are below street rate. ` : ''}
+                              Potential upside:{' '}
+                              <span className="font-semibold text-foreground">{formatCompactCurrency(artifact.om_data.below_market_annual_upside)}/year</span>.
+                              {' '}Not included in modeled returns.
+                            </p>
+                          </div>
+                        ) : null}
+                        {artifact.om_data?.value_add_notes ? (
+                          <div className="rounded-xl border border-border/50 bg-background/50 p-3">
+                            <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-muted-foreground">Conversion opportunity</p>
+                            <p className="mt-2 text-sm leading-6 text-muted-foreground">{artifact.om_data.value_add_notes}</p>
+                            <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                              Broker-stated upside only. Requires feasibility, capex, permitting, and demand review.
+                            </p>
+                          </div>
+                        ) : null}
+                      </div>
                     </div>
                   ) : null}
 
@@ -1016,38 +1077,22 @@ export default function UnderwritingResult() {
                           () => marketRentPerDoor != null ? `Market rate: ${formatCurrency(Math.round(marketRentPerDoor))}/month` : null,
                         )}
                       />
-                      {hasT12Data ? (
-                        <>
-                          <UnderwritingMetricCard
-                            label="Current Expense Ratio"
-                            value={formatPercent(currentExpenseRatio)}
-                            detail="T-12 actual operating ratio"
-                            tone={currentExpenseRatio != null && currentExpenseRatio > 0.45 ? 'warning' : 'default'}
-                            formula={buildTooltip('current_expense_ratio', () =>
-                              artifact.t12_data?.summary?.total_opex != null && artifact.t12_data?.summary?.egi != null
-                                ? `${formatCompactCurrency(artifact.t12_data.summary.total_opex)} ÷ ${formatCompactCurrency(artifact.t12_data.summary.egi)}`
-                                : null
-                            )}
-                          />
-                          <UnderwritingMetricCard
-                            label="Pro Forma Expense Ratio"
-                            value={formatPercent(proFormaExpenseRatio)}
-                            detail="OM / underwritten expense ratio"
-                            tone={proFormaExpenseRatio != null && currentExpenseRatio != null && proFormaExpenseRatio < currentExpenseRatio - 0.05 ? 'active' : 'default'}
-                            formula={buildTooltip('pro_forma_expense_ratio',
-                              (cv) => cv.pro_forma_expense_pct != null && cv.gpr != null ? `${formatPercent(cv.pro_forma_expense_pct)} × ${formatCompactCurrency(cv.gpr)}` : null,
-                              () => proFormaExpenseRatio != null && gpr != null ? `${formatPercent(proFormaExpenseRatio)} × ${formatCompactCurrency(gpr)}` : null,
-                            )}
-                          />
-                        </>
-                      ) : proFormaExpenseRatio != null ? (
+                      {modelExpenseRatio != null ? (
                         <UnderwritingMetricCard
-                          label="Stated Expense Ratio"
-                          value={formatPercent(proFormaExpenseRatio)}
-                          detail="Source: OM / broker pro forma"
-                          formula={buildTooltip('pro_forma_expense_ratio',
-                            (cv) => cv.pro_forma_expense_pct != null && cv.gpr != null ? `${formatPercent(cv.pro_forma_expense_pct)} × ${formatCompactCurrency(cv.gpr)}` : null,
-                            () => proFormaExpenseRatio != null && gpr != null ? `${formatPercent(proFormaExpenseRatio)} × ${formatCompactCurrency(gpr)}` : null,
+                          label="Model Expense Ratio"
+                          value={formatPercent(modelExpenseRatio)}
+                          detail={expenseBasis?.label || 'Selected expense basis'}
+                          tone={modelExpenseRatio < 0.3 ? 'warning' : 'default'}
+                          formula={buildTooltip('expense_basis',
+                            (cv) => {
+                              if (cv.ratio != null && cv.year1_egi != null) {
+                                return `${formatPercent(cv.ratio)} × ${formatCompactCurrency(cv.year1_egi)} Year-1 EGI`;
+                              }
+                              return null;
+                            },
+                            () => expenseBasis?.modeled_total_expenses != null && expenseBasis?.modeled_egi != null
+                              ? `${formatCompactCurrency(expenseBasis.modeled_total_expenses)} ÷ ${formatCompactCurrency(expenseBasis.modeled_egi)}`
+                              : null,
                           )}
                         />
                       ) : null}

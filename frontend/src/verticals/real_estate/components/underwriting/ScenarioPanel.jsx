@@ -1,6 +1,36 @@
 import { Loader2, RotateCcw } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 
+function formatCompactCurrency(value) {
+  if (value == null || !Number.isFinite(Number(value))) return '—';
+  const n = Number(value);
+  if (Math.abs(n) >= 1_000_000) return `$${(n / 1_000_000).toFixed(1)}M`;
+  if (Math.abs(n) >= 1_000) return `$${(n / 1_000).toFixed(0)}K`;
+  return `$${n.toFixed(0)}`;
+}
+
+function formatInputValue(value, unit) {
+  if (value == null || !Number.isFinite(Number(value))) return '';
+  if (unit === '$') return Math.round(Number(value)).toLocaleString('en-US');
+  return Number(value);
+}
+
+function parseInputValue(value, unit) {
+  const cleaned = unit === '$' ? String(value).replace(/[$,\s]/g, '') : value;
+  const parsed = parseFloat(cleaned);
+  return Number.isNaN(parsed) ? null : parsed;
+}
+
+function formatDelta(delta, unit) {
+  if (delta == null) return null;
+  const direction = delta >= 0 ? '▲' : '▼';
+  const abs = Math.abs(delta);
+  if (unit === '$') return `${direction}${formatCompactCurrency(abs)}`;
+  if (unit === 'x') return `${direction}${abs.toFixed(2)}x`;
+  if (unit === 'pp') return `${direction}${abs.toFixed(2)}pp`;
+  return `${direction}${abs.toFixed(2)}`;
+}
+
 export default function ScenarioPanel({
   baseScenario,
   scenarioValues,
@@ -30,14 +60,14 @@ export default function ScenarioPanel({
     { label: 'Cash-on-Cash', base: currentRun?.cash_on_cash, scenario: scenarioResult?.cash_on_cash, fmt: (v) => `${(v * 100).toFixed(1)}%`, unit: 'pp', scale: 100 },
     { label: 'Equity Multiple', base: currentRun?.equity_multiple, scenario: scenarioResult?.equity_multiple, fmt: (v) => `${v.toFixed(2)}×`, unit: 'x', scale: 1 },
     { label: 'DSCR Year 1', base: currentRun?.dscr_year_one, scenario: scenarioResult?.dscr_year_one, fmt: (v) => `${v.toFixed(2)}×`, unit: 'x', scale: 1 },
-    { label: 'NOI Year 1', base: currentRun?.noi_year_one, scenario: scenarioResult?.noi_year_one, fmt: (v) => `$${(v / 1000).toFixed(0)}K`, unit: '$', scale: 1 },
+    { label: 'NOI Year 1', base: currentRun?.noi_year_one, scenario: scenarioResult?.noi_year_one, fmt: formatCompactCurrency, unit: '$', scale: 1 },
   ];
 
   return (
     <div className="mt-4 underwriting-panel p-4 sm:p-5">
       <div className="mb-4 flex items-center justify-between gap-3">
         <div>
-          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Assumption what-if</p>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Scenario What-If</p>
           <p className="mt-1 text-sm text-muted-foreground">Adjust assumptions to preview updated returns. Changes are not saved.</p>
         </div>
         <div className="flex items-center gap-2">
@@ -64,18 +94,19 @@ export default function ScenarioPanel({
                   </label>
                   <div className="flex items-center gap-1.5">
                     <input
-                      type="number"
-                      value={currentVal}
+                      type="text"
+                      inputMode={unit === '$' ? 'numeric' : 'decimal'}
+                      value={formatInputValue(currentVal, unit)}
                       step={step}
                       min={min}
                       max={max}
                       onChange={(e) => {
-                        const v = parseFloat(e.target.value);
-                        if (!Number.isNaN(v)) onValueChange(field, v);
+                        const v = parseInputValue(e.target.value, unit);
+                        if (v != null) onValueChange(field, v);
                       }}
                       className="w-24 rounded-lg border border-border bg-background px-2 py-1 text-right text-sm font-semibold text-foreground focus:outline-none focus:ring-1 focus:ring-primary"
                     />
-                    <span className="text-sm text-muted-foreground">{unit}</span>
+                    {unit !== '$' ? <span className="text-sm text-muted-foreground">{unit}</span> : null}
                   </div>
                 </div>
                 <input
@@ -88,9 +119,9 @@ export default function ScenarioPanel({
                   className="underwriting-range"
                 />
                 <div className="mt-0.5 flex justify-between text-[11px] text-muted-foreground">
-                  <span>{unit === '$' ? `$${(min / 1_000_000).toFixed(1)}M` : `${min}%`}</span>
-                  {baseVal != null ? <span className="text-primary">base: {unit === '$' ? `$${(baseVal / 1_000_000).toFixed(1)}M` : `${baseVal.toFixed(1)}%`}</span> : null}
-                  <span>{unit === '$' ? `$${(max / 1_000_000).toFixed(1)}M` : `${max}%`}</span>
+                  <span>{unit === '$' ? formatCompactCurrency(min) : `${min}%`}</span>
+                  {baseVal != null ? <span className="text-primary">base: {unit === '$' ? formatCompactCurrency(baseVal) : `${baseVal.toFixed(1)}%`}</span> : null}
+                  <span>{unit === '$' ? formatCompactCurrency(max) : `${max}%`}</span>
                 </div>
               </div>
             );
@@ -104,9 +135,7 @@ export default function ScenarioPanel({
           {resultMetrics.map(({ label, base, scenario, fmt, unit, scale }) => {
             const hasScenario = scenarioResult != null;
             const delta = hasScenario && base != null && scenario != null ? (scenario - base) * scale : null;
-            const deltaStr = delta != null
-              ? `${delta >= 0 ? '▲' : '▼'}${Math.abs(delta).toFixed(unit === '$' ? 0 : 2)}${unit === 'pp' ? 'pp' : ''}`
-              : null;
+            const deltaStr = formatDelta(delta, unit);
             const deltaTone = delta == null ? '' : delta > 0 ? 'text-success' : delta < 0 ? 'text-destructive' : 'text-muted-foreground';
             return (
               <div key={label} className="flex items-center justify-between gap-3 rounded-2xl border border-border/60 bg-background/60 px-4 py-3">

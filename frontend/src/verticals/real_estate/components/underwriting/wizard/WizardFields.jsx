@@ -29,7 +29,20 @@ function citationTier(citation) {
     return { label: 'T-12 annualized', tone: 'actual', title: citation.selection_note ?? citation.formula ?? 'Annualized from a partial-period T-12.' };
   }
   if (citation.doc_type === 'om' && citation.used_fallback_source) {
-    return { label: 'OM fallback', tone: 'om', title: citation.selection_note ?? 'Used an OM fallback field because the preferred source was unavailable.' };
+    const missingPreferred = Array.isArray(citation.preferred_sources_missing)
+      ? citation.preferred_sources_missing
+      : [];
+    const isPeriodFallback = citation.source_period === 'current'
+      && missingPreferred.some((source) => String(source).toLowerCase().includes('year1'));
+    return {
+      label: isPeriodFallback ? 'OM fallback' : 'OM stated',
+      tone: 'om',
+      title: citation.selection_note ?? (
+        isPeriodFallback
+          ? 'Used an OM fallback field because the preferred period was unavailable.'
+          : 'Broker or offering memorandum stated assumption.'
+      ),
+    };
   }
   if (citation.doc_type === 't12' && citation.used_fallback_source) {
     return { label: 'T-12 fallback', tone: 'actual', title: citation.selection_note ?? 'Used a T-12 fallback field because the preferred source was unavailable.' };
@@ -439,7 +452,8 @@ export function ValueAddEvidence({ omData, getCitation, onOpenSource }) {
 
 export function OperationsIncomeBasisStrip({ inputs, currentRun }) {
   const artifact = currentRun?.result_artifact || {};
-  const expenseBasisSource = artifact.expense_basis?.source;
+  const expenseBasis = artifact.expense_basis;
+  const expenseBasisSource = expenseBasis?.source;
   // Prefer saved model inputs because they reflect any analyst edits, then fall back to
   // preserved extraction artifacts so historical runs still show a useful basis strip.
   const months = inputs.operational?.income_basis_months
@@ -451,6 +465,10 @@ export function OperationsIncomeBasisStrip({ inputs, currentRun }) {
   let tone = 'neutral';
   let title = 'Income period not stated';
   let detail = 'The source period is unknown. Treat income and expense support as preliminary.';
+
+  if (!months && expenseBasis && !['missing', 'noi'].includes(expenseBasis.method)) {
+    return null;
+  }
 
   if (expenseBasisSource === 'om_noi') {
     tone = 'warning';

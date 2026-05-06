@@ -146,6 +146,55 @@ export default function WizardInputStage({
         const isDriver = (field) => !hasBasis || driverFields.has(field);
         const driverBadge = (field) => (isDriver(field) ? 'Drives model' : 'Evidence');
         const driverNote = (field) => (isDriver(field) ? null : 'Not driving model under current basis.');
+        const hasValue = (value) => value !== '' && value != null;
+        const hasEvidenceCitation = (field) => {
+          const citation = getCitation(field);
+          return Boolean(citation && !citation.is_default);
+        };
+        const showEvidence = (field) => hasValue(inputs.operational[field]) && hasEvidenceCitation(field);
+        const supportingEvidence = [
+          showEvidence('avg_in_place_rent_per_unit_monthly') ? (
+            <NumericField key="avg-in-place" label="Avg Current Rent / Door / Mo" value={inputs.operational.avg_in_place_rent_per_unit_monthly} onChange={() => {}} placeholder="—" prefix="$" citation={getCitation('avg_in_place_rent_per_unit_monthly')} onOpenSource={handleOpenSource} disabled badge="Evidence" note="Displayed for analyst context; GPR drives revenue." />
+          ) : null,
+          showEvidence('avg_market_rent_per_unit_monthly') ? (
+            <NumericField key="avg-market" label="Avg Market Rent / Door / Mo" value={inputs.operational.avg_market_rent_per_unit_monthly} onChange={() => {}} placeholder="—" prefix="$" citation={getCitation('avg_market_rent_per_unit_monthly')} onOpenSource={handleOpenSource} disabled badge="Evidence" note="Displayed for rent-position context; not a direct NOI driver." />
+          ) : null,
+          expenseBasis?.method !== 'expense_ratio' && showEvidence('expense_ratio_t12') ? (
+            <NumericField key="ratio-t12" label="T-12 Expense Ratio" value={inputs.operational.expense_ratio_t12} onChange={() => {}} placeholder="—" suffix="%" citation={getCitation('expense_ratio_t12')} onOpenSource={handleOpenSource} disabled badge="Evidence" note="Not driving model under current basis." />
+          ) : null,
+          expenseBasis?.method !== 'expense_ratio' && showEvidence('expense_ratio_current') ? (
+            <NumericField key="ratio-current" label="Current Expense Ratio" value={inputs.operational.expense_ratio_current} onChange={() => {}} placeholder="—" suffix="%" citation={getCitation('expense_ratio_current')} onOpenSource={handleOpenSource} disabled badge="Evidence" note="Not driving model under current basis." />
+          ) : null,
+          expenseBasis?.method !== 'expense_ratio' && showEvidence('expense_ratio_year1') ? (
+            <NumericField key="ratio-year1" label="Year 1 Expense Ratio" value={inputs.operational.expense_ratio_year1} onChange={() => {}} placeholder="—" suffix="%" citation={getCitation('expense_ratio_year1')} onOpenSource={handleOpenSource} disabled badge="Evidence" note="Shown as a cross-check against line-item OpEx." />
+          ) : null,
+          expenseBasis?.method !== 'expense_ratio' && showEvidence('expense_ratio_pro_forma') ? (
+            <NumericField key="ratio-pro-forma" label="Pro Forma Expense Ratio" value={inputs.operational.expense_ratio_pro_forma} onChange={() => {}} placeholder="—" suffix="%" citation={getCitation('expense_ratio_pro_forma')} onOpenSource={handleOpenSource} disabled badge="Evidence" note="Broker/stabilized evidence only unless basis changes." />
+          ) : null,
+          showEvidence('bad_debt_annual') ? (
+            <NumericField key="bad-debt" label="Bad Debt (Annual)" value={inputs.operational.bad_debt_annual} onChange={() => {}} placeholder="—" prefix="$" citation={getCitation('bad_debt_annual')} onOpenSource={handleOpenSource} disabled badge="Evidence" />
+          ) : null,
+          showEvidence('corrections_collections_annual') ? (
+            <NumericField key="corrections" label="Corrections / Collections" value={inputs.operational.corrections_collections_annual} onChange={() => {}} placeholder="—" prefix="$" citation={getCitation('corrections_collections_annual')} onOpenSource={handleOpenSource} disabled badge="Evidence" />
+          ) : null,
+        ].filter(Boolean);
+        const taxSupport = [
+          showEvidence('property_tax_value_basis_amount') ? (
+            <NumericField key="tax-value-basis" label="Tax Value Basis" value={inputs.operational.property_tax_value_basis_amount} onChange={() => {}} placeholder="—" prefix="$" citation={getCitation('property_tax_value_basis_amount')} onOpenSource={handleOpenSource} disabled badge="Tax support" />
+          ) : null,
+          showEvidence('property_tax_assessed_value') ? (
+            <NumericField key="tax-assessed" label="Assessed Value" value={inputs.operational.property_tax_assessed_value} onChange={() => {}} placeholder="—" prefix="$" citation={getCitation('property_tax_assessed_value')} onOpenSource={handleOpenSource} disabled badge="Tax support" />
+          ) : null,
+          showEvidence('property_tax_assessment_ratio') ? (
+            <NumericField key="tax-assessment-ratio" label="Assessment Ratio" value={inputs.operational.property_tax_assessment_ratio} onChange={() => {}} placeholder="—" suffix="%" citation={getCitation('property_tax_assessment_ratio')} onOpenSource={handleOpenSource} disabled badge="Tax support" />
+          ) : null,
+          showEvidence('property_tax_millage_rate') ? (
+            <NumericField key="tax-millage" label="Millage Rate" value={inputs.operational.property_tax_millage_rate} onChange={() => {}} placeholder="—" suffix="mills" citation={getCitation('property_tax_millage_rate')} onOpenSource={handleOpenSource} disabled badge="Tax support" />
+          ) : null,
+          showEvidence('property_tax_rate_per_assessed_dollar') ? (
+            <NumericField key="tax-rate" label="Tax Rate / Assessed $" value={inputs.operational.property_tax_rate_per_assessed_dollar} onChange={() => {}} placeholder="—" citation={getCitation('property_tax_rate_per_assessed_dollar')} onOpenSource={handleOpenSource} disabled badge="Tax support" />
+          ) : null,
+        ].filter(Boolean);
         return (
           <div className="fields-grid">
             <OperationsIncomeBasisStrip inputs={inputs} currentRun={currentRun} />
@@ -154,7 +203,6 @@ export default function WizardInputStage({
             <NumericField label="Gross Potential Rent (Annual)" value={inputs.operational.gross_potential_rent_annual} onChange={(v) => patchOp('gross_potential_rent_annual', v)} placeholder="600,000" prefix="$" citation={getCitation('gross_potential_rent_annual')} onOpenSource={handleOpenSource} badge={driverBadge('gross_potential_rent_annual')} note={driverNote('gross_potential_rent_annual')} disabled={!isDriver('gross_potential_rent_annual')} />
             <NumericField label="Other Income (Annual)" value={inputs.operational.other_income_annual} onChange={(v) => patchOp('other_income_annual', v)} placeholder="0" prefix="$" citation={getCitation('other_income_annual')} onOpenSource={handleOpenSource} badge={driverBadge('other_income_annual')} note={driverNote('other_income_annual')} disabled={!isDriver('other_income_annual')} />
             <NumericField label="Vacancy & Credit Loss" value={inputs.operational.vacancy_credit_loss_pct} onChange={(v) => patchOp('vacancy_credit_loss_pct', v)} placeholder="10" suffix="%" citation={getCitation('vacancy_credit_loss_pct')} onOpenSource={handleOpenSource} badge={driverBadge('vacancy_credit_loss_pct')} note={driverNote('vacancy_credit_loss_pct')} disabled={!isDriver('vacancy_credit_loss_pct')} />
-            <NumericField label="Rent Growth" value={inputs.operational.rent_growth_pct} onChange={(v) => patchOp('rent_growth_pct', v)} placeholder="3" suffix="%" citation={getCitation('rent_growth_pct')} onOpenSource={handleOpenSource} badge={driverBadge('rent_growth_pct')} note={driverNote('rent_growth_pct')} disabled={!isDriver('rent_growth_pct')} />
             {expenseBasis?.method === 'expense_ratio' ? (
               <>
                 <FieldGroup label="Expense Ratio Driver" />
@@ -168,7 +216,7 @@ export default function WizardInputStage({
             <div>
               <NumericField label="Property Tax (Year 1)" value={inputs.operational.property_tax_annual} onChange={(v) => patchOp('property_tax_annual', v)} placeholder="0" prefix="$" citation={getCitation('property_tax_annual')} onOpenSource={handleOpenSource} badge={driverBadge('property_tax_annual')} note={driverNote('property_tax_annual')} disabled={!isDriver('property_tax_annual')} />
               <ExpenseHint citation={getCitation('property_tax_annual')} />
-              {getCitation('property_tax_annual')?.field === 'expense_property_tax_annual_current'
+              {getCitation('property_tax_annual')?.source_period === 'current'
                 && currentRun?.result_artifact?.om_data?.detected_has_current_column !== false && (
                 <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">
                   Year-1 value not extracted — using Current column value instead.
@@ -176,7 +224,6 @@ export default function WizardInputStage({
                 </p>
               )}
             </div>
-            <NumericField label="Property Tax Growth" value={inputs.operational.property_tax_growth_pct} onChange={(v) => patchOp('property_tax_growth_pct', v)} placeholder="4" suffix="%" citation={getCitation('property_tax_growth_pct')} onOpenSource={handleOpenSource} badge={driverBadge('property_tax_growth_pct')} note={driverNote('property_tax_growth_pct')} disabled={!isDriver('property_tax_growth_pct')} />
             <div>
               <NumericField label="Insurance (Year 1)" value={inputs.operational.insurance_annual} onChange={(v) => patchOp('insurance_annual', v)} placeholder="0" prefix="$" citation={getCitation('insurance_annual')} onOpenSource={handleOpenSource} badge={driverBadge('insurance_annual')} note={driverNote('insurance_annual')} disabled={!isDriver('insurance_annual')} />
               <ExpenseHint citation={getCitation('insurance_annual')} />
@@ -196,26 +243,25 @@ export default function WizardInputStage({
               <ExpenseHint citation={getCitation('marketing_annual')} />
             </div>
             <NumericField label="Other OpEx (Annual)" value={inputs.operational.other_opex_annual} onChange={(v) => patchOp('other_opex_annual', v)} placeholder="0" prefix="$" citation={getCitation('other_opex_annual')} onOpenSource={handleOpenSource} badge={driverBadge('other_opex_annual')} note={driverNote('other_opex_annual')} disabled={!isDriver('other_opex_annual')} />
-            <NumericField label="OpEx Growth" value={inputs.operational.opex_growth_pct} onChange={(v) => patchOp('opex_growth_pct', v)} placeholder="2" suffix="%" citation={getCitation('opex_growth_pct')} onOpenSource={handleOpenSource} badge={driverBadge('opex_growth_pct')} note={driverNote('opex_growth_pct')} disabled={!isDriver('opex_growth_pct')} />
 
-            <FieldGroup label="Supporting Evidence" />
-            <NumericField label="Avg Current Rent / Door / Mo" value={inputs.operational.avg_in_place_rent_per_unit_monthly} onChange={() => {}} placeholder="115" prefix="$" citation={getCitation('avg_in_place_rent_per_unit_monthly')} onOpenSource={handleOpenSource} disabled badge="Evidence" note="Displayed for analyst context; GPR drives revenue." />
-            <NumericField label="Avg Market Rent / Door / Mo" value={inputs.operational.avg_market_rent_per_unit_monthly} onChange={() => {}} placeholder="132" prefix="$" citation={getCitation('avg_market_rent_per_unit_monthly')} onOpenSource={handleOpenSource} disabled badge="Evidence" note="Displayed for rent-position context; not a direct NOI driver." />
-            {expenseBasis?.method !== 'expense_ratio' ? (
+            <FieldGroup label="Growth Assumptions" />
+            <NumericField label="Rent Growth" value={inputs.operational.rent_growth_pct} onChange={(v) => patchOp('rent_growth_pct', v)} placeholder="3" suffix="%" citation={getCitation('rent_growth_pct')} onOpenSource={handleOpenSource} badge="Drives projections" note="Applies to future-year revenue growth." />
+            <NumericField label="OpEx Growth" value={inputs.operational.opex_growth_pct} onChange={(v) => patchOp('opex_growth_pct', v)} placeholder="2" suffix="%" citation={getCitation('opex_growth_pct')} onOpenSource={handleOpenSource} badge="Drives projections" note="Applies to future-year operating expense growth." />
+            <NumericField label="Property Tax Growth" value={inputs.operational.property_tax_growth_pct} onChange={(v) => patchOp('property_tax_growth_pct', v)} placeholder="4" suffix="%" citation={getCitation('property_tax_growth_pct')} onOpenSource={handleOpenSource} badge="Drives projections" note="Applies to future-year property tax growth when tax is modeled as a line item." />
+
+            {supportingEvidence.length ? (
               <>
-                <NumericField label="T-12 Expense Ratio" value={inputs.operational.expense_ratio_t12} onChange={() => {}} placeholder="40" suffix="%" citation={getCitation('expense_ratio_t12')} onOpenSource={handleOpenSource} disabled badge="Evidence" note="Not driving model under current basis." />
-                <NumericField label="Current Expense Ratio" value={inputs.operational.expense_ratio_current} onChange={() => {}} placeholder="41" suffix="%" citation={getCitation('expense_ratio_current')} onOpenSource={handleOpenSource} disabled badge="Evidence" note="Not driving model under current basis." />
-                <NumericField label="Year 1 Expense Ratio" value={inputs.operational.expense_ratio_year1} onChange={() => {}} placeholder="28.5" suffix="%" citation={getCitation('expense_ratio_year1')} onOpenSource={handleOpenSource} disabled badge="Evidence" note="Shown as a cross-check against line-item OpEx." />
-                <NumericField label="Pro Forma Expense Ratio" value={inputs.operational.expense_ratio_pro_forma} onChange={() => {}} placeholder="27.8" suffix="%" citation={getCitation('expense_ratio_pro_forma')} onOpenSource={handleOpenSource} disabled badge="Evidence" note="Broker/stabilized evidence only unless basis changes." />
+                <FieldGroup label="Supporting Evidence" />
+                {supportingEvidence}
               </>
             ) : null}
-            <NumericField label="Bad Debt (Annual)" value={inputs.operational.bad_debt_annual} onChange={() => {}} placeholder="0" prefix="$" citation={getCitation('bad_debt_annual')} onOpenSource={handleOpenSource} disabled badge="Evidence" />
-            <NumericField label="Corrections / Collections" value={inputs.operational.corrections_collections_annual} onChange={() => {}} placeholder="0" prefix="$" citation={getCitation('corrections_collections_annual')} onOpenSource={handleOpenSource} disabled badge="Evidence" />
-            <NumericField label="Tax Value Basis" value={inputs.operational.property_tax_value_basis_amount} onChange={() => {}} placeholder="2,500,000" prefix="$" citation={getCitation('property_tax_value_basis_amount')} onOpenSource={handleOpenSource} disabled badge="Tax evidence" />
-            <NumericField label="Assessed Value" value={inputs.operational.property_tax_assessed_value} onChange={() => {}} placeholder="275,000" prefix="$" citation={getCitation('property_tax_assessed_value')} onOpenSource={handleOpenSource} disabled badge="Tax evidence" />
-            <NumericField label="Assessment Ratio" value={inputs.operational.property_tax_assessment_ratio} onChange={() => {}} placeholder="11" suffix="%" citation={getCitation('property_tax_assessment_ratio')} onOpenSource={handleOpenSource} disabled badge="Tax evidence" />
-            <NumericField label="Millage Rate" value={inputs.operational.property_tax_millage_rate} onChange={() => {}} placeholder="111.61" suffix="mills" citation={getCitation('property_tax_millage_rate')} onOpenSource={handleOpenSource} disabled badge="Tax evidence" />
-            <NumericField label="Tax Rate / Assessed $" value={inputs.operational.property_tax_rate_per_assessed_dollar} onChange={() => {}} placeholder="0.11161" citation={getCitation('property_tax_rate_per_assessed_dollar')} onOpenSource={handleOpenSource} disabled badge="Tax evidence" />
+
+            {taxSupport.length ? (
+              <>
+                <FieldGroup label="Tax Support" />
+                {taxSupport}
+              </>
+            ) : null}
 
             <div className="col-span-full">
               <button

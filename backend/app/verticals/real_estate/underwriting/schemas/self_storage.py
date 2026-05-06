@@ -156,7 +156,7 @@ class OperationalInputs(BaseModel):
     )
 
     # Expenses (annual)
-    property_tax_annual: float = 0.0
+    property_tax_annual: Optional[float] = None
     insurance_annual: float = 0.0
     mgmt_fee_pct: float = Field(
         default=0.08, description="Management fee as % of EGI."

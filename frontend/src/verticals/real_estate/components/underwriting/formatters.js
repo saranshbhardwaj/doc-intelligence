@@ -185,10 +185,10 @@ export function getUnitMixSource(artifact = {}, persistedInputs = {}, coverage =
   }
   if (hasRows(artifact.unit_mix)) {
     return {
-      label: 'Extracted source',
+      label: 'Extracted OM unit mix',
       tone: 'active',
       source: 'extracted',
-      detail: 'Unit mix was extracted into the model input set.',
+      detail: 'Unit mix was extracted from OM/unit schedule data. Validate against the rent roll when available.',
     };
   }
   if (hasRows(persistedInputs.unit_mix)) {
