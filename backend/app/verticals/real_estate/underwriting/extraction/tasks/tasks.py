@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from celery import chain, chord, group, shared_task
 from celery.exceptions import SoftTimeLimitExceeded
+from pydantic import ValidationError
 
 from app.config import settings
 from app.database import get_db
@@ -464,6 +465,27 @@ def re_detect_discrepancies_task(self, payload: dict) -> dict:
         logger.warning(f"Discrepancy detection failed (non-fatal): {e}", extra={"run_id": run_id})
         payload["discrepancies"] = []
         return payload
+
+
+def _describe_validation_error(exc: ValidationError) -> str:
+    """Convert a Pydantic ValidationError into a plain-English user message.
+
+    Each missing/invalid field becomes one bullet. The message guides the
+    user to enter the value manually in the wizard rather than showing a
+    raw Pydantic traceback.
+    """
+    field_msgs: list[str] = []
+    for error in exc.errors():
+        loc = " → ".join(str(part) for part in error["loc"])
+        pydantic_msg = error.get("msg", "invalid value")
+        field_msgs.append(f"  • {loc}: {pydantic_msg}")
+
+    fields_block = "\n".join(field_msgs)
+    return (
+        f"Could not run calculations — {len(field_msgs)} required field(s) are missing "
+        f"or invalid:\n{fields_block}\n\n"
+        "Please enter these values manually in the wizard and re-run the analysis."
+    )
 
 
 @shared_task(
