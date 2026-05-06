@@ -626,3 +626,144 @@ class TestOMNOIMode:
         from app.verticals.real_estate.underwriting import calculator as calc_module
         result_noi = calc_module._stated_om_noi(inputs)
         assert result_noi == 0.0  # returned 0.0, not 663_830
+
+
+from pydantic import ValidationError as PydanticValidationError
+from app.verticals.real_estate.underwriting.extraction.tasks.tasks import (
+    _describe_validation_error,
+)
+
+
+def _make_validation_error(missing_fields: list[tuple[str, ...]]) -> PydanticValidationError:
+    """Build a real ValidationError by constructing SelfStorageInputs with bad data."""
+    from app.verticals.real_estate.underwriting.schemas.self_storage import (
+        SelfStorageInputs,
+        ProjectDetails,
+        AcquisitionInputs,
+        FinancingInputs,
+        ExitInputs,
+        InvestmentCriteria,
+    )
+    import pytest
+    data = {
+        "project": ProjectDetails(name="T", asset_type="self_storage"),
+        "acquisition": AcquisitionInputs(),
+        "operational": {"gross_potential_rent_annual": None},  # forces float_type error
+        "financing": FinancingInputs(),
+        "exit": ExitInputs(),
+        "criteria": InvestmentCriteria(),
+    }
+    with pytest.raises(PydanticValidationError) as exc_info:
+        SelfStorageInputs(**data)
+    return exc_info.value
+
+
+def test_describe_validation_error_names_field():
+    """Human-readable message includes the field name."""
+    exc = _make_validation_error([])
+    msg = _describe_validation_error(exc)
+    assert "gross_potential_rent_annual" in msg
+
+
+def test_describe_validation_error_is_string():
+    """Always returns a non-empty string."""
+    exc = _make_validation_error([])
+    msg = _describe_validation_error(exc)
+    assert isinstance(msg, str) and len(msg) > 0
+
+
+def test_describe_validation_error_mentions_manual_entry():
+    """Should guide the user toward the wizard for manual entry."""
+    exc = _make_validation_error([])
+    msg = _describe_validation_error(exc)
+    assert "wizard" in msg.lower() or "manually" in msg.lower() or "enter" in msg.lower()
+
+
+def test_describe_validation_error_multiple_fields():
+    """When multiple fields are missing, all are listed."""
+    from app.verticals.real_estate.underwriting.schemas.self_storage import (
+        SelfStorageInputs,
+        ProjectDetails,
+        AcquisitionInputs,
+        FinancingInputs,
+        ExitInputs,
+        InvestmentCriteria,
+    )
+    import pytest
+    data = {
+        "project": ProjectDetails(name="T", asset_type="self_storage"),
+        "acquisition": AcquisitionInputs(),
+        "operational": {
+            "gross_potential_rent_annual": None,
+            "vacancy_credit_loss_pct": None,
+        },
+        "financing": FinancingInputs(),
+        "exit": ExitInputs(),
+        "criteria": InvestmentCriteria(),
+    }
+    with pytest.raises(PydanticValidationError) as exc_info:
+        SelfStorageInputs(**data)
+    msg = _describe_validation_error(exc_info.value)
+    assert "gross_potential_rent_annual" in msg
+    assert "vacancy_credit_loss_pct" in msg
+
+
+def test_re_calculate_task_validation_error_message(monkeypatch):
+    """ValidationError in re_calculate_underwriting_task produces a user-friendly SSE message."""
+    from unittest.mock import MagicMock, patch
+    from pydantic import ValidationError as PydanticValidationError
+    from app.verticals.real_estate.underwriting.extraction.tasks import tasks as task_module
+
+    # Patch SelfStorageInputs to raise a real ValidationError
+    from app.verticals.real_estate.underwriting.schemas.self_storage import (
+        SelfStorageInputs,
+        ProjectDetails,
+        AcquisitionInputs,
+        FinancingInputs,
+        ExitInputs,
+        InvestmentCriteria,
+    )
+    import pytest
+
+    with pytest.raises(PydanticValidationError) as exc_info:
+        SelfStorageInputs(
+            project=ProjectDetails(name="T", asset_type="self_storage"),
+            acquisition=AcquisitionInputs(),
+            operational={"gross_potential_rent_annual": None},
+            financing=FinancingInputs(),
+            exit=ExitInputs(),
+            criteria=InvestmentCriteria(),
+        )
+    real_exc = exc_info.value
+
+    captured_error_message = {}
+
+    def fake_mark_error(error_stage, error_message, internal_error="", error_type="", is_retryable=False):
+        captured_error_message["error_message"] = error_message
+
+    mock_tracker = MagicMock()
+    mock_tracker.mark_error.side_effect = fake_mark_error
+
+    mock_repo = MagicMock()
+    mock_db = MagicMock()
+
+    with (
+        patch.object(task_module, "_get_db_session", return_value=mock_db),
+        patch("app.verticals.real_estate.underwriting.extraction.tasks.tasks.JobProgressTracker", return_value=mock_tracker),
+        patch("app.verticals.real_estate.underwriting.extraction.tasks.tasks.UnderwritingRunRepository", return_value=mock_repo),
+        patch("app.verticals.real_estate.underwriting.extraction.tasks.tasks.SelfStorageInputs", side_effect=real_exc),
+    ):
+        with pytest.raises(PydanticValidationError):
+            task_module.re_calculate_underwriting_task.run(
+                {
+                    "run_id": "test-run",
+                    "job_id": "test-job",
+                    "merged_inputs": {},
+                    "doc_results": [],
+                },
+            )
+
+    assert "gross_potential_rent_annual" in captured_error_message.get("error_message", "")
+    assert "wizard" in captured_error_message.get("error_message", "").lower() or \
+           "manually" in captured_error_message.get("error_message", "").lower() or \
+           "enter" in captured_error_message.get("error_message", "").lower()

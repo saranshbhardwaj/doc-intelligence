@@ -595,6 +595,15 @@ def re_calculate_underwriting_task(self, payload: dict) -> dict:
         )
         repo.update_status(run_id, "failed", "Calculation timed out")
         raise
+    except ValidationError as e:
+        user_message = _describe_validation_error(e)
+        logger.error(f"Calculation failed (missing inputs): {e}", extra={"run_id": run_id})
+        tracker.mark_error(
+            error_stage="calculation", error_message=user_message,
+            internal_error=str(e)[:1000], error_type="missing_inputs", is_retryable=False,
+        )
+        repo.update_status(run_id, "failed", user_message[:500])
+        raise
     except Exception as e:
         logger.error(f"Calculation failed: {e}", extra={"run_id": run_id})
         tracker.mark_error(
