@@ -339,8 +339,10 @@ export default function UnderwritingResult() {
     if (meta) {
       const cv = meta.computed_values || {};
       const computed = valueFn ? valueFn(cv) : null;
+      const fallback = !computed && fallbackFn ? fallbackFn() : null;
       const description = descriptionOverride || meta.description;
-      return computed ? `${description}\n\n${computed}` : description;
+      const calculation = computed || fallback;
+      return calculation ? `${description}\n\n${calculation}` : description;
     }
     const fallback = fallbackFn ? fallbackFn() : null;
     return fallback || null;
@@ -415,15 +417,42 @@ export default function UnderwritingResult() {
   const expenseBasisFormula = buildTooltip('expense_basis',
     (cv) => {
       const lines = [];
-      if (cv.year1_line_item_opex != null) lines.push(`Line-item OpEx: ${formatCompactCurrency(cv.year1_line_item_opex)}`);
-      if (cv.year1_ratio_opex != null) lines.push(`Ratio-implied OpEx: ${formatCompactCurrency(cv.year1_ratio_opex)}`);
-      if (cv.ratio != null && cv.year1_egi != null) lines.push(`${formatPercent(cv.ratio)} × ${formatCompactCurrency(cv.year1_egi)} Year-1 EGI`);
+      const isLineItemBasis = expenseBasis?.method === 'line_items'
+        || String(expenseBasis?.source || '').endsWith('_line_items');
+      if (isLineItemBasis) {
+        const opex = expenseBasis?.modeled_total_expenses ?? cv.year1_line_item_opex;
+        const egi = expenseBasis?.modeled_egi ?? cv.year1_egi;
+        if (opex != null) lines.push(`Line-item OpEx: ${formatCompactCurrency(opex)}`);
+        if (opex != null && egi != null) lines.push(`Implied ratio: ${formatCompactCurrency(opex)} ÷ ${formatCompactCurrency(egi)} EGI = ${formatPercent(opex / egi)}`);
+      } else {
+        const ratio = expenseBasis?.expense_ratio ?? expenseBasis?.ratio ?? cv.ratio;
+        const egi = expenseBasis?.modeled_egi ?? cv.year1_egi;
+        if (ratio != null && egi != null) lines.push(`Ratio-driven OpEx: ${formatPercent(ratio)} × ${formatCompactCurrency(egi)} EGI = ${formatCompactCurrency(ratio * egi)}`);
+      }
       return lines.length ? lines.join('\n') : null;
     },
   );
   const rentSpreadPerDoor = marketRentPerDoor != null && currentRentPerDoor != null
     ? marketRentPerDoor - currentRentPerDoor : null;
   const breakEvenOccupancyPct = artifact.break_even_occupancy_pct;
+  const isLineItemExpenseBasis = expenseBasis?.method === 'line_items'
+    || String(expenseBasis?.source || '').endsWith('_line_items');
+  const expenseRatioBenchmarkNote = modelExpenseRatio != null && modelExpenseRatio < 0.3
+    ? 'Below 30% expense benchmark'
+    : null;
+  const modelExpenseRatioDetail = isLineItemExpenseBasis
+    ? [expenseRatioBenchmarkNote, 'Implied by selected line items'].filter(Boolean).join(' · ')
+    : [expenseRatioBenchmarkNote, expenseBasis?.label || 'Selected expense basis'].filter(Boolean).join(' · ');
+  const breakEvenOccupancyDetail = (() => {
+    if (breakEvenOccupancyPct == null) return 'Needs NOI, debt service, and revenue support';
+    if (occupancy != null) {
+      const cushion = occupancy - breakEvenOccupancyPct;
+      if (cushion < 0) return 'Above stated occupancy';
+      if (cushion < 0.1) return 'Narrow cushion to stated occupancy';
+      return 'Debt-service occupancy cushion';
+    }
+    return 'Minimum occupancy to cover Year-1 debt service';
+  })();
   const rentPositionAnalysis = artifact.rent_position_analysis || [];
   const revenueBasis = getRevenueBasis(artifact, persistedInputs, sourceCitations);
   const unitMixSummary = getUnitMixSummary(unitMix);
@@ -616,30 +645,35 @@ export default function UnderwritingResult() {
   const evidenceItems = [
     {
       key: 'purchase_price',
+      category: 'Acquisition',
       label: 'Purchase price',
       value: formatEvidenceValue(formatCompactCurrency, persistedInputs.acquisition?.purchase_price),
       citation: getFieldCitation(fieldCitations, citationContext, 'purchase_price'),
     },
     {
       key: 'num_units',
+      category: 'Property',
       label: 'Unit count',
       value: persistedInputs.project?.num_units ?? '—',
       citation: getFieldCitation(fieldCitations, citationContext, 'num_units'),
     },
     {
       key: 'rentable_sqft',
+      category: 'Property',
       label: 'Rentable sqft',
       value: persistedInputs.project?.rentable_sqft?.toLocaleString?.() ?? '—',
       citation: getFieldCitation(fieldCitations, citationContext, 'rentable_sqft'),
     },
     {
       key: 'gross_potential_rent_annual',
-      label: 'Gross potential rent',
+      category: 'Revenue',
+      label: 'Year 1 GPR',
       value: formatEvidenceValue(formatCompactCurrency, persistedInputs.operational?.gross_potential_rent_annual),
       citation: getFieldCitation(fieldCitations, citationContext, 'gross_potential_rent_annual'),
     },
     {
       key: 'avg_in_place_rent_per_unit_monthly',
+      category: 'Revenue',
       label: 'Avg in-place rent / door',
       value: computedAvgInPlaceRent != null
         ? formatCurrency(computedAvgInPlaceRent)
@@ -653,66 +687,77 @@ export default function UnderwritingResult() {
     },
     {
       key: 'avg_market_rent_per_unit_monthly',
+      category: 'Revenue',
       label: 'Avg market rent / door',
       value: formatEvidenceValue(formatCurrency, persistedInputs.operational?.avg_market_rent_per_unit_monthly),
       citation: getFieldCitation(fieldCitations, citationContext, 'avg_market_rent_per_unit_monthly'),
     },
     {
       key: 'vacancy_credit_loss_pct',
-      label: 'Vacancy loss',
+      category: 'Revenue',
+      label: 'Year 1 vacancy loss',
       value: formatEvidenceValue(formatPercent, persistedInputs.operational?.vacancy_credit_loss_pct),
       citation: getFieldCitation(fieldCitations, citationContext, 'vacancy_credit_loss_pct'),
     },
     {
       key: 'expense_ratio_current',
+      category: 'Expenses',
       label: 'Current expense ratio',
       value: formatEvidenceValue(formatPercent, persistedInputs.operational?.expense_ratio_current),
       citation: getFieldCitation(fieldCitations, citationContext, 'expense_ratio_current'),
     },
     {
       key: 'expense_ratio_year1',
+      category: 'Expenses',
       label: 'Year 1 expense ratio',
       value: formatEvidenceValue(formatPercent, persistedInputs.operational?.expense_ratio_year1),
       citation: getFieldCitation(fieldCitations, citationContext, 'expense_ratio_year1'),
     },
     {
       key: 'expense_ratio_pro_forma',
+      category: 'Expenses',
       label: 'Pro forma expense ratio',
       value: formatEvidenceValue(formatPercent, persistedInputs.operational?.expense_ratio_pro_forma),
       citation: getFieldCitation(fieldCitations, citationContext, 'expense_ratio_pro_forma'),
     },
     {
       key: 'property_tax_annual',
-      label: 'Property tax',
+      category: 'Expenses',
+      label: 'Year 1 property tax',
       value: formatEvidenceValue(formatCompactCurrency, persistedInputs.operational?.property_tax_annual),
       citation: getFieldCitation(fieldCitations, citationContext, 'property_tax_annual'),
     },
     {
       key: 'property_tax_growth_pct',
+      category: 'Tax Support',
       label: 'Property tax growth',
       value: formatEvidenceValue(formatPercent, persistedInputs.operational?.property_tax_growth_pct),
       citation: getFieldCitation(fieldCitations, citationContext, 'property_tax_growth_pct'),
     },
     {
       key: 'property_tax_value_basis_amount',
+      category: 'Tax Support',
       label: 'Tax value basis',
       value: formatEvidenceValue(formatCompactCurrency, persistedInputs.operational?.property_tax_value_basis_amount),
       citation: getFieldCitation(fieldCitations, citationContext, 'property_tax_value_basis_amount'),
     },
     {
       key: 'property_tax_assessed_value',
+      category: 'Tax Support',
       label: 'Tax assessed value',
       value: formatEvidenceValue(formatCompactCurrency, persistedInputs.operational?.property_tax_assessed_value),
       citation: getFieldCitation(fieldCitations, citationContext, 'property_tax_assessed_value'),
     },
     {
       key: 'property_tax_assessment_ratio',
+      category: 'Tax Support',
       label: 'Tax assessment ratio',
       value: formatEvidenceValue(formatPercent, persistedInputs.operational?.property_tax_assessment_ratio),
       citation: getFieldCitation(fieldCitations, citationContext, 'property_tax_assessment_ratio'),
     },
     {
       key: 'property_tax_millage_rate',
+      category: 'Tax Support',
       label: 'Tax millage rate',
       value: persistedInputs.operational?.property_tax_millage_rate != null
         ? `${persistedInputs.operational.property_tax_millage_rate.toFixed(2)} mills` : '—',
@@ -720,6 +765,7 @@ export default function UnderwritingResult() {
     },
     {
       key: 'property_tax_rate_per_assessed_dollar',
+      category: 'Tax Support',
       label: 'Tax rate / assessed $',
       value: persistedInputs.operational?.property_tax_rate_per_assessed_dollar != null
         ? persistedInputs.operational.property_tax_rate_per_assessed_dollar.toFixed(5) : '—',
@@ -727,24 +773,28 @@ export default function UnderwritingResult() {
     },
     {
       key: 'interest_rate_pct',
+      category: 'Financing / Exit',
       label: 'Interest rate',
       value: formatEvidenceValue(formatPercent, persistedInputs.financing?.interest_rate_pct),
       citation: getFieldCitation(fieldCitations, citationContext, 'interest_rate_pct'),
     },
     {
       key: 'market_cap_rate_purchase',
+      category: 'Acquisition',
       label: 'Market cap rate purchase',
       value: formatEvidenceValue(formatPercent, persistedInputs.acquisition?.market_cap_rate_purchase),
       citation: getFieldCitation(fieldCitations, citationContext, 'market_cap_rate_purchase'),
     },
     {
       key: 'exit_cap_rate',
+      category: 'Financing / Exit',
       label: 'Exit cap rate',
       value: formatEvidenceValue(formatPercent, persistedInputs.exit?.exit_cap_rate),
       citation: getFieldCitation(fieldCitations, citationContext, 'exit_cap_rate'),
     },
     {
       key: 'market_cap_rate_sale',
+      category: 'Financing / Exit',
       label: 'Market cap rate sale',
       value: formatEvidenceValue(formatPercent, persistedInputs.exit?.market_cap_rate_sale),
       citation: getFieldCitation(fieldCitations, citationContext, 'market_cap_rate_sale'),
@@ -1030,7 +1080,7 @@ export default function UnderwritingResult() {
                         className="gap-1.5 h-7 px-3 text-xs"
                       >
                         <SlidersHorizontal className="h-3.5 w-3.5" />
-                        Assumption what-if
+                        Scenario What-If
                       </Button>
                     </div>
                     <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
@@ -1058,48 +1108,61 @@ export default function UnderwritingResult() {
                   {/* Operating benchmarks */}
                   <div className="mt-4">
                     <div className="field-section-label mb-3">Operating Benchmarks</div>
-                    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+                    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
                       <UnderwritingMetricCard
                         label="Avg Current Rent / Door"
-                        value={formatCurrency(currentRentPerDoor ? Math.round(currentRentPerDoor) : null)}
-                        detail="Monthly in-place rent basis"
+                        value={formatCurrency(currentRentPerDoor != null ? Math.round(currentRentPerDoor) : null)}
+                        detail="Rent reasonableness benchmark"
                         formula={buildTooltip('avg_current_rent_per_door',
                           (cv) => cv.gpr != null && cv.num_units != null ? `${formatCompactCurrency(cv.gpr)} ÷ ${cv.num_units} units ÷ 12` : null,
                           () => gpr != null && totalUnits ? `${formatCompactCurrency(gpr)} ÷ ${totalUnits} units ÷ 12` : null,
+                          'Monthly in-place rent benchmark. Used for sanity checks and rent-position context; modeled revenue comes from GPR.',
                         )}
                       />
-                      <UnderwritingMetricCard
-                        label="Avg Market Rent / Door"
-                        value={formatCurrency(marketRentPerDoor ? Math.round(marketRentPerDoor) : null)}
-                        detail="Monthly market rent basis"
-                        formula={buildTooltip('avg_market_rent_per_door',
-                          (cv) => cv.market_rate != null ? `Market rate: ${formatCurrency(Math.round(cv.market_rate))}/month` : null,
-                          () => marketRentPerDoor != null ? `Market rate: ${formatCurrency(Math.round(marketRentPerDoor))}/month` : null,
-                        )}
-                      />
+                      {marketRentPerDoor != null ? (
+                        <UnderwritingMetricCard
+                          label="Avg Market Rent / Door"
+                          value={formatCurrency(Math.round(marketRentPerDoor))}
+                          detail="Rent-position benchmark"
+                          formula={buildTooltip('avg_market_rent_per_door',
+                            (cv) => cv.market_rate != null ? `Market rate: ${formatCurrency(Math.round(cv.market_rate))}/month` : null,
+                            () => `Market rate: ${formatCurrency(Math.round(marketRentPerDoor))}/month`,
+                            'Monthly market-rate benchmark from the OM or rent roll. Used only for rent-position context; modeled revenue still comes from GPR.',
+                          )}
+                        />
+                      ) : null}
                       {modelExpenseRatio != null ? (
                         <UnderwritingMetricCard
                           label="Model Expense Ratio"
                           value={formatPercent(modelExpenseRatio)}
-                          detail={expenseBasis?.label || 'Selected expense basis'}
+                          detail={modelExpenseRatioDetail || 'Selected expense basis'}
                           tone={modelExpenseRatio < 0.3 ? 'warning' : 'default'}
                           formula={buildTooltip('expense_basis',
                             (cv) => {
-                              if (cv.ratio != null && cv.year1_egi != null) {
-                                return `${formatPercent(cv.ratio)} × ${formatCompactCurrency(cv.year1_egi)} Year-1 EGI`;
+                              const egi = expenseBasis?.modeled_egi ?? cv.year1_egi;
+                              const lineItemOpex = expenseBasis?.modeled_total_expenses ?? cv.year1_line_item_opex;
+                              const ratio = modelExpenseRatio ?? cv.ratio;
+                              if (isLineItemExpenseBasis && lineItemOpex != null && egi != null) {
+                                return `${formatCompactCurrency(lineItemOpex)} OpEx ÷ ${formatCompactCurrency(egi)} EGI = ${formatPercent(ratio ?? lineItemOpex / egi)}`;
+                              }
+                              if (ratio != null && egi != null) {
+                                return `${formatPercent(ratio)} × ${formatCompactCurrency(egi)} EGI = ${formatCompactCurrency(ratio * egi)} OpEx`;
                               }
                               return null;
                             },
                             () => expenseBasis?.modeled_total_expenses != null && expenseBasis?.modeled_egi != null
                               ? `${formatCompactCurrency(expenseBasis.modeled_total_expenses)} ÷ ${formatCompactCurrency(expenseBasis.modeled_egi)}`
                               : null,
+                            isLineItemExpenseBasis
+                              ? 'Line items drive modeled expenses. This ratio is implied by OpEx ÷ EGI and shown as an operating benchmark.'
+                              : 'The selected expense ratio drives modeled expenses because coherent line-item OpEx was unavailable.',
                           )}
                         />
                       ) : null}
                       <UnderwritingMetricCard
                         label="Break-Even Occupancy"
                         value={formatRatioPercent(breakEvenOccupancyPct)}
-                        detail="Occupancy needed to cover year-one debt service"
+                        detail={breakEvenOccupancyDetail}
                         tone={
                           breakEvenOccupancyPct == null ? 'default'
                           : occupancy == null ? 'default'
@@ -1118,6 +1181,7 @@ export default function UnderwritingResult() {
                             const ds = noi / dscr;
                             return `Debt service: ${formatCompactCurrency(ds)} | GPR: ${formatCompactCurrency(gpr)}`;
                           },
+                          'Minimum occupancy needed for Year-1 NOI to cover annual debt service. Lower is safer; compare it with supported physical or economic occupancy.',
                         )}
                       />
                     </div>

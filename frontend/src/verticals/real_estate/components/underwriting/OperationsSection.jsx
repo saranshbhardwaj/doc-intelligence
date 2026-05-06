@@ -126,18 +126,35 @@ export default function OperationsSection({
   const hasCitation = (field) => Boolean(sourceCitations?.[field]);
   const hasSupportValue = (value) => value != null && value !== '—';
   const modeledExpenseRatio = expenseBasis?.expense_ratio ?? expenseBasis?.ratio ?? null;
+  const isLineItemExpenseBasis = expenseBasis?.method === 'line_items'
+    || String(expenseBasis?.source || '').endsWith('_line_items');
+  const isExpenseRatioBasis = expenseBasis?.method === 'expense_ratio'
+    || String(expenseBasis?.source || '').includes('expense_ratio');
+  const expenseBasisReason = expenseBasis
+    ? isLineItemExpenseBasis
+      ? 'Operating expenses are modeled from selected line-item OpEx. The ratio shown below is an implied benchmark, not the driver.'
+      : isExpenseRatioBasis
+        ? 'Operating expenses are modeled from the selected expense ratio because coherent line-item support was unavailable.'
+        : expenseBasis.reason
+    : null;
+  const modeledRatioLabel = isLineItemExpenseBasis
+    ? 'Implied model ratio'
+    : isExpenseRatioBasis
+      ? 'Model ratio used'
+      : 'Model expense ratio';
+  const expenseRatioLabel = isLineItemExpenseBasis ? 'Implied ratio' : 'Expense ratio';
   const t12ExpenseRatio = operational?.expense_ratio_t12;
   const omCurrentExpenseRatio = operational?.expense_ratio_current;
   const omYear1ExpenseRatio = operational?.expense_ratio_year1;
   const omProFormaExpenseRatio = operational?.expense_ratio_pro_forma ?? proFormaExpenseRatio;
   const expenseSupportRows = [
-    { label: 'Model expense ratio', value: formatPercent(modeledExpenseRatio) },
+    { label: modeledRatioLabel, value: formatPercent(modeledExpenseRatio) },
     { label: 'T-12 expense ratio', value: formatPercent(t12ExpenseRatio) },
     { label: 'OM current expense ratio', value: formatPercent(omCurrentExpenseRatio) },
     { label: 'OM Year 1 expense ratio', value: formatPercent(omYear1ExpenseRatio) },
     { label: 'OM pro forma expense ratio', value: formatPercent(omProFormaExpenseRatio) },
     {
-      label: 'Model vs OM pro forma',
+      label: 'Delta vs broker pro forma',
       value: modeledExpenseRatio != null && omProFormaExpenseRatio != null
         ? `${((modeledExpenseRatio - omProFormaExpenseRatio) * 100).toFixed(1)} pp`
         : '—',
@@ -164,13 +181,7 @@ export default function OperationsSection({
   const growthAssumptionRows = [
     { label: 'Property tax growth', value: formatPercent(propertyTaxGrowthPct) },
   ].filter((row) => hasSupportValue(row.value));
-  const adjustmentRows = [
-    hasCitation('bad_debt_annual') || Number(badDebtAnnual) !== 0
-      ? { label: 'Bad debt', value: formatCurrency(badDebtAnnual) }
-      : null,
-    hasCitation('corrections_collections_annual') || Number(correctionsCollectionsAnnual) !== 0
-      ? { label: 'Corrections / collections', value: formatCurrency(correctionsCollectionsAnnual) }
-      : null,
+  const pricingContextRows = [
     {
       label: 'Price / unit',
       value: purchasePrice && totalUnits ? formatCurrency(Math.round(purchasePrice / totalUnits)) : '—',
@@ -179,6 +190,15 @@ export default function OperationsSection({
       label: 'Price / rentable sqft',
       value: purchasePrice && rentableSqft ? `$${(purchasePrice / rentableSqft).toFixed(2)}` : '—',
     },
+  ].filter((row) => row && hasSupportValue(row.value));
+  const revenueQualityRows = [
+    { label: 'Vacancy & credit loss', value: formatPercent(operational?.vacancy_credit_loss_pct) },
+    hasCitation('bad_debt_annual') || Number(badDebtAnnual) !== 0
+      ? { label: 'Bad debt', value: formatCurrency(badDebtAnnual), help: 'Historical charge-offs or delinquent losses from the T-12.' }
+      : null,
+    hasCitation('corrections_collections_annual') || Number(correctionsCollectionsAnnual) !== 0
+      ? { label: 'Corrections / collections', value: formatCurrency(correctionsCollectionsAnnual), help: 'Adjustments, write-downs, or collection-related offsets.' }
+      : null,
   ].filter((row) => row && hasSupportValue(row.value));
 
   return (
@@ -308,7 +328,7 @@ export default function OperationsSection({
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <div>
                         <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">Modeled OpEx basis</p>
-                        <p className="mt-1 text-sm leading-6 text-muted-foreground">{expenseBasis.reason}</p>
+                        <p className="mt-1 text-sm leading-6 text-muted-foreground">{expenseBasisReason}</p>
                       </div>
                       <UnderwritingStatusBadge tone={getExpenseBasisTone(expenseBasis.source)}>
                         {expenseBasis.label}
@@ -325,7 +345,7 @@ export default function OperationsSection({
                           <p className="mt-1 font-semibold text-foreground">{methodLabel[expenseBasis.method] ?? expenseBasis.method ?? '—'}</p>
                         </div>
                         <div>
-                          <p className="text-xs text-muted-foreground">Expense ratio</p>
+                          <p className="text-xs text-muted-foreground">{expenseRatioLabel}</p>
                           <p className="mt-1 font-semibold text-foreground">{formatPercent(expenseBasis.expense_ratio ?? expenseBasis.ratio)}</p>
                         </div>
                         <div>
@@ -354,12 +374,34 @@ export default function OperationsSection({
                     ) : null}
                   </div>
                 ) : null}
-                <KeyValueList rows={[
-                  ...expenseSupportRows,
-                  ...taxSupportRows,
-                  ...growthAssumptionRows,
-                  ...adjustmentRows,
-                ]} />
+                <KeyValueList rows={expenseSupportRows} />
+
+                {taxSupportRows.length > 0 ? (
+                  <div className="mt-5 border-t border-border/60 pt-4">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Property tax support</p>
+                    <div className="mt-3">
+                      <KeyValueList rows={taxSupportRows} />
+                    </div>
+                  </div>
+                ) : null}
+
+                {growthAssumptionRows.length > 0 ? (
+                  <div className="mt-5 border-t border-border/60 pt-4">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Growth assumptions</p>
+                    <div className="mt-3">
+                      <KeyValueList rows={growthAssumptionRows} />
+                    </div>
+                  </div>
+                ) : null}
+
+                {pricingContextRows.length > 0 ? (
+                  <div className="mt-5 border-t border-border/60 pt-4">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Pricing context</p>
+                    <div className="mt-3">
+                      <KeyValueList rows={pricingContextRows} />
+                    </div>
+                  </div>
+                ) : null}
 
                 {hasOtherOpex && (
                   <div className="mt-3">
@@ -421,11 +463,13 @@ export default function OperationsSection({
             <div className="underwriting-panel p-4 sm:p-5">
               <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Revenue quality</p>
               <div className="mt-4">
-                <KeyValueList rows={[
-                  { label: 'Vacancy & credit loss', value: formatPercent(operational?.vacancy_credit_loss_pct) },
-                  { label: 'Bad debt', value: formatCurrency(badDebtAnnual), help: 'Historical charge-offs or delinquent losses from the T-12.' },
-                  { label: 'Corrections / collections', value: formatCurrency(correctionsCollectionsAnnual), help: 'Adjustments, write-downs, or collection-related offsets.' },
-                ]} />
+                <KeyValueList rows={revenueQualityRows} />
+                {!hasCitation('bad_debt_annual') && !hasCitation('corrections_collections_annual')
+                  && Number(badDebtAnnual) === 0 && Number(correctionsCollectionsAnnual) === 0 ? (
+                    <p className="mt-3 rounded-xl border border-border/60 bg-background/60 px-3 py-2 text-xs leading-5 text-muted-foreground">
+                      No T-12 bad debt or collection adjustments available.
+                    </p>
+                ) : null}
                 <SourceSupportActions
                   citations={[
                     sourceCitations.vacancy_credit_loss_pct,
@@ -447,7 +491,7 @@ export default function OperationsSection({
 
             {stressTests.length > 0 && (
               <div className="underwriting-panel p-4 sm:p-5">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Stress tests</p>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Operating sensitivity</p>
                 <div className="mt-4">
                   <StressTestTable stressTests={stressTests} />
                 </div>
