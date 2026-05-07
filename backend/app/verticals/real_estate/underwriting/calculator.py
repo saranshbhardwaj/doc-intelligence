@@ -84,6 +84,8 @@ def _build_rent_position_analysis(
     comp_data: list[_CompEntry] = []
     unknown_count = 0
     for comp in rent_comps:
+        if comp.is_broker_market_average:
+            continue
         sqft = comp.standard_sqft or _parse_standard_sqft(comp.size)
         if sqft is None or sqft <= 0:
             continue
@@ -133,24 +135,22 @@ def _build_rent_position_analysis(
                 e.rate for e in comp_data
                 if e.bucket == bucket and e.climate == climate
             ]
-        if not matched_rates:
-            continue
-
-        comp_average_rent = sum(matched_rates) / len(matched_rates)
+        comp_average_rent = sum(matched_rates) / len(matched_rates) if matched_rates else None
         subject_current = _weighted_avg(rows, "current_rent")
         subject_market = _weighted_avg(rows, "market_rent")
         current_ratio = (
             subject_current / comp_average_rent
-            if subject_current is not None and comp_average_rent > 0
+            if subject_current is not None and comp_average_rent is not None and comp_average_rent > 0
             else None
         )
         market_ratio = (
             subject_market / comp_average_rent
-            if subject_market is not None and comp_average_rent > 0
+            if subject_market is not None and comp_average_rent is not None and comp_average_rent > 0
             else None
         )
 
         display_climate = "Mixed" if all_unknown else climate
+        match_basis = "size_only" if all_unknown else "exact"
         analysis.append(
             RentPositionRow(
                 size=rows[0].size or bucket,
@@ -162,6 +162,7 @@ def _build_rent_position_analysis(
                 market_vs_comp_ratio=market_ratio,
                 comp_count=len(matched_rates),
                 bucket=bucket,
+                match_basis=match_basis,
             )
         )
 
@@ -187,29 +188,116 @@ def _resolve_expense_basis(
     """Choose the safest available OpEx basis and expose it for analyst review."""
 
     op = inputs.operational
+    selected_period = op.operating_statement_period or "year1"
+    warnings = list(op.operating_statement_warnings or [])
+    if op.property_tax_annual is None:
+        warnings.append(
+            "Property tax not found in source documents — modeled as $0. "
+            "Verify with county assessor before relying on this analysis."
+        )
+
+    ratio_options = {
+        "t12": (
+            "t12_expense_ratio",
+            "T-12 expense ratio",
+            "expense_ratio_t12",
+            op.expense_ratio_t12,
+        ),
+        "current": (
+            "om_current_expense_ratio",
+            "Current OM expense ratio",
+            "expense_ratio_current",
+            op.expense_ratio_current,
+        ),
+        "year1": (
+            "om_year1_expense_ratio",
+            "Year 1 OM expense ratio",
+            "expense_ratio_year1",
+            op.expense_ratio_year1,
+        ),
+        "pro_forma": (
+            "om_pro_forma_expense_ratio",
+            "Pro Forma OM expense ratio",
+            "expense_ratio_pro_forma",
+            op.expense_ratio_pro_forma,
+        ),
+    }
+    ratio_fallback_order = {
+        "t12": ("t12", "year1", "current", "pro_forma"),
+        "current": ("current", "year1", "t12", "pro_forma"),
+        "year1": ("year1", "current", "t12", "pro_forma"),
+        "pro_forma": ("pro_forma", "year1", "current", "t12"),
+    }.get(selected_period, ("year1", "current", "t12", "pro_forma"))
+
     ratio_source = None
     ratio_label = None
+    ratio_period = selected_period
+    ratio_field = None
     ratio = None
-    if _positive_ratio(op.expense_ratio_current):
-        ratio_source = "expense_ratio_current"
-        ratio_label = "Current / T-12 expense ratio"
-        ratio = op.expense_ratio_current
-    elif _positive_ratio(op.expense_ratio_pro_forma):
-        ratio_source = "expense_ratio_pro_forma"
-        ratio_label = "OM pro forma expense ratio"
-        ratio = op.expense_ratio_pro_forma
+    for candidate_period in ratio_fallback_order:
+        source, label, field, value = ratio_options[candidate_period]
+        if _positive_ratio(value):
+            ratio_source = source
+            ratio_label = label
+            ratio_period = candidate_period
+            ratio_field = field
+            ratio = value
+            break
 
     ratio_opex = year1_egi * ratio if ratio is not None and year1_egi > 0 else None
     has_line_items = year1_line_item_opex > 0
     noi_stated = _stated_om_noi(inputs)
+    line_item_period = selected_period if selected_period in {"t12", "current", "year1", "pro_forma"} else "year1"
+    line_item_source = "t12_line_items" if line_item_period == "t12" else f"om_{line_item_period}_line_items"
+    line_item_label = {
+        "t12": "T-12 line items",
+        "current": "Current OM line items",
+        "year1": "Year 1 OM line items",
+        "pro_forma": "Pro Forma OM line items",
+    }.get(line_item_period, "Year 1 OM line items")
+    line_item_driver_fields = [
+        "gross_potential_rent_annual",
+        "vacancy_credit_loss_pct",
+        "other_income_annual",
+        "property_tax_annual",
+        "insurance_annual",
+        "mgmt_fee_pct",
+        "payroll_annual",
+        "repairs_maintenance_annual",
+        "utilities_annual",
+        "marketing_annual",
+        "other_opex_annual",
+        "rent_growth_pct",
+        "opex_growth_pct",
+    ]
+    available_ratio_fields = [
+        field for field, value in (
+            ("expense_ratio_t12", op.expense_ratio_t12),
+            ("expense_ratio_current", op.expense_ratio_current),
+            ("expense_ratio_year1", op.expense_ratio_year1),
+            ("expense_ratio_pro_forma", op.expense_ratio_pro_forma),
+        )
+        if value is not None
+    ]
 
     def om_noi_basis() -> ExpenseBasis:
+        period = "year1" if inputs.operational.noi_year_one_stated is not None else "current"
+        noi_field = "noi_year_one_stated" if period == "year1" else "noi_current_stated"
         return ExpenseBasis(
             source="om_noi",
             label="OM-stated NOI quick screen",
             ratio=None,
+            period=period,
+            method="noi",
+            modeled_egi=None,
+            modeled_total_expenses=None,
+            modeled_noi=noi_stated,
+            expense_ratio=None,
             year1_line_item_opex=year1_line_item_opex,
             year1_ratio_opex=None,
+            driver_fields=[noi_field, "rent_growth_pct"],
+            inactive_fields=line_item_driver_fields + available_ratio_fields,
+            warnings=warnings,
             reason=(
                 f"No reliable GPR/expense build-up is available. Projections use OM-stated NOI "
                 f"(${noi_stated or 0:,.0f}) grown at the assumed rent growth rate. "
@@ -223,17 +311,77 @@ def _resolve_expense_basis(
                 source=ratio_source,
                 label=ratio_label,
                 ratio=ratio,
+                period=ratio_period,
+                method="expense_ratio",
+                modeled_egi=year1_egi,
+                modeled_total_expenses=ratio_opex,
+                modeled_noi=year1_egi - ratio_opex if ratio_opex is not None else None,
+                expense_ratio=ratio,
                 year1_line_item_opex=year1_line_item_opex,
                 year1_ratio_opex=ratio_opex,
+                driver_fields=[
+                    "gross_potential_rent_annual",
+                    "vacancy_credit_loss_pct",
+                    "other_income_annual",
+                    ratio_field,
+                    "rent_growth_pct",
+                    "opex_growth_pct",
+                ],
+                inactive_fields=line_item_driver_fields,
+                warnings=warnings,
                 reason="Detailed expense line items were missing, so the model used the stated expense ratio.",
+            )
+        if warnings:
+            return ExpenseBasis(
+                source=ratio_source,
+                label=ratio_label,
+                ratio=ratio,
+                period=ratio_period,
+                method="expense_ratio",
+                modeled_egi=year1_egi,
+                modeled_total_expenses=ratio_opex,
+                modeled_noi=year1_egi - ratio_opex if ratio_opex is not None else None,
+                expense_ratio=ratio,
+                year1_line_item_opex=year1_line_item_opex,
+                year1_ratio_opex=ratio_opex,
+                driver_fields=[
+                    "gross_potential_rent_annual",
+                    "vacancy_credit_loss_pct",
+                    "other_income_annual",
+                    ratio_field,
+                    "rent_growth_pct",
+                    "opex_growth_pct",
+                ],
+                inactive_fields=line_item_driver_fields,
+                warnings=warnings,
+                reason=(
+                    "Detailed expense line items mix operating periods, so the model used "
+                    "the coherent stated expense ratio for the selected basis."
+                ),
             )
         if year1_line_item_opex < ratio_opex * LINE_ITEMS_VS_RATIO_CUTOFF:
             return ExpenseBasis(
                 source=ratio_source,
                 label=ratio_label,
                 ratio=ratio,
+                period=ratio_period,
+                method="expense_ratio",
+                modeled_egi=year1_egi,
+                modeled_total_expenses=ratio_opex,
+                modeled_noi=year1_egi - ratio_opex if ratio_opex is not None else None,
+                expense_ratio=ratio,
                 year1_line_item_opex=year1_line_item_opex,
                 year1_ratio_opex=ratio_opex,
+                driver_fields=[
+                    "gross_potential_rent_annual",
+                    "vacancy_credit_loss_pct",
+                    "other_income_annual",
+                    ratio_field,
+                    "rent_growth_pct",
+                    "opex_growth_pct",
+                ],
+                inactive_fields=line_item_driver_fields,
+                warnings=warnings,
                 reason=(
                     "Detailed expense line items were materially below the ratio-implied expense load, "
                     "so the model used the more conservative expense ratio."
@@ -244,12 +392,22 @@ def _resolve_expense_basis(
         return om_noi_basis()
 
     if has_line_items:
+        expense_ratio = year1_line_item_opex / year1_egi if year1_egi > 0 else None
         return ExpenseBasis(
-            source="line_items",
-            label="Detailed expense line items",
+            source=line_item_source,
+            label=line_item_label,
+            period="mixed" if warnings else line_item_period,
+            method="line_items",
+            modeled_egi=year1_egi,
+            modeled_total_expenses=year1_line_item_opex,
+            modeled_noi=year1_egi - year1_line_item_opex,
+            expense_ratio=expense_ratio,
             year1_line_item_opex=year1_line_item_opex,
             year1_ratio_opex=ratio_opex,
             ratio=ratio,
+            driver_fields=line_item_driver_fields,
+            inactive_fields=available_ratio_fields,
+            warnings=warnings,
             reason="Operating expenses were modeled from extracted or manually entered line items.",
         )
 
@@ -260,8 +418,17 @@ def _resolve_expense_basis(
         source="missing",
         label="Missing expense support",
         ratio=ratio,
+        period="unknown",
+        method="missing",
+        modeled_egi=year1_egi,
+        modeled_total_expenses=None,
+        modeled_noi=None,
+        expense_ratio=None,
         year1_line_item_opex=year1_line_item_opex,
         year1_ratio_opex=ratio_opex,
+        driver_fields=[],
+        inactive_fields=line_item_driver_fields + available_ratio_fields,
+        warnings=warnings,
         reason="No detailed expense line items or usable expense ratio were available.",
     )
 
@@ -345,6 +512,7 @@ def calculate(inputs: SelfStorageInputs) -> SelfStorageResult:
 
     # ── NOI buildup year-by-year ─────────────────────────────────────────────
     # Fixed opex components (before growth) at year 0:
+    property_tax_year1 = op.property_tax_annual or 0.0
     base_non_tax_opex = (
         op.insurance_annual
         + op.payroll_annual
@@ -362,7 +530,7 @@ def calculate(inputs: SelfStorageInputs) -> SelfStorageResult:
     year1_vacancy_loss = year1_gpr * op.vacancy_credit_loss_pct
     year1_other_income = op.other_income_annual
     year1_egi = year1_gpr - year1_vacancy_loss + year1_other_income
-    year1_fixed_opex = op.property_tax_annual + base_non_tax_opex
+    year1_fixed_opex = property_tax_year1 + base_non_tax_opex
     year1_line_item_opex = year1_fixed_opex + (year1_egi * op.mgmt_fee_pct)
     expense_basis = _resolve_expense_basis(inputs, year1_egi, year1_line_item_opex)
 
@@ -386,10 +554,10 @@ def calculate(inputs: SelfStorageInputs) -> SelfStorageResult:
             other_income = op.other_income_annual * (1 + op.rent_growth_pct) ** (n - 1)
             egi = gpr - vacancy_loss + other_income
 
-            if expense_basis.source in ("expense_ratio_current", "expense_ratio_pro_forma"):
+            if expense_basis.method == "expense_ratio":
                 opex = (expense_basis.year1_ratio_opex or 0.0) * (1 + op.opex_growth_pct) ** (n - 1)
             else:
-                property_tax = op.property_tax_annual * (1 + property_tax_growth) ** (n - 1)
+                property_tax = property_tax_year1 * (1 + property_tax_growth) ** (n - 1)
                 other_fixed_opex = base_non_tax_opex * (1 + op.opex_growth_pct) ** (n - 1)
                 fixed_opex = property_tax + other_fixed_opex
                 mgmt_fee = egi * op.mgmt_fee_pct
@@ -483,12 +651,15 @@ def calculate(inputs: SelfStorageInputs) -> SelfStorageResult:
     if annual_debt_service > 0:
         dscr_year_one = projections[0].noi / annual_debt_service
 
+    # NOI / loan — CMBS financeability signal
+    debt_yield = projections[0].noi / loan_amount if loan_amount and loan_amount > 0 and projections else None
+
     # Break-even occupancy: minimum occupancy so Year-1 NOI covers debt service.
     break_even_occupancy_pct: float | None = None
     if expense_basis.source == "om_noi":
         break_even_occupancy_pct = None
     elif annual_debt_service > 0 and op.gross_potential_rent_annual > 0:
-        if expense_basis.source in ("expense_ratio_current", "expense_ratio_pro_forma") and expense_basis.ratio is not None:
+        if expense_basis.method == "expense_ratio" and expense_basis.ratio is not None:
             noi_margin = 1 - expense_basis.ratio
             if noi_margin > 0:
                 required_egi = annual_debt_service / noi_margin
@@ -497,7 +668,7 @@ def calculate(inputs: SelfStorageInputs) -> SelfStorageResult:
                     min(1.0, (required_egi - op.other_income_annual) / op.gross_potential_rent_annual),
                 )
         else:
-            fixed_opex_yr1 = op.property_tax_annual + base_non_tax_opex
+            fixed_opex_yr1 = property_tax_year1 + base_non_tax_opex
             mgmt_factor = 1 - op.mgmt_fee_pct
             adjusted_numerator = (
                 annual_debt_service + fixed_opex_yr1
@@ -519,14 +690,14 @@ def calculate(inputs: SelfStorageInputs) -> SelfStorageResult:
     # Build formula metadata — backend is the authority
     from .schemas.self_storage import FormulaMetadata, FormulaComputedValues
 
-    fixed_opex_yr1 = op.property_tax_annual + base_non_tax_opex
+    fixed_opex_yr1 = property_tax_year1 + base_non_tax_opex
     mgmt_factor_yr1 = 1 - op.mgmt_fee_pct
     if expense_basis.source == "om_noi":
         break_even_description = (
             "Break-even occupancy is not computed in OM-stated NOI quick-screen mode "
             "because GPR, vacancy, and expense components are not available."
         )
-    elif expense_basis.source in ("expense_ratio_current", "expense_ratio_pro_forma"):
+    elif expense_basis.method == "expense_ratio":
         break_even_description = (
             "Debt service ÷ (1 − expense ratio), adjusted for other income, then divided by GPR. "
             "Used when operating expenses are modeled from an expense-ratio fallback."
@@ -536,7 +707,10 @@ def calculate(inputs: SelfStorageInputs) -> SelfStorageResult:
 
     formula_metadata = {
         "irr": FormulaMetadata(
-            description="Annualized return on equity across the full hold, accounting for timing of every cash flow in and out.",
+            description=(
+                "Annualized return on equity across the full hold, accounting for timing of every cash flow in and out. "
+                "IRR uses the annual cash-flow schedule and exit proceeds; the summary below reconciles total proceeds."
+            ),
             computed_values=FormulaComputedValues(
                 entry_equity=float(total_equity),
                 total_distributions=float(annual_cash_flows_sum),
@@ -548,6 +722,7 @@ def calculate(inputs: SelfStorageInputs) -> SelfStorageResult:
         "cash_on_cash": FormulaMetadata(
             description="Year 1 cash flow after debt service ÷ total equity invested. Income yield only — excludes appreciation and principal paydown.",
             computed_values=FormulaComputedValues(
+                year1_noi=float(projections[0].noi) if projections else None,
                 year1_cash_flow=float(projections[0].cash_flow) if projections else None,
                 total_equity=float(total_equity),
                 annual_debt_service=float(annual_debt_service) if annual_debt_service > 0 else None,
@@ -569,6 +744,13 @@ def calculate(inputs: SelfStorageInputs) -> SelfStorageResult:
             computed_values=FormulaComputedValues(
                 year1_noi=float(projections[0].noi) if projections else None,
                 annual_debt_service=float(annual_debt_service) if annual_debt_service > 0 else None,
+            ),
+        ),
+        "debt_yield": FormulaMetadata(
+            description="Debt Yield = Year-1 NOI ÷ Loan Amount. CMBS/agency lenders typically require ≥8%. Below 7% is a hard stop for most agency debt.",
+            computed_values=FormulaComputedValues(
+                year1_noi=float(projections[0].noi) if projections else None,
+                loan_amount=float(loan_amount) if loan_amount else None,
             ),
         ),
         "break_even_occupancy": FormulaMetadata(
@@ -621,6 +803,7 @@ def calculate(inputs: SelfStorageInputs) -> SelfStorageResult:
         cap_rate_year_one=cap_rate_year_one,
         cap_rate_pro_forma=cap_rate_pro_forma,
         dscr_year_one=dscr_year_one,
+        debt_yield=debt_yield,
         break_even_occupancy_pct=break_even_occupancy_pct,
         ltv=ltv,
         noi_year_one=projections[0].noi,
@@ -658,6 +841,7 @@ def calculate_sensitivity(
                     cash_on_cash=result.cash_on_cash if result.cash_on_cash is not None else float("nan"),
                     dscr_year_one=result.dscr_year_one if result.dscr_year_one is not None else float("nan"),
                     equity_multiple=result.equity_multiple if result.equity_multiple is not None else float("nan"),
+                    debt_yield=result.debt_yield,
                 )
             )
         except Exception:

@@ -3,22 +3,52 @@ import { ChevronRight, Sigma } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipPortal, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
 import AIPrefilledField from '../AIPrefilledField';
 
+function humanizeFieldName(field) {
+  if (!field) return null;
+  return field.replace(/^expense_/, '').replace(/_/g, ' ');
+}
+
 function citationTier(citation) {
   if (!citation) return null;
   if (citation.is_default) {
     return { label: 'Default', tone: 'default', title: 'System default; review before relying on this assumption.' };
   }
+  if (citation.doc_type === 'benchmark') {
+    return { label: 'Benchmark', tone: 'derived', title: citation.selection_note ?? citation.formula ?? 'Raised to an underwriting benchmark floor.' };
+  }
   if (citation.is_derived) {
     return { label: 'Derived', tone: 'derived', title: citation.formula ?? 'Computed from extracted fields.' };
-  }
-  if (citation.is_uncited_extraction) {
-    return { label: 'Extracted', tone: 'extracted', title: 'Extracted from a source document, but exact citation was not captured.' };
   }
   if (citation.doc_type === 'om' && citation.is_computed) {
     return { label: 'OM computed', tone: 'om', title: citation.formula ?? 'Computed from OM source-backed line items.' };
   }
   if (citation.doc_type === 't12' && citation.is_computed) {
     return { label: 'T-12 computed', tone: 'actual', title: citation.formula ?? 'Computed from T-12 operating statement evidence.' };
+  }
+  if (citation.doc_type === 't12' && citation.annualized_from_months) {
+    return { label: 'T-12 annualized', tone: 'actual', title: citation.selection_note ?? citation.formula ?? 'Annualized from a partial-period T-12.' };
+  }
+  if (citation.doc_type === 'om' && citation.used_fallback_source) {
+    const missingPreferred = Array.isArray(citation.preferred_sources_missing)
+      ? citation.preferred_sources_missing
+      : [];
+    const isPeriodFallback = citation.source_period === 'current'
+      && missingPreferred.some((source) => String(source).toLowerCase().includes('year1'));
+    return {
+      label: isPeriodFallback ? 'OM fallback' : 'OM stated',
+      tone: 'om',
+      title: citation.selection_note ?? (
+        isPeriodFallback
+          ? 'Used an OM fallback field because the preferred period was unavailable.'
+          : 'Broker or offering memorandum stated assumption.'
+      ),
+    };
+  }
+  if (citation.doc_type === 't12' && citation.used_fallback_source) {
+    return { label: 'T-12 fallback', tone: 'actual', title: citation.selection_note ?? 'Used a T-12 fallback field because the preferred source was unavailable.' };
+  }
+  if (citation.doc_type === 'rent_roll' && citation.used_fallback_source) {
+    return { label: 'Rent roll fallback', tone: 'actual', title: citation.selection_note ?? 'Used a rent roll fallback field because the preferred source was unavailable.' };
   }
   if (citation.doc_type === 't12') {
     return { label: 'T-12 actual', tone: 'actual', title: citation.formula ?? 'Supported by T-12 operating statement evidence.' };
@@ -28,6 +58,13 @@ function citationTier(citation) {
   }
   if (citation.doc_type === 'om') {
     return { label: 'OM stated', tone: 'om', title: 'Broker or offering memorandum stated assumption.' };
+  }
+  if (citation.is_uncited_extraction) {
+    return {
+      label: citation.doc_type === 't12' ? 'T-12 extracted' : citation.doc_type === 'om' ? 'OM extracted' : 'Extracted',
+      tone: citation.doc_type === 'om' ? 'om' : 'extracted',
+      title: citation.selection_note ?? 'Extracted from a source document, but exact citation was not captured.',
+    };
   }
   return { label: 'Extracted', tone: 'extracted', title: 'Extracted from source evidence.' };
 }
@@ -53,6 +90,14 @@ function CitationTooltipContent({ citation, tier, canOpen }) {
   const isComputed = citation?.is_computed || citation?.is_derived;
   const confidence = confidenceLabel(citation);
   const confidenceClass = `uw-confidence-dot-${confidenceTone(citation)}`;
+  const selectionNote = citation?.selection_note;
+  const sourceField = humanizeFieldName(citation?.source_field);
+  const preferredSources = Array.isArray(citation?.preferred_sources_missing)
+    ? citation.preferred_sources_missing
+    : [];
+  const annualizedFromMonths = citation?.annualized_from_months;
+  const annualizationFactor = Number(citation?.annualization_factor);
+  const originalValue = citation?.original_value;
 
   return (
     <div className="w-[320px] overflow-hidden rounded-2xl border border-border/70 bg-popover p-0 text-popover-foreground shadow-2xl shadow-foreground/10">
@@ -90,6 +135,35 @@ function CitationTooltipContent({ citation, tier, canOpen }) {
               Calculation
             </div>
             <p className="font-mono text-[12px] leading-5 text-foreground">{formula}</p>
+          </div>
+        ) : null}
+
+        {selectionNote ? (
+          <div className="rounded-xl border border-border/60 bg-background/70 p-3">
+            <div className="mb-1 text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+              Selection
+            </div>
+            <p className="text-xs leading-5 text-foreground">{selectionNote}</p>
+          </div>
+        ) : null}
+
+        {sourceField || annualizedFromMonths || originalValue != null || preferredSources.length ? (
+          <div className="rounded-xl border border-border/60 bg-background/70 p-3 text-xs leading-5 text-foreground">
+            {sourceField ? (
+              <p><span className="font-semibold text-muted-foreground">Selected field:</span> {sourceField}</p>
+            ) : null}
+            {annualizedFromMonths ? (
+              <p>
+                <span className="font-semibold text-muted-foreground">Annualization:</span> {annualizedFromMonths}-month figure
+                {Number.isFinite(annualizationFactor) ? ` scaled by ×${annualizationFactor.toFixed(2)}` : ''}
+              </p>
+            ) : null}
+            {originalValue != null ? (
+              <p><span className="font-semibold text-muted-foreground">Original value:</span> ${Number(originalValue).toLocaleString()}</p>
+            ) : null}
+            {preferredSources.length ? (
+              <p><span className="font-semibold text-muted-foreground">Missing preferred sources:</span> {preferredSources.join(', ')}</p>
+            ) : null}
           </div>
         ) : null}
 
@@ -173,7 +247,20 @@ export function FieldGroup({ label }) {
   );
 }
 
-export function NumericField({ label, value, onChange, prefix, suffix, citation, onOpenSource, wide = false, placeholder }) {
+export function NumericField({
+  label,
+  value,
+  onChange,
+  prefix,
+  suffix,
+  citation,
+  onOpenSource,
+  wide = false,
+  placeholder,
+  disabled = false,
+  badge = null,
+  note = null,
+}) {
   const id = useId();
   const [raw, setRaw] = useState('');
   const [focused, setFocused] = useState(false);
@@ -190,11 +277,13 @@ export function NumericField({ label, value, onChange, prefix, suffix, citation,
       : '');
 
   const handleFocus = () => {
+    if (disabled) return;
     setFocused(true);
     setRaw(String(value ?? '').replace(/,/g, ''));
   };
 
   const handleBlur = () => {
+    if (disabled) return;
     setFocused(false);
     const normalized = raw.replace(/,/g, '').trim();
     if (normalized === '') {
@@ -206,9 +295,10 @@ export function NumericField({ label, value, onChange, prefix, suffix, citation,
   };
 
   return (
-    <div className={`field-wrap${wide ? ' wide' : ''}`}>
+    <div className={`field-wrap${wide ? ' wide' : ''}${disabled ? ' opacity-70' : ''}`}>
       <div className="field-label-row">
         <label htmlFor={id} className="field-label">{label}</label>
+        {badge ? <span className="rounded-full border border-border/60 bg-muted/50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">{badge}</span> : null}
         <CitationControl citation={citation} onOpenSource={onOpenSource} />
       </div>
 
@@ -224,9 +314,79 @@ export function NumericField({ label, value, onChange, prefix, suffix, citation,
           onChange={(e) => setRaw(e.target.value)}
           onFocus={handleFocus}
           onBlur={handleBlur}
+          disabled={disabled}
         />
         {suffix ? <span className="field-affix suffix">{suffix}</span> : null}
       </div>
+      {note ? <p className="mt-1 text-xs text-muted-foreground">{note}</p> : null}
+    </div>
+  );
+}
+
+const formatCurrency = (value) => (
+  value == null ? '—' : `$${Number(value).toLocaleString(undefined, { maximumFractionDigits: 0 })}`
+);
+
+const formatPercent = (value) => (
+  value == null ? '—' : `${(Number(value) * 100).toFixed(2)}%`
+);
+
+const periodLabel = {
+  t12: 'T-12',
+  current: 'Current',
+  year1: 'Year 1',
+  pro_forma: 'Pro Forma',
+  mixed: 'Mixed period',
+  unknown: 'Unknown',
+};
+
+const methodLabel = {
+  line_items: 'Line items',
+  expense_ratio: 'Expense ratio',
+  noi: 'OM NOI',
+  missing: 'Missing',
+};
+
+export function OperationsModelBasisPanel({ expenseBasis }) {
+  if (!expenseBasis) return null;
+
+  return (
+    <div className="col-span-full rounded-xl border border-border/60 bg-muted/30 p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">Model Basis</p>
+          <p className="mt-1 text-base font-semibold text-foreground">Using {expenseBasis.label}</p>
+          <p className="mt-1 text-sm text-muted-foreground">{expenseBasis.reason}</p>
+        </div>
+        <span className="rounded-full bg-uw-success/15 px-3 py-1 text-xs font-semibold text-uw-success">Drives model</span>
+      </div>
+      <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+        <div>
+          <p className="text-xs text-muted-foreground">Period</p>
+          <p className="font-semibold text-foreground">{periodLabel[expenseBasis.period] ?? 'Unknown'}</p>
+        </div>
+        <div>
+          <p className="text-xs text-muted-foreground">Method</p>
+          <p className="font-semibold text-foreground">{methodLabel[expenseBasis.method] ?? expenseBasis.method ?? '—'}</p>
+        </div>
+        <div>
+          <p className="text-xs text-muted-foreground">EGI</p>
+          <p className="font-semibold text-foreground">{formatCurrency(expenseBasis.modeled_egi)}</p>
+        </div>
+        <div>
+          <p className="text-xs text-muted-foreground">OpEx</p>
+          <p className="font-semibold text-foreground">{formatCurrency(expenseBasis.modeled_total_expenses ?? expenseBasis.year1_line_item_opex)}</p>
+        </div>
+        <div>
+          <p className="text-xs text-muted-foreground">Expense Ratio</p>
+          <p className="font-semibold text-foreground">{formatPercent(expenseBasis.expense_ratio ?? expenseBasis.ratio)}</p>
+        </div>
+      </div>
+      {Array.isArray(expenseBasis.warnings) && expenseBasis.warnings.length ? (
+        <div className="mt-3 rounded-lg border border-warning/30 bg-warning/10 px-3 py-2 text-sm text-muted-foreground">
+          {expenseBasis.warnings.join(' ')}
+        </div>
+      ) : null}
     </div>
   );
 }
@@ -292,7 +452,8 @@ export function ValueAddEvidence({ omData, getCitation, onOpenSource }) {
 
 export function OperationsIncomeBasisStrip({ inputs, currentRun }) {
   const artifact = currentRun?.result_artifact || {};
-  const expenseBasisSource = artifact.expense_basis?.source;
+  const expenseBasis = artifact.expense_basis;
+  const expenseBasisSource = expenseBasis?.source;
   // Prefer saved model inputs because they reflect any analyst edits, then fall back to
   // preserved extraction artifacts so historical runs still show a useful basis strip.
   const months = inputs.operational?.income_basis_months
@@ -304,6 +465,10 @@ export function OperationsIncomeBasisStrip({ inputs, currentRun }) {
   let tone = 'neutral';
   let title = 'Income period not stated';
   let detail = 'The source period is unknown. Treat income and expense support as preliminary.';
+
+  if (!months && expenseBasis && !['missing', 'noi'].includes(expenseBasis.method)) {
+    return null;
+  }
 
   if (expenseBasisSource === 'om_noi') {
     tone = 'warning';

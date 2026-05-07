@@ -185,10 +185,10 @@ export function getUnitMixSource(artifact = {}, persistedInputs = {}, coverage =
   }
   if (hasRows(artifact.unit_mix)) {
     return {
-      label: 'Extracted source',
+      label: 'Extracted OM unit mix',
       tone: 'active',
       source: 'extracted',
-      detail: 'Unit mix was extracted into the model input set.',
+      detail: 'Unit mix was extracted from OM/unit schedule data. Validate against the rent roll when available.',
     };
   }
   if (hasRows(persistedInputs.unit_mix)) {
@@ -242,6 +242,26 @@ export function getRentCompCoverage(unitMix = [], rentComps = [], rentPositionAn
     .filter((row) => isStorageRow(row) && normalizeSizeLabel(row?.size));
   const positionRows = Array.isArray(rentPositionAnalysis) ? rentPositionAnalysis : [];
   const compRows = Array.isArray(rentComps) ? rentComps : [];
+  const facilityCompRows = compRows.filter((row) => !row?.is_broker_market_average);
+  const brokerBenchmarkRows = compRows.length - facilityCompRows.length;
+
+  const isSizeOnly = positionRows.length > 0
+    && positionRows.every(r => r.match_basis === 'size_only' || r.climate_type === 'Mixed');
+
+  // Zero-comp rows are emitted so the UI can show coverage gaps — exclude them from matched counts.
+  const matchedPositionRows = positionRows.filter(
+    r => (r.comp_count ?? 0) > 0 && r.comp_average_rent != null
+  );
+
+  // Mirror backend _size_bucket thresholds for bucket-level coverage in size-only mode.
+  const getSizeBucket = (sqft) => {
+    if (!sqft || sqft <= 0) return null;
+    if (sqft < 25)  return 'locker';
+    if (sqft < 75)  return 'small';
+    if (sqft < 150) return 'medium';
+    if (sqft < 300) return 'large';
+    return 'xlarge';
+  };
 
   const subjectSizeMap = new Map();
   storageRows.forEach((row) => {
@@ -253,44 +273,80 @@ export function getRentCompCoverage(unitMix = [], rentComps = [], rentPositionAn
         label: row.size || 'Unknown size',
         sizeKey,
         climateKey,
+        bucket: getSizeBucket(row.standard_sqft),
       });
     }
   });
   const subjectSizes = [...subjectSizeMap.values()];
-  const totalBuckets = subjectSizes.length;
 
-  const matchedKeys = new Set(positionRows.map((row) => {
+  const subjectBuckets = [...new Map(subjectSizes.filter(s => s.bucket).map(s => [s.bucket, s])).values()];
+
+  const matchedKeys = new Set(matchedPositionRows.map((row) => {
     const sizeKey = normalizeSizeLabel(row?.size);
     const climateKey = normalizeClimateLabel(row?.climate_type);
     return climateKey === 'unknown' ? sizeKey : `${sizeKey}-${climateKey}`;
   }));
-  const matchedSizes = new Set(positionRows.map((row) => normalizeSizeLabel(row?.size)).filter(Boolean));
-  const compSizes = new Set(compRows.map((row) => normalizeSizeLabel(row?.size)).filter(Boolean));
+  const matchedSizes = new Set(matchedPositionRows.map((row) => normalizeSizeLabel(row?.size)).filter(Boolean));
+  const matchedBucketSet = new Set(matchedPositionRows.map((row) => row?.bucket).filter(Boolean));
+  const compSizes = new Set(
+    facilityCompRows
+      .filter((row) => row?.asking_rent != null || row?.rent_per_sqft != null)
+      .map((row) => normalizeSizeLabel(row?.size))
+      .filter(Boolean)
+  );
 
-  const unmatchedLabels = subjectSizes
+  const exactUnmatchedLabels = subjectSizes
+    .filter((subjectSize) => !compSizes.has(subjectSize.sizeKey))
+    .map((subjectSize) => subjectSize.label);
+  const exactTotalSizes = subjectSizes.length;
+  const exactUnmatchedCount = exactUnmatchedLabels.length;
+  const exactMatchedSizes = Math.max(exactTotalSizes - exactUnmatchedCount, 0);
+
+  const coverageSubjects = isSizeOnly ? subjectBuckets : subjectSizes;
+  const unmatchedLabels = coverageSubjects
     .filter((subjectSize) => {
+      if (isSizeOnly) {
+        return !matchedBucketSet.has(subjectSize.bucket);
+      }
       const keyedMatch = matchedKeys.has(`${subjectSize.sizeKey}-${subjectSize.climateKey}`);
       return !(keyedMatch || matchedSizes.has(subjectSize.sizeKey) || compSizes.has(subjectSize.sizeKey));
     })
     .map((subjectSize) => subjectSize.label);
 
-  const matchedBuckets = totalBuckets > 0 ? totalBuckets - unmatchedLabels.length : positionRows.length;
+  const totalBuckets = coverageSubjects.length || subjectSizes.length;
+  const matchedBuckets = totalBuckets > 0 ? totalBuckets - unmatchedLabels.length : matchedPositionRows.length;
   const unmatchedCount = Math.max(totalBuckets - matchedBuckets, 0);
+  const hasUnmatchedBuckets = positionRows.some(r => r.comp_count === 0 || r.comp_average_rent == null);
   const tone = totalBuckets === 0 ? 'neutral'
     : matchedBuckets === 0 ? 'danger'
-    : unmatchedCount > 0 ? 'warning'
+    : (unmatchedCount > 0 || (isSizeOnly && hasUnmatchedBuckets)) ? 'warning'
     : 'success';
+  const supportMode = isSizeOnly ? 'bucket' : 'exact';
 
   return {
     totalBuckets,
     matchedBuckets,
     unmatchedCount,
     unmatchedLabels: [...new Set(unmatchedLabels)].slice(0, 6),
-    compRows: compRows.length,
+    supportMode,
+    bucketTotal: isSizeOnly ? totalBuckets : subjectBuckets.length,
+    bucketMatched: isSizeOnly ? matchedBuckets : matchedBucketSet.size,
+    bucketUnmatchedCount: isSizeOnly ? unmatchedCount : Math.max(subjectBuckets.length - matchedBucketSet.size, 0),
+    exactTotalSizes,
+    exactMatchedSizes,
+    exactUnmatchedCount,
+    exactUnmatchedLabels: [...new Set(exactUnmatchedLabels)].slice(0, 6),
+    exactLabel: exactTotalSizes > 0 ? `${exactMatchedSizes}/${exactTotalSizes} exact sizes supported` : 'No subject sizes',
+    compRows: facilityCompRows.length,
+    brokerBenchmarkRows,
     tone,
-    label: totalBuckets > 0 ? `${matchedBuckets}/${totalBuckets} subject sizes matched` : `${compRows.length} comp rows`,
+    label: totalBuckets > 0
+      ? (isSizeOnly ? `${matchedBuckets}/${totalBuckets} rent buckets supported` : `${matchedBuckets}/${totalBuckets} subject sizes matched`)
+      : `${facilityCompRows.length} comp rows`,
     detail: totalBuckets > 0
-      ? 'Subject storage sizes are matched to same-size comp rows when available; unmatched sizes should be reviewed manually.'
+      ? (isSizeOnly
+          ? 'Rent-position ratios use bucket-level facility comps because climate type is not fully classified. Exact-size gaps are listed separately.'
+          : 'Subject storage sizes are matched to same-size comp rows when available; unmatched sizes should be reviewed manually.')
       : 'Add subject unit mix to measure rent-position coverage against the comp set.',
   };
 }

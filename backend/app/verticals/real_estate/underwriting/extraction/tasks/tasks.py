@@ -13,6 +13,7 @@ from __future__ import annotations
 
 from celery import chain, chord, group, shared_task
 from celery.exceptions import SoftTimeLimitExceeded
+from pydantic import ValidationError
 
 from app.config import settings
 from app.database import get_db
@@ -466,6 +467,27 @@ def re_detect_discrepancies_task(self, payload: dict) -> dict:
         return payload
 
 
+def _describe_validation_error(exc: ValidationError) -> str:
+    """Convert a Pydantic ValidationError into a plain-English user message.
+
+    Each missing/invalid field becomes one bullet. The message guides the
+    user to enter the value manually in the wizard rather than showing a
+    raw Pydantic traceback.
+    """
+    field_msgs: list[str] = []
+    for error in exc.errors():
+        loc = " → ".join(str(part) for part in error["loc"])
+        pydantic_msg = error.get("msg", "invalid value")
+        field_msgs.append(f"  • {loc}: {pydantic_msg}")
+
+    fields_block = "\n".join(field_msgs)
+    return (
+        f"Could not run calculations — {len(field_msgs)} required field(s) are missing "
+        f"or invalid:\n{fields_block}\n\n"
+        "Please enter these values manually in the wizard and re-run the analysis."
+    )
+
+
 @shared_task(
     bind=True,
     soft_time_limit=settings.re_uw_task_soft_time_limit_seconds,
@@ -485,7 +507,25 @@ def re_calculate_underwriting_task(self, payload: dict) -> dict:
             status="calculating", current_stage="calculation",
             progress_percent=80, message="Running calculations...",
         )
-        inputs = SelfStorageInputs(**payload.get("merged_inputs", {}))
+        merged_inputs = payload.get("merged_inputs", {})
+        # Snapshot the user's current verdict-gate thresholds into criteria so this
+        # run's pass/fail gates are frozen at extraction time and immune to future default changes.
+        run_obj = repo.get_by_id(run_id)
+        if run_obj:
+            from app.repositories.user_repository import UserRepository
+            from app.schemas.user_thresholds import UserUnderwritingThresholds
+            saved = UserRepository().get_underwriting_thresholds(run_obj.user_id) or {}
+            if saved:
+                thresholds = UserUnderwritingThresholds(**saved)
+                criteria = merged_inputs.get("criteria", {})
+                for key in ("dscr_year_one_floor", "stress_dscr_floor", "rollover_risk_pct"):
+                    if criteria.get(key) is None:
+                        val = getattr(thresholds, key, None)
+                        if val is not None:
+                            criteria[key] = val
+                merged_inputs = {**merged_inputs, "criteria": criteria}
+
+        inputs = SelfStorageInputs(**merged_inputs)
         doc_results = [ExtractedDocResult(**d) for d in payload.get("doc_results", [])]
         result = calculate(inputs)
         result.income_basis_months = inputs.operational.income_basis_months
@@ -572,6 +612,15 @@ def re_calculate_underwriting_task(self, payload: dict) -> dict:
             internal_error="SoftTimeLimitExceeded", error_type="timeout", is_retryable=False,
         )
         repo.update_status(run_id, "failed", "Calculation timed out")
+        raise
+    except ValidationError as e:
+        user_message = _describe_validation_error(e)
+        logger.error(f"Calculation failed (missing inputs): {e}", extra={"run_id": run_id})
+        tracker.mark_error(
+            error_stage="calculation", error_message=user_message,
+            internal_error=str(e)[:1000], error_type="missing_inputs", is_retryable=False,
+        )
+        repo.update_status(run_id, "failed", user_message[:500])
         raise
     except Exception as e:
         logger.error(f"Calculation failed: {e}", extra={"run_id": run_id})

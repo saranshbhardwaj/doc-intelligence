@@ -68,6 +68,123 @@ def _build_source_token(chunk, source_index: int) -> str:
     return f"S{source_index}:p{page}"
 
 
+def _chunk_page_number(chunk) -> int | None:
+    metadata = chunk.chunk_metadata or {}
+    bbox = metadata.get("bbox")
+    if isinstance(bbox, dict) and bbox.get("page") is not None:
+        try:
+            return int(bbox["page"])
+        except (TypeError, ValueError):
+            pass
+    page = getattr(chunk, "page_number", None)
+    if page is None:
+        page = metadata.get("page_number")
+    if page is None:
+        return None
+    try:
+        return int(page)
+    except (TypeError, ValueError):
+        return None
+
+
+def _chunk_section_type(chunk) -> str:
+    return str(getattr(chunk, "section_type", None) or "").lower()
+
+
+_OM_FINANCIAL_TABLE_KEYWORDS = (
+    "operating statement",
+    "income statement",
+    "financial",
+    "revenue",
+    "income",
+    "expense",
+    "noi",
+    "net operating income",
+    "gross potential rent",
+    "gpr",
+    "current",
+    "year 1",
+    "year-one",
+    "pro forma",
+    "stabilized",
+)
+
+_OM_DEMOGRAPHIC_KEYWORDS = (
+    "demographic",
+    "population",
+    "household income",
+    "average household income",
+    "storage sqft",
+    "square feet per capita",
+)
+
+_OM_DEMOGRAPHIC_RADIUS_KEYWORDS = (
+    "3 mile",
+    "3-mile",
+    "3 miles",
+    "3-miles",
+    "within 3",
+    "1 mile | 3 miles | 5 miles",
+    "1 mile 3 miles 5 miles",
+)
+
+_OM_MARKET_COMPETITION_KEYWORDS = (
+    "competition",
+    "competitive",
+    "competitor",
+    "nearby",
+    "facility",
+    "rent comp",
+    "rent comparable",
+    "storage supply",
+)
+
+
+def _is_om_targeted_chunk(chunk) -> bool:
+    return _chunk_section_type(chunk) in {"table", "key_value_pairs", "key_value"}
+
+
+def _chunk_haystack(chunk) -> str:
+    metadata = chunk.chunk_metadata or {}
+    pieces = [
+        str(getattr(chunk, "text", "") or ""),
+        str(getattr(chunk, "section_heading", "") or ""),
+        str(metadata.get("section_heading") or ""),
+        str(metadata.get("table_name") or ""),
+        " ".join(str(item) for item in (metadata.get("column_headers") or [])),
+    ]
+    return "\n".join(piece for piece in pieces if piece).lower()
+
+
+def _has_any_keyword(haystack: str, keywords: tuple[str, ...]) -> bool:
+    return any(keyword in haystack for keyword in keywords)
+
+
+def _is_om_table_chunk(chunk) -> bool:
+    return _chunk_section_type(chunk) == "table"
+
+
+def _is_om_financial_table_chunk(chunk) -> bool:
+    return _is_om_table_chunk(chunk) and _has_any_keyword(
+        _chunk_haystack(chunk),
+        _OM_FINANCIAL_TABLE_KEYWORDS,
+    )
+
+
+def _is_om_demographic_market_haystack(haystack: str) -> bool:
+    has_demographics = _has_any_keyword(haystack, _OM_DEMOGRAPHIC_KEYWORDS)
+    has_radius = _has_any_keyword(haystack, _OM_DEMOGRAPHIC_RADIUS_KEYWORDS)
+    has_market_competition = _has_any_keyword(haystack, _OM_MARKET_COMPETITION_KEYWORDS)
+
+    if has_demographics:
+        return has_radius or has_market_competition
+    return has_market_competition
+
+
+def _is_om_demographic_market_chunk(chunk) -> bool:
+    return _is_om_demographic_market_haystack(_chunk_haystack(chunk))
+
+
 def build_chunk_context(chunks: list, source_index: int) -> str:
     """Format chunks as a context string with source citation headers."""
     parts: list[str] = []
@@ -95,6 +212,105 @@ def _build_extraction_context(
     if t12_totals and t12_totals.prompt_block:
         return f"{t12_totals.prompt_block}\n\n{context}"
     return context
+
+
+def _om_increment_reason_count(reason_counts: dict[str, int], reason: str) -> None:
+    reason_counts[reason] = reason_counts.get(reason, 0) + 1
+
+
+def _build_om_two_call_contexts(chunks: list, source_index: int) -> tuple[str, str, dict]:
+    """Build split OM contexts: structure tables first, extraction evidence second."""
+    full_context = build_chunk_context(chunks, source_index)
+    table_indexes: set[int] = set()
+    financial_table_indexes: set[int] = set()
+    page_one_indexes: set[int] = set()
+    kv_indexes: set[int] = set()
+    demographic_market_indexes: set[int] = set()
+
+    for index, chunk in enumerate(chunks):
+        section_type = _chunk_section_type(chunk)
+        page_number = _chunk_page_number(chunk)
+        haystack = _chunk_haystack(chunk)
+        is_table = section_type == "table"
+
+        if is_table:
+            table_indexes.add(index)
+            if _has_any_keyword(haystack, _OM_FINANCIAL_TABLE_KEYWORDS):
+                financial_table_indexes.add(index)
+        if page_number == 1:
+            page_one_indexes.add(index)
+        if section_type in {"key_value_pairs", "key_value"}:
+            kv_indexes.add(index)
+        if _is_om_demographic_market_haystack(haystack):
+            demographic_market_indexes.add(index)
+
+    structure_indexes = sorted(financial_table_indexes or table_indexes)
+    extraction_indexes = sorted(
+        page_one_indexes | kv_indexes | table_indexes | demographic_market_indexes
+    )
+    structure_used_fallback = not bool(structure_indexes)
+    extraction_used_fallback = not bool(extraction_indexes)
+
+    structure_selected_indexes = range(len(chunks)) if structure_used_fallback else structure_indexes
+    extraction_selected_indexes = range(len(chunks)) if extraction_used_fallback else extraction_indexes
+    structure_chunks = [chunks[index] for index in structure_selected_indexes]
+    extraction_chunks = [chunks[index] for index in extraction_selected_indexes]
+    structure_context = (
+        full_context
+        if structure_used_fallback
+        else build_chunk_context(structure_chunks, source_index)
+    )
+    extraction_context = (
+        full_context
+        if extraction_used_fallback
+        else build_chunk_context(extraction_chunks, source_index)
+    )
+
+    structure_reason_counts: dict[str, int] = {}
+    for chunk in structure_chunks:
+        if _is_om_financial_table_chunk(chunk):
+            _om_increment_reason_count(structure_reason_counts, "financial_table")
+        elif _is_om_table_chunk(chunk):
+            _om_increment_reason_count(structure_reason_counts, "table")
+        else:
+            _om_increment_reason_count(structure_reason_counts, "fallback")
+
+    extraction_reason_counts: dict[str, int] = {}
+    for chunk in extraction_chunks:
+        reasons: list[str] = []
+        if _chunk_page_number(chunk) == 1:
+            reasons.append("page_one")
+        if _chunk_section_type(chunk) in {"key_value_pairs", "key_value"}:
+            reasons.append("kv")
+        if _is_om_table_chunk(chunk):
+            reasons.append("table")
+        if _is_om_demographic_market_chunk(chunk):
+            reasons.append("demographic_market")
+        _om_increment_reason_count(
+            extraction_reason_counts,
+            "+".join(reasons) if reasons else "fallback",
+        )
+
+    metadata = {
+        "enabled": True,
+        "source": "split_contexts",
+        "original_chunk_count": len(chunks),
+        "structure_chunk_count": len(structure_chunks),
+        "extraction_chunk_count": len(extraction_chunks),
+        "structure_char_count": len(structure_context),
+        "extraction_char_count": len(extraction_context),
+        "structure_used_fallback": structure_used_fallback,
+        "extraction_used_fallback": extraction_used_fallback,
+        "structure_source_tokens": [
+            _build_source_token(chunk, source_index) for chunk in structure_chunks
+        ],
+        "extraction_source_tokens": [
+            _build_source_token(chunk, source_index) for chunk in extraction_chunks
+        ],
+        "structure_reason_counts": structure_reason_counts,
+        "extraction_reason_counts": extraction_reason_counts,
+    }
+    return structure_context, extraction_context, metadata
 
 
 def _parse_extraction(doc_type: str, data: dict):
@@ -172,6 +388,18 @@ def extract_document(
     )
 
     t12_totals = compute_t12_table_totals(chunks, source_index) if doc_type == "t12" else None
+
+    if doc_type == "om" and settings.re_uw_om_two_call_enabled:
+        return _direct_extract(
+            run_id,
+            job_id,
+            doc_type,
+            chunks,
+            service,
+            source_index,
+            document_id,
+            t12_totals,
+        )
 
     if (
         doc_type == "om"
@@ -309,8 +537,32 @@ def _direct_extract(
     context = _build_extraction_context(chunks, source_index, t12_totals)
     citation_context = _build_citation_context(chunks, source_index, document_id)
     try:
+        om_context_metadata = None
         if doc_type == "om":
-            extracted = service.extract_om(context)
+            if settings.re_uw_om_two_call_enabled:
+                (
+                    structure_context,
+                    extraction_context,
+                    om_context_metadata,
+                ) = _build_om_two_call_contexts(chunks, source_index)
+                logger.info(
+                    "OM two-call contexts: structure_chunks=%s extraction_chunks=%s "
+                    "structure_chars=%s extraction_chars=%s structure_reasons=%s "
+                    "extraction_reasons=%s",
+                    om_context_metadata["structure_chunk_count"],
+                    om_context_metadata["extraction_chunk_count"],
+                    om_context_metadata["structure_char_count"],
+                    om_context_metadata["extraction_char_count"],
+                    om_context_metadata["structure_reason_counts"],
+                    om_context_metadata["extraction_reason_counts"],
+                    extra={"run_id": run_id, "doc_type": doc_type},
+                )
+                extracted = service.extract_om(
+                    extraction_context,
+                    structure_context=structure_context,
+                )
+            else:
+                extracted = service.extract_om(context)
         elif doc_type == "t12":
             extracted = service.extract_t12(context)
         else:
@@ -325,6 +577,8 @@ def _direct_extract(
             for field, cdata in raw_citations.items()
         }
         result_metadata = dict(extraction_metadata or {})
+        if doc_type == "om" and om_context_metadata is not None:
+            result_metadata["om_two_call_contexts"] = om_context_metadata
         if doc_type == "t12" and t12_totals is not None:
             t12_metadata = reconcile_t12_with_computed_totals(
                 t12=typed,

@@ -29,7 +29,7 @@ export const TAB_CONFIG = [
   { id: 'operations', label: 'Operations', desc: 'Revenue assumptions and operating expense inputs.' },
   { id: 'market', label: 'Market', desc: 'Nearby facilities, population, and income context.' },
   { id: 'debtExit', label: 'Debt & Exit', desc: 'Financing, hold horizon, and exit assumptions.' },
-  { id: 'criteria', label: 'Criteria', desc: 'Return hurdles and leverage limits.' },
+  { id: 'criteria', label: 'Criteria', desc: 'Return hurdles, leverage limits, and coverage floors.' },
 ];
 
 export const VISIBLE_CITATION_FIELD_KEYS = [
@@ -39,12 +39,15 @@ export const VISIBLE_CITATION_FIELD_KEYS = [
   'capex_reserve_per_unit',
   'num_units',
   'rentable_sqft',
+  'year_built',
   'gross_potential_rent_annual',
   'avg_in_place_rent_per_unit_monthly',
   'avg_market_rent_per_unit_monthly',
   'other_income_annual',
   'vacancy_credit_loss_pct',
+  'expense_ratio_t12',
   'expense_ratio_current',
+  'expense_ratio_year1',
   'expense_ratio_pro_forma',
   'bad_debt_annual',
   'corrections_collections_annual',
@@ -102,6 +105,7 @@ export const INITIAL_PROJECT_DATA = {
   name: '',
   address: '',
   asset_type: 'self_storage',
+  year_built: '',
   nearby_storage_count_1mi: '',
   nearby_storage_count_3mi: '',
   nearby_storage_count_5mi: '',
@@ -117,7 +121,9 @@ export const createDefaultInputs = () => ({
     avg_in_place_rent_per_unit_monthly: '',
     avg_market_rent_per_unit_monthly: '',
     vacancy_credit_loss_pct: 10,
+    expense_ratio_t12: '',
     expense_ratio_current: '',
+    expense_ratio_year1: '',
     expense_ratio_pro_forma: '',
     other_income_annual: 0,
     bad_debt_annual: '',
@@ -141,7 +147,7 @@ export const createDefaultInputs = () => ({
   },
   financing: { interest_rate_pct: 6.5, loan_term_years: 10, amortization_years: 25, ltv_pct: 70 },
   exit: { hold_period_years: 10, market_cap_rate_sale: '', exit_cap_rate: 6.5, selling_cost_pct: 3 },
-  criteria: { target_irr: 15, target_cash_on_cash: 8, target_equity_multiple: 2.0, max_ltv: 80 },
+  criteria: { target_irr: 15, target_cash_on_cash: 8, target_equity_multiple: 2.0, max_ltv: 80, dscr_year_one_floor: 1.25, stress_dscr_floor: 1.15, rollover_risk_pct: 40 },
   rent_comps: [],
 });
 

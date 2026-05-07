@@ -9,10 +9,26 @@ import SourceSupportActions from './SourceSupportActions';
 import { formatCompactCurrency, formatCurrency, formatPercent } from './formatters';
 
 function getExpenseBasisTone(source) {
-  if (source === 'line_items' || source === 'expense_ratio_current') return 'success';
-  if (source === 'expense_ratio_pro_forma' || source === 'om_noi') return 'warning';
+  if (source === 't12_line_items' || source === 't12_expense_ratio' || source === 'om_year1_line_items') return 'success';
+  if (source?.includes?.('expense_ratio') || source === 'om_noi') return 'warning';
   return 'danger';
 }
+
+const periodLabel = {
+  t12: 'T-12',
+  current: 'Current',
+  year1: 'Year 1',
+  pro_forma: 'Pro Forma',
+  mixed: 'Mixed period',
+  unknown: 'Unknown',
+};
+
+const methodLabel = {
+  line_items: 'Line items',
+  expense_ratio: 'Expense ratio',
+  noi: 'OM NOI',
+  missing: 'Missing',
+};
 
 function getUnitTypeBadge(row) {
   const label = `${row.unit_category || ''}`.toLowerCase();
@@ -78,7 +94,6 @@ export default function OperationsSection({
   extractedUnits = 0,
   unitMixCoveragePct = null,
   occupancy,
-  currentExpenseRatio,
   proFormaExpenseRatio,
   propertyTaxAnnual,
   propertyTaxGrowthPct,
@@ -107,6 +122,83 @@ export default function OperationsSection({
   ];
   const hasOtherOpex = otherOpexItems.some((item) => item.value != null);
   const revenueMix = getRevenueMix(unitMix);
+  const hasCitation = (field) => Boolean(sourceCitations?.[field]);
+  const hasSupportValue = (value) => value != null && value !== '—';
+  const modeledExpenseRatio = expenseBasis?.expense_ratio ?? expenseBasis?.ratio ?? null;
+  const isLineItemExpenseBasis = expenseBasis?.method === 'line_items'
+    || String(expenseBasis?.source || '').endsWith('_line_items');
+  const isExpenseRatioBasis = expenseBasis?.method === 'expense_ratio'
+    || String(expenseBasis?.source || '').includes('expense_ratio');
+  const expenseBasisReason = expenseBasis
+    ? isLineItemExpenseBasis
+      ? 'Operating expenses are modeled from selected line-item OpEx. The ratio shown below is an implied benchmark, not the driver.'
+      : isExpenseRatioBasis
+        ? 'Operating expenses are modeled from the selected expense ratio because coherent line-item support was unavailable.'
+        : expenseBasis.reason
+    : null;
+  const modeledRatioLabel = isLineItemExpenseBasis
+    ? 'Implied model ratio'
+    : isExpenseRatioBasis
+      ? 'Model ratio used'
+      : 'Model expense ratio';
+  const expenseRatioLabel = isLineItemExpenseBasis ? 'Implied ratio' : 'Expense ratio';
+  const t12ExpenseRatio = operational?.expense_ratio_t12;
+  const omCurrentExpenseRatio = operational?.expense_ratio_current;
+  const omYear1ExpenseRatio = operational?.expense_ratio_year1;
+  const omProFormaExpenseRatio = operational?.expense_ratio_pro_forma ?? proFormaExpenseRatio;
+  const expenseSupportRows = [
+    { label: modeledRatioLabel, value: formatPercent(modeledExpenseRatio) },
+    { label: 'T-12 expense ratio', value: formatPercent(t12ExpenseRatio) },
+    { label: 'OM current expense ratio', value: formatPercent(omCurrentExpenseRatio) },
+    { label: 'OM Year 1 expense ratio', value: formatPercent(omYear1ExpenseRatio) },
+    { label: 'OM pro forma expense ratio', value: formatPercent(omProFormaExpenseRatio) },
+    {
+      label: 'Delta vs broker pro forma',
+      value: modeledExpenseRatio != null && omProFormaExpenseRatio != null
+        ? `${((modeledExpenseRatio - omProFormaExpenseRatio) * 100).toFixed(1)} pp`
+        : '—',
+    },
+  ].filter((row, index) => index === 0 || hasSupportValue(row.value));
+  const taxSupportRows = [
+    { label: 'Property tax (year 1)', value: formatCurrency(propertyTaxAnnual) },
+    { label: 'Tax value basis', value: formatCurrency(operational?.property_tax_value_basis_amount) },
+    { label: 'Tax assessed value', value: formatCurrency(operational?.property_tax_assessed_value) },
+    { label: 'Tax assessment ratio', value: formatPercent(operational?.property_tax_assessment_ratio) },
+    {
+      label: 'Tax millage rate',
+      value: operational?.property_tax_millage_rate != null
+        ? `${operational.property_tax_millage_rate.toFixed(2)} mills`
+        : '—',
+    },
+    {
+      label: 'Tax rate / assessed $',
+      value: operational?.property_tax_rate_per_assessed_dollar != null
+        ? operational.property_tax_rate_per_assessed_dollar.toFixed(5)
+        : '—',
+    },
+  ].filter((row) => hasSupportValue(row.value));
+  const growthAssumptionRows = [
+    { label: 'Property tax growth', value: formatPercent(propertyTaxGrowthPct) },
+  ].filter((row) => hasSupportValue(row.value));
+  const pricingContextRows = [
+    {
+      label: 'Price / unit',
+      value: purchasePrice && totalUnits ? formatCurrency(Math.round(purchasePrice / totalUnits)) : '—',
+    },
+    {
+      label: 'Price / rentable sqft',
+      value: purchasePrice && rentableSqft ? `$${(purchasePrice / rentableSqft).toFixed(2)}` : '—',
+    },
+  ].filter((row) => row && hasSupportValue(row.value));
+  const revenueQualityRows = [
+    { label: 'Vacancy & credit loss', value: formatPercent(operational?.vacancy_credit_loss_pct) },
+    hasCitation('bad_debt_annual') || Number(badDebtAnnual) !== 0
+      ? { label: 'Bad debt', value: formatCurrency(badDebtAnnual), help: 'Historical charge-offs or delinquent losses from the T-12.' }
+      : null,
+    hasCitation('corrections_collections_annual') || Number(correctionsCollectionsAnnual) !== 0
+      ? { label: 'Corrections / collections', value: formatCurrency(correctionsCollectionsAnnual), help: 'Adjustments, write-downs, or collection-related offsets.' }
+      : null,
+  ].filter((row) => row && hasSupportValue(row.value));
 
   return (
     <UnderwritingSection
@@ -235,7 +327,7 @@ export default function OperationsSection({
                     <div className="flex flex-wrap items-start justify-between gap-3">
                       <div>
                         <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">Modeled OpEx basis</p>
-                        <p className="mt-1 text-sm leading-6 text-muted-foreground">{expenseBasis.reason}</p>
+                        <p className="mt-1 text-sm leading-6 text-muted-foreground">{expenseBasisReason}</p>
                       </div>
                       <UnderwritingStatusBadge tone={getExpenseBasisTone(expenseBasis.source)}>
                         {expenseBasis.label}
@@ -244,17 +336,34 @@ export default function OperationsSection({
                     {expenseBasis.source !== 'om_noi' ? (
                       <div className="mt-3 grid gap-3 sm:grid-cols-3">
                         <div>
-                          <p className="text-xs text-muted-foreground">Line-item OpEx</p>
-                          <p className="mt-1 font-semibold text-foreground">{formatCompactCurrency(expenseBasis.year1_line_item_opex)}</p>
+                          <p className="text-xs text-muted-foreground">Period</p>
+                          <p className="mt-1 font-semibold text-foreground">{periodLabel[expenseBasis.period] ?? 'Unknown'}</p>
                         </div>
                         <div>
-                          <p className="text-xs text-muted-foreground">Ratio-implied OpEx</p>
-                          <p className="mt-1 font-semibold text-foreground">{formatCompactCurrency(expenseBasis.year1_ratio_opex)}</p>
+                          <p className="text-xs text-muted-foreground">Method</p>
+                          <p className="mt-1 font-semibold text-foreground">{methodLabel[expenseBasis.method] ?? expenseBasis.method ?? '—'}</p>
                         </div>
                         <div>
-                          <p className="text-xs text-muted-foreground">Expense ratio used</p>
-                          <p className="mt-1 font-semibold text-foreground">{formatPercent(expenseBasis.ratio)}</p>
+                          <p className="text-xs text-muted-foreground">{expenseRatioLabel}</p>
+                          <p className="mt-1 font-semibold text-foreground">{formatPercent(expenseBasis.expense_ratio ?? expenseBasis.ratio)}</p>
                         </div>
+                        <div>
+                          <p className="text-xs text-muted-foreground">Modeled EGI</p>
+                          <p className="mt-1 font-semibold text-foreground">{formatCompactCurrency(expenseBasis.modeled_egi)}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-muted-foreground">Modeled OpEx</p>
+                          <p className="mt-1 font-semibold text-foreground">{formatCompactCurrency(expenseBasis.modeled_total_expenses ?? expenseBasis.year1_line_item_opex)}</p>
+                        </div>
+                        <div>
+                          <p className="text-xs text-muted-foreground">Modeled NOI</p>
+                          <p className="mt-1 font-semibold text-foreground">{formatCompactCurrency(expenseBasis.modeled_noi)}</p>
+                        </div>
+                      </div>
+                    ) : null}
+                    {Array.isArray(expenseBasis.warnings) && expenseBasis.warnings.length ? (
+                      <div className="mt-3 rounded-xl border border-warning/30 bg-warning/10 px-3 py-2 text-sm leading-6 text-muted-foreground">
+                        {expenseBasis.warnings.join(' ')}
                       </div>
                     ) : null}
                     {expenseBasisFormula ? (
@@ -264,43 +373,34 @@ export default function OperationsSection({
                     ) : null}
                   </div>
                 ) : null}
-                <KeyValueList rows={[
-                  { label: 'Expense ratio (T-12 actual)', value: formatPercent(currentExpenseRatio) },
-                  { label: 'Expense ratio (OM pro forma)', value: formatPercent(proFormaExpenseRatio) },
-                  {
-                    label: 'Expense ratio delta',
-                    value: currentExpenseRatio != null && proFormaExpenseRatio != null
-                      ? `${((currentExpenseRatio - proFormaExpenseRatio) * 100).toFixed(1)} pp`
-                      : '—',
-                  },
-                  { label: 'Property tax (year 1)', value: formatCurrency(propertyTaxAnnual) },
-                  { label: 'Property tax growth', value: formatPercent(propertyTaxGrowthPct) },
-                  { label: 'Tax value basis', value: formatCurrency(operational?.property_tax_value_basis_amount) },
-                  { label: 'Tax assessed value', value: formatCurrency(operational?.property_tax_assessed_value) },
-                  { label: 'Tax assessment ratio', value: formatPercent(operational?.property_tax_assessment_ratio) },
-                  {
-                    label: 'Tax millage rate',
-                    value: operational?.property_tax_millage_rate != null
-                      ? `${operational.property_tax_millage_rate.toFixed(2)} mills`
-                      : '—',
-                  },
-                  {
-                    label: 'Tax rate / assessed $',
-                    value: operational?.property_tax_rate_per_assessed_dollar != null
-                      ? operational.property_tax_rate_per_assessed_dollar.toFixed(5)
-                      : '—',
-                  },
-                  { label: 'Bad debt', value: formatCurrency(badDebtAnnual) },
-                  { label: 'Corrections / collections', value: formatCurrency(correctionsCollectionsAnnual) },
-                  {
-                    label: 'Price / unit',
-                    value: purchasePrice && totalUnits ? formatCurrency(Math.round(purchasePrice / totalUnits)) : '—',
-                  },
-                  {
-                    label: 'Price / rentable sqft',
-                    value: purchasePrice && rentableSqft ? `$${(purchasePrice / rentableSqft).toFixed(2)}` : '—',
-                  },
-                ]} />
+                <KeyValueList rows={expenseSupportRows} />
+
+                {taxSupportRows.length > 0 ? (
+                  <div className="mt-5 border-t border-border/60 pt-4">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Property tax support</p>
+                    <div className="mt-3">
+                      <KeyValueList rows={taxSupportRows} />
+                    </div>
+                  </div>
+                ) : null}
+
+                {growthAssumptionRows.length > 0 ? (
+                  <div className="mt-5 border-t border-border/60 pt-4">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Growth assumptions</p>
+                    <div className="mt-3">
+                      <KeyValueList rows={growthAssumptionRows} />
+                    </div>
+                  </div>
+                ) : null}
+
+                {pricingContextRows.length > 0 ? (
+                  <div className="mt-5 border-t border-border/60 pt-4">
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Pricing context</p>
+                    <div className="mt-3">
+                      <KeyValueList rows={pricingContextRows} />
+                    </div>
+                  </div>
+                ) : null}
 
                 {hasOtherOpex && (
                   <div className="mt-3">
@@ -338,7 +438,9 @@ export default function OperationsSection({
                 )}
                 <SourceSupportActions
                   citations={[
+                    sourceCitations.expense_ratio_t12,
                     sourceCitations.expense_ratio_current,
+                    sourceCitations.expense_ratio_year1,
                     sourceCitations.expense_ratio_pro_forma,
                     sourceCitations.property_tax_annual,
                     sourceCitations.property_tax_growth_pct,
@@ -360,11 +462,13 @@ export default function OperationsSection({
             <div className="underwriting-panel p-4 sm:p-5">
               <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Revenue quality</p>
               <div className="mt-4">
-                <KeyValueList rows={[
-                  { label: 'Vacancy & credit loss', value: formatPercent(operational?.vacancy_credit_loss_pct) },
-                  { label: 'Bad debt', value: formatCurrency(badDebtAnnual), help: 'Historical charge-offs or delinquent losses from the T-12.' },
-                  { label: 'Corrections / collections', value: formatCurrency(correctionsCollectionsAnnual), help: 'Adjustments, write-downs, or collection-related offsets.' },
-                ]} />
+                <KeyValueList rows={revenueQualityRows} />
+                {!hasCitation('bad_debt_annual') && !hasCitation('corrections_collections_annual')
+                  && Number(badDebtAnnual) === 0 && Number(correctionsCollectionsAnnual) === 0 ? (
+                    <p className="mt-3 rounded-xl border border-border/60 bg-background/60 px-3 py-2 text-xs leading-5 text-muted-foreground">
+                      No T-12 bad debt or collection adjustments available.
+                    </p>
+                ) : null}
                 <SourceSupportActions
                   citations={[
                     sourceCitations.vacancy_credit_loss_pct,
@@ -386,7 +490,7 @@ export default function OperationsSection({
 
             {stressTests.length > 0 && (
               <div className="underwriting-panel p-4 sm:p-5">
-                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Stress tests</p>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Operating sensitivity</p>
                 <div className="mt-4">
                   <StressTestTable stressTests={stressTests} />
                 </div>

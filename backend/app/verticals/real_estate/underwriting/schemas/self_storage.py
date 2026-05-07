@@ -98,9 +98,17 @@ class OperationalInputs(BaseModel):
     vacancy_credit_loss_pct: float = Field(
         default=0.10, description="Vacancy + credit loss as % of GPR."
     )
+    expense_ratio_t12: Optional[float] = Field(
+        default=None,
+        description="T-12 actual operating expense ratio as a decimal.",
+    )
     expense_ratio_current: Optional[float] = Field(
         default=None,
-        description="Actual operating expense ratio as a decimal.",
+        description="OM current/in-place operating expense ratio as a decimal.",
+    )
+    expense_ratio_year1: Optional[float] = Field(
+        default=None,
+        description="OM Year-1 operating expense ratio as a decimal.",
     )
     expense_ratio_pro_forma: Optional[float] = Field(
         default=None,
@@ -125,6 +133,16 @@ class OperationalInputs(BaseModel):
         default=None,
         description="Analyst-facing note about income statement basis from the source document.",
     )
+    operating_statement_period: Optional[
+        Literal["t12", "current", "year1", "pro_forma", "mixed", "unknown"]
+    ] = Field(
+        default=None,
+        description="Operating statement period selected by extraction/merge.",
+    )
+    operating_statement_warnings: list[str] = Field(
+        default_factory=list,
+        description="Analyst-facing warnings about operating statement basis support.",
+    )
     bad_debt_annual: Optional[float] = Field(
         default=None,
         description="Annual bad debt or charge-offs when stated.",
@@ -138,7 +156,7 @@ class OperationalInputs(BaseModel):
     )
 
     # Expenses (annual)
-    property_tax_annual: float = 0.0
+    property_tax_annual: Optional[float] = None
     insurance_annual: float = 0.0
     mgmt_fee_pct: float = Field(
         default=0.08, description="Management fee as % of EGI."
@@ -227,6 +245,18 @@ class InvestmentCriteria(BaseModel):
         default=0.80, description="Hard upper bound on LTV."
     )
 
+    # Verdict gate overrides — snapshotted from user's "My Defaults" at run creation.
+    # None means "use the hardcoded industry minimum" (see verdict._DEFAULTS).
+    dscr_year_one_floor: Optional[float] = Field(
+        default=None, description="Minimum acceptable Year 1 DSCR for this deal."
+    )
+    stress_dscr_floor: Optional[float] = Field(
+        default=None, description="Minimum DSCR under any stress scenario for this deal."
+    )
+    rollover_risk_pct: Optional[float] = Field(
+        default=None, description="Rollover-risk warning threshold (fraction of rent expiring within 12 months)."
+    )
+
 
 class UnitMixRow(BaseModel):
     """One row from a self-storage unit-mix schedule."""
@@ -306,6 +336,13 @@ class RentCompRow(BaseModel):
         default=None,
         description="Canonical unit area in sqft derived from the size string (e.g. '5×10' → 50).",
     )
+    is_broker_market_average: bool = Field(
+        default=False,
+        description=(
+            "True when this row is a broker-computed market average benchmark "
+            "rather than an individual competing facility."
+        ),
+    )
 
 
 class SelfStorageInputs(BaseModel):
@@ -361,16 +398,30 @@ class ExpenseBasis(BaseModel):
     """How operating expenses were modeled for the projection."""
 
     source: Literal[
-        "line_items",
-        "expense_ratio_current",
-        "expense_ratio_pro_forma",
+        "t12_line_items",
+        "t12_expense_ratio",
+        "om_year1_line_items",
+        "om_year1_expense_ratio",
+        "om_current_line_items",
+        "om_current_expense_ratio",
+        "om_pro_forma_line_items",
+        "om_pro_forma_expense_ratio",
         "om_noi",
         "missing",
     ]
     label: str
     ratio: Optional[float] = None
+    period: Literal["t12", "current", "year1", "pro_forma", "mixed", "unknown"] = "unknown"
+    method: Literal["line_items", "expense_ratio", "noi", "missing"] = "missing"
+    modeled_egi: Optional[float] = None
+    modeled_total_expenses: Optional[float] = None
+    modeled_noi: Optional[float] = None
+    expense_ratio: Optional[float] = None
     year1_line_item_opex: Optional[float] = None
     year1_ratio_opex: Optional[float] = None
+    driver_fields: list[str] = Field(default_factory=list)
+    inactive_fields: list[str] = Field(default_factory=list)
+    warnings: list[str] = Field(default_factory=list)
     reason: str
 
 
@@ -410,6 +461,7 @@ class SensitivityPoint(BaseModel):
     cash_on_cash: float
     dscr_year_one: float
     equity_multiple: float
+    debt_yield: Optional[float] = None
 
 
 class StressScenario(BaseModel):
@@ -468,10 +520,14 @@ class RentPositionRow(BaseModel):
     )
     subject_current_rent: Optional[float] = None
     subject_market_rent: Optional[float] = None
-    comp_average_rent: float
+    comp_average_rent: Optional[float] = None
     current_vs_comp_ratio: Optional[float] = None
     market_vs_comp_ratio: Optional[float] = None
     comp_count: int
+    match_basis: Literal["exact", "size_only"] = Field(
+        default="exact",
+        description='"exact" = matched by bucket+climate; "size_only" = all-unknown fallback.',
+    )
     bucket: Optional[Literal["locker", "small", "medium", "large", "xlarge"]] = Field(
         default=None,
         description="Size bucket label: locker / small / medium / large / xlarge.",
@@ -533,6 +589,7 @@ class SelfStorageResult(BaseModel):
         description="Stabilised NOI / purchase price.",
     )
     dscr_year_one: Optional[float] = None
+    debt_yield: Optional[float] = None
     break_even_occupancy_pct: Optional[float] = Field(
         default=None,
         description="Approximate occupancy needed for year-one NOI to cover debt service.",

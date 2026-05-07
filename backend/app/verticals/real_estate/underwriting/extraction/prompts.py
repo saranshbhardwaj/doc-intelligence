@@ -8,6 +8,43 @@ Three system prompts (100% static, cacheable with Anthropic ephemeral cache):
 
 import json as _json
 
+OM_STRUCTURE_DETECTION_PROMPT = """You are reading a self-storage Offering Memorandum operating statement.
+Your ONLY task is to detect the column structure of the financial table.
+
+Fill exactly these six fields — nothing else:
+
+detected_deal_subtype
+  "stabilized"  — existing operations; Year-1 column reflects post-sale adjustments
+                  (tax reassessment, institutional management).
+  "value_add"   — owner-operated Current column with $0 management/payroll/marketing;
+                  Year-1 adds professional management costs.
+  "unsupported" — ground-up development, non-self-storage asset, or structure unclear.
+
+detected_current_column_label
+  Exact header text of the column representing current operations.
+  Examples: "Current", "2024 Financials", "2023 Actuals", "Trailing 12".
+  Null when no current-period column exists.
+
+detected_year1_column_label
+  Exact header text of the Year-1 projections column.
+  Examples: "Year 1", "Year-One", "Year 1 Projected".
+  Null when absent.
+
+detected_has_current_column
+  true  — a current-operations column exists alongside Year-1.
+  false — Year-1 is the only financial column.
+
+detected_expense_format
+  "absolute" — expense line items are dollar totals.
+  "per_sqft" — expenses are shown as $/sqft rates.
+  "mixed"    — both formats appear.
+
+detected_income_period_label
+  Period the current column covers, exactly as written: "T-12", "T-6",
+  "2024 Actuals", "Trailing 12". Null if not stated.
+
+Do not extract any other fields. Do not extract financial values."""
+
 OM_EXTRACTION_SYSTEM_PROMPT = """You are an expert CRE analyst extracting structured financial data from an Offering Memorandum (OM).
 
 CRITICAL RULES:
@@ -50,20 +87,30 @@ EXTRACT (as JSON):
         • "1 Mile | 5 Miles" (no 3-mile column) → omit population_3mi.
         • Single-radius tables (e.g. "3-Mile Radius" header) → use that value directly.
       Always match by column header, not by picking the largest or middle value.
+      If a demographics radius table is present, radius-labeled tables override
+      narrative summaries such as "selected geography", "your area", or
+      "selected area" for *_3mi fields. Use those narrative summaries only when
+      they explicitly label the geography as 3-mile.
       Do not use Population Age 25+, Housing Units, or Occupied Units rows for population_3mi.
     - avg_household_income_3mi: average household income within the 3-mile trade area as a float
-      (e.g. "average household income … is $65,499" → 65,499.0). Apply the same radius-column
-      matching rules above. Use the 3-mile figure ONLY — do NOT use metro, MSA, submarket, or
-      city-level income figures even if they appear nearby. If the OM shows a demographics table
+      (e.g. "average household income … is $25,000" → 25,000.0). Apply the same radius-column
+      matching rules above. Use the 3-mile figure ONLY. If the OM shows a demographics table
       with multiple radii (1/3/5 mi), always pick the 3-mile column for this field.
+      Use only rows explicitly labeled "Average Household Income" or
+      "Average (Mean) Household Income". Do not use Median Household Income,
+      Per Capita Income, household-income distribution buckets, or narrative income summaries unless explicitly labeled 3-mile average household income.
     - storage_sqft_per_capita_3mi: square feet of storage per capita within 3 miles if stated. Apply the same radius-column matching rules above.
 - Acquisition: purchase_price (asking), closing_cost_pct if stated, capex_reserve_per_unit if stated, market_cap_rate_purchase if stated
-- Income (extract from the YEAR 1 column when a multi-column operating statement is present;
-  fall back to Current column only when Year 1 is absent):
+- Column anchors: The DETECTED STRUCTURE block at the top of the user message provides
+  the exact column labels to use. Treat current_column_label and year1_column_label as
+  literal header text anchors. If detected_deal_subtype is "unsupported", return only
+  the six detected_* fields and stop.
+- Income (extract from the year1_column_label column when present; fall back to
+  current_column_label only when year1_column_label is absent):
     - gross_potential_rent_annual: Year 1 Gross Potential Rent (annualised)
     - avg_in_place_rent_per_unit_monthly: average monthly in-place rent per unit ONLY if the OM
       states it as a single explicit aggregate figure (e.g. "Average In-Place Rent: $125/unit/mo"
-      or "Avg Monthly Rent Per Unit: $114"). Do NOT compute or derive this from individual unit-mix
+      or "Avg Monthly Rent Per Unit: $100"). Do NOT compute or derive this from individual unit-mix
       rows — omit if not explicitly stated as an aggregate
     - avg_market_rent_per_unit_monthly: average market rent per unit if explicitly stated; omit otherwise
     - vacancy_pct_projected: Year 1 total economic vacancy as a decimal. Economic vacancy combines
@@ -81,75 +128,50 @@ EXTRACT (as JSON):
         - other_income_misc_annual: "Miscellaneous Income" Year 1
     - rent_growth_pct: annual rent growth assumption if stated
 - Expenses (extract from the operating statement table when present):
-    Prefer the "Year 1" or "Year-One" column for all line items.
-    Use "Current" column only when Year 1 is absent.
-    Never use the "Pro Forma" column for base-case expense inputs.
+    Use year1_column_label for all line items. Never use "Pro Forma" column values.
     Extract each line item as an annual dollar amount (remove $ and commas):
-    - expense_office_admin_annual: "Office & Administrative"
-    - expense_bank_fees_annual: "Bank & Credit Card Fees"
-    - expense_contract_services_annual: "Contract Services (Fire, Security & Grounds)"
-    - expense_miscellaneous_annual: "Miscellaneous"
-    - expense_telephone_annual: "Telephone & Communications"
-    - expense_payroll_annual: "Salaries, Taxes & Benefits (On-Site)"
-    - STEP 1 — DETECT STRUCTURE: Before extracting any expense values, fill these fields:
-        detected_deal_subtype: "stabilized" (existing ops, Year-1 has post-sale adjustments
-          like tax reassessment) | "value_add" (owner-operated Current with $0 management/
-          payroll/marketing; Year-1 adds professional management costs) | "unsupported"
-          (ground-up development, non-self-storage, or unclear).
-        detected_current_column_label: exact column header for current operations —
-          "Current", a calendar year ("2024", "2023"), or a phrase ("2024 Financials",
-          "2023 Actuals", "Trailing 12"). Null if no current column exists.
-        detected_year1_column_label: exact column header for Year-1 projections —
-          "Year 1", "Year-One", "Year 1 Projected". Null if absent.
-        detected_has_current_column: true if a current-operations column exists
-          alongside Year-1, false otherwise.
-        detected_expense_format: "absolute" if expense line items are dollar totals;
-          "per_sqft" if shown as $/sqft (you must multiply by rentable_sqft to produce
-          the annual dollar total); "mixed" if both formats appear.
-        detected_income_period_label: period the current column covers as written —
-          "T-12", "T-6", "2024 Actuals", "Trailing 12". Null if not stated.
-    - STEP 2 — EXTRACT using your detected labels as anchors. For each of the five
-      adjustable expense line items, read _current from detected_current_column_label
-      and _year1 from detected_year1_column_label:
-        • If detected_has_current_column is false: emit only _year1 fields; omit _current.
-        • If detected_expense_format is "per_sqft": multiply rate × rentable_sqft first.
-        • When Current is explicitly $0 (owner-operated): emit _current=0.0 — never omit it.
-        • Never emit only one of the pair when both columns exist. If Year-1 and Current
-          are identical, still emit both.
-        • For tables with more than 3 columns (Year 2, Year 3 ...): ignore beyond Year-1.
-        • If detected_deal_subtype is "unsupported": return only the six detected_* fields.
+    - expense_office_admin_annual: "Office & Administrative" from year1_column_label column
+    - expense_bank_fees_annual: "Bank & Credit Card Fees" from year1_column_label column
+    - expense_contract_services_annual: "Contract Services (Fire, Security & Grounds)" from year1_column_label column
+    - expense_miscellaneous_annual: "Miscellaneous" from year1_column_label column
+    - expense_telephone_annual: "Telephone & Communications" from year1_column_label column
+    - expense_payroll_annual: "Salaries, Taxes & Benefits (On-Site)" from year1_column_label column
+    - Five adjustable expense pairs — emit BOTH _current and _year1 when has_current_column is true:
+        • Read _current from the current_column_label column; read _year1 from the year1_column_label column.
+        • If has_current_column is false: emit only _year1 fields.
+        • If expense_format is "per_sqft": multiply rate × rentable_sqft first.
+        • When Current is explicitly $0: emit _current=0.0 — never omit it.
+        • Never emit only one of the pair when both columns exist (even if values are identical).
+        • Ignore columns beyond Year-1 (Year 2, Year 3, Pro Forma).
+        • COLUMN POSITION RULE: column headers may vary by section. Use column position
+          (second data column in a 3-column table; first projection column in a 6-column table)
+          to identify Year-1 when header text differs from year1_column_label.
       - expense_property_tax_annual_year1 / expense_property_tax_annual_current:
-          "Property Taxes". Extract the dollar amount directly from each column —
-          do not compute from assessed value or tax rate.
-      - expense_insurance_annual_year1 / expense_insurance_annual_current:
-          "Property Insurance".
-      - expense_repairs_maintenance_annual_year1 / expense_repairs_maintenance_annual_current:
-          "Repairs, Maintenance & Reserves".
-      - expense_marketing_annual_year1 / expense_marketing_annual_current:
-          "Marketing & Promotion".
-      - expense_utilities_annual_year1 / expense_utilities_annual_current:
-          "Utilities & Trash".
-      EXPECTED OUTPUT SHAPE (both fields required when detected_has_current_column is true):
-        expense_property_tax_annual_current        = [dollar amount from detected_current_column_label column]
-        expense_property_tax_annual_year1          = [dollar amount from detected_year1_column_label column]  ← DO NOT OMIT
-        expense_insurance_annual_current           = [dollar amount from detected_current_column_label column]
-        expense_insurance_annual_year1             = [dollar amount from detected_year1_column_label column]  ← DO NOT OMIT
-        expense_repairs_maintenance_annual_current = [dollar amount from detected_current_column_label column]
-        expense_repairs_maintenance_annual_year1   = [dollar amount from detected_year1_column_label column]  ← DO NOT OMIT
-        expense_marketing_annual_current           = [dollar amount from detected_current_column_label column]
-        expense_marketing_annual_year1             = [dollar amount from detected_year1_column_label column]  ← DO NOT OMIT
-        expense_utilities_annual_current           = [dollar amount from detected_current_column_label column]
-        expense_utilities_annual_year1             = [dollar amount from detected_year1_column_label column]  ← DO NOT OMIT
-      COLUMN POSITION RULE: Within a single document, column headers may vary by section.
-        The expense table may label Year-1 as "Estimated" or "Projected" rather than the
-        exact detected_year1_column_label text. Use column position (second data column in
-        a 3-column table; first projection column in a 6-column table) to identify Year-1,
-        not header text matching.
+          "Property Taxes". Extract dollar amount directly — do not compute from assessed value or tax rate.
+      - expense_insurance_annual_year1 / expense_insurance_annual_current: "Property Insurance".
+      - expense_repairs_maintenance_annual_year1 / expense_repairs_maintenance_annual_current: "Repairs, Maintenance & Reserves".
+      - expense_marketing_annual_year1 / expense_marketing_annual_current: "Marketing & Promotion".
+      - expense_utilities_annual_year1 / expense_utilities_annual_current: "Utilities & Trash".
+      REQUIRED OUTPUT (when has_current_column is true — DO NOT OMIT _year1 fields):
+        expense_property_tax_annual_current        = [$ from current_column_label]
+        expense_property_tax_annual_year1          = [$ from year1_column_label]
+        expense_insurance_annual_current           = [$ from current_column_label]
+        expense_insurance_annual_year1             = [$ from year1_column_label]
+        expense_repairs_maintenance_annual_current = [$ from current_column_label]
+        expense_repairs_maintenance_annual_year1   = [$ from year1_column_label]
+        expense_marketing_annual_current           = [$ from current_column_label]
+        expense_marketing_annual_year1             = [$ from year1_column_label]
+        expense_utilities_annual_current           = [$ from current_column_label]
+        expense_utilities_annual_year1             = [$ from year1_column_label]
     - expense_mgmt_fee_annual: "Third Party Management (Off-Site)"
     - expense_total_annual: "Total Operating Expenses"
     - noi_year_one_stated: "Net Operating Income" from Year 1 column
     - noi_current_stated: "Net Operating Income" from Current column
-    - expense_ratio_pro_forma: "Expenses % EGI" — prefer Year 1 value
+    - expense_ratio_current: "Expenses % EGI" from Current/In-Place column only
+    - expense_ratio_year1: "Expenses % EGI" from Year 1 column only
+    - expense_ratio_pro_forma: "Expenses % EGI" from Pro Forma/Stabilized column only
+      Do not move a Pro Forma percentage into Current or Year 1. If the OM shows
+      Current | Year 1 | Pro Forma, extract all three ratios into their matching fields.
     - mgmt_fee_pct: if the OM explicitly states the management fee as a percentage in text
       (e.g. "Third Party Management: 5% of GPR" or "Management Fee: 8%"), extract as decimal
       (0.05). Do NOT compute from expense_mgmt_fee_annual ÷ revenue. Only extract when a
@@ -173,8 +195,9 @@ EXTRACT (as JSON):
 - Exit: hold_period_years, exit_cap_rate, selling_cost_pct, market_cap_rate_sale if stated
 - Broker metrics: broker_cap_rate, broker_noi if stated
 - Unit mix: when a unit-mix overview table is present, extract one row per size/type bucket with size, standard_sqft, num_units, occupied_units, occupancy_pct, current_rent, market_rent if explicitly separate, rent_per_sqft, potential_rent, occupied_sqft, total_sqft, pct_of_total_sqft
-- Rent comps: when the OM includes a competitive set or nearby facility rent table, extract one row per facility/size bucket with facility, size, asking_rent, rent_per_sqft, distance_mi, and notes for address, year built, square footage, missing data, or specials
+- Rent comps: when the OM includes a competitive set or nearby facility rent table, extract one row per facility/size bucket with facility, size, asking_rent, rent_per_sqft, distance_mi, climate_type, standard_sqft, is_broker_market_average=false, and notes for address, year built, square footage, missing data, or specials. Do NOT include the subject property itself — its rates are already in unit_mix. Only include competing facilities.
 - Never collapse multiple size buckets into one rent_comps row. If a facility lists 5 x 10, 10 x 10, 10 x 15, and 10 x 20, emit four separate rows repeating the same facility, distance, and notes.
+- When the OM includes a broker-computed market average chart (e.g. "Weighted Rent Comparables") showing $/sqft or $/unit benchmarks per size, emit those as additional rent_comps benchmark rows with facility="Market Average (Broker)", is_broker_market_average=true, and notes containing the chart title and date. These are not individual competing facilities.
 - The size field must contain exactly one size bucket such as "10 x 10". Never place comma-separated sizes, addresses, year built, or square footage in size.
 - Map Rent/Unit into asking_rent and Rent/Sq.Ft. into rent_per_sqft whenever those columns are present.
 - Distinguish cap-rate labels carefully:
@@ -355,13 +378,54 @@ EXAMPLE OUTPUT (partial — missing fields omitted for brevity):
 Return as valid JSON only. No explanations."""
 
 
-def create_om_user_prompt(document_text: str) -> str:
-    """Wrap document text for OM extraction."""
-    return f"""Extract underwriting data from this Offering Memorandum:
+def create_om_detection_user_prompt(document_text: str) -> list[dict]:
+  """Build user message content blocks for OM structure detection."""
+  return [
+    {"type": "text", "text": "Detect the column structure of this Offering Memorandum:"},
+    {"type": "text", "text": document_text, "cache_control": {"type": "ephemeral"}},
+    {"type": "text", "text": "Return only the six detection fields."},
+  ]
 
-{document_text}
 
-Return extracted data as JSON."""
+def create_om_user_prompt(
+  document_text: str,
+  detection_context: dict | None = None,
+  supplemental_context: str | None = None,
+) -> list[dict]:
+    """Build user message content blocks for OM extraction.
+
+    The document text is always in a separate cached block so Call 2
+    gets a cache hit when called after _detect_om_structure.
+    """
+    if detection_context:
+        dc = detection_context
+        has_current = dc.get("detected_has_current_column")
+        preamble = (
+            "DETECTED STRUCTURE (copy verbatim into output fields — do not re-derive):\n"
+            f"  deal_subtype         = {dc.get('detected_deal_subtype')}\n"
+            f"  current_column_label = {dc.get('detected_current_column_label')}\n"
+            f"  year1_column_label   = {dc.get('detected_year1_column_label')}\n"
+            f"  has_current_column   = {str(has_current).lower() if has_current is not None else 'null'}\n"
+            f"  expense_format       = {dc.get('detected_expense_format')}\n"
+            f"  income_period_label  = {dc.get('detected_income_period_label')}\n"
+            "\nUse detected structure for operating statement fields. Use demographic, market, competition, rent-comp, and trade-area context for demographic fields. Extract underwriting data from this Offering Memorandum:"
+        )
+    else:
+        preamble = "Extract underwriting data from this Offering Memorandum:"
+
+    blocks = [
+        {"type": "text", "text": preamble},
+        {"type": "text", "text": document_text, "cache_control": {"type": "ephemeral"}},
+    ]
+    if supplemental_context:
+      blocks.extend(
+        [
+          {"type": "text", "text": "\nAdditional page-1 OM context:"},
+          {"type": "text", "text": supplemental_context},
+        ]
+      )
+    blocks.append({"type": "text", "text": "\nReturn extracted data as JSON."})
+    return blocks
 
 
 def create_rent_roll_user_prompt(document_text: str) -> str:
@@ -393,6 +457,8 @@ CHUNK TYPES (indicated in each chunk header):
 - KV Pair: Highest confidence — data is already structured. Extract exactly as shown.
 - Table Chunk: High confidence — extract every numeric column and row.
 - Narrative: Extract only explicitly stated figures (e.g. "$485,000 annual rent"). Skip vague descriptions.
+
+DEMOGRAPHIC / MARKET CHUNKS: For demographic, market, competition, and trade-area chunks, extract explicit population, household income, storage-square-foot-per-capita, and nearby facility counts. Preserve radius labels and source text.
 
 MULTI-COLUMN TABLES: When a table row has values across multiple period/scenario
 columns, extract a SEPARATE field entry for each column's value. Common self-storage
@@ -482,7 +548,8 @@ _OM_FIELDS = _om_reg["om_fields_for_prompt"] + [
         "name": "rent_comps",
         "type": (
             'array of {facility, size, asking_rent, rent_per_sqft, distance_mi, '
-            'climate_type ("CC"|"NC"|"UNKNOWN"), standard_sqft (float|null), notes}'
+            'climate_type ("CC"|"NC"|"UNKNOWN"), standard_sqft (float|null), '
+            'is_broker_market_average (boolean; true only for broker-computed market average rows), notes}'
         ),
     },
 ]
@@ -507,16 +574,19 @@ _OM_PHASE2_RULES = """OM MAPPING RULES:
 - "111.61 mills" -> property_tax_millage_rate = 111.61
 - If the tax-rate unit is ambiguous, omit both tax-rate fields rather than guessing
 - "gross potential rent", "GPR", "scheduled rent" -> gpr_annual_projected (annual)
+- "Expenses % EGI" / "Expense Ratio" in a Current/In-Place column -> expense_ratio_current; in a Year 1 column -> expense_ratio_year1; in a Pro Forma/Stabilized column -> expense_ratio_pro_forma. Do not collapse these period-specific ratios into one field.
 - "hold period", "investment horizon" -> hold_period_years
 - Do not map annual property tax expense, property tax growth, appraised value, assessed value, or assessment ratio into tax-rate fields
 - Nearby competitor / facility counts -> nearby_storage_count_1mi, nearby_storage_count_3mi, nearby_storage_count_5mi. "No Competitors within 1-Mile" -> nearby_storage_count_1mi = 0. Count distinct facilities in rent-comp tables for nearby_storage_count_3mi if not explicitly stated
-- Population within 3 miles -> population_3mi (integer). Average household income within 3 miles -> avg_household_income_3mi (float). Square feet per capita -> storage_sqft_per_capita_3mi. Extract these even when they appear on a demographics or market overview page separate from the operating statement. For all *_3mi fields, match by the column whose header is closest to 3 miles — do not pick the largest or middle value blindly. "1 Mile | 3 Miles | 5 Miles" → middle column; "1 Mile | 2 Miles | 3 Miles" → last column; "3 Miles | 5 Miles" → first column; "1 Mile | 5 Miles" → omit; single-radius table with 3-mile header → use directly. Example: "2023 Estimate 10,509 63,110 153,689" in a 1/3/5 table → population_3mi = 63,110. Do not use age-25+, housing-unit, or occupied-unit rows for population_3mi.
+- Population within 3 miles -> population_3mi (integer). Average household income within 3 miles -> avg_household_income_3mi (float). Square feet per capita -> storage_sqft_per_capita_3mi. Extract these even when they appear on a demographics or market overview page separate from the operating statement. For all *_3mi fields, match by the column whose header is closest to 3 miles — do not pick the largest or middle value blindly. "1 Mile | 3 Miles | 5 Miles" → middle column; "1 Mile | 2 Miles | 3 Miles" → last column; "3 Miles | 5 Miles" → first column; "1 Mile | 5 Miles" → omit; single-radius table with 3-mile header → use directly. Example: "2023 Estimate 10,509 63,110 153,689" in a 1/3/5 table → population_3mi = 63,110. For avg_household_income_3mi, use only rows explicitly labeled "Average Household Income" or "Average (Mean) Household Income"; do not use Median Household Income, Per Capita Income, income distribution buckets, or narrative income summaries unless explicitly labeled 3-mile average household income. Radius-labeled tables override narrative summaries such as "selected geography", "your area", or "selected area" for *_3mi fields unless the narrative explicitly labels the geography as 3-mile. Do not use age-25+, housing-unit, or occupied-unit rows for population_3mi.
 - For OM unit-mix tables, preserve one row per bucket. Use the section header (for example NON-CLIMATE or COVERED PARKING) in both section and unit_type when no more specific type label exists.
 - For OM competitive-set rent tables, preserve one row per facility and size bucket in rent_comps. Use asking_rent for Rent/Unit, rent_per_sqft for Rent/Sq.Ft., and keep notes for address, year built, square footage, blanks like "no data", or specials.
 - Never collapse multiple size buckets into one rent_comps row. Repeat facility, distance, and notes across separate rows when a facility lists multiple sizes.
 - The size field must contain exactly one size bucket. Do not put comma-separated sizes, addresses, year built, or square footage into size.
+- CRITICAL: Do NOT include the subject property itself in rent_comps. The subject property is the property being marketed — it typically appears first in the comparison table, is highlighted, or is labeled with its own name/address as the listing. Its rental rates are already captured in unit_mix. Only include competing facilities in rent_comps.
 - If the table shows Rent/Unit and Rent/Sq.Ft., populate asking_rent and rent_per_sqft for each emitted row.
 - For each rent_comps row, set climate_type to "CC" if the facility or unit is described as climate-controlled, temperature-controlled, heated, or humidity-controlled; "NC" if described as non-climate, drive-up, or outdoor; "UNKNOWN" if unclear. Set standard_sqft to the numeric area in sqft derived from size (e.g. "5x10" -> 50, "10x20" -> 200).
+- When the OM includes a "Rental Rate Comparison", "Weighted Rent Comparables", or similar broker-computed market average chart or table showing a market/average $/sqft or $/unit benchmark per size bucket, emit those averages as additional rent_comps rows with facility set to "Market Average (Broker)", is_broker_market_average=true, and notes set to the chart title and date (e.g. "Weighted Rent Comparables Drive-Up October 2024"). These are broker-weighted benchmarks, not individual competing facilities.
 - Phase 1 condensation extracted both column values for expense line items using
   _current and _year1 suffixes (e.g. property_taxes_current, property_taxes_year1,
   insurance_current, insurance_year1, repairs_maintenance_current, etc.). Map these

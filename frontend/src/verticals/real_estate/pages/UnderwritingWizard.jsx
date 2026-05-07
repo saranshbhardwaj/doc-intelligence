@@ -174,6 +174,9 @@ export default function UnderwritingWizard() {
           ...(saved.target_cash_on_cash != null && { target_cash_on_cash: saved.target_cash_on_cash * 100 }),
           ...(saved.target_equity_multiple != null && { target_equity_multiple: saved.target_equity_multiple }),
           ...(saved.max_ltv != null && { max_ltv: saved.max_ltv * 100 }),
+          ...(saved.dscr_year_one_floor != null && { dscr_year_one_floor: saved.dscr_year_one_floor }),
+          ...(saved.stress_dscr_floor != null && { stress_dscr_floor: saved.stress_dscr_floor }),
+          ...(saved.rollover_risk_pct != null && { rollover_risk_pct: saved.rollover_risk_pct * 100 }),
         },
       }));
     }).catch(() => {});
@@ -339,10 +342,8 @@ export default function UnderwritingWizard() {
       ?? fieldCitations[`rent_roll.${fieldKey}`]
       ?? null;
     if (!raw) return null;
-    if (raw.is_default) return { is_default: true };
-    if (raw.is_derived) return { is_derived: true, formula: raw.formula ?? null };
-    if (raw.is_uncited_extraction || !raw.citations?.length) {
-      return { is_uncited_extraction: true, doc_type: raw.doc_type };
+    if (raw.is_default || raw.is_derived || raw.is_uncited_extraction || !raw.citations?.length) {
+      return { ...raw };
     }
     const token = raw.citations?.[0];
     const ctx = token && citCtx ? citCtx[token] : null;
@@ -578,7 +579,6 @@ export default function UnderwritingWizard() {
       )}
     >
       <ResizablePanelGroup
-        key={showSourcePanel ? 'uw-split-open' : 'uw-split-closed'}
         direction="horizontal"
         className="h-full min-w-0"
       >

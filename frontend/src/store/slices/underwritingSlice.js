@@ -58,10 +58,25 @@ export const createUnderwritingSlice = (set, get) => ({
   loadRun: async (getToken, runId) => {
     try {
       const data = await getUnderwritingRun(getToken, runId);
+      const terminal = data?.status === "completed" || data?.status === "failed";
+      const cleanup = get().underwriting.extraction.cleanup;
+      if (terminal && cleanup) {
+        cleanup();
+      }
       set((state) => ({
         underwriting: {
           ...state.underwriting,
           currentRun: data,
+          extraction: terminal
+            ? {
+                ...state.underwriting.extraction,
+                isProcessing: false,
+                progress: data.status === "completed" ? 100 : state.underwriting.extraction.progress,
+                stage: data.status,
+                message: data.status === "completed" ? "Extraction completed successfully" : "Extraction failed",
+                cleanup: null,
+              }
+            : state.underwriting.extraction,
         },
       }));
     } catch (err) {

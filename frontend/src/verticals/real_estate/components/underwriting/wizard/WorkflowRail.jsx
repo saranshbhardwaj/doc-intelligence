@@ -79,10 +79,10 @@ export default function WorkflowRail({
   setLeftCollapsed,
 }) {
   const attachedCount = Object.values(selectedDocs).filter(Boolean).length;
-  const railProcessing = Boolean(
+  const runProcessing = currentRun?.status === 'extracting' || currentRun?.status === 'calculating';
+  const railProcessing = !extractionDone && Boolean(
     extraction.isProcessing
-    || currentRun?.status === 'extracting'
-    || currentRun?.status === 'calculating'
+    || runProcessing
   );
   const progressValue = Math.max(0, Math.min(100, extraction.progress || (railProcessing ? 8 : extractionDone ? 100 : 0)));
   const extractionTitle = railProcessing

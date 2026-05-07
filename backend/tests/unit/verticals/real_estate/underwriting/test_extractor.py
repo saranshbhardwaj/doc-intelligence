@@ -163,6 +163,7 @@ def test_t12_spreadsheet_totals_are_injected_and_reconciled():
 
 
 def test_large_om_uses_selected_context_without_fallback(monkeypatch):
+    monkeypatch.setattr(settings, "re_uw_om_two_call_enabled", False)
     monkeypatch.setattr(settings, "re_uw_om_context_selector_enabled", True)
     monkeypatch.setattr(settings, "re_uw_om_context_selector_min_chars", 50)
     monkeypatch.setattr(settings, "re_uw_om_context_max_chars", 400)
@@ -210,6 +211,7 @@ def test_large_om_uses_selected_context_without_fallback(monkeypatch):
 
 
 def test_large_om_falls_back_to_full_context_when_core_fields_missing(monkeypatch):
+    monkeypatch.setattr(settings, "re_uw_om_two_call_enabled", False)
     monkeypatch.setattr(settings, "re_uw_om_context_selector_enabled", True)
     monkeypatch.setattr(settings, "re_uw_om_context_selector_min_chars", 50)
     monkeypatch.setattr(settings, "re_uw_om_context_max_chars", 350)
@@ -261,3 +263,233 @@ def test_large_om_falls_back_to_full_context_when_core_fields_missing(monkeypatc
     metadata = result.extraction_metadata["om_context_selection"]
     assert metadata["fallback_to_full_context"] is True
     assert "missing_units_or_sqft" in metadata["fallback_reasons"]
+
+
+def test_om_two_call_uses_full_chunk_contexts_and_bypasses_selector(monkeypatch):
+    monkeypatch.setattr(settings, "re_uw_om_two_call_enabled", True)
+    monkeypatch.setattr(settings, "re_uw_om_context_selector_enabled", True)
+    monkeypatch.setattr(settings, "re_uw_om_context_selector_min_chars", 1)
+    monkeypatch.setattr(settings, "re_uw_om_context_max_chars", 20)
+    monkeypatch.setattr(settings, "re_uw_full_text_max_chars", 50)
+
+    chunks = [
+        _make_chunk("Offering Memorandum cover with property overview", page=1),
+        _make_chunk("Purchase price $2,500,000; 205 units; GPR $285,740", page=4, section_type="key_value"),
+        _make_chunk("Confidentiality disclaimer broker biography legal disclosure " + "x" * 200, page=8),
+    ]
+
+    class FakeService:
+        def __init__(self):
+            self.calls = []
+
+        def extract_om(self, context, supplemental_context=None, structure_context=None):
+            self.calls.append({
+                "context": context,
+                "supplemental_context": supplemental_context,
+                "structure_context": structure_context,
+            })
+            return {
+                "scalars": {
+                    "purchase_price": 2_500_000.0,
+                    "num_units": 205,
+                    "gpr_annual_projected": 285_740.0,
+                    "rentable_sqft": 21_017.0,
+                    "market_cap_rate_purchase": 0.0811,
+                    "vacancy_pct_projected": 0.1278,
+                    "other_income_annual": 34_278.0,
+                    "expense_ratio_pro_forma": 0.2778,
+                    "noi_year_one_stated": 202_790.0,
+                    "rent_comps": [],
+                    "unit_mix": [],
+                },
+                "field_citations": {
+                    "purchase_price": {"citations": ["S1:p4"], "confidence": 0.9, "source_text": "$2,500,000"},
+                    "num_units": {"citations": ["S1:p4"], "confidence": 0.9, "source_text": "205 units"},
+                    "gpr_annual_projected": {"citations": ["S1:p4"], "confidence": 0.9, "source_text": "GPR $285,740"},
+                },
+            }
+
+    service = FakeService()
+    result = extract_document("run-1", "job-1", "om", chunks, service)
+
+    assert len(service.calls) == 1
+    call = service.calls[0]
+    extraction_context = call["context"]
+    structure_context = call["structure_context"]
+    assert "Purchase price" in extraction_context
+    assert "Offering Memorandum cover" in extraction_context
+    assert "broker biography" not in extraction_context
+    assert "Purchase price" in structure_context
+    assert "Offering Memorandum cover" in structure_context
+    assert "broker biography" in structure_context
+    assert call["supplemental_context"] is None
+    assert result.om.purchase_price == 2_500_000.0
+    metadata = result.extraction_metadata["om_two_call_contexts"]
+    assert metadata["source"] == "split_contexts"
+    assert metadata["structure_used_fallback"] is True
+    assert metadata["extraction_used_fallback"] is False
+    assert metadata["structure_source_tokens"]
+    assert metadata["extraction_source_tokens"]
+
+
+def test_om_two_call_splits_structure_and_extraction_contexts(monkeypatch):
+    monkeypatch.setattr(settings, "re_uw_om_two_call_enabled", True)
+
+    chunks = [
+        _make_chunk("Cover page property overview", page=1),
+        _make_chunk("Purchase Price: $2,500,000", page=2, section_type="key_value"),
+        _make_chunk("Operating Statement | Current | Year 1 | Pro Forma | NOI", page=4, is_tabular=True),
+        _make_chunk("3-mile Population demographics household income square feet per capita", page=7),
+    ]
+
+    class FakeService:
+        def __init__(self):
+            self.calls = []
+
+        def extract_om(self, context, supplemental_context=None, structure_context=None):
+            self.calls.append({
+                "context": context,
+                "supplemental_context": supplemental_context,
+                "structure_context": structure_context,
+            })
+            return {
+                "scalars": {
+                    "purchase_price": 2_500_000.0,
+                    "num_units": 205,
+                    "gpr_annual_projected": 285_740.0,
+                    "rentable_sqft": 21_017.0,
+                    "market_cap_rate_purchase": 0.0811,
+                    "vacancy_pct_projected": 0.1278,
+                    "other_income_annual": 34_278.0,
+                    "expense_ratio_pro_forma": 0.2778,
+                    "noi_year_one_stated": 202_790.0,
+                    "rent_comps": [],
+                    "unit_mix": [],
+                },
+                "field_citations": {
+                    "purchase_price": {"citations": ["S1:p2"], "confidence": 0.9, "source_text": "$2,500,000"},
+                    "noi_year_one_stated": {"citations": ["S1:p4"], "confidence": 0.9, "source_text": "NOI"},
+                },
+            }
+
+    service = FakeService()
+    result = extract_document("run-1", "job-1", "om", chunks, service)
+
+    assert len(service.calls) == 1
+    call = service.calls[0]
+    assert "Operating Statement" in call["structure_context"]
+    assert "Purchase Price" not in call["structure_context"]
+    assert "Population demographics" not in call["structure_context"]
+    assert "Operating Statement" in call["context"]
+    assert "Purchase Price" in call["context"]
+    assert "Cover page" in call["context"]
+    assert "Population demographics" in call["context"]
+    assert call["supplemental_context"] is None
+    assert result.om.purchase_price == 2_500_000.0
+    metadata = result.extraction_metadata["om_two_call_contexts"]
+    assert metadata["source"] == "split_contexts"
+    assert metadata["structure_chunk_count"] == 1
+    assert metadata["extraction_chunk_count"] == 4
+    assert metadata["structure_char_count"] > 0
+    assert metadata["extraction_char_count"] > metadata["structure_char_count"]
+    assert metadata["structure_used_fallback"] is False
+    assert metadata["extraction_used_fallback"] is False
+
+
+def test_om_two_call_call1_falls_back_when_no_tables(monkeypatch):
+    monkeypatch.setattr(settings, "re_uw_om_two_call_enabled", True)
+
+    chunks = [
+        _make_chunk("Cover page property overview", page=1),
+        _make_chunk("Purchase Price: $2,500,000", page=2, section_type="key_value"),
+        _make_chunk("Population demographics household income square feet per capita", page=7),
+    ]
+
+    class FakeService:
+        def __init__(self):
+            self.calls = []
+
+        def extract_om(self, context, supplemental_context=None, structure_context=None):
+            self.calls.append((context, structure_context))
+            return {
+                "scalars": {
+                    "purchase_price": 2_500_000.0,
+                    "num_units": 205,
+                    "gpr_annual_projected": 285_740.0,
+                    "rentable_sqft": 21_017.0,
+                    "market_cap_rate_purchase": 0.0811,
+                    "vacancy_pct_projected": 0.1278,
+                    "other_income_annual": 34_278.0,
+                    "expense_ratio_pro_forma": 0.2778,
+                    "noi_year_one_stated": 202_790.0,
+                    "rent_comps": [],
+                    "unit_mix": [],
+                },
+                "field_citations": {
+                    "purchase_price": {"citations": ["S1:p2"], "confidence": 0.9, "source_text": "$2,500,000"},
+                },
+            }
+
+    service = FakeService()
+    result = extract_document("run-1", "job-1", "om", chunks, service)
+
+    assert len(service.calls) == 1
+    context, structure_context = service.calls[0]
+    assert "Cover page" in structure_context
+    assert "Purchase Price" in structure_context
+    assert "Population demographics" in structure_context
+    assert "Population demographics" not in context
+    assert result.om.purchase_price == 2_500_000.0
+    metadata = result.extraction_metadata["om_two_call_contexts"]
+    assert metadata["structure_used_fallback"] is True
+
+
+def test_om_two_call_excludes_generic_selected_geography_narrative(monkeypatch):
+    monkeypatch.setattr(settings, "re_uw_om_two_call_enabled", True)
+
+    chunks = [
+        _make_chunk("Cover page property overview", page=1),
+        _make_chunk("Purchase Price: $2,500,000", page=2, section_type="key_value"),
+        _make_chunk("Operating Statement | Current | Year 1 | NOI", page=4, is_tabular=True),
+        _make_chunk(
+            "In 2023, the population in your selected geography is 153,689. "
+            "The current year's average household income in your area is $65,499.",
+            page=26,
+        ),
+        _make_chunk(
+            "Within 3 miles, the population is 63,110 and average household income is $49,306.",
+            page=27,
+        ),
+    ]
+
+    class FakeService:
+        def __init__(self):
+            self.calls = []
+
+        def extract_om(self, context, supplemental_context=None, structure_context=None):
+            self.calls.append(context)
+            return {
+                "scalars": {
+                    "purchase_price": 2_500_000.0,
+                    "num_units": 205,
+                    "gpr_annual_projected": 285_740.0,
+                    "rentable_sqft": 21_017.0,
+                    "market_cap_rate_purchase": 0.0811,
+                    "vacancy_pct_projected": 0.1278,
+                    "other_income_annual": 34_278.0,
+                    "expense_ratio_pro_forma": 0.2778,
+                    "noi_year_one_stated": 202_790.0,
+                    "rent_comps": [],
+                    "unit_mix": [],
+                },
+                "field_citations": {},
+            }
+
+    service = FakeService()
+    result = extract_document("run-1", "job-1", "om", chunks, service)
+
+    extraction_context = service.calls[0]
+    assert "selected geography is 153,689" not in extraction_context
+    assert "population is 63,110" in extraction_context
+    metadata = result.extraction_metadata["om_two_call_contexts"]
+    assert metadata["extraction_chunk_count"] == 4

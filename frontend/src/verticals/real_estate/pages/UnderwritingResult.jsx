@@ -236,7 +236,9 @@ export default function UnderwritingResult() {
     avg_in_place_rent_per_unit_monthly: getFieldCitation(fieldCitations, citationContext, 'avg_in_place_rent_per_unit_monthly'),
     avg_market_rent_per_unit_monthly: getFieldCitation(fieldCitations, citationContext, 'avg_market_rent_per_unit_monthly'),
     vacancy_credit_loss_pct: getFieldCitation(fieldCitations, citationContext, 'vacancy_credit_loss_pct'),
+    expense_ratio_t12: getFieldCitation(fieldCitations, citationContext, 'expense_ratio_t12'),
     expense_ratio_current: getFieldCitation(fieldCitations, citationContext, 'expense_ratio_current'),
+    expense_ratio_year1: getFieldCitation(fieldCitations, citationContext, 'expense_ratio_year1'),
     expense_ratio_pro_forma: getFieldCitation(fieldCitations, citationContext, 'expense_ratio_pro_forma'),
     property_tax_annual: getFieldCitation(fieldCitations, citationContext, 'property_tax_annual'),
     insurance_annual: getFieldCitation(fieldCitations, citationContext, 'insurance_annual'),
@@ -297,6 +299,13 @@ export default function UnderwritingResult() {
       ? `${verdict.rationale} Warning: ${derivedMixedRevenueWarning.message}`
       : verdict.rationale)
     : derivedMixedRevenueWarning?.message || null;
+  const leadSummary = verdictStatus === 'worth_pursuing'
+    ? 'Returns clear the configured screen based on the current underwriting assumptions.'
+    : verdictStatus === 'needs_review'
+      ? 'Returns clear the initial screen, but the source support needs analyst review before relying on this result.'
+      : verdictStatus
+        ? 'The current assumptions do not clear the configured screen. Review the failed metrics and source support before revising.'
+        : verdictRationale;
 
   const criticalWarningCount = verdictWarnings.filter((w) => w.severity === 'critical').length;
   const prioritizedWarnings = [
@@ -318,17 +327,22 @@ export default function UnderwritingResult() {
       label: warning.message,
       citations: [],
     })),
-  ].slice(0, Math.max(criticalWarningCount + 3, 3));
+  ].slice(0, Math.max(criticalWarningCount + 4, 4));
+  const leadWatchItems = watchItems.slice(0, 3);
+  const hiddenWatchCount = Math.max(watchItems.length - leadWatchItems.length, 0);
 
   const failedSet = new Set((verdict?.failures || []).map((f) => f.metric));
 
   const fm = artifact.formula_metadata || {};
-  function buildTooltip(key, valueFn, fallbackFn = null) {
+  function buildTooltip(key, valueFn, fallbackFn = null, descriptionOverride = null) {
     const meta = fm[key];
     if (meta) {
       const cv = meta.computed_values || {};
       const computed = valueFn ? valueFn(cv) : null;
-      return computed ? `${meta.description}\n\n${computed}` : meta.description;
+      const fallback = !computed && fallbackFn ? fallbackFn() : null;
+      const description = descriptionOverride || meta.description;
+      const calculation = computed || fallback;
+      return calculation ? `${description}\n\n${calculation}` : description;
     }
     const fallback = fallbackFn ? fallbackFn() : null;
     return fallback || null;
@@ -350,7 +364,6 @@ export default function UnderwritingResult() {
     interest_rate_pct: persistedInputs.financing?.interest_rate_pct != null ? persistedInputs.financing.interest_rate_pct * 100 : null,
     purchase_price: persistedInputs.acquisition?.purchase_price || purchasePrice || null,
   };
-
   const totalUnits = artifact.rent_roll_data?.summary?.total_units || persistedInputs.project?.num_units;
   const gpr = persistedInputs.operational?.gross_potential_rent_annual;
   const derivedCurrentRentPerDoor = totalUnits && gpr ? gpr / totalUnits / 12 : null;
@@ -386,24 +399,60 @@ export default function UnderwritingResult() {
     (artifact.t12_data.summary.expense_ratio_actual != null || artifact.t12_data.summary.opex_ratio != null));
   const currentExpenseRatio = hasT12Data
     ? (artifact.t12_data.summary.expense_ratio_actual ?? t12OpexRatio)
-    : null;
+    : persistedInputs.operational?.expense_ratio_current ?? artifact.om_data?.expense_ratio_current ?? null;
   const proFormaExpenseRatio = persistedInputs.operational?.expense_ratio_pro_forma
     ?? artifact.om_data?.expense_ratio_pro_forma
     ?? omOpexPct;
   const expenseBasis = artifact.expense_basis || null;
   const isOmNoiMode = expenseBasis?.source === 'om_noi';
+  const modelExpenseRatio = expenseBasis?.expense_ratio ?? expenseBasis?.ratio ?? null;
+  const decisionSnapshotRows = [
+    { label: 'NOI Y1', value: formatCompactCurrency(currentRun?.noi_year_one) },
+    { label: 'Cap rate Y1', value: formatPercent(currentRun?.cap_rate_year_one) },
+    { label: 'DSCR Y1', value: formatMultiple(currentRun?.dscr_year_one) },
+    { label: 'Basis', value: expenseBasis?.label || '—' },
+    { label: 'Current ask', value: formatCompactCurrency(purchasePrice) },
+    { label: 'Review items', value: `${prioritizedWarnings.length}` },
+  ];
   const expenseBasisFormula = buildTooltip('expense_basis',
     (cv) => {
       const lines = [];
-      if (cv.year1_line_item_opex != null) lines.push(`Line-item OpEx: ${formatCompactCurrency(cv.year1_line_item_opex)}`);
-      if (cv.year1_ratio_opex != null) lines.push(`Ratio-implied OpEx: ${formatCompactCurrency(cv.year1_ratio_opex)}`);
-      if (cv.ratio != null && cv.year1_egi != null) lines.push(`${formatPercent(cv.ratio)} × ${formatCompactCurrency(cv.year1_egi)} Year-1 EGI`);
+      const isLineItemBasis = expenseBasis?.method === 'line_items'
+        || String(expenseBasis?.source || '').endsWith('_line_items');
+      if (isLineItemBasis) {
+        const opex = expenseBasis?.modeled_total_expenses ?? cv.year1_line_item_opex;
+        const egi = expenseBasis?.modeled_egi ?? cv.year1_egi;
+        if (opex != null) lines.push(`Line-item OpEx: ${formatCompactCurrency(opex)}`);
+        if (opex != null && egi != null) lines.push(`Implied ratio: ${formatCompactCurrency(opex)} ÷ ${formatCompactCurrency(egi)} EGI = ${formatPercent(opex / egi)}`);
+      } else {
+        const ratio = expenseBasis?.expense_ratio ?? expenseBasis?.ratio ?? cv.ratio;
+        const egi = expenseBasis?.modeled_egi ?? cv.year1_egi;
+        if (ratio != null && egi != null) lines.push(`Ratio-driven OpEx: ${formatPercent(ratio)} × ${formatCompactCurrency(egi)} EGI = ${formatCompactCurrency(ratio * egi)}`);
+      }
       return lines.length ? lines.join('\n') : null;
     },
   );
   const rentSpreadPerDoor = marketRentPerDoor != null && currentRentPerDoor != null
     ? marketRentPerDoor - currentRentPerDoor : null;
   const breakEvenOccupancyPct = artifact.break_even_occupancy_pct;
+  const isLineItemExpenseBasis = expenseBasis?.method === 'line_items'
+    || String(expenseBasis?.source || '').endsWith('_line_items');
+  const expenseRatioBenchmarkNote = modelExpenseRatio != null && modelExpenseRatio < 0.3
+    ? 'Below 30% expense benchmark'
+    : null;
+  const modelExpenseRatioDetail = isLineItemExpenseBasis
+    ? [expenseRatioBenchmarkNote, 'Implied by selected line items'].filter(Boolean).join(' · ')
+    : [expenseRatioBenchmarkNote, expenseBasis?.label || 'Selected expense basis'].filter(Boolean).join(' · ');
+  const breakEvenOccupancyDetail = (() => {
+    if (breakEvenOccupancyPct == null) return 'Needs NOI, debt service, and revenue support';
+    if (occupancy != null) {
+      const cushion = occupancy - breakEvenOccupancyPct;
+      if (cushion < 0) return 'Above stated occupancy';
+      if (cushion < 0.1) return 'Narrow cushion to stated occupancy';
+      return 'Debt-service occupancy cushion';
+    }
+    return 'Minimum occupancy to cover Year-1 debt service';
+  })();
   const rentPositionAnalysis = artifact.rent_position_analysis || [];
   const revenueBasis = getRevenueBasis(artifact, persistedInputs, sourceCitations);
   const unitMixSummary = getUnitMixSummary(unitMix);
@@ -448,6 +497,12 @@ export default function UnderwritingResult() {
     || marketData.market_cap_rate_sale;
   const bpsDelta = capRateSubmarket && impliedCapRate
     ? Math.round((impliedCapRate - capRateSubmarket) * 10000) : null;
+  const capRateSpreadBps = capRatePurchase != null && capRateSale != null
+    ? Math.round((capRateSale - capRatePurchase) * 10000)
+    : null;
+
+  const dscrFloor = persistedInputs?.criteria?.dscr_year_one_floor ?? 1.25;
+  const debtYield = artifact?.debt_yield ?? null;
 
   const address = currentRun?.address
     || persistedInputs.project?.address
@@ -457,8 +512,6 @@ export default function UnderwritingResult() {
   const mapUrl = mapsKey && address
     ? `https://maps.googleapis.com/maps/api/staticmap?center=${encodeURIComponent(address)}&zoom=13&size=500x260&markers=color:red%7C${encodeURIComponent(address)}&key=${mapsKey}`
     : null;
-
-  const basePurchasePrice = purchasePrice || 5_000_000;
 
   const proformaData = projections.slice(0, 5).map((p) => ({
     year: `Y${p.year}`,
@@ -500,6 +553,7 @@ export default function UnderwritingResult() {
             ? `Equity in: −${formatCompactCurrency(eq)}\nTotal out: ${formatCompactCurrency(em * eq)} = ${em.toFixed(2)}× equity`
             : `Equity in: −${formatCompactCurrency(eq)}`;
         },
+        'Annualized return on equity across the full hold, accounting for timing of every cash flow in and out. IRR uses the annual cash-flow schedule and exit proceeds; the summary below reconciles total proceeds.',
       ),
     },
     {
@@ -510,15 +564,27 @@ export default function UnderwritingResult() {
       formula: buildTooltip('cash_on_cash',
         (cv) => {
           if (cv.year1_cash_flow == null || cv.total_equity == null) return null;
-          const lines = [`Year-1 cash flow:  ${formatCompactCurrency(cv.year1_cash_flow)}`, `Equity invested:   ${formatCompactCurrency(cv.total_equity)}`];
-          if (cv.annual_debt_service != null) lines.splice(1, 0, `Debt service:      −${formatCompactCurrency(cv.annual_debt_service)}`);
+          const year1Noi = cv.year1_noi ?? currentRun?.noi_year_one;
+          const lines = [];
+          if (year1Noi != null) lines.push(`Year-1 NOI:                     ${formatCompactCurrency(year1Noi)}`);
+          if (cv.annual_debt_service != null) lines.push(`Debt service:                  −${formatCompactCurrency(cv.annual_debt_service)}`);
+          lines.push(`Cash flow after debt service:  ${formatCompactCurrency(cv.year1_cash_flow)}`);
+          lines.push(`Equity invested:               ${formatCompactCurrency(cv.total_equity)}`);
           return lines.join('\n');
         },
         () => {
           const eq = capitalStructure.total_equity_invested;
           const coc = currentRun?.cash_on_cash;
           if (!eq || !coc) return null;
-          return `Year-1 cash flow: ${formatCompactCurrency(coc * eq)}\nEquity invested:  ${formatCompactCurrency(eq)}`;
+          const cashFlow = coc * eq;
+          const lines = [];
+          if (currentRun?.noi_year_one != null) lines.push(`Year-1 NOI: ${formatCompactCurrency(currentRun.noi_year_one)}`);
+          if (currentRun?.noi_year_one != null && currentRun?.dscr_year_one) {
+            lines.push(`Debt service: −${formatCompactCurrency(currentRun.noi_year_one / currentRun.dscr_year_one)}`);
+          }
+          lines.push(`Cash flow after debt service: ${formatCompactCurrency(cashFlow)}`);
+          lines.push(`Equity invested: ${formatCompactCurrency(eq)}`);
+          return lines.join('\n');
         },
       ),
     },
@@ -555,8 +621,8 @@ export default function UnderwritingResult() {
     {
       label: 'DSCR Year 1',
       value: formatMultiple(currentRun?.dscr_year_one),
-      tone: currentRun?.dscr_year_one != null && currentRun.dscr_year_one < 1.25 ? 'warning' : 'default',
-      detail: currentRun?.dscr_year_one != null && currentRun.dscr_year_one < 1.25 ? 'Below 1.25× minimum' : 'Debt coverage cushion',
+      tone: currentRun?.dscr_year_one != null && currentRun.dscr_year_one < dscrFloor ? 'warning' : 'default',
+      detail: currentRun?.dscr_year_one != null && currentRun.dscr_year_one < dscrFloor ? `Below ${dscrFloor.toFixed(2)}× minimum` : 'Debt coverage cushion',
       formula: buildTooltip('dscr_year_one',
         (cv) => {
           if (cv.year1_noi == null || cv.annual_debt_service == null) return null;
@@ -566,7 +632,7 @@ export default function UnderwritingResult() {
             `Debt service:   ${formatCompactCurrency(cv.annual_debt_service)}`,
             `─────────────────────────`,
             `Cash cushion:   ${formatCompactCurrency(cushion)}/yr above breakeven`,
-            `Lender min:     1.25×`,
+            `Lender min:     ${dscrFloor.toFixed(2)}×`,
           ].join('\n');
         },
         () => {
@@ -574,7 +640,7 @@ export default function UnderwritingResult() {
           const dscr = currentRun?.dscr_year_one;
           if (!noi || !dscr) return null;
           const ds = noi / dscr;
-          return `Year-1 NOI: ${formatCompactCurrency(noi)}\nDebt service: ${formatCompactCurrency(ds)}\nCushion: ${formatCompactCurrency(noi - ds)}/yr\nLender min: 1.25×`;
+          return `Year-1 NOI: ${formatCompactCurrency(noi)}\nDebt service: ${formatCompactCurrency(ds)}\nCushion: ${formatCompactCurrency(noi - ds)}/yr\nLender min: ${dscrFloor.toFixed(2)}×`;
         },
       ),
     },
@@ -583,30 +649,35 @@ export default function UnderwritingResult() {
   const evidenceItems = [
     {
       key: 'purchase_price',
+      category: 'Acquisition',
       label: 'Purchase price',
       value: formatEvidenceValue(formatCompactCurrency, persistedInputs.acquisition?.purchase_price),
       citation: getFieldCitation(fieldCitations, citationContext, 'purchase_price'),
     },
     {
       key: 'num_units',
+      category: 'Property',
       label: 'Unit count',
       value: persistedInputs.project?.num_units ?? '—',
       citation: getFieldCitation(fieldCitations, citationContext, 'num_units'),
     },
     {
       key: 'rentable_sqft',
+      category: 'Property',
       label: 'Rentable sqft',
       value: persistedInputs.project?.rentable_sqft?.toLocaleString?.() ?? '—',
       citation: getFieldCitation(fieldCitations, citationContext, 'rentable_sqft'),
     },
     {
       key: 'gross_potential_rent_annual',
-      label: 'Gross potential rent',
+      category: 'Revenue',
+      label: 'Year 1 GPR',
       value: formatEvidenceValue(formatCompactCurrency, persistedInputs.operational?.gross_potential_rent_annual),
       citation: getFieldCitation(fieldCitations, citationContext, 'gross_potential_rent_annual'),
     },
     {
       key: 'avg_in_place_rent_per_unit_monthly',
+      category: 'Revenue',
       label: 'Avg in-place rent / door',
       value: computedAvgInPlaceRent != null
         ? formatCurrency(computedAvgInPlaceRent)
@@ -620,60 +691,77 @@ export default function UnderwritingResult() {
     },
     {
       key: 'avg_market_rent_per_unit_monthly',
+      category: 'Revenue',
       label: 'Avg market rent / door',
       value: formatEvidenceValue(formatCurrency, persistedInputs.operational?.avg_market_rent_per_unit_monthly),
       citation: getFieldCitation(fieldCitations, citationContext, 'avg_market_rent_per_unit_monthly'),
     },
     {
       key: 'vacancy_credit_loss_pct',
-      label: 'Vacancy loss',
+      category: 'Revenue',
+      label: 'Year 1 vacancy loss',
       value: formatEvidenceValue(formatPercent, persistedInputs.operational?.vacancy_credit_loss_pct),
       citation: getFieldCitation(fieldCitations, citationContext, 'vacancy_credit_loss_pct'),
     },
     {
       key: 'expense_ratio_current',
+      category: 'Expenses',
       label: 'Current expense ratio',
       value: formatEvidenceValue(formatPercent, persistedInputs.operational?.expense_ratio_current),
       citation: getFieldCitation(fieldCitations, citationContext, 'expense_ratio_current'),
     },
     {
+      key: 'expense_ratio_year1',
+      category: 'Expenses',
+      label: 'Year 1 expense ratio',
+      value: formatEvidenceValue(formatPercent, persistedInputs.operational?.expense_ratio_year1),
+      citation: getFieldCitation(fieldCitations, citationContext, 'expense_ratio_year1'),
+    },
+    {
       key: 'expense_ratio_pro_forma',
+      category: 'Expenses',
       label: 'Pro forma expense ratio',
       value: formatEvidenceValue(formatPercent, persistedInputs.operational?.expense_ratio_pro_forma),
       citation: getFieldCitation(fieldCitations, citationContext, 'expense_ratio_pro_forma'),
     },
     {
       key: 'property_tax_annual',
-      label: 'Property tax',
+      category: 'Expenses',
+      label: 'Year 1 property tax',
       value: formatEvidenceValue(formatCompactCurrency, persistedInputs.operational?.property_tax_annual),
       citation: getFieldCitation(fieldCitations, citationContext, 'property_tax_annual'),
     },
     {
       key: 'property_tax_growth_pct',
+      category: 'Tax Support',
       label: 'Property tax growth',
       value: formatEvidenceValue(formatPercent, persistedInputs.operational?.property_tax_growth_pct),
       citation: getFieldCitation(fieldCitations, citationContext, 'property_tax_growth_pct'),
     },
     {
       key: 'property_tax_value_basis_amount',
+      category: 'Tax Support',
       label: 'Tax value basis',
       value: formatEvidenceValue(formatCompactCurrency, persistedInputs.operational?.property_tax_value_basis_amount),
       citation: getFieldCitation(fieldCitations, citationContext, 'property_tax_value_basis_amount'),
     },
     {
       key: 'property_tax_assessed_value',
+      category: 'Tax Support',
       label: 'Tax assessed value',
       value: formatEvidenceValue(formatCompactCurrency, persistedInputs.operational?.property_tax_assessed_value),
       citation: getFieldCitation(fieldCitations, citationContext, 'property_tax_assessed_value'),
     },
     {
       key: 'property_tax_assessment_ratio',
+      category: 'Tax Support',
       label: 'Tax assessment ratio',
       value: formatEvidenceValue(formatPercent, persistedInputs.operational?.property_tax_assessment_ratio),
       citation: getFieldCitation(fieldCitations, citationContext, 'property_tax_assessment_ratio'),
     },
     {
       key: 'property_tax_millage_rate',
+      category: 'Tax Support',
       label: 'Tax millage rate',
       value: persistedInputs.operational?.property_tax_millage_rate != null
         ? `${persistedInputs.operational.property_tax_millage_rate.toFixed(2)} mills` : '—',
@@ -681,6 +769,7 @@ export default function UnderwritingResult() {
     },
     {
       key: 'property_tax_rate_per_assessed_dollar',
+      category: 'Tax Support',
       label: 'Tax rate / assessed $',
       value: persistedInputs.operational?.property_tax_rate_per_assessed_dollar != null
         ? persistedInputs.operational.property_tax_rate_per_assessed_dollar.toFixed(5) : '—',
@@ -688,24 +777,28 @@ export default function UnderwritingResult() {
     },
     {
       key: 'interest_rate_pct',
+      category: 'Financing / Exit',
       label: 'Interest rate',
       value: formatEvidenceValue(formatPercent, persistedInputs.financing?.interest_rate_pct),
       citation: getFieldCitation(fieldCitations, citationContext, 'interest_rate_pct'),
     },
     {
       key: 'market_cap_rate_purchase',
+      category: 'Acquisition',
       label: 'Market cap rate purchase',
       value: formatEvidenceValue(formatPercent, persistedInputs.acquisition?.market_cap_rate_purchase),
       citation: getFieldCitation(fieldCitations, citationContext, 'market_cap_rate_purchase'),
     },
     {
       key: 'exit_cap_rate',
+      category: 'Financing / Exit',
       label: 'Exit cap rate',
       value: formatEvidenceValue(formatPercent, persistedInputs.exit?.exit_cap_rate),
       citation: getFieldCitation(fieldCitations, citationContext, 'exit_cap_rate'),
     },
     {
       key: 'market_cap_rate_sale',
+      category: 'Financing / Exit',
       label: 'Market cap rate sale',
       value: formatEvidenceValue(formatPercent, persistedInputs.exit?.market_cap_rate_sale),
       citation: getFieldCitation(fieldCitations, citationContext, 'market_cap_rate_sale'),
@@ -738,7 +831,6 @@ export default function UnderwritingResult() {
       )}
     >
       <ResizablePanelGroup
-        key={showSourcePanel ? 'uw-result-split-open' : 'uw-result-split-closed'}
         direction="horizontal"
         className="h-full min-w-0"
       >
@@ -857,9 +949,17 @@ export default function UnderwritingResult() {
                           <MapPin className="h-3.5 w-3.5 shrink-0" />
                           <span>{address || 'Address not provided'}</span>
                         </div>
-                        {verdictRationale ? (
-                          <p className="mt-3 max-w-3xl text-sm leading-6 text-muted-foreground">{verdictRationale}</p>
+                        {leadSummary ? (
+                          <p className="mt-3 max-w-3xl text-sm leading-6 text-muted-foreground">{leadSummary}</p>
                         ) : null}
+                        <div className="mt-5 grid max-w-3xl gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                          {decisionSnapshotRows.map((row) => (
+                            <div key={row.label} className="rounded-xl border border-border/50 bg-background/45 px-3 py-2">
+                              <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-muted-foreground">{row.label}</p>
+                              <p className="mt-1 truncate text-sm font-semibold text-foreground">{row.value}</p>
+                            </div>
+                          ))}
+                        </div>
                       </div>
 
                       {watchItems.length > 0 && (
@@ -869,7 +969,7 @@ export default function UnderwritingResult() {
                               {criticalWarningCount > 0 ? 'Critical items' : 'Watch items'}
                             </p>
                             <div className="mt-2.5">
-                              {watchItems.map((item) => (
+                              {leadWatchItems.map((item) => (
                                 <div key={item.id} className="uw-watch-item">
                                   <span
                                     className="uw-watch-item-dot"
@@ -879,7 +979,7 @@ export default function UnderwritingResult() {
                                         : 'hsl(var(--uw-risk))',
                                     }}
                                   />
-                                  <span className="min-w-0 capitalize">{item.label}</span>
+                                  <span className="min-w-0">{item.label}</span>
                                   {item.kind === 'failure' && item.gap != null ? (
                                     <span
                                       className="ml-auto shrink-0 rounded px-1.5 py-0.5 text-[10px] font-bold tabular-nums"
@@ -904,6 +1004,15 @@ export default function UnderwritingResult() {
                                   ) : null}
                                 </div>
                               ))}
+                              {hiddenWatchCount > 0 ? (
+                                <button
+                                  type="button"
+                                  onClick={() => setShowTrustPanel(true)}
+                                  className="mt-2 text-xs font-semibold text-primary hover:underline"
+                                >
+                                  +{hiddenWatchCount} more in trust summary
+                                </button>
+                              ) : null}
                             </div>
                           </div>
                         </div>
@@ -920,20 +1029,33 @@ export default function UnderwritingResult() {
                     rentCompCoverage={rentCompCoverage}
                   />
 
-                  {/* Below-market upside banner */}
-                  {artifact.om_data?.below_market_annual_upside ? (
+                  {/* Upside not in base case */}
+                  {artifact.om_data?.below_market_annual_upside || artifact.om_data?.value_add_notes ? (
                     <div className="uw-upside-banner mt-4">
-                      <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-uw-risk">Upside not in model</p>
-                      <p className="mt-2 text-sm leading-6 text-muted-foreground">
-                        {artifact.om_data.below_market_tenant_pct
-                          ? `${(artifact.om_data.below_market_tenant_pct * 100).toFixed(0)}% of tenants are below street rate. ` : ''}
-                        Raising them to current rates could add{' '}
-                        <span className="font-semibold text-foreground">{formatCompactCurrency(artifact.om_data.below_market_annual_upside)}/year</span>
-                        {' '}in revenue — not reflected in the modeled returns.
-                      </p>
-                      {artifact.om_data.value_add_notes ? (
-                        <p className="mt-2 text-sm leading-6 text-muted-foreground">{artifact.om_data.value_add_notes}</p>
-                      ) : null}
+                      <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-uw-risk">Upside not in base case</p>
+                      <div className="mt-3 grid gap-3 md:grid-cols-2">
+                        {artifact.om_data?.below_market_annual_upside ? (
+                          <div className="rounded-xl border border-border/50 bg-background/50 p-3">
+                            <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-muted-foreground">Rent mark-to-market</p>
+                            <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                              {artifact.om_data.below_market_tenant_pct
+                                ? `${(artifact.om_data.below_market_tenant_pct * 100).toFixed(0)}% of tenants are below street rate. ` : ''}
+                              Potential upside:{' '}
+                              <span className="font-semibold text-foreground">{formatCompactCurrency(artifact.om_data.below_market_annual_upside)}/year</span>.
+                              {' '}Not included in modeled returns.
+                            </p>
+                          </div>
+                        ) : null}
+                        {artifact.om_data?.value_add_notes ? (
+                          <div className="rounded-xl border border-border/50 bg-background/50 p-3">
+                            <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-muted-foreground">Conversion opportunity</p>
+                            <p className="mt-2 text-sm leading-6 text-muted-foreground">{artifact.om_data.value_add_notes}</p>
+                            <p className="mt-2 text-xs leading-5 text-muted-foreground">
+                              Broker-stated upside only. Requires feasibility, capex, permitting, and demand review.
+                            </p>
+                          </div>
+                        ) : null}
+                      </div>
                     </div>
                   ) : null}
 
@@ -961,7 +1083,7 @@ export default function UnderwritingResult() {
                         className="gap-1.5 h-7 px-3 text-xs"
                       >
                         <SlidersHorizontal className="h-3.5 w-3.5" />
-                        Assumption what-if
+                        Scenario What-If
                       </Button>
                     </div>
                     <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
@@ -989,64 +1111,61 @@ export default function UnderwritingResult() {
                   {/* Operating benchmarks */}
                   <div className="mt-4">
                     <div className="field-section-label mb-3">Operating Benchmarks</div>
-                    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+                    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5">
                       <UnderwritingMetricCard
                         label="Avg Current Rent / Door"
-                        value={formatCurrency(currentRentPerDoor ? Math.round(currentRentPerDoor) : null)}
-                        detail="Monthly in-place rent basis"
+                        value={formatCurrency(currentRentPerDoor != null ? Math.round(currentRentPerDoor) : null)}
+                        detail="Rent reasonableness benchmark"
                         formula={buildTooltip('avg_current_rent_per_door',
                           (cv) => cv.gpr != null && cv.num_units != null ? `${formatCompactCurrency(cv.gpr)} ÷ ${cv.num_units} units ÷ 12` : null,
                           () => gpr != null && totalUnits ? `${formatCompactCurrency(gpr)} ÷ ${totalUnits} units ÷ 12` : null,
+                          'Monthly in-place rent benchmark. Used for sanity checks and rent-position context; modeled revenue comes from GPR.',
                         )}
                       />
-                      <UnderwritingMetricCard
-                        label="Avg Market Rent / Door"
-                        value={formatCurrency(marketRentPerDoor ? Math.round(marketRentPerDoor) : null)}
-                        detail="Monthly market rent basis"
-                        formula={buildTooltip('avg_market_rent_per_door',
-                          (cv) => cv.market_rate != null ? `Market rate: ${formatCurrency(Math.round(cv.market_rate))}/month` : null,
-                          () => marketRentPerDoor != null ? `Market rate: ${formatCurrency(Math.round(marketRentPerDoor))}/month` : null,
-                        )}
-                      />
-                      {hasT12Data ? (
-                        <>
-                          <UnderwritingMetricCard
-                            label="Current Expense Ratio"
-                            value={formatPercent(currentExpenseRatio)}
-                            detail="T-12 actual operating ratio"
-                            tone={currentExpenseRatio != null && currentExpenseRatio > 0.45 ? 'warning' : 'default'}
-                            formula={buildTooltip('current_expense_ratio', () =>
-                              artifact.t12_data?.summary?.total_opex != null && artifact.t12_data?.summary?.egi != null
-                                ? `${formatCompactCurrency(artifact.t12_data.summary.total_opex)} ÷ ${formatCompactCurrency(artifact.t12_data.summary.egi)}`
-                                : null
-                            )}
-                          />
-                          <UnderwritingMetricCard
-                            label="Pro Forma Expense Ratio"
-                            value={formatPercent(proFormaExpenseRatio)}
-                            detail="OM / underwritten expense ratio"
-                            tone={proFormaExpenseRatio != null && currentExpenseRatio != null && proFormaExpenseRatio < currentExpenseRatio - 0.05 ? 'active' : 'default'}
-                            formula={buildTooltip('pro_forma_expense_ratio',
-                              (cv) => cv.pro_forma_expense_pct != null && cv.gpr != null ? `${formatPercent(cv.pro_forma_expense_pct)} × ${formatCompactCurrency(cv.gpr)}` : null,
-                              () => proFormaExpenseRatio != null && gpr != null ? `${formatPercent(proFormaExpenseRatio)} × ${formatCompactCurrency(gpr)}` : null,
-                            )}
-                          />
-                        </>
-                      ) : proFormaExpenseRatio != null ? (
+                      {marketRentPerDoor != null ? (
                         <UnderwritingMetricCard
-                          label="Stated Expense Ratio"
-                          value={formatPercent(proFormaExpenseRatio)}
-                          detail="Source: OM / broker pro forma"
-                          formula={buildTooltip('pro_forma_expense_ratio',
-                            (cv) => cv.pro_forma_expense_pct != null && cv.gpr != null ? `${formatPercent(cv.pro_forma_expense_pct)} × ${formatCompactCurrency(cv.gpr)}` : null,
-                            () => proFormaExpenseRatio != null && gpr != null ? `${formatPercent(proFormaExpenseRatio)} × ${formatCompactCurrency(gpr)}` : null,
+                          label="Avg Market Rent / Door"
+                          value={formatCurrency(Math.round(marketRentPerDoor))}
+                          detail="Rent-position benchmark"
+                          formula={buildTooltip('avg_market_rent_per_door',
+                            (cv) => cv.market_rate != null ? `Market rate: ${formatCurrency(Math.round(cv.market_rate))}/month` : null,
+                            () => `Market rate: ${formatCurrency(Math.round(marketRentPerDoor))}/month`,
+                            'Monthly market-rate benchmark from the OM or rent roll. Used only for rent-position context; modeled revenue still comes from GPR.',
+                          )}
+                        />
+                      ) : null}
+                      {modelExpenseRatio != null ? (
+                        <UnderwritingMetricCard
+                          label="Model Expense Ratio"
+                          value={formatPercent(modelExpenseRatio)}
+                          detail={modelExpenseRatioDetail || 'Selected expense basis'}
+                          tone={modelExpenseRatio < 0.3 ? 'warning' : 'default'}
+                          formula={buildTooltip('expense_basis',
+                            (cv) => {
+                              const egi = expenseBasis?.modeled_egi ?? cv.year1_egi;
+                              const lineItemOpex = expenseBasis?.modeled_total_expenses ?? cv.year1_line_item_opex;
+                              const ratio = modelExpenseRatio ?? cv.ratio;
+                              if (isLineItemExpenseBasis && lineItemOpex != null && egi != null) {
+                                return `${formatCompactCurrency(lineItemOpex)} OpEx ÷ ${formatCompactCurrency(egi)} EGI = ${formatPercent(ratio ?? lineItemOpex / egi)}`;
+                              }
+                              if (ratio != null && egi != null) {
+                                return `${formatPercent(ratio)} × ${formatCompactCurrency(egi)} EGI = ${formatCompactCurrency(ratio * egi)} OpEx`;
+                              }
+                              return null;
+                            },
+                            () => expenseBasis?.modeled_total_expenses != null && expenseBasis?.modeled_egi != null
+                              ? `${formatCompactCurrency(expenseBasis.modeled_total_expenses)} ÷ ${formatCompactCurrency(expenseBasis.modeled_egi)}`
+                              : null,
+                            isLineItemExpenseBasis
+                              ? 'Line items drive modeled expenses. This ratio is implied by OpEx ÷ EGI and shown as an operating benchmark.'
+                              : 'The selected expense ratio drives modeled expenses because coherent line-item OpEx was unavailable.',
                           )}
                         />
                       ) : null}
                       <UnderwritingMetricCard
                         label="Break-Even Occupancy"
                         value={formatRatioPercent(breakEvenOccupancyPct)}
-                        detail="Occupancy needed to cover year-one debt service"
+                        detail={breakEvenOccupancyDetail}
                         tone={
                           breakEvenOccupancyPct == null ? 'default'
                           : occupancy == null ? 'default'
@@ -1065,6 +1184,36 @@ export default function UnderwritingResult() {
                             const ds = noi / dscr;
                             return `Debt service: ${formatCompactCurrency(ds)} | GPR: ${formatCompactCurrency(gpr)}`;
                           },
+                          'Minimum occupancy needed for Year-1 NOI to cover annual debt service. Lower is safer; compare it with supported physical or economic occupancy.',
+                        )}
+                      />
+                      <UnderwritingMetricCard
+                        label="Debt Yield"
+                        value={debtYield != null ? `${(debtYield * 100).toFixed(1)}%` : null}
+                        tone={
+                          debtYield == null ? 'default'
+                          : debtYield < 0.07 ? 'danger'
+                          : debtYield < 0.08 ? 'warning'
+                          : 'default'
+                        }
+                        detail={
+                          debtYield == null ? null
+                          : debtYield < 0.07 ? 'Below 7% agency floor'
+                          : debtYield < 0.08 ? 'In lender watch zone'
+                          : 'Above 8% threshold'
+                        }
+                        formula={buildTooltip('debt_yield',
+                          (cv) => {
+                            if (cv.year1_noi == null || cv.loan_amount == null) return null;
+                            return [
+                              `Year-1 NOI:   ${formatCompactCurrency(cv.year1_noi)}`,
+                              `Loan amount:  ${formatCompactCurrency(cv.loan_amount)}`,
+                              `─────────────────────────`,
+                              `Watch: 8%  |  Hard stop: 7%`,
+                            ].join('\n');
+                          },
+                          () => debtYield != null ? `Watch: 8%  |  Hard stop: 7%` : null,
+                          'Debt Yield = Year-1 NOI ÷ Loan Amount. CMBS/agency lenders typically require ≥8%. Below 7% is a hard stop for most agency debt.',
                         )}
                       />
                     </div>
@@ -1156,14 +1305,11 @@ export default function UnderwritingResult() {
                       capRatePurchase={capRatePurchase}
                       capRateSale={capRateSale}
                       bpsDelta={bpsDelta}
+                      capRateSpreadBps={capRateSpreadBps}
                       rentPositionAnalysis={rentPositionAnalysis}
                       rentComps={rentComps}
                       rentCompCoverage={rentCompCoverage}
                       unknownClimateCompCount={artifact.unknown_climate_comp_count ?? 0}
-                      getToken={getToken}
-                      runId={runId}
-                      runSensitivityAnalysis={runSensitivityAnalysis}
-                      basePurchasePrice={basePurchasePrice}
                     />
 
                     <DiscrepanciesSection

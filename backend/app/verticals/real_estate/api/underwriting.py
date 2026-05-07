@@ -99,6 +99,24 @@ def _load_user_thresholds(user_id: str) -> UserUnderwritingThresholds | None:
     return UserUnderwritingThresholds(**saved) if saved else None
 
 
+def _snapshot_thresholds_into_criteria(inputs_payload: dict, user_id: str) -> dict:
+    """Fill any None verdict-gate fields in criteria from the user's current defaults.
+
+    Called once at run creation / first save so the thresholds are frozen per-deal.
+    Fields that are already set (non-None) are never overwritten.
+    """
+    thresholds = _load_user_thresholds(user_id)
+    if not thresholds:
+        return inputs_payload
+    criteria = inputs_payload.get("criteria", {})
+    for key in ("dscr_year_one_floor", "stress_dscr_floor", "rollover_risk_pct"):
+        if criteria.get(key) is None:
+            val = getattr(thresholds, key, None)
+            if val is not None:
+                criteria[key] = val
+    return {**inputs_payload, "criteria": criteria}
+
+
 def _source_documents_for_run(document_ids: list[dict] | None, org_id: str | None) -> list[dict]:
     """Attach display metadata to saved underwriting source document specs."""
     source_specs = [
@@ -130,7 +148,6 @@ def _calculate_and_store_result(
     repo: UnderwritingRunRepository,
     run_id: str,
     inputs_payload: dict,
-    thresholds: UserUnderwritingThresholds | None = None,
 ) -> None:
     """Recalculate underwriting outputs from saved inputs and persist the result artifact."""
     existing_run = repo.get_by_id(run_id)
@@ -162,7 +179,6 @@ def _calculate_and_store_result(
         stress_tests,
         _get_t12_period_months_from_artifact(existing_artifact),
         inputs=inputs,
-        thresholds=thresholds,
     )
     typed_metrics = {
         "irr": result.irr,
@@ -276,13 +292,17 @@ def update_underwriting_inputs(run_id: str, payload: UpdateInputsRequest, user: 
         )
         raise HTTPException(status_code=422, detail=_safe_validation_error_detail(exc))
 
+    # Snapshot user's current verdict-gate thresholds into criteria for any fields not explicitly set.
+    # This freezes dscr_year_one_floor / stress_dscr_floor / rollover_risk_pct per-deal at first save.
+    snapshotted = _snapshot_thresholds_into_criteria(validated_inputs.model_dump(), user.id)
+    validated_inputs = SelfStorageInputs(**snapshotted)
+
     success = repo.update_inputs(run_id, user.id, validated_inputs.model_dump())
     if not success:
         raise HTTPException(status_code=400, detail="Failed to update inputs")
 
-    user_thresholds = _load_user_thresholds(user.id)
     try:
-        _calculate_and_store_result(repo, run_id, validated_inputs.model_dump(), thresholds=user_thresholds)
+        _calculate_and_store_result(repo, run_id, validated_inputs.model_dump())
     except ValueError as e:
         logger.warning(f"Underwriting calculation validation failed for run {run_id}: {e}")
         raise HTTPException(status_code=400, detail=str(e))
@@ -337,7 +357,7 @@ def scenario_recalculate(run_id: str, payload: ScenarioOverrides, user: User = D
         result = calculate(inputs)
         stress = run_stress_tests(inputs)
         result.stress_tests = stress
-        verdict = evaluate(result, inputs.criteria, stress, _get_t12_period_months_from_artifact(run.result_artifact), inputs=inputs, thresholds=_load_user_thresholds(user.id))
+        verdict = evaluate(result, inputs.criteria, stress, _get_t12_period_months_from_artifact(run.result_artifact), inputs=inputs)
 
         # Keep this stateless what-if response lean: the UI only needs scenario
         # metrics here. Persisted calculation paths build result_artifact.noi_bridge.
