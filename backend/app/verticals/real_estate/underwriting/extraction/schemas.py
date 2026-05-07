@@ -99,7 +99,7 @@ class OMExtraction(BaseModel):
     # ── Property ──────────────────────────────────────────────────────────────
     num_units:      Optional[int]   = Field(default=None, description="total unit count",        json_schema_extra={"cite": True})
     rentable_sqft:  Optional[float] = Field(default=None, description="total rentable square feet", json_schema_extra={"cite": True})
-    year_built:     Optional[int]   = Field(default=None, description="year property was built", json_schema_extra={"cite": False})
+    year_built:     Optional[int]   = Field(default=None, description="year property was built", json_schema_extra={"cite": True})
 
     # ── Market / Demographics ─────────────────────────────────────────────────
     nearby_storage_count_1mi:    Optional[int]   = Field(default=None, description="competing storage facilities within 1 mile",  json_schema_extra={"cite": True})
