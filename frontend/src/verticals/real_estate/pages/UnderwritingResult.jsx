@@ -499,6 +499,7 @@ export default function UnderwritingResult() {
     ? Math.round((impliedCapRate - capRateSubmarket) * 10000) : null;
 
   const dscrFloor = persistedInputs?.criteria?.dscr_year_one_floor ?? 1.25;
+  const debtYield = artifact?.debt_yield ?? null;
 
   const address = currentRun?.address
     || persistedInputs.project?.address
@@ -1109,7 +1110,7 @@ export default function UnderwritingResult() {
                   {/* Operating benchmarks */}
                   <div className="mt-4">
                     <div className="field-section-label mb-3">Operating Benchmarks</div>
-                    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-5">
                       <UnderwritingMetricCard
                         label="Avg Current Rent / Door"
                         value={formatCurrency(currentRentPerDoor != null ? Math.round(currentRentPerDoor) : null)}
@@ -1183,6 +1184,35 @@ export default function UnderwritingResult() {
                             return `Debt service: ${formatCompactCurrency(ds)} | GPR: ${formatCompactCurrency(gpr)}`;
                           },
                           'Minimum occupancy needed for Year-1 NOI to cover annual debt service. Lower is safer; compare it with supported physical or economic occupancy.',
+                        )}
+                      />
+                      <UnderwritingMetricCard
+                        label="Debt Yield"
+                        value={debtYield != null ? `${(debtYield * 100).toFixed(1)}%` : null}
+                        tone={
+                          debtYield == null ? 'default'
+                          : debtYield < 0.07 ? 'danger'
+                          : debtYield < 0.08 ? 'warning'
+                          : 'default'
+                        }
+                        detail={
+                          debtYield == null ? null
+                          : debtYield < 0.07 ? 'Below 7% agency floor'
+                          : debtYield < 0.08 ? 'In lender watch zone'
+                          : 'Above 8% threshold'
+                        }
+                        formula={buildTooltip('debt_yield',
+                          (cv) => {
+                            if (cv.year1_noi == null || cv.loan_amount == null) return null;
+                            return [
+                              `Year-1 NOI:   ${formatCompactCurrency(cv.year1_noi)}`,
+                              `Loan amount:  ${formatCompactCurrency(cv.loan_amount)}`,
+                              `─────────────────────────`,
+                              `Watch: 8%  |  Hard stop: 7%`,
+                            ].join('\n');
+                          },
+                          () => debtYield != null ? `Watch: 8%  |  Hard stop: 7%` : null,
+                          'Debt Yield = Year-1 NOI ÷ Loan Amount. CMBS/agency lenders typically require ≥8%. Below 7% is a hard stop for most agency debt.',
                         )}
                       />
                     </div>

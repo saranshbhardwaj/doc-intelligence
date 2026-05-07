@@ -17,6 +17,7 @@ const DEFAULT_CRITERIA = {
   target_equity_multiple: 2.0,
   max_ltv: 0.8,
   dscr_year_one_floor: 1.25,
+  debt_yield_floor: 0.08,
 };
 
 function buildPriceGrid(purchasePrice) {
@@ -100,6 +101,8 @@ function constraintLabel(key) {
       return 'equity multiple';
     case 'dscr_year_one':
       return 'DSCR';
+    case 'debt_yield':
+      return 'debt yield';
     default:
       return 'the tightest screen';
   }
@@ -173,11 +176,13 @@ export default function MaxBidPanel({
   const maxByCashOnCash = interpolatedMaxPrice(enrichedPoints, 'cash_on_cash', normalizedCriteria.target_cash_on_cash);
   const maxByEquityMultiple = interpolatedMaxPrice(enrichedPoints, 'equity_multiple', normalizedCriteria.target_equity_multiple);
   const debtConstrainedPrice = interpolatedMaxPrice(enrichedPoints, 'dscr_year_one', normalizedCriteria.dscr_year_one_floor ?? 1.25);
+  const debtYieldFloorPrice = interpolatedMaxPrice(enrichedPoints, 'debt_yield', normalizedCriteria.debt_yield_floor ?? 0.08);
   const constraints = [
     { key: 'irr', price: maxByIrr },
     { key: 'cash_on_cash', price: maxByCashOnCash },
     { key: 'equity_multiple', price: maxByEquityMultiple },
     { key: 'dscr_year_one', price: debtConstrainedPrice },
+    { key: 'debt_yield', price: debtYieldFloorPrice },
   ].filter((constraint) => constraint.price != null);
   const tightestConstraint = constraints.sort((a, b) => a.price - b.price)[0] ?? null;
   const suggestedMax = tightestConstraint?.price ?? null;
@@ -336,6 +341,7 @@ export default function MaxBidPanel({
                 <th className="pb-3 text-right">Cash-on-Cash</th>
                 <th className="pb-3 text-right">Equity Multiple</th>
                 <th className="pb-3 text-right">DSCR Y1</th>
+                <th className="pb-3 text-right">Debt Yield</th>
                 <th className="pb-3 text-right">Cap Rate Y1</th>
                 <th className="pb-3 text-right">Return Screen</th>
               </tr>
@@ -349,6 +355,7 @@ export default function MaxBidPanel({
                   <td className="py-3 text-right">{safePercent(point.cash_on_cash)}</td>
                   <td className="py-3 text-right">{safeMultiple(point.equity_multiple)}</td>
                   <td className="py-3 text-right">{safeMultiple(point.dscr_year_one)}</td>
+                  <td className="py-3 text-right">{point.debt_yield != null ? `${(point.debt_yield * 100).toFixed(1)}%` : '—'}</td>
                   <td className="py-3 text-right">{safePercent(point.cap_rate_year_one)}</td>
                   <td className="py-3 text-right">
                     <UnderwritingStatusBadge tone={point.verdict_tone}>{point.verdict_label}</UnderwritingStatusBadge>
@@ -357,7 +364,7 @@ export default function MaxBidPanel({
               ))}
               {enrichedPoints.length === 0 ? (
                 <tr>
-                  <td colSpan={8} className="py-8 text-center text-sm text-muted-foreground">
+                  <td colSpan={9} className="py-8 text-center text-sm text-muted-foreground">
                     {isLoading ? 'Calculating purchase price sensitivity...' : 'No sensitivity points available.'}
                   </td>
                 </tr>

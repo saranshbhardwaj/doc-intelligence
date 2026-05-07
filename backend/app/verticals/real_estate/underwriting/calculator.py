@@ -650,6 +650,9 @@ def calculate(inputs: SelfStorageInputs) -> SelfStorageResult:
     if annual_debt_service > 0:
         dscr_year_one = projections[0].noi / annual_debt_service
 
+    # NOI / loan — CMBS financeability signal
+    debt_yield = projections[0].noi / loan_amount if loan_amount and loan_amount > 0 and projections else None
+
     # Break-even occupancy: minimum occupancy so Year-1 NOI covers debt service.
     break_even_occupancy_pct: float | None = None
     if expense_basis.source == "om_noi":
@@ -742,6 +745,13 @@ def calculate(inputs: SelfStorageInputs) -> SelfStorageResult:
                 annual_debt_service=float(annual_debt_service) if annual_debt_service > 0 else None,
             ),
         ),
+        "debt_yield": FormulaMetadata(
+            description="Debt Yield = Year-1 NOI ÷ Loan Amount. CMBS/agency lenders typically require ≥8%. Below 7% is a hard stop for most agency debt.",
+            computed_values=FormulaComputedValues(
+                year1_noi=float(projections[0].noi) if projections else None,
+                loan_amount=float(loan_amount) if loan_amount else None,
+            ),
+        ),
         "break_even_occupancy": FormulaMetadata(
             description=break_even_description,
             computed_values=FormulaComputedValues(
@@ -792,6 +802,7 @@ def calculate(inputs: SelfStorageInputs) -> SelfStorageResult:
         cap_rate_year_one=cap_rate_year_one,
         cap_rate_pro_forma=cap_rate_pro_forma,
         dscr_year_one=dscr_year_one,
+        debt_yield=debt_yield,
         break_even_occupancy_pct=break_even_occupancy_pct,
         ltv=ltv,
         noi_year_one=projections[0].noi,
@@ -829,6 +840,7 @@ def calculate_sensitivity(
                     cash_on_cash=result.cash_on_cash if result.cash_on_cash is not None else float("nan"),
                     dscr_year_one=result.dscr_year_one if result.dscr_year_one is not None else float("nan"),
                     equity_multiple=result.equity_multiple if result.equity_multiple is not None else float("nan"),
+                    debt_yield=result.debt_yield,
                 )
             )
         except Exception:

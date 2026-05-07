@@ -18,6 +18,8 @@ from ..underwriting.schemas.self_storage import (
     VerdictWarning,
 )
 from .thresholds import (
+    DEBT_YIELD_CRITICAL,
+    DEBT_YIELD_WATCH,
     DSCR_YEAR_ONE_FLOOR,
     EXPENSE_RATIO_HIGH_PCT,
     EXPENSE_RATIO_LOW_PCT,
@@ -43,6 +45,7 @@ _DEFAULTS = {
 
 _CONDITION_WARNING_KEYS = {
     "annualized_short_period_income",
+    "debt_yield_watch",
     "expense_ratio_benchmark",
     "expenses_incomplete",
     "expenses_missing",
@@ -540,6 +543,21 @@ def _build_warnings(
                 severity="warning",
             )
         )
+
+    # Debt yield
+    if result.debt_yield is not None:
+        if result.debt_yield < DEBT_YIELD_CRITICAL:
+            warnings.append(VerdictWarning(
+                key="debt_yield_critical",
+                severity="critical",
+                message=f"Debt yield {result.debt_yield:.1%} is below 7% — hard stop for most agency and CMBS lenders.",
+            ))
+        elif result.debt_yield < DEBT_YIELD_WATCH:
+            warnings.append(VerdictWarning(
+                key="debt_yield_watch",
+                severity="warning",
+                message=f"Debt yield {result.debt_yield:.1%} is below 8% — lenders will scrutinize closely.",
+            ))
 
     return warnings
 

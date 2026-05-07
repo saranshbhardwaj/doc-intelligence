@@ -1,7 +1,11 @@
 """Unit tests for the underwriting calculator."""
+import copy
+import math
+
 import pytest
 from app.verticals.real_estate.underwriting.calculator import calculate, calculate_sensitivity
 from app.verticals.real_estate.underwriting import calculator as calc_module
+from app.verticals.real_estate.underwriting.verdict import evaluate
 from app.verticals.real_estate.underwriting.schemas.self_storage import (
     SelfStorageInputs,
     ProjectDetails,
@@ -626,6 +630,73 @@ class TestOMNOIMode:
         from app.verticals.real_estate.underwriting import calculator as calc_module
         result_noi = calc_module._stated_om_noi(inputs)
         assert result_noi == 0.0  # returned 0.0, not 663_830
+
+
+@pytest.fixture
+def base_inputs():
+    return VALID_INPUTS.model_copy(deep=True)
+
+
+class TestDebtYield:
+    def test_debt_yield_computed(self, base_inputs):
+        """debt_yield = NOI_Y1 / loan_amount"""
+        result = calculate(base_inputs)
+        assert result.debt_yield is not None
+        pp = base_inputs.acquisition.purchase_price
+        ltv = base_inputs.financing.ltv_pct
+        expected_loan = pp * ltv
+        expected_debt_yield = result.projections[0].noi / expected_loan
+        assert result.debt_yield == pytest.approx(expected_debt_yield, abs=1e-4)
+        assert result.debt_yield > 0
+        assert math.isfinite(result.debt_yield)
+
+    def test_debt_yield_none_when_no_loan(self, base_inputs):
+        """Zero LTV → no loan → debt_yield is None"""
+        base_inputs.financing.ltv_pct = 0.0
+        result = calculate(base_inputs)
+        assert result.debt_yield is None
+
+    def test_sensitivity_point_includes_debt_yield(self, base_inputs):
+        """Every sensitivity point has a debt_yield field"""
+        prices = [4_000_000, 5_000_000, 6_000_000]
+        sensitivity = calculate_sensitivity(base_inputs, prices)
+        assert len(sensitivity) > 0
+        for pt in sensitivity:
+            assert hasattr(pt, "debt_yield")
+
+
+class TestDebtYieldVerdict:
+    def test_critical_below_7pct(self, base_inputs):
+        """Debt yield < 7% → critical warning"""
+        result = calculate(base_inputs)
+        result.debt_yield = 0.065
+        verdict = evaluate(result, base_inputs.criteria)
+        keys = [w.key for w in verdict.warnings]
+        assert "debt_yield_critical" in keys
+
+    def test_warning_7_to_8pct(self, base_inputs):
+        """Debt yield 7–8% → warning"""
+        result = calculate(base_inputs)
+        result.debt_yield = 0.075
+        verdict = evaluate(result, base_inputs.criteria)
+        keys = [w.key for w in verdict.warnings]
+        assert "debt_yield_watch" in keys
+
+    def test_no_warning_above_8pct(self, base_inputs):
+        """Debt yield ≥ 8% → no debt yield warning"""
+        result = calculate(base_inputs)
+        result.debt_yield = 0.09
+        verdict = evaluate(result, base_inputs.criteria)
+        keys = [w.key for w in verdict.warnings]
+        assert "debt_yield_critical" not in keys
+        assert "debt_yield_watch" not in keys
+
+    def test_critical_triggers_needs_review(self, base_inputs):
+        """debt_yield_critical → overall status degrades to needs_review"""
+        result = calculate(base_inputs)
+        result.debt_yield = 0.065
+        verdict = evaluate(result, base_inputs.criteria)
+        assert verdict.status in ("needs_review", "fail", "below_standards")
 
 
 from pydantic import ValidationError as PydanticValidationError

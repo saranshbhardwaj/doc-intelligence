@@ -454,6 +454,7 @@ class SensitivityPoint(BaseModel):
     cash_on_cash: float
     dscr_year_one: float
     equity_multiple: float
+    debt_yield: Optional[float] = None
 
 
 class StressScenario(BaseModel):
@@ -577,6 +578,7 @@ class SelfStorageResult(BaseModel):
         description="Stabilised NOI / purchase price.",
     )
     dscr_year_one: Optional[float] = None
+    debt_yield: Optional[float] = None
     break_even_occupancy_pct: Optional[float] = Field(
         default=None,
         description="Approximate occupancy needed for year-one NOI to cover debt service.",
