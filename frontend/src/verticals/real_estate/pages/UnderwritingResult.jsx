@@ -497,6 +497,9 @@ export default function UnderwritingResult() {
     || marketData.market_cap_rate_sale;
   const bpsDelta = capRateSubmarket && impliedCapRate
     ? Math.round((impliedCapRate - capRateSubmarket) * 10000) : null;
+  const capRateSpreadBps = capRatePurchase != null && capRateSale != null
+    ? Math.round((capRateSale - capRatePurchase) * 10000)
+    : null;
 
   const dscrFloor = persistedInputs?.criteria?.dscr_year_one_floor ?? 1.25;
   const debtYield = artifact?.debt_yield ?? null;
@@ -1304,6 +1307,7 @@ export default function UnderwritingResult() {
                       capRatePurchase={capRatePurchase}
                       capRateSale={capRateSale}
                       bpsDelta={bpsDelta}
+                      capRateSpreadBps={capRateSpreadBps}
                       rentPositionAnalysis={rentPositionAnalysis}
                       rentComps={rentComps}
                       rentCompCoverage={rentCompCoverage}

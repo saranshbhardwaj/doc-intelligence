@@ -31,6 +31,7 @@ export default function MarketSection({
   capRatePurchase,
   capRateSale,
   bpsDelta,
+  capRateSpreadBps,
   rentPositionAnalysis,
   rentComps,
   rentCompCoverage,
@@ -148,6 +149,18 @@ export default function MarketSection({
                     <p className="mt-3 rounded-xl border border-border/60 bg-background/60 px-3 py-2 text-xs leading-5 text-muted-foreground">
                       No submarket cap-rate benchmark is available yet.
                     </p>
+                  )}
+                  {capRateSpreadBps != null && Math.abs(capRateSpreadBps) >= 10 && (
+                    <div className={`mt-3 rounded-md border px-3 py-2 text-sm ${
+                      capRateSpreadBps > 0
+                        ? 'bg-amber-500/10 border-amber-500/30 text-amber-700 dark:text-amber-400'
+                        : 'bg-green-500/10 border-green-500/30 text-green-700 dark:text-green-400'
+                    }`}>
+                      <span className="font-medium">
+                        {capRateSpreadBps > 0 ? 'Cap rate expansion: ' : 'Cap rate compression: '}
+                      </span>
+                      {Math.abs(capRateSpreadBps)} bps {capRateSpreadBps > 0 ? '(exit headwind)' : '(exit tailwind)'}
+                    </div>
                   )}
                 </div>
               </div>
