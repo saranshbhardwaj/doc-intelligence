@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { AlertTriangle, Loader2, RefreshCw } from 'lucide-react';
-import { Bar, BarChart, CartesianGrid, Cell, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
+import { CartesianGrid, Legend, Line, LineChart, ReferenceLine, ResponsiveContainer, Tooltip, XAxis, YAxis } from 'recharts';
 import { Button } from '@/components/ui/button';
 import { UnderwritingStatusBadge } from './UnderwritingUI';
 import SourceSupportActions from './SourceSupportActions';
@@ -260,15 +260,22 @@ export default function MaxBidPanel({
         </div>
       </div>
 
-      <div className="mt-5 grid gap-5 xl:grid-cols-[0.9fr,1.6fr]">
+      <div className="mt-5 grid gap-5 xl:grid-cols-[1fr,1.55fr]">
         <div className="rounded-2xl border border-border/60 bg-background/60 p-4">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Bid curve</p>
+          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Pricing sensitivity</p>
+          <p className="mt-1 text-sm leading-6 text-muted-foreground">IRR and cash-on-cash versus purchase price.</p>
           {enrichedPoints.length > 0 ? (
-            <div className="mt-3 h-[190px]">
+            <div className="mt-3 h-[230px]">
               <ResponsiveContainer width="100%" height="100%">
-                <BarChart data={enrichedPoints}>
+                <LineChart data={enrichedPoints} margin={{ top: 12, right: 14, left: 0, bottom: 4 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" vertical={false} />
-                  <XAxis dataKey="purchase_price" tickFormatter={(v) => `$${(v / 1_000_000).toFixed(1)}M`} tick={{ fontSize: 11 }} />
+                  <XAxis
+                    dataKey="purchase_price"
+                    type="number"
+                    domain={['dataMin', 'dataMax']}
+                    tickFormatter={(v) => `$${(v / 1_000_000).toFixed(1)}M`}
+                    tick={{ fontSize: 11 }}
+                  />
                   <YAxis tickFormatter={(v) => `${(v * 100).toFixed(0)}%`} tick={{ fontSize: 11 }} />
                   <ReferenceLine
                     y={normalizedCriteria.target_irr}
@@ -276,19 +283,39 @@ export default function MaxBidPanel({
                     strokeDasharray="4 4"
                     label={{ value: `Target IRR ${formatPercent(normalizedCriteria.target_irr)}`, position: 'insideTopRight', fontSize: 10, fill: 'hsl(var(--muted-foreground))' }}
                   />
+                  <ReferenceLine
+                    x={purchasePrice}
+                    stroke="hsl(var(--foreground))"
+                    strokeDasharray="3 3"
+                    label={{ value: 'Current ask', position: 'insideTop', fontSize: 10, fill: 'hsl(var(--foreground))' }}
+                  />
                   <Tooltip
                     labelFormatter={(v) => formatCurrency(v)}
-                    formatter={(v, name) => [name === 'irr' ? safePercent(v) : safeMultiple(v), name === 'irr' ? 'IRR' : 'Equity Multiple']}
+                    formatter={(v, name) => [
+                      safePercent(v),
+                      name === 'irr' ? 'IRR' : 'Cash-on-Cash',
+                    ]}
                   />
-                  <Bar dataKey="irr" radius={[4, 4, 0, 0]} name="IRR">
-                    {enrichedPoints.map((entry) => (
-                      <Cell
-                        key={entry.purchase_price}
-                        fill={entry.verdict_status === 'worth_pursuing' ? 'hsl(var(--uw-success))' : 'hsl(var(--uw-risk))'}
-                      />
-                    ))}
-                  </Bar>
-                </BarChart>
+                  <Legend wrapperStyle={{ fontSize: 12 }} />
+                  <Line
+                    type="monotone"
+                    dataKey="irr"
+                    name="IRR"
+                    stroke="hsl(var(--primary))"
+                    strokeWidth={2.4}
+                    dot={{ r: 3 }}
+                    activeDot={{ r: 4 }}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="cash_on_cash"
+                    name="Cash-on-Cash"
+                    stroke="hsl(var(--accent))"
+                    strokeWidth={2.4}
+                    dot={{ r: 3 }}
+                    activeDot={{ r: 4 }}
+                  />
+                </LineChart>
               </ResponsiveContainer>
             </div>
           ) : (

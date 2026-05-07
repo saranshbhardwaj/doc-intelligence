@@ -261,7 +261,9 @@ export default function ReturnsSection({
                   <div className="mt-3 space-y-2">
                     {noiBridgeRows.map((row) => {
                       const citation = sourceCitations?.[row.source_field];
-                      const citationLabel = flattenCitationEntries([citation])[0]?.label;
+                      const citationFlatEntries = flattenCitationEntries([citation]);
+                      const citationLabel = citationFlatEntries[0]?.label;
+                      const citationEntry = citationFlatEntries[0]?.entry;
                       const supportLabel = citationLabel
                         || (row.source_type === 'model' ? 'Model rebuild' : null);
                       const pct = row.delta_to_prior?.pct;
@@ -290,8 +292,8 @@ export default function ReturnsSection({
                                   {signedAmount} · {pct >= 0 ? '+' : ''}{(pct * 100).toFixed(0)}%{basisLabel ? ` vs ${basisLabel}` : ''}
                                 </span>
                               ) : null}
-                              {citation ? (
-                                <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-[10px] font-bold uppercase tracking-wide text-uw-citation" onClick={() => onOpenSource?.(citation)}>
+                              {citationEntry ? (
+                                <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-[10px] font-bold uppercase tracking-wide text-uw-citation" onClick={() => onOpenSource?.(citationEntry)}>
                                   {supportLabel || 'Source'}
                                 </Button>
                               ) : supportLabel ? (

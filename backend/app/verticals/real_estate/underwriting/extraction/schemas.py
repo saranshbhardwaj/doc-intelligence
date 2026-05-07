@@ -156,8 +156,8 @@ class OMExtraction(BaseModel):
     expense_utilities_annual_current:             Optional[float] = Field(default=None, description="Utilities & Trash – Current annual",                       json_schema_extra={"cite": True})
     expense_mgmt_fee_annual:            Optional[float] = Field(default=None, description="Third Party Management annual",                   json_schema_extra={"cite": False})
     expense_total_annual:               Optional[float] = Field(default=None, description="Total Operating Expenses annual",                 json_schema_extra={"cite": False})
-    noi_year_one_stated:                Optional[float] = Field(default=None, description="NOI from Year 1 column",                         json_schema_extra={"cite": False})
-    noi_current_stated:                 Optional[float] = Field(default=None, description="NOI from Current column",                        json_schema_extra={"cite": False})
+    noi_year_one_stated:                Optional[float] = Field(default=None, description="NOI from Year 1 column",                         json_schema_extra={"cite": True})
+    noi_current_stated:                 Optional[float] = Field(default=None, description="NOI from Current column",                        json_schema_extra={"cite": True})
 
     # ── Financing & Exit ──────────────────────────────────────────────────────
     ltv_pct:             Optional[float] = Field(default=None, description="decimal e.g. 0.70",      json_schema_extra={"cite": True})

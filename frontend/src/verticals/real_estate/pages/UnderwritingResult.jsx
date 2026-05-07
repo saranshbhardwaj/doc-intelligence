@@ -1277,10 +1277,6 @@ export default function UnderwritingResult() {
                       rentComps={rentComps}
                       rentCompCoverage={rentCompCoverage}
                       unknownClimateCompCount={artifact.unknown_climate_comp_count ?? 0}
-                      getToken={getToken}
-                      runId={runId}
-                      runSensitivityAnalysis={runSensitivityAnalysis}
-                      basePurchasePrice={basePurchasePrice}
                     />
 
                     <DiscrepanciesSection
