@@ -131,8 +131,9 @@ export default function ModelBasisPanel({
         detail={rentCoverageDetail}
       >
         <p className="text-xs font-medium text-muted-foreground">
-          {rentCompCoverage?.compRows ?? 0} comp rows reviewed
-          {rentCompCoverage?.unmatchedCount != null ? ` · ${rentCompCoverage.unmatchedCount} unmatched` : ''}
+          {rentCompCoverage?.compRows ?? 0} facility comp rows reviewed
+          {rentCompCoverage?.supportMode === 'bucket' && rentCompCoverage?.exactLabel ? ` · ${rentCompCoverage.exactLabel}` : ''}
+          {rentCompCoverage?.supportMode !== 'bucket' && rentCompCoverage?.unmatchedCount != null ? ` · ${rentCompCoverage.unmatchedCount} unmatched` : ''}
         </p>
       </BasisCard>
     </UnderwritingSection>

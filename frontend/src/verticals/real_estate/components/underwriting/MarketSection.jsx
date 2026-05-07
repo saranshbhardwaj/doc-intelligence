@@ -9,6 +9,24 @@ const BUCKET_ORDER = ['locker', 'small', 'medium', 'large', 'xlarge'];
 const CLIMATE_ORDER = ['CC', 'NC'];
 const CLIMATE_LABEL = { CC: 'Climate-Controlled', NC: 'Non-Climate' };
 
+function parseStandardSqft(size) {
+  if (!size) return null;
+  const text = String(size).trim().toLowerCase().replace('×', 'x');
+  const dimension = text.match(/^(\d+(?:\.\d+)?)\s*x\s*(\d+(?:\.\d+)?)/);
+  if (dimension) return Number(dimension[1]) * Number(dimension[2]);
+  const scalar = text.match(/^(\d+(?:\.\d+)?)/);
+  return scalar ? Number(scalar[1]) : null;
+}
+
+function sizeBucket(sqft) {
+  if (!sqft || sqft <= 0) return null;
+  if (sqft < 25) return 'locker';
+  if (sqft < 75) return 'small';
+  if (sqft < 150) return 'medium';
+  if (sqft < 300) return 'large';
+  return 'xlarge';
+}
+
 function deltaTone(ratio) {
   if (ratio == null) return null;
   if (ratio > 1.10) return 'danger';
@@ -51,6 +69,22 @@ export default function MarketSection({
       allSizeOnly: sizeOnly,
     };
   }, [rentPositionAnalysis]);
+
+  const brokerBenchmarksByBucket = useMemo(() => {
+    const grouped = new Map();
+    rentComps
+      .filter((row) => row?.is_broker_market_average)
+      .forEach((row) => {
+        const sqft = row.standard_sqft || parseStandardSqft(row.size);
+        const bucket = sizeBucket(sqft);
+        if (!bucket) return;
+        const rent = row.asking_rent ?? (row.rent_per_sqft != null && sqft ? row.rent_per_sqft * sqft : null);
+        if (rent == null || rent <= 0) return;
+        const current = grouped.get(bucket) || { total: 0, count: 0 };
+        grouped.set(bucket, { total: current.total + rent, count: current.count + 1 });
+      });
+    return grouped;
+  }, [rentComps]);
 
   const capRateRows = [
     { label: 'Submarket average cap rate', value: formatPercent(capRateSubmarket) },
@@ -189,14 +223,35 @@ export default function MarketSection({
                       </UnderwritingStatusBadge>
                     </div>
                     <div className="mt-3 flex flex-wrap gap-2 text-xs font-medium text-muted-foreground">
-                      <span>{rentCompCoverage.compRows} comp rows reviewed</span>
-                      <span>·</span>
-                      <span>{rentCompCoverage.unmatchedCount} unmatched subject sizes</span>
+                      <span>{rentCompCoverage.compRows} facility comp rows reviewed</span>
+                      {rentCompCoverage.brokerBenchmarkRows > 0 ? (
+                        <>
+                          <span>·</span>
+                          <span>{rentCompCoverage.brokerBenchmarkRows} broker benchmark{rentCompCoverage.brokerBenchmarkRows === 1 ? '' : 's'}</span>
+                        </>
+                      ) : null}
+                      {rentCompCoverage.supportMode === 'bucket' ? (
+                        <>
+                          <span>·</span>
+                          <span>{rentCompCoverage.exactLabel}</span>
+                        </>
+                      ) : (
+                        <>
+                          <span>·</span>
+                          <span>{rentCompCoverage.unmatchedCount} unmatched subject sizes</span>
+                        </>
+                      )}
                     </div>
                     {rentCompCoverage.unmatchedLabels?.length > 0 ? (
                       <p className="mt-2 text-xs leading-5 text-muted-foreground">
-                        Unmatched: {rentCompCoverage.unmatchedLabels.join(', ')}
+                        {rentCompCoverage.supportMode === 'bucket' ? 'Unsupported buckets' : 'Unmatched'}: {rentCompCoverage.unmatchedLabels.join(', ')}
                         {rentCompCoverage.unmatchedCount > rentCompCoverage.unmatchedLabels.length ? ', and more' : ''}
+                      </p>
+                    ) : null}
+                    {rentCompCoverage.supportMode === 'bucket' && rentCompCoverage.exactUnmatchedLabels?.length > 0 ? (
+                      <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                        Exact sizes without direct facility comps: {rentCompCoverage.exactUnmatchedLabels.join(', ')}
+                        {rentCompCoverage.exactUnmatchedCount > rentCompCoverage.exactUnmatchedLabels.length ? ', and more' : ''}
                       </p>
                     ) : null}
                   </div>
@@ -260,8 +315,19 @@ export default function MarketSection({
                                 <td className="py-3 pr-4 font-medium text-foreground capitalize">{bucket}</td>
                                 {matrixClimates.map(climate => {
                                   const cell = rentPositionAnalysis.find(r => r.bucket === bucket && r.climate_type === climate);
+                                  const benchmark = brokerBenchmarksByBucket.get(bucket);
+                                  const benchmarkAverage = benchmark ? benchmark.total / benchmark.count : null;
                                   if (!cell) {
-                                    return <td key={climate} className="py-3 px-3 text-muted-foreground">—</td>;
+                                    return (
+                                      <td key={climate} className="py-3 px-3 text-muted-foreground">
+                                        {benchmarkAverage != null ? (
+                                          <span className="text-xs">
+                                            Broker: {formatCurrency(benchmarkAverage)}
+                                            <span className="ml-1 text-muted-foreground/70">({benchmark.count})</span>
+                                          </span>
+                                        ) : '—'}
+                                      </td>
+                                    );
                                   }
                                   const ratio = cell.current_vs_comp_ratio ?? cell.market_vs_comp_ratio;
                                   const tone = deltaTone(ratio);
@@ -290,6 +356,12 @@ export default function MarketSection({
                                             )}
                                           </span>
                                         )}
+                                        {benchmarkAverage != null && (
+                                          <span className="text-[11px] text-muted-foreground/80 tabular-nums">
+                                            Broker benchmark: {formatCurrency(benchmarkAverage)}
+                                            {benchmark.count > 1 ? ` (${benchmark.count})` : ''}
+                                          </span>
+                                        )}
                                       </div>
                                     </td>
                                   );
@@ -303,12 +375,12 @@ export default function MarketSection({
 
                     {unknownClimateCompCount > 0 && !allSizeOnly && (
                       <p className="mt-2 text-[11px] text-muted-foreground/70">
-                        {unknownClimateCompCount} comp{unknownClimateCompCount !== 1 ? 's' : ''} not matched — climate type unclear
+                        {unknownClimateCompCount} facility comp row{unknownClimateCompCount !== 1 ? 's' : ''} excluded from exact climate matching because climate type was unclear
                       </p>
                     )}
                     {allSizeOnly && (
                       <p className="mt-2 text-[11px] text-muted-foreground/70">
-                        Comps matched by unit size · climate type not classified
+                        Bucket-level view · facility comp climate type not fully classified
                       </p>
                     )}
 
@@ -316,7 +388,7 @@ export default function MarketSection({
                     {rentComps.length > 0 && (
                       <details className="mt-3">
                         <summary className="cursor-pointer select-none text-xs font-medium text-primary hover:text-primary/80">
-                          View comp rows ({rentComps.length})
+                          View comp / benchmark rows ({rentComps.length})
                         </summary>
                         <div className="mt-2 overflow-x-auto">
                           <table className="underwriting-table min-w-[560px]">
@@ -336,7 +408,11 @@ export default function MarketSection({
                                   <td className="py-2 text-muted-foreground">{c.facility ?? '—'}</td>
                                   <td className="py-2 tabular-nums text-muted-foreground">{c.size ?? '—'}</td>
                                   <td className="py-2">
-                                    {c.climate_type ? (
+                                    {c.is_broker_market_average ? (
+                                      <UnderwritingStatusBadge tone="neutral" className="px-1.5 py-0 text-[9px]">
+                                        Benchmark
+                                      </UnderwritingStatusBadge>
+                                    ) : c.climate_type ? (
                                       <UnderwritingStatusBadge
                                         tone={c.climate_type === 'CC' ? 'success' : c.climate_type === 'NC' ? 'active' : 'neutral'}
                                         className="px-1.5 py-0 text-[9px]"
@@ -389,7 +465,16 @@ export default function MarketSection({
                         {displayedRentComps.map((row, index) => (
                           <tr key={index} className="border-b border-border/50 last:border-b-0">
                             <td className="py-3 font-medium text-foreground">{row.size || '—'}</td>
-                            <td className="py-3 text-muted-foreground">{row.facility || '—'}</td>
+                            <td className="py-3 text-muted-foreground">
+                              <div className="flex flex-col gap-1">
+                                <span>{row.facility || '—'}</span>
+                                {row.is_broker_market_average ? (
+                                  <UnderwritingStatusBadge tone="neutral" className="w-fit px-1.5 py-0 text-[9px]">
+                                    Broker benchmark
+                                  </UnderwritingStatusBadge>
+                                ) : null}
+                              </div>
+                            </td>
                             <td className="py-3 text-right">{row.asking_rent != null ? formatCurrency(row.asking_rent) : '—'}</td>
                             <td className="py-3 text-right">{row.rent_per_sqft != null ? formatCurrencyPrecise(row.rent_per_sqft) : '—'}</td>
                             <td className="py-3 text-right text-muted-foreground">{row.distance_mi ? `${row.distance_mi} mi` : '—'}</td>

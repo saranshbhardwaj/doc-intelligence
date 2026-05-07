@@ -286,6 +286,12 @@ class REExtractionLLMService:
                     "asking_rent": {"type": "number"},
                     "rent_per_sqft": {"type": "number"},
                     "distance_mi": {"type": "number"},
+                    "climate_type": {"type": "string", "description": '"CC" | "NC" | "UNKNOWN"'},
+                    "standard_sqft": {"type": "number"},
+                    "is_broker_market_average": {
+                        "type": "boolean",
+                        "description": "true only for broker-computed market-average benchmark rows",
+                    },
                     "notes": {"type": "string"},
                 },
             },

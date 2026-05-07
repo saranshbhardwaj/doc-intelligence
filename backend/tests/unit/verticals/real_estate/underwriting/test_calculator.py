@@ -374,6 +374,20 @@ class TestSchemaNewFields:
         row = RentCompRow(size="5x10", asking_rent=85.0, standard_sqft=50.0)
         assert row.standard_sqft == 50.0
 
+    def test_rent_comp_row_broker_market_average_flag(self):
+        row = RentCompRow(
+            facility="Market Average (Broker)",
+            size="5x10",
+            asking_rent=58.0,
+            rent_per_sqft=1.16,
+            is_broker_market_average=True,
+        )
+        assert row.is_broker_market_average is True
+
+    def test_rent_comp_row_broker_market_average_defaults_false(self):
+        row = RentCompRow(size="5x10", asking_rent=85.0)
+        assert row.is_broker_market_average is False
+
     def test_rent_position_row_has_bucket(self):
         row = RentPositionRow(
             size="5x10", climate_type="CC", comp_average_rent=90.0,
@@ -455,6 +469,17 @@ class TestRentPositionBucketMatching:
             size=size, standard_sqft=sqft, climate_type=climate, asking_rent=asking_rent,
         )
 
+    def _make_broker_average_row(self, size, sqft, asking_rent):
+        from app.verticals.real_estate.underwriting.schemas.self_storage import RentCompRow
+        return RentCompRow(
+            facility="Market Average (Broker)",
+            size=size,
+            standard_sqft=sqft,
+            climate_type="UNKNOWN",
+            asking_rent=asking_rent,
+            is_broker_market_average=True,
+        )
+
     def test_matching_by_bucket_and_climate(self):
         unit_mix = [self._make_unit_row("5x10", 50, "CC", 95.0)]
         comps = [
@@ -478,6 +503,25 @@ class TestRentPositionBucketMatching:
         assert result[0].comp_count == 0
         assert result[0].comp_average_rent is None
         assert result[0].current_vs_comp_ratio is None
+
+    def test_broker_market_average_rows_do_not_drive_facility_comp_average(self):
+        unit_mix = [self._make_unit_row("5x10", 50, "NC", 80.0)]
+        comps = [
+            self._make_comp_row("5x10", 50, "NC", 70.0),
+            self._make_broker_average_row("5x10", 50, 110.0),
+        ]
+        result, _ = calc_module._build_rent_position_analysis(unit_mix, comps)
+        assert len(result) == 1
+        assert result[0].comp_count == 1
+        assert result[0].comp_average_rent == pytest.approx(70.0)
+
+    def test_only_broker_market_average_rows_emit_zero_comp_row(self):
+        unit_mix = [self._make_unit_row("5x10", 50, "NC", 80.0)]
+        comps = [self._make_broker_average_row("5x10", 50, 110.0)]
+        result, _ = calc_module._build_rent_position_analysis(unit_mix, comps)
+        assert len(result) == 1
+        assert result[0].comp_count == 0
+        assert result[0].comp_average_rent is None
 
     def test_all_unknown_sets_match_basis_size_only(self):
         unit_mix = [self._make_unit_row("5x10", 50, "NC", 80.0)]

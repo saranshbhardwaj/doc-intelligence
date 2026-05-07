@@ -195,8 +195,9 @@ EXTRACT (as JSON):
 - Exit: hold_period_years, exit_cap_rate, selling_cost_pct, market_cap_rate_sale if stated
 - Broker metrics: broker_cap_rate, broker_noi if stated
 - Unit mix: when a unit-mix overview table is present, extract one row per size/type bucket with size, standard_sqft, num_units, occupied_units, occupancy_pct, current_rent, market_rent if explicitly separate, rent_per_sqft, potential_rent, occupied_sqft, total_sqft, pct_of_total_sqft
-- Rent comps: when the OM includes a competitive set or nearby facility rent table, extract one row per facility/size bucket with facility, size, asking_rent, rent_per_sqft, distance_mi, and notes for address, year built, square footage, missing data, or specials
+- Rent comps: when the OM includes a competitive set or nearby facility rent table, extract one row per facility/size bucket with facility, size, asking_rent, rent_per_sqft, distance_mi, climate_type, standard_sqft, is_broker_market_average=false, and notes for address, year built, square footage, missing data, or specials. Do NOT include the subject property itself — its rates are already in unit_mix. Only include competing facilities.
 - Never collapse multiple size buckets into one rent_comps row. If a facility lists 5 x 10, 10 x 10, 10 x 15, and 10 x 20, emit four separate rows repeating the same facility, distance, and notes.
+- When the OM includes a broker-computed market average chart (e.g. "Weighted Rent Comparables") showing $/sqft or $/unit benchmarks per size, emit those as additional rent_comps benchmark rows with facility="Market Average (Broker)", is_broker_market_average=true, and notes containing the chart title and date. These are not individual competing facilities.
 - The size field must contain exactly one size bucket such as "10 x 10". Never place comma-separated sizes, addresses, year built, or square footage in size.
 - Map Rent/Unit into asking_rent and Rent/Sq.Ft. into rent_per_sqft whenever those columns are present.
 - Distinguish cap-rate labels carefully:
@@ -547,7 +548,8 @@ _OM_FIELDS = _om_reg["om_fields_for_prompt"] + [
         "name": "rent_comps",
         "type": (
             'array of {facility, size, asking_rent, rent_per_sqft, distance_mi, '
-            'climate_type ("CC"|"NC"|"UNKNOWN"), standard_sqft (float|null), notes}'
+            'climate_type ("CC"|"NC"|"UNKNOWN"), standard_sqft (float|null), '
+            'is_broker_market_average (boolean; true only for broker-computed market average rows), notes}'
         ),
     },
 ]
@@ -581,8 +583,10 @@ _OM_PHASE2_RULES = """OM MAPPING RULES:
 - For OM competitive-set rent tables, preserve one row per facility and size bucket in rent_comps. Use asking_rent for Rent/Unit, rent_per_sqft for Rent/Sq.Ft., and keep notes for address, year built, square footage, blanks like "no data", or specials.
 - Never collapse multiple size buckets into one rent_comps row. Repeat facility, distance, and notes across separate rows when a facility lists multiple sizes.
 - The size field must contain exactly one size bucket. Do not put comma-separated sizes, addresses, year built, or square footage into size.
+- CRITICAL: Do NOT include the subject property itself in rent_comps. The subject property is the property being marketed — it typically appears first in the comparison table, is highlighted, or is labeled with its own name/address as the listing. Its rental rates are already captured in unit_mix. Only include competing facilities in rent_comps.
 - If the table shows Rent/Unit and Rent/Sq.Ft., populate asking_rent and rent_per_sqft for each emitted row.
 - For each rent_comps row, set climate_type to "CC" if the facility or unit is described as climate-controlled, temperature-controlled, heated, or humidity-controlled; "NC" if described as non-climate, drive-up, or outdoor; "UNKNOWN" if unclear. Set standard_sqft to the numeric area in sqft derived from size (e.g. "5x10" -> 50, "10x20" -> 200).
+- When the OM includes a "Rental Rate Comparison", "Weighted Rent Comparables", or similar broker-computed market average chart or table showing a market/average $/sqft or $/unit benchmark per size bucket, emit those averages as additional rent_comps rows with facility set to "Market Average (Broker)", is_broker_market_average=true, and notes set to the chart title and date (e.g. "Weighted Rent Comparables Drive-Up October 2024"). These are broker-weighted benchmarks, not individual competing facilities.
 - Phase 1 condensation extracted both column values for expense line items using
   _current and _year1 suffixes (e.g. property_taxes_current, property_taxes_year1,
   insurance_current, insurance_year1, repairs_maintenance_current, etc.). Map these

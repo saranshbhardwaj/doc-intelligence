@@ -84,6 +84,8 @@ def _build_rent_position_analysis(
     comp_data: list[_CompEntry] = []
     unknown_count = 0
     for comp in rent_comps:
+        if comp.is_broker_market_average:
+            continue
         sqft = comp.standard_sqft or _parse_standard_sqft(comp.size)
         if sqft is None or sqft <= 0:
             continue

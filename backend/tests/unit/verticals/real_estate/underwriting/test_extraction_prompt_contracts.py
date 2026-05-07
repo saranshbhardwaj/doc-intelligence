@@ -136,6 +136,25 @@ def test_om_prompt_keeps_expense_ratios_period_specific():
     assert "pro forma/stabilized column" in prompt
 
 
+def test_om_prompt_excludes_subject_property_from_rent_comps():
+    prompt = create_phase2_om_prompt("[]").lower()
+
+    assert "do not include the subject property itself in rent_comps" in prompt
+    assert "already captured in unit_mix" in prompt
+    assert "only include competing facilities" in prompt
+
+
+def test_om_prompt_marks_broker_market_average_rows():
+    prompt = create_phase2_om_prompt("[]").lower()
+    rent_comp_schema = REExtractionLLMService._TOOL_SCHEMAS["om"]["properties"]["rent_comps"]["items"]["properties"]
+
+    assert "is_broker_market_average" in prompt
+    assert "broker-computed market average" in prompt
+    assert "not individual competing facilities" in prompt
+    assert "is_broker_market_average" in rent_comp_schema
+    assert rent_comp_schema["is_broker_market_average"]["type"] == "boolean"
+
+
 def test_om_tool_schema_has_detection_fields_before_extraction_fields():
     """Detection fields must exist in tool schema and appear before extraction fields."""
     props = REExtractionLLMService._TOOL_SCHEMAS["om"]["properties"]

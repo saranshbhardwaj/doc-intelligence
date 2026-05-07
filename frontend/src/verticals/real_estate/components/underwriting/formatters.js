@@ -242,6 +242,8 @@ export function getRentCompCoverage(unitMix = [], rentComps = [], rentPositionAn
     .filter((row) => isStorageRow(row) && normalizeSizeLabel(row?.size));
   const positionRows = Array.isArray(rentPositionAnalysis) ? rentPositionAnalysis : [];
   const compRows = Array.isArray(rentComps) ? rentComps : [];
+  const facilityCompRows = compRows.filter((row) => !row?.is_broker_market_average);
+  const brokerBenchmarkRows = compRows.length - facilityCompRows.length;
 
   const isSizeOnly = positionRows.length > 0
     && positionRows.every(r => r.match_basis === 'size_only' || r.climate_type === 'Mixed');
@@ -277,13 +279,7 @@ export function getRentCompCoverage(unitMix = [], rentComps = [], rentPositionAn
   });
   const subjectSizes = [...subjectSizeMap.values()];
 
-  // In size-only mode the backend collapses multiple subject sizes into one bucket row.
-  // Count and report coverage at bucket granularity so 10x10 and 5x10 in the same
-  // bucket don't each count as separate "unmatched" sizes.
-  const effectiveSubjectSizes = isSizeOnly
-    ? [...new Map(subjectSizes.filter(s => s.bucket).map(s => [s.bucket, s])).values()]
-    : subjectSizes;
-  const totalBuckets = effectiveSubjectSizes.length || subjectSizes.length;
+  const subjectBuckets = [...new Map(subjectSizes.filter(s => s.bucket).map(s => [s.bucket, s])).values()];
 
   const matchedKeys = new Set(matchedPositionRows.map((row) => {
     const sizeKey = normalizeSizeLabel(row?.size);
@@ -292,9 +288,22 @@ export function getRentCompCoverage(unitMix = [], rentComps = [], rentPositionAn
   }));
   const matchedSizes = new Set(matchedPositionRows.map((row) => normalizeSizeLabel(row?.size)).filter(Boolean));
   const matchedBucketSet = new Set(matchedPositionRows.map((row) => row?.bucket).filter(Boolean));
-  const compSizes = new Set(compRows.map((row) => normalizeSizeLabel(row?.size)).filter(Boolean));
+  const compSizes = new Set(
+    facilityCompRows
+      .filter((row) => row?.asking_rent != null || row?.rent_per_sqft != null)
+      .map((row) => normalizeSizeLabel(row?.size))
+      .filter(Boolean)
+  );
 
-  const unmatchedLabels = effectiveSubjectSizes
+  const exactUnmatchedLabels = subjectSizes
+    .filter((subjectSize) => !compSizes.has(subjectSize.sizeKey))
+    .map((subjectSize) => subjectSize.label);
+  const exactTotalSizes = subjectSizes.length;
+  const exactUnmatchedCount = exactUnmatchedLabels.length;
+  const exactMatchedSizes = Math.max(exactTotalSizes - exactUnmatchedCount, 0);
+
+  const coverageSubjects = isSizeOnly ? subjectBuckets : subjectSizes;
+  const unmatchedLabels = coverageSubjects
     .filter((subjectSize) => {
       if (isSizeOnly) {
         return !matchedBucketSet.has(subjectSize.bucket);
@@ -304,6 +313,7 @@ export function getRentCompCoverage(unitMix = [], rentComps = [], rentPositionAn
     })
     .map((subjectSize) => subjectSize.label);
 
+  const totalBuckets = coverageSubjects.length || subjectSizes.length;
   const matchedBuckets = totalBuckets > 0 ? totalBuckets - unmatchedLabels.length : matchedPositionRows.length;
   const unmatchedCount = Math.max(totalBuckets - matchedBuckets, 0);
   const hasUnmatchedBuckets = positionRows.some(r => r.comp_count === 0 || r.comp_average_rent == null);
@@ -311,18 +321,31 @@ export function getRentCompCoverage(unitMix = [], rentComps = [], rentPositionAn
     : matchedBuckets === 0 ? 'danger'
     : (unmatchedCount > 0 || (isSizeOnly && hasUnmatchedBuckets)) ? 'warning'
     : 'success';
+  const supportMode = isSizeOnly ? 'bucket' : 'exact';
 
   return {
     totalBuckets,
     matchedBuckets,
     unmatchedCount,
     unmatchedLabels: [...new Set(unmatchedLabels)].slice(0, 6),
-    compRows: compRows.length,
+    supportMode,
+    bucketTotal: isSizeOnly ? totalBuckets : subjectBuckets.length,
+    bucketMatched: isSizeOnly ? matchedBuckets : matchedBucketSet.size,
+    bucketUnmatchedCount: isSizeOnly ? unmatchedCount : Math.max(subjectBuckets.length - matchedBucketSet.size, 0),
+    exactTotalSizes,
+    exactMatchedSizes,
+    exactUnmatchedCount,
+    exactUnmatchedLabels: [...new Set(exactUnmatchedLabels)].slice(0, 6),
+    exactLabel: exactTotalSizes > 0 ? `${exactMatchedSizes}/${exactTotalSizes} exact sizes supported` : 'No subject sizes',
+    compRows: facilityCompRows.length,
+    brokerBenchmarkRows,
     tone,
-    label: totalBuckets > 0 ? `${matchedBuckets}/${totalBuckets} subject sizes matched` : `${compRows.length} comp rows`,
+    label: totalBuckets > 0
+      ? (isSizeOnly ? `${matchedBuckets}/${totalBuckets} rent buckets supported` : `${matchedBuckets}/${totalBuckets} subject sizes matched`)
+      : `${facilityCompRows.length} comp rows`,
     detail: totalBuckets > 0
       ? (isSizeOnly
-          ? 'Comps matched by unit size only — climate type not classified. Ratios are directional; verify against classified comps when available.'
+          ? 'Rent-position ratios use bucket-level facility comps because climate type is not fully classified. Exact-size gaps are listed separately.'
           : 'Subject storage sizes are matched to same-size comp rows when available; unmatched sizes should be reviewed manually.')
       : 'Add subject unit mix to measure rent-position coverage against the comp set.',
   };

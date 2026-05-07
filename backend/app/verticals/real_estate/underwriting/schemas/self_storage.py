@@ -336,6 +336,13 @@ class RentCompRow(BaseModel):
         default=None,
         description="Canonical unit area in sqft derived from the size string (e.g. '5×10' → 50).",
     )
+    is_broker_market_average: bool = Field(
+        default=False,
+        description=(
+            "True when this row is a broker-computed market average benchmark "
+            "rather than an individual competing facility."
+        ),
+    )
 
 
 class SelfStorageInputs(BaseModel):
