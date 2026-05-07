@@ -507,7 +507,25 @@ def re_calculate_underwriting_task(self, payload: dict) -> dict:
             status="calculating", current_stage="calculation",
             progress_percent=80, message="Running calculations...",
         )
-        inputs = SelfStorageInputs(**payload.get("merged_inputs", {}))
+        merged_inputs = payload.get("merged_inputs", {})
+        # Snapshot the user's current verdict-gate thresholds into criteria so this
+        # run's pass/fail gates are frozen at extraction time and immune to future default changes.
+        run_obj = repo.get_by_id(run_id)
+        if run_obj:
+            from app.repositories.user_repository import UserRepository
+            from app.schemas.user_thresholds import UserUnderwritingThresholds
+            saved = UserRepository().get_underwriting_thresholds(run_obj.user_id) or {}
+            if saved:
+                thresholds = UserUnderwritingThresholds(**saved)
+                criteria = merged_inputs.get("criteria", {})
+                for key in ("dscr_year_one_floor", "stress_dscr_floor", "rollover_risk_pct"):
+                    if criteria.get(key) is None:
+                        val = getattr(thresholds, key, None)
+                        if val is not None:
+                            criteria[key] = val
+                merged_inputs = {**merged_inputs, "criteria": criteria}
+
+        inputs = SelfStorageInputs(**merged_inputs)
         doc_results = [ExtractedDocResult(**d) for d in payload.get("doc_results", [])]
         result = calculate(inputs)
         result.income_basis_months = inputs.operational.income_basis_months

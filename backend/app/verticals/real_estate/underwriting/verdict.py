@@ -54,11 +54,11 @@ _CONDITION_WARNING_KEYS = {
 }
 
 
-def _resolve(thresholds: UserUnderwritingThresholds | None, key: str) -> float:
-    if thresholds is not None:
-        value = getattr(thresholds, key, None)
-        if value is not None:
-            return value
+def _resolve(criteria: InvestmentCriteria, key: str) -> float:
+    """Return the per-deal threshold from criteria, falling back to the hardcoded industry minimum."""
+    value = getattr(criteria, key, None)
+    if value is not None:
+        return value
     if key not in _DEFAULTS:
         raise ValueError(f"No default configured for threshold key '{key}'")
     return _DEFAULTS[key]
@@ -70,7 +70,7 @@ def evaluate(
     stress_scenarios: list[StressScenario] | None = None,
     income_statement_period_months: int | None = None,
     inputs=None,
-    thresholds: UserUnderwritingThresholds | None = None,
+    thresholds: UserUnderwritingThresholds | None = None,  # noqa: ARG001 — kept for call-site backward compat
 ) -> VerdictResult:
     """
     Evaluate underwriting results against investment criteria.
@@ -147,8 +147,8 @@ def evaluate(
             )
         )
 
-    # Hard check 4: DSCR year one floor (default 1.25; user-overridable)
-    dscr_floor = _resolve(thresholds, "dscr_year_one_floor")
+    # Hard check 4: DSCR year one floor (default 1.25; snapshotted from user defaults at run creation)
+    dscr_floor = _resolve(criteria, "dscr_year_one_floor")
     if result.dscr_year_one is not None and result.dscr_year_one < dscr_floor:
         failures.append(
             VerdictFailure(
@@ -179,7 +179,7 @@ def evaluate(
                 if min_stress_dscr is None or scenario.min_dscr < min_stress_dscr:
                     min_stress_dscr = scenario.min_dscr
 
-        stress_floor = _resolve(thresholds, "stress_dscr_floor")
+        stress_floor = _resolve(criteria, "stress_dscr_floor")
         if min_stress_dscr is not None and min_stress_dscr < stress_floor:
             failures.append(
                 VerdictFailure(
@@ -190,7 +190,7 @@ def evaluate(
                 )
             )
 
-    warnings = _build_warnings(result, income_statement_period_months, inputs=inputs, thresholds=thresholds)
+    warnings = _build_warnings(result, income_statement_period_months, inputs=inputs, criteria=criteria)
 
     # Determine status
     if failures:
@@ -361,7 +361,7 @@ def _build_warnings(
     result: SelfStorageResult,
     income_statement_period_months: int | None = None,
     inputs=None,
-    thresholds: UserUnderwritingThresholds | None = None,
+    criteria: InvestmentCriteria | None = None,
 ) -> list[VerdictWarning]:
     warnings: list[VerdictWarning] = []
     expense_basis = getattr(result, "expense_basis", None)
@@ -525,7 +525,7 @@ def _build_warnings(
     if market_supply_warning:
         warnings.append(market_supply_warning)
 
-    rollover_floor = _resolve(thresholds, "rollover_risk_pct")
+    rollover_floor = _resolve(criteria or InvestmentCriteria(), "rollover_risk_pct")
     if (
         result.rollover_risk
         and result.rollover_risk.pct_rent_expiring_12mo > rollover_floor

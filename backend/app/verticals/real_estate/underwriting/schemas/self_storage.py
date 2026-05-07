@@ -245,6 +245,18 @@ class InvestmentCriteria(BaseModel):
         default=0.80, description="Hard upper bound on LTV."
     )
 
+    # Verdict gate overrides — snapshotted from user's "My Defaults" at run creation.
+    # None means "use the hardcoded industry minimum" (see verdict._DEFAULTS).
+    dscr_year_one_floor: Optional[float] = Field(
+        default=None, description="Minimum acceptable Year 1 DSCR for this deal."
+    )
+    stress_dscr_floor: Optional[float] = Field(
+        default=None, description="Minimum DSCR under any stress scenario for this deal."
+    )
+    rollover_risk_pct: Optional[float] = Field(
+        default=None, description="Rollover-risk warning threshold (fraction of rent expiring within 12 months)."
+    )
+
 
 class UnitMixRow(BaseModel):
     """One row from a self-storage unit-mix schedule."""

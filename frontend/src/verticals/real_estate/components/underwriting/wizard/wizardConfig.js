@@ -29,7 +29,7 @@ export const TAB_CONFIG = [
   { id: 'operations', label: 'Operations', desc: 'Revenue assumptions and operating expense inputs.' },
   { id: 'market', label: 'Market', desc: 'Nearby facilities, population, and income context.' },
   { id: 'debtExit', label: 'Debt & Exit', desc: 'Financing, hold horizon, and exit assumptions.' },
-  { id: 'criteria', label: 'Criteria', desc: 'Return hurdles and leverage limits.' },
+  { id: 'criteria', label: 'Criteria', desc: 'Return hurdles, leverage limits, and coverage floors.' },
 ];
 
 export const VISIBLE_CITATION_FIELD_KEYS = [
@@ -145,7 +145,7 @@ export const createDefaultInputs = () => ({
   },
   financing: { interest_rate_pct: 6.5, loan_term_years: 10, amortization_years: 25, ltv_pct: 70 },
   exit: { hold_period_years: 10, market_cap_rate_sale: '', exit_cap_rate: 6.5, selling_cost_pct: 3 },
-  criteria: { target_irr: 15, target_cash_on_cash: 8, target_equity_multiple: 2.0, max_ltv: 80 },
+  criteria: { target_irr: 15, target_cash_on_cash: 8, target_equity_multiple: 2.0, max_ltv: 80, dscr_year_one_floor: 1.25, stress_dscr_floor: 1.15, rollover_risk_pct: 40 },
   rent_comps: [],
 });
 

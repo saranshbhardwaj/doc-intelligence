@@ -21,6 +21,11 @@ import {
   ValueAddEvidence,
 } from './WizardFields';
 
+const formatPct = (value, digits = 1) => {
+  const number = Number(value);
+  return Number.isFinite(number) ? `${number.toFixed(digits)}%` : '—';
+};
+
 function humanizeFieldName(field) {
   if (!field) return null;
   return field.replace(/^expense_/, '').replace(/_/g, ' ');
@@ -115,28 +120,78 @@ export default function WizardInputStage({
   const renderActiveTabPanel = () => {
     switch (activeTab) {
       case 'acquisition':
+        const purchasePrice = Number(inputs.acquisition.purchase_price);
+        const modelCapRate = Number(currentRun?.cap_rate_year_one);
+        const omPurchaseCapRate = Number(inputs.acquisition.market_cap_rate_purchase);
+        const capRateSpread = Number.isFinite(modelCapRate) && Number.isFinite(omPurchaseCapRate)
+          ? (modelCapRate * 100) - omPurchaseCapRate
+          : null;
         return (
-          <div className="fields-grid">
-            <NumericField label="Purchase Price" value={inputs.acquisition.purchase_price} onChange={(v) => patchAcq('purchase_price', v)} placeholder="5,000,000" prefix="$" citation={getCitation('purchase_price')} onOpenSource={handleOpenSource} />
-            <NumericField label="Closing Cost" value={inputs.acquisition.closing_cost_pct} onChange={(v) => patchAcq('closing_cost_pct', v)} placeholder="2" suffix="%" citation={getCitation('closing_cost_pct')} onOpenSource={handleOpenSource} />
-            <NumericField label="Market Cap Rate Purchase" value={inputs.acquisition.market_cap_rate_purchase} onChange={(v) => patchAcq('market_cap_rate_purchase', v)} placeholder="6.0" suffix="%" citation={getCitation('market_cap_rate_purchase')} onOpenSource={handleOpenSource} />
-            <NumericField label="CapEx Reserve / Unit" value={inputs.acquisition.capex_reserve_per_unit} onChange={(v) => patchAcq('capex_reserve_per_unit', v)} placeholder="0" prefix="$" suffix="/unit" citation={getCitation('capex_reserve_per_unit')} onOpenSource={handleOpenSource} />
-            <FieldGroup label="Property" />
-            <NumericField
-              label="Total Units"
-              value={projectData.num_units ?? ''}
-              onChange={(v) => patchProject('num_units', v === '' ? '' : parseInt(v, 10) || '')}
-              citation={getCitation('num_units')}
-              onOpenSource={handleOpenSource}
-            />
-            <NumericField
-              label="Rentable Sq Ft"
-              value={projectData.rentable_sqft ?? ''}
-              onChange={(v) => patchProject('rentable_sqft', v)}
-              suffix="sqft"
-              citation={getCitation('rentable_sqft')}
-              onOpenSource={handleOpenSource}
-            />
+          <div className="space-y-4">
+            <div className="fields-grid">
+              <NumericField label="Purchase Price" value={inputs.acquisition.purchase_price} onChange={(v) => patchAcq('purchase_price', v)} placeholder="5,000,000" prefix="$" citation={getCitation('purchase_price')} onOpenSource={handleOpenSource} />
+              <NumericField label="Closing Cost" value={inputs.acquisition.closing_cost_pct} onChange={(v) => patchAcq('closing_cost_pct', v)} placeholder="2" suffix="%" citation={getCitation('closing_cost_pct')} onOpenSource={handleOpenSource} />
+              <NumericField label="CapEx Reserve / Unit" value={inputs.acquisition.capex_reserve_per_unit} onChange={(v) => patchAcq('capex_reserve_per_unit', v)} placeholder="0" prefix="$" suffix="/unit" citation={getCitation('capex_reserve_per_unit')} onOpenSource={handleOpenSource} />
+              <FieldGroup label="Property" />
+              <NumericField
+                label="Total Units"
+                value={projectData.num_units ?? ''}
+                onChange={(v) => patchProject('num_units', v === '' ? '' : parseInt(v, 10) || '')}
+                citation={getCitation('num_units')}
+                onOpenSource={handleOpenSource}
+              />
+              <NumericField
+                label="Rentable Sq Ft"
+                value={projectData.rentable_sqft ?? ''}
+                onChange={(v) => patchProject('rentable_sqft', v)}
+                suffix="sqft"
+                citation={getCitation('rentable_sqft')}
+                onOpenSource={handleOpenSource}
+              />
+            </div>
+
+            <div className="rounded-2xl border border-border/60 bg-muted/25 p-4">
+              <div className="flex flex-wrap items-start justify-between gap-3">
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                    Purchase Evidence
+                  </p>
+                  <p className="mt-1 text-sm leading-6 text-muted-foreground">
+                    Broker cap rate is source evidence only. Model implied cap rate is Year-1 NOI divided by purchase price.
+                  </p>
+                </div>
+                {getCitation('market_cap_rate_purchase') ? (
+                  <span className="rounded-full border border-border/60 bg-background px-2.5 py-1 text-[10px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">
+                    Evidence
+                  </span>
+                ) : null}
+              </div>
+              <div className="mt-4 grid gap-3 md:grid-cols-3">
+                <div className="rounded-xl border border-border/60 bg-background/70 px-3 py-2">
+                  <p className="text-xs text-muted-foreground">OM purchase cap rate</p>
+                  <p className="mt-1 font-display text-lg font-semibold text-foreground">
+                    {formatPct(inputs.acquisition.market_cap_rate_purchase)}
+                  </p>
+                </div>
+                <div className="rounded-xl border border-border/60 bg-background/70 px-3 py-2">
+                  <p className="text-xs text-muted-foreground">Model implied cap rate</p>
+                  <p className="mt-1 font-display text-lg font-semibold text-foreground">
+                    {Number.isFinite(modelCapRate) ? formatPct(modelCapRate * 100) : '—'}
+                  </p>
+                </div>
+                <div className="rounded-xl border border-border/60 bg-background/70 px-3 py-2">
+                  <p className="text-xs text-muted-foreground">Model vs OM</p>
+                  <p className="mt-1 font-display text-lg font-semibold text-foreground">
+                    {capRateSpread != null ? `${capRateSpread >= 0 ? '+' : ''}${capRateSpread.toFixed(1)} pp` : '—'}
+                  </p>
+                </div>
+              </div>
+              {!Number.isFinite(purchasePrice) || purchasePrice <= 0 ? (
+                <p className="mt-3 text-xs text-muted-foreground">
+                  Add purchase price to calculate model implied cap rate.
+                </p>
+              ) : null}
+            </div>
           </div>
         );
       case 'operations':
@@ -416,6 +471,10 @@ export default function WizardInputStage({
             <NumericField label="Target Cash-on-Cash" value={inputs.criteria.target_cash_on_cash} onChange={(v) => patchCrit('target_cash_on_cash', v)} suffix="%" citation={getCitation('target_cash_on_cash')} onOpenSource={handleOpenSource} />
             <NumericField label="Target Equity Multiple" value={inputs.criteria.target_equity_multiple} onChange={(v) => patchCrit('target_equity_multiple', v)} suffix="×" citation={getCitation('target_equity_multiple')} onOpenSource={handleOpenSource} />
             <NumericField label="Max LTV" value={inputs.criteria.max_ltv} onChange={(v) => patchCrit('max_ltv', v)} suffix="%" citation={getCitation('max_ltv')} onOpenSource={handleOpenSource} />
+            <FieldGroup label="Coverage & Financing Gates" />
+            <NumericField label="Min DSCR — Year 1" value={inputs.criteria.dscr_year_one_floor} onChange={(v) => patchCrit('dscr_year_one_floor', v)} suffix="×" note="Lender floor. SBA/CMBS standard is 1.25×." />
+            <NumericField label="Min DSCR — Stress" value={inputs.criteria.stress_dscr_floor} onChange={(v) => patchCrit('stress_dscr_floor', v)} suffix="×" note="Coverage floor across all stress scenarios." />
+            <NumericField label="Rollover Warning" value={inputs.criteria.rollover_risk_pct} onChange={(v) => patchCrit('rollover_risk_pct', v)} suffix="%" note="Flag if this % of rent rolls within 12 months." />
           </div>
         );
       default:

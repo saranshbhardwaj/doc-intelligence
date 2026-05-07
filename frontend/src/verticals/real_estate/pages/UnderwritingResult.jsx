@@ -827,7 +827,6 @@ export default function UnderwritingResult() {
       )}
     >
       <ResizablePanelGroup
-        key={showSourcePanel ? 'uw-result-split-open' : 'uw-result-split-closed'}
         direction="horizontal"
         className="h-full min-w-0"
       >
