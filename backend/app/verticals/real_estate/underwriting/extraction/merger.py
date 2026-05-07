@@ -10,7 +10,7 @@ Priority rules (industry standard):
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field as dc_field
 from typing import Any, Optional
 
 from .schemas import (
@@ -30,7 +30,7 @@ class MergeCandidate:
     formula: str | None = None
     is_default_candidate: bool = False
     is_computed: bool = False
-    metadata: dict[str, Any] = field(default_factory=dict)
+    metadata: dict[str, Any] = dc_field(default_factory=dict)
 
 
 def _candidate(

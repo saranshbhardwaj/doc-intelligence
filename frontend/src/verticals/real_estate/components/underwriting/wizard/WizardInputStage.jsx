@@ -119,7 +119,7 @@ export default function WizardInputStage({
 
   const renderActiveTabPanel = () => {
     switch (activeTab) {
-      case 'acquisition':
+      case 'acquisition': {
         const purchasePrice = Number(inputs.acquisition.purchase_price);
         const modelCapRate = Number(currentRun?.cap_rate_year_one);
         const omPurchaseCapRate = Number(inputs.acquisition.market_cap_rate_purchase);
@@ -202,7 +202,8 @@ export default function WizardInputStage({
             </div>
           </div>
         );
-      case 'operations':
+      }
+      case 'operations': {
         const expenseBasis = currentRun?.result_artifact?.expense_basis;
         const driverFields = new Set(expenseBasis?.driver_fields ?? []);
         const hasBasis = Boolean(expenseBasis);
@@ -353,6 +354,7 @@ export default function WizardInputStage({
 
           </div>
         );
+      }
       case 'market':
         return (
           <>

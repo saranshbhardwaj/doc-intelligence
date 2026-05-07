@@ -150,7 +150,6 @@ export default function TrustPanel({
   warningCount = 0,
   // Col 1 — source data
   persistedInputs,
-  artifact,
   currentRentPerDoor,
   currentExpenseRatio,
   proFormaExpenseRatio,

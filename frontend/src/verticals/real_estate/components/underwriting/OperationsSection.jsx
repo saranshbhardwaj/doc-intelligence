@@ -94,7 +94,6 @@ export default function OperationsSection({
   extractedUnits = 0,
   unitMixCoveragePct = null,
   occupancy,
-  currentExpenseRatio,
   proFormaExpenseRatio,
   propertyTaxAnnual,
   propertyTaxGrowthPct,

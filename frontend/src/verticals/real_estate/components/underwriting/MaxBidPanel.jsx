@@ -60,12 +60,6 @@ function getPointVerdict(point, criteria) {
     : { status: 'worth_pursuing', tone: 'success', label: 'Passes Screen' };
 }
 
-function highestPassingPrice(points, predicate) {
-  const passing = points
-    .filter((point) => point.purchase_price > 0 && predicate(point))
-    .sort((a, b) => b.purchase_price - a.purchase_price);
-  return passing[0]?.purchase_price ?? null;
-}
 
 function interpolatedMaxPrice(points, valueKey, target) {
   const sorted = points
@@ -116,8 +110,6 @@ function pointLabel(point, purchasePrice) {
 
 export default function MaxBidPanel({
   purchasePrice,
-  currentVerdictLabel,
-  currentVerdictTone,
   currentNoi,
   criteria,
   getToken,

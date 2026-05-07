@@ -513,8 +513,6 @@ export default function UnderwritingResult() {
     ? `https://maps.googleapis.com/maps/api/staticmap?center=${encodeURIComponent(address)}&zoom=13&size=500x260&markers=color:red%7C${encodeURIComponent(address)}&key=${mapsKey}`
     : null;
 
-  const basePurchasePrice = purchasePrice || 5_000_000;
-
   const proformaData = projections.slice(0, 5).map((p) => ({
     year: `Y${p.year}`,
     NOI: Math.round(p.noi),
