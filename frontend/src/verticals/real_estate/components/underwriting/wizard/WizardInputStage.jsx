@@ -151,7 +151,7 @@ export default function WizardInputStage({
               <NumericField
                 label="Year Built"
                 value={projectData.year_built ?? ''}
-                onChange={(v) => patchProject('year_built', parseInt(v, 10) || '')}
+                onChange={(v) => { const n = parseInt(v, 10); patchProject('year_built', isNaN(n) ? '' : n); }}
                 placeholder="1985"
                 citation={getCitation('year_built')}
                 onOpenSource={handleOpenSource}
