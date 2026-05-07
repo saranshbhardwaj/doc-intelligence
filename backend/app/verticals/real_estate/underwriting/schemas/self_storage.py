@@ -513,10 +513,14 @@ class RentPositionRow(BaseModel):
     )
     subject_current_rent: Optional[float] = None
     subject_market_rent: Optional[float] = None
-    comp_average_rent: float
+    comp_average_rent: Optional[float] = None
     current_vs_comp_ratio: Optional[float] = None
     market_vs_comp_ratio: Optional[float] = None
     comp_count: int
+    match_basis: Literal["exact", "size_only"] = Field(
+        default="exact",
+        description='"exact" = matched by bucket+climate; "size_only" = all-unknown fallback.',
+    )
     bucket: Optional[Literal["locker", "small", "medium", "large", "xlarge"]] = Field(
         default=None,
         description="Size bucket label: locker / small / medium / large / xlarge.",

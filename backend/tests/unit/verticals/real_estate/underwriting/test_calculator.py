@@ -391,6 +391,16 @@ class TestSchemaNewFields:
         )
         assert row.bucket is None
 
+    def test_rent_position_row_comp_average_rent_optional(self):
+        row = RentPositionRow(size="5x10", climate_type="CC", comp_average_rent=None, comp_count=0)
+        assert row.comp_average_rent is None
+        assert row.match_basis == "exact"
+
+    def test_rent_position_row_match_basis_size_only(self):
+        row = RentPositionRow(size="5x10", climate_type="Mixed",
+                              comp_average_rent=80.0, comp_count=2, match_basis="size_only")
+        assert row.match_basis == "size_only"
+
 
 
 class TestSizeBucketUtilities:
@@ -459,11 +469,52 @@ class TestRentPositionBucketMatching:
         assert result[0].comp_average_rent == pytest.approx(95.0)
         assert result[0].bucket == "small"
 
-    def test_no_comp_match_returns_no_row(self):
+    def test_no_comp_match_emits_zero_comp_row(self):
+        """Unmatched subject bucket → row with comp_count=0, comp_average_rent=None."""
         unit_mix = [self._make_unit_row("10x20", 200, "CC", 150.0)]
         comps = [self._make_comp_row("5x10", 50, "CC", 90.0)]
         result, _ = calc_module._build_rent_position_analysis(unit_mix, comps)
-        assert result == []
+        assert len(result) == 1
+        assert result[0].comp_count == 0
+        assert result[0].comp_average_rent is None
+        assert result[0].current_vs_comp_ratio is None
+
+    def test_all_unknown_sets_match_basis_size_only(self):
+        unit_mix = [self._make_unit_row("5x10", 50, "NC", 80.0)]
+        comps = [self._make_comp_row("5x10", 50, None, 75.0),
+                 self._make_comp_row("5x10", 50, None, 85.0)]
+        result, _ = calc_module._build_rent_position_analysis(unit_mix, comps)
+        assert result[0].match_basis == "size_only"
+        assert result[0].climate_type == "Mixed"
+        assert result[0].comp_average_rent == pytest.approx(80.0)
+
+    def test_classified_comps_set_match_basis_exact(self):
+        unit_mix = [self._make_unit_row("5x10", 50, "CC", 90.0)]
+        comps = [self._make_comp_row("5x10", 50, "CC", 88.0)]
+        result, _ = calc_module._build_rent_position_analysis(unit_mix, comps)
+        assert result[0].match_basis == "exact"
+
+    def test_mixed_known_unknown_emits_zero_comp_row_for_unmatched(self):
+        """Large CC bucket has no comp — should emit a zero-comp row."""
+        unit_mix = [self._make_unit_row("10x20", 200, "CC", 150.0),
+                    self._make_unit_row("5x10",   50, "CC",  90.0)]
+        comps = [self._make_comp_row("5x10", 50, "CC", 88.0)]
+        result, _ = calc_module._build_rent_position_analysis(unit_mix, comps)
+        assert len(result) == 2
+        unmatched = next(r for r in result if r.bucket == "large")
+        matched   = next(r for r in result if r.bucket == "small")
+        assert unmatched.comp_count == 0
+        assert unmatched.comp_average_rent is None
+        assert matched.comp_average_rent == pytest.approx(88.0)
+
+    def test_all_unknown_no_bucket_match_emits_zero_comp_row(self):
+        """Size-only fallback still emits a row when no comp covers the bucket."""
+        unit_mix = [self._make_unit_row("10x20", 200, "NC", 150.0)]
+        comps = [self._make_comp_row("5x10", 50, None, 80.0)]
+        result, _ = calc_module._build_rent_position_analysis(unit_mix, comps)
+        assert len(result) == 1
+        assert result[0].comp_count == 0
+        assert result[0].match_basis == "size_only"
 
     def test_cc_and_nc_rows_matched_separately(self):
         unit_mix = [

@@ -39,13 +39,16 @@ export default function MarketSection({
 }) {
   const [showAllRentComps, setShowAllRentComps] = useState(false);
 
-  const { hasBuckets, matrixBuckets, matrixClimates } = useMemo(() => {
+  const { hasBuckets, matrixBuckets, matrixClimates, allSizeOnly } = useMemo(() => {
     const bucketSet = new Set(rentPositionAnalysis.map(r => r.bucket).filter(Boolean));
     const climateSet = new Set(rentPositionAnalysis.map(r => r.climate_type).filter(Boolean));
+    const sizeOnly = rentPositionAnalysis.length > 0
+      && rentPositionAnalysis.every(r => r.match_basis === 'size_only' || r.climate_type === 'Mixed');
     return {
       hasBuckets: bucketSet.size > 0,
       matrixBuckets: BUCKET_ORDER.filter(b => bucketSet.has(b)),
       matrixClimates: CLIMATE_ORDER.filter(c => climateSet.has(c)),
+      allSizeOnly: sizeOnly,
     };
   }, [rentPositionAnalysis]);
 
@@ -201,7 +204,7 @@ export default function MarketSection({
                 {rentPositionAnalysis.length > 0 ? (
                   <div>
                     {/* Matrix table */}
-                    {!hasBuckets ? (
+                    {!hasBuckets || allSizeOnly ? (
                       <div className="overflow-x-auto">
                         <table className="underwriting-table min-w-[760px]">
                           <thead>
@@ -216,17 +219,24 @@ export default function MarketSection({
                             </tr>
                           </thead>
                           <tbody>
-                            {rentPositionAnalysis.map((row, index) => (
-                              <tr key={index} className="border-b border-border/50 last:border-b-0">
-                                <td className="py-3 font-medium text-foreground">{row.size || '—'}</td>
-                                <td className="py-3 text-muted-foreground">{row.climate_type}</td>
-                                <td className="py-3 text-right">{formatCurrency(row.subject_current_rent)}</td>
-                                <td className="py-3 text-right">{formatCurrency(row.subject_market_rent)}</td>
-                                <td className="py-3 text-right">{formatCurrency(row.comp_average_rent)}</td>
-                                <td className="py-3 text-right font-medium text-foreground">{formatRatioPercent(row.current_vs_comp_ratio)}</td>
-                                <td className="py-3 text-right font-medium text-foreground">{formatRatioPercent(row.market_vs_comp_ratio)}</td>
-                              </tr>
-                            ))}
+                            {rentPositionAnalysis.map((row, index) => {
+                              const noComp = row.comp_count === 0 || row.comp_average_rent == null;
+                              return (
+                                <tr key={index} className={`border-b border-border/50 last:border-b-0 ${noComp ? 'opacity-50' : ''}`}>
+                                  <td className="py-3 font-medium text-foreground">{row.size || '—'}</td>
+                                  <td className="py-3 text-muted-foreground">{row.climate_type}</td>
+                                  <td className="py-3 text-right">{formatCurrency(row.subject_current_rent)}</td>
+                                  <td className="py-3 text-right">{formatCurrency(row.subject_market_rent)}</td>
+                                  <td className="py-3 text-right">
+                                    {noComp
+                                      ? <span className="text-muted-foreground/60 italic text-xs">no comp data</span>
+                                      : formatCurrency(row.comp_average_rent)}
+                                  </td>
+                                  <td className="py-3 text-right font-medium text-foreground">{formatRatioPercent(row.current_vs_comp_ratio)}</td>
+                                  <td className="py-3 text-right font-medium text-foreground">{formatRatioPercent(row.market_vs_comp_ratio)}</td>
+                                </tr>
+                              );
+                            })}
                           </tbody>
                         </table>
                       </div>
@@ -291,9 +301,14 @@ export default function MarketSection({
                       </div>
                     )}
 
-                    {unknownClimateCompCount > 0 && (
+                    {unknownClimateCompCount > 0 && !allSizeOnly && (
                       <p className="mt-2 text-[11px] text-muted-foreground/70">
                         {unknownClimateCompCount} comp{unknownClimateCompCount !== 1 ? 's' : ''} not matched — climate type unclear
+                      </p>
+                    )}
+                    {allSizeOnly && (
+                      <p className="mt-2 text-[11px] text-muted-foreground/70">
+                        Comps matched by unit size · climate type not classified
                       </p>
                     )}
 

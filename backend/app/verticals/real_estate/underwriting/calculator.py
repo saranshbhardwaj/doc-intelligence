@@ -133,24 +133,22 @@ def _build_rent_position_analysis(
                 e.rate for e in comp_data
                 if e.bucket == bucket and e.climate == climate
             ]
-        if not matched_rates:
-            continue
-
-        comp_average_rent = sum(matched_rates) / len(matched_rates)
+        comp_average_rent = sum(matched_rates) / len(matched_rates) if matched_rates else None
         subject_current = _weighted_avg(rows, "current_rent")
         subject_market = _weighted_avg(rows, "market_rent")
         current_ratio = (
             subject_current / comp_average_rent
-            if subject_current is not None and comp_average_rent > 0
+            if subject_current is not None and comp_average_rent is not None and comp_average_rent > 0
             else None
         )
         market_ratio = (
             subject_market / comp_average_rent
-            if subject_market is not None and comp_average_rent > 0
+            if subject_market is not None and comp_average_rent is not None and comp_average_rent > 0
             else None
         )
 
         display_climate = "Mixed" if all_unknown else climate
+        match_basis = "size_only" if all_unknown else "exact"
         analysis.append(
             RentPositionRow(
                 size=rows[0].size or bucket,
@@ -162,6 +160,7 @@ def _build_rent_position_analysis(
                 market_vs_comp_ratio=market_ratio,
                 comp_count=len(matched_rates),
                 bucket=bucket,
+                match_basis=match_basis,
             )
         )
 
