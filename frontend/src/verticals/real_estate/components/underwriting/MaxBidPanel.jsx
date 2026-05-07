@@ -16,6 +16,7 @@ const DEFAULT_CRITERIA = {
   target_cash_on_cash: 0.08,
   target_equity_multiple: 2.0,
   max_ltv: 0.8,
+  dscr_year_one_floor: 1.25,
 };
 
 function buildPriceGrid(purchasePrice) {
@@ -51,7 +52,7 @@ function getPointVerdict(point, criteria) {
     point.irr < criteria.target_irr,
     point.cash_on_cash < criteria.target_cash_on_cash,
     point.equity_multiple < criteria.target_equity_multiple,
-    point.dscr_year_one < 1.25,
+    point.dscr_year_one < (criteria.dscr_year_one_floor ?? 1.25),
   ].some(Boolean);
   return fails
     ? { status: 'below_standards', tone: 'danger', label: 'Below Screen' }
@@ -171,7 +172,7 @@ export default function MaxBidPanel({
   const maxByIrr = interpolatedMaxPrice(enrichedPoints, 'irr', normalizedCriteria.target_irr);
   const maxByCashOnCash = interpolatedMaxPrice(enrichedPoints, 'cash_on_cash', normalizedCriteria.target_cash_on_cash);
   const maxByEquityMultiple = interpolatedMaxPrice(enrichedPoints, 'equity_multiple', normalizedCriteria.target_equity_multiple);
-  const debtConstrainedPrice = interpolatedMaxPrice(enrichedPoints, 'dscr_year_one', 1.25);
+  const debtConstrainedPrice = interpolatedMaxPrice(enrichedPoints, 'dscr_year_one', normalizedCriteria.dscr_year_one_floor ?? 1.25);
   const constraints = [
     { key: 'irr', price: maxByIrr },
     { key: 'cash_on_cash', price: maxByCashOnCash },
@@ -247,7 +248,7 @@ export default function MaxBidPanel({
         <div className="rounded-2xl border border-border/60 bg-background/60 p-4">
           <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Debt-constrained price</p>
           <p className="mt-2 font-display text-2xl font-semibold text-foreground">{formatCompactCurrency(debtConstrainedPrice)}</p>
-          <p className="mt-1 text-xs text-muted-foreground">Approx. DSCR ≥ 1.25×</p>
+          <p className="mt-1 text-xs text-muted-foreground">Approx. DSCR ≥ {(normalizedCriteria.dscr_year_one_floor ?? 1.25).toFixed(2)}×</p>
         </div>
         <div className={`rounded-2xl border p-4 ${suggestedMax && suggestedMax < purchasePrice ? 'border-warning/25 bg-warning/10' : 'border-success/25 bg-success/10'}`}>
           <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Suggested review range</p>

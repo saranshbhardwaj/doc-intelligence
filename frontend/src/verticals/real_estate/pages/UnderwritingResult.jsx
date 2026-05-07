@@ -498,6 +498,8 @@ export default function UnderwritingResult() {
   const bpsDelta = capRateSubmarket && impliedCapRate
     ? Math.round((impliedCapRate - capRateSubmarket) * 10000) : null;
 
+  const dscrFloor = persistedInputs?.criteria?.dscr_year_one_floor ?? 1.25;
+
   const address = currentRun?.address
     || persistedInputs.project?.address
     || artifact.om_data?.address
@@ -617,8 +619,8 @@ export default function UnderwritingResult() {
     {
       label: 'DSCR Year 1',
       value: formatMultiple(currentRun?.dscr_year_one),
-      tone: currentRun?.dscr_year_one != null && currentRun.dscr_year_one < 1.25 ? 'warning' : 'default',
-      detail: currentRun?.dscr_year_one != null && currentRun.dscr_year_one < 1.25 ? 'Below 1.25× minimum' : 'Debt coverage cushion',
+      tone: currentRun?.dscr_year_one != null && currentRun.dscr_year_one < dscrFloor ? 'warning' : 'default',
+      detail: currentRun?.dscr_year_one != null && currentRun.dscr_year_one < dscrFloor ? `Below ${dscrFloor.toFixed(2)}× minimum` : 'Debt coverage cushion',
       formula: buildTooltip('dscr_year_one',
         (cv) => {
           if (cv.year1_noi == null || cv.annual_debt_service == null) return null;
@@ -628,7 +630,7 @@ export default function UnderwritingResult() {
             `Debt service:   ${formatCompactCurrency(cv.annual_debt_service)}`,
             `─────────────────────────`,
             `Cash cushion:   ${formatCompactCurrency(cushion)}/yr above breakeven`,
-            `Lender min:     1.25×`,
+            `Lender min:     ${dscrFloor.toFixed(2)}×`,
           ].join('\n');
         },
         () => {
@@ -636,7 +638,7 @@ export default function UnderwritingResult() {
           const dscr = currentRun?.dscr_year_one;
           if (!noi || !dscr) return null;
           const ds = noi / dscr;
-          return `Year-1 NOI: ${formatCompactCurrency(noi)}\nDebt service: ${formatCompactCurrency(ds)}\nCushion: ${formatCompactCurrency(noi - ds)}/yr\nLender min: 1.25×`;
+          return `Year-1 NOI: ${formatCompactCurrency(noi)}\nDebt service: ${formatCompactCurrency(ds)}\nCushion: ${formatCompactCurrency(noi - ds)}/yr\nLender min: ${dscrFloor.toFixed(2)}×`;
         },
       ),
     },
