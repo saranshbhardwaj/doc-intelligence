@@ -642,12 +642,12 @@ class TestDebtYield:
         """debt_yield = NOI_Y1 / loan_amount"""
         result = calculate(base_inputs)
         assert result.debt_yield is not None
-        pp = base_inputs.acquisition.purchase_price
-        ltv = base_inputs.financing.ltv_pct
-        expected_loan = pp * ltv
-        expected_debt_yield = result.projections[0].noi / expected_loan
-        assert result.debt_yield == pytest.approx(expected_debt_yield, abs=1e-4)
-        assert result.debt_yield > 0
+        # Compute the loan amount independently from raw inputs (not from result)
+        expected_loan = base_inputs.acquisition.purchase_price * base_inputs.financing.ltv_pct
+        # Verify the formula holds: debt_yield == noi / loan (formula check, not value tautology)
+        assert result.debt_yield == pytest.approx(result.projections[0].noi / expected_loan, abs=1e-6)
+        # Sanity-check the result is in a plausible range for a real self-storage deal
+        assert 0.04 < result.debt_yield < 0.30, "Debt yield outside plausible range for self-storage"
         assert math.isfinite(result.debt_yield)
 
     def test_debt_yield_none_when_no_loan(self, base_inputs):
@@ -669,7 +669,7 @@ class TestDebtYieldVerdict:
     def test_critical_below_7pct(self, base_inputs):
         """Debt yield < 7% → critical warning"""
         result = calculate(base_inputs)
-        result.debt_yield = 0.065
+        result = result.model_copy(update={"debt_yield": 0.065})
         verdict = evaluate(result, base_inputs.criteria)
         keys = [w.key for w in verdict.warnings]
         assert "debt_yield_critical" in keys
@@ -677,7 +677,7 @@ class TestDebtYieldVerdict:
     def test_warning_7_to_8pct(self, base_inputs):
         """Debt yield 7–8% → warning"""
         result = calculate(base_inputs)
-        result.debt_yield = 0.075
+        result = result.model_copy(update={"debt_yield": 0.075})
         verdict = evaluate(result, base_inputs.criteria)
         keys = [w.key for w in verdict.warnings]
         assert "debt_yield_watch" in keys
@@ -685,7 +685,7 @@ class TestDebtYieldVerdict:
     def test_no_warning_above_8pct(self, base_inputs):
         """Debt yield ≥ 8% → no debt yield warning"""
         result = calculate(base_inputs)
-        result.debt_yield = 0.09
+        result = result.model_copy(update={"debt_yield": 0.09})
         verdict = evaluate(result, base_inputs.criteria)
         keys = [w.key for w in verdict.warnings]
         assert "debt_yield_critical" not in keys
@@ -694,7 +694,7 @@ class TestDebtYieldVerdict:
     def test_critical_triggers_needs_review(self, base_inputs):
         """debt_yield_critical → overall status degrades to needs_review"""
         result = calculate(base_inputs)
-        result.debt_yield = 0.065
+        result = result.model_copy(update={"debt_yield": 0.065})
         verdict = evaluate(result, base_inputs.criteria)
         assert verdict.status in ("needs_review", "fail", "below_standards")
 
