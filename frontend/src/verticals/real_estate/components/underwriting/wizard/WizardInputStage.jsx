@@ -148,6 +148,14 @@ export default function WizardInputStage({
                 citation={getCitation('rentable_sqft')}
                 onOpenSource={handleOpenSource}
               />
+              <NumericField
+                label="Year Built"
+                value={projectData.year_built ?? ''}
+                onChange={(v) => patchProject('year_built', parseInt(v, 10) || '')}
+                placeholder="1985"
+                citation={getCitation('year_built')}
+                onOpenSource={handleOpenSource}
+              />
             </div>
 
             <div className="rounded-2xl border border-border/60 bg-muted/25 p-4">
