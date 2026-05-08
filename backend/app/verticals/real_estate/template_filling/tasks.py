@@ -10,10 +10,11 @@ Task Flow:
 """
 
 import asyncio
+import copy
 import json
 import re
 import time
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -37,6 +38,12 @@ from app.utils.metrics import TEMPLATE_FILL_LATENCY_SECONDS
 from app.verticals.real_estate.template_filling.excel_handler import ExcelHandler
 from app.verticals.real_estate.template_filling.llm_service import TemplateFillLLMService
 from app.verticals.real_estate.template_filling.excel.mapping_coordinator import coordinator as mapping_coordinator
+from app.verticals.real_estate.template_filling.source_map import (
+    SKIP_REASON_VALUES,
+    STRUCTURE_HIGH_CONFIDENCE,
+    STRUCTURE_LOW_CONFIDENCE,
+    as_list,
+)
 
 
 def _get_db_session() -> Session:
@@ -282,9 +289,203 @@ def _compute_schema_counts(schema_obj: Any) -> Dict[str, Any]:
     }
 
 
+def _iter_structure_entries(structure: Dict[str, Any]):
+    for group_name in ("column_map", "section_presence"):
+        group = structure.get(group_name) or {}
+        for key, value in group.items():
+            if isinstance(value, dict):
+                yield f"{group_name}.{key}", value
+
+
+def _build_structure_confidence_summary(structure: Dict[str, Any]) -> Dict[str, Any]:
+    entries = list(_iter_structure_entries(structure or {}))
+    confidences = [
+        float(entry.get("confidence"))
+        for _, entry in entries
+        if entry.get("confidence") is not None
+    ]
+    if not confidences:
+        return {
+            "min_confidence": None,
+            "mean_confidence": None,
+            "low_confidence_keys": [],
+        }
+    return {
+        "min_confidence": round(min(confidences), 4),
+        "mean_confidence": round(sum(confidences) / len(confidences), 4),
+        "low_confidence_keys": [
+            key
+            for key, entry in entries
+            if float(entry.get("confidence") or 0) < STRUCTURE_LOW_CONFIDENCE
+        ],
+    }
+
+
+def _build_om_structure_artifact(
+    detected_structure: Dict[str, Any],
+    model_name: str,
+) -> Dict[str, Any]:
+    """Build the stored Source Map artifact used by this fill run."""
+    return {
+        "extractor_version": "template_om_structure_v1",
+        "model_name": model_name,
+        "detected_at": datetime.now(timezone.utc).isoformat(),
+        "edited": False,
+        "original": copy.deepcopy(detected_structure),
+        "effective": copy.deepcopy(detected_structure),
+        "confidence_summary": _build_structure_confidence_summary(detected_structure),
+    }
+
+
+def _get_structure_entry(structure: Dict[str, Any], dotted_key: str) -> Optional[Dict[str, Any]]:
+    node: Any = structure or {}
+    for part in dotted_key.split("."):
+        if not isinstance(node, dict):
+            return None
+        node = node.get(part)
+    return node if isinstance(node, dict) else None
+
+
+def _target_status(target: Dict[str, Any], target_type: str, reason: str, **extra: Any) -> Dict[str, Any]:
+    if reason not in SKIP_REASON_VALUES:
+        raise ValueError(f"Unknown skip reason: {reason}")
+    status = {
+        "excel_sheet": target.get("sheet"),
+        "excel_cell": target.get("value_cell"),
+        "target_id": target.get("id"),
+        "target_type": target_type,
+        "skip_reason": reason,
+    }
+    protected = set(status)
+    for key, value in extra.items():
+        if key not in protected:
+            status[key] = value
+    return status
+
+
+def _target_review_status(
+    target: Dict[str, Any],
+    target_type: str,
+    reason: str,
+    **extra: Any,
+) -> Dict[str, Any]:
+    status = {
+        "excel_sheet": target.get("sheet"),
+        "excel_cell": target.get("value_cell"),
+        "target_id": target.get("id"),
+        "target_type": target_type,
+        "review_reason": reason,
+    }
+    protected = set(status)
+    for key, value in extra.items():
+        if key not in protected:
+            status[key] = value
+    return status
+
+
+def _plan_schema_targets_for_structure(
+    fields: List[Dict[str, Any]],
+    tables: List[Dict[str, Any]],
+    structure: Dict[str, Any],
+) -> Dict[str, Any]:
+    """
+    Apply Source Map gating before LLM extraction.
+
+    This keeps cells with missing sections or unsafe structure confidence out of
+    the extraction prompt. A skipped cell with a reason is better than a guessed
+    cell value.
+    """
+    fields_to_extract: List[Dict[str, Any]] = []
+    tables_to_extract: List[Dict[str, Any]] = []
+    skipped_targets: List[Dict[str, Any]] = []
+    review_required_targets: List[Dict[str, Any]] = []
+
+    def plan_one(target: Dict[str, Any], target_type: str) -> bool:
+        fill_when_values = [
+            value for value in as_list(target.get("fill_when")) if value != "always"
+        ]
+        if fill_when_values:
+            matching_sections = [
+                (fill_when, _get_structure_entry(structure, f"section_presence.{fill_when}"))
+                for fill_when in fill_when_values
+            ]
+            if not any(section and section.get("present") for _, section in matching_sections):
+                skipped_targets.append(
+                    _target_status(
+                        target,
+                        target_type,
+                        "missing_section",
+                        structure_key="|".join(
+                            f"section_presence.{fill_when}" for fill_when in fill_when_values
+                        ),
+                    )
+                )
+                return False
+
+        required_structure_keys = as_list(target.get("requires_structure"))
+        if required_structure_keys:
+            candidates = []
+            for structure_key in required_structure_keys:
+                entry = _get_structure_entry(structure, structure_key)
+                confidence = float((entry or {}).get("confidence") or 0)
+                if entry and entry.get("present"):
+                    candidates.append((structure_key, entry, confidence))
+
+            if not candidates:
+                skipped_targets.append(
+                    _target_status(
+                        target,
+                        target_type,
+                        "structure_key_missing",
+                        structure_key="|".join(required_structure_keys),
+                    )
+                )
+                return False
+
+            structure_key, _entry, confidence = max(candidates, key=lambda item: item[2])
+            if confidence < STRUCTURE_LOW_CONFIDENCE:
+                skipped_targets.append(
+                    _target_status(
+                        target,
+                        target_type,
+                        "low_structure_confidence",
+                        structure_key=structure_key,
+                        confidence=confidence,
+                    )
+                )
+                return False
+            if confidence < STRUCTURE_HIGH_CONFIDENCE:
+                review_required_targets.append(
+                    _target_review_status(
+                        target,
+                        target_type,
+                        "mid_structure_confidence",
+                        structure_key=structure_key,
+                        confidence=confidence,
+                    )
+                )
+        return True
+
+    for field in fields or []:
+        if plan_one(field, "field"):
+            fields_to_extract.append(field)
+    for table in tables or []:
+        if plan_one(table, "table"):
+            tables_to_extract.append(table)
+
+    return {
+        "fields_to_extract": fields_to_extract,
+        "tables_to_extract": tables_to_extract,
+        "skipped_targets": skipped_targets,
+        "review_required_targets": review_required_targets,
+    }
+
+
 def _build_yaml_cell_status(
     schema_obj: Any,
-    mappings: List[Dict[str, Any]]
+    mappings: List[Dict[str, Any]],
+    skipped_targets: Optional[List[Dict[str, Any]]] = None,
+    review_required_targets: Optional[List[Dict[str, Any]]] = None,
 ) -> Dict[str, Any]:
     target_by_key: Dict[str, Dict[str, Any]] = {}
     unknown_row_tables: List[Dict[str, Any]] = []
@@ -354,6 +555,8 @@ def _build_yaml_cell_status(
         "all_target_cells": all_target_cells,
         "mapped_cells": mapped_cells,
         "unmapped_cells": unmapped_cells,
+        "skipped_cells": skipped_targets or [],
+        "review_required_cells": review_required_targets or [],
         "unknown_row_tables": unknown_row_tables,
         "total_target_cells": len(all_target_cells),
         "mapped_target_cells": len(mapped_cells),
@@ -872,7 +1075,7 @@ def auto_map_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
 
     Workflow:
     1. Try schema-based mapping (deterministic, instant)
-    2. Fall back to generic + LLM for unmapped cells
+    2. Targeted LLM for unmapped YAML fields
     3. Merge results (schema takes priority)
 
     Args:
@@ -899,11 +1102,7 @@ def auto_map_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
     detection_result = payload["detection_result"]
     job_id = payload["job_id"]
 
-    # Config flags (read from settings if not in payload)
-    # skip_generic_mapping controls Stage 2 (generic Excel mapping) - Default: True (skip generic, run only targeted)
-    skip_generic_mapping = payload.get("skip_generic_mapping", True)
-    # skip_schema controls Stage 1 (schema alias matching) - Default: False (run alias matching)
-    # Set to True to SKIP alias matching and send ALL YAML fields to targeted LLM extraction instead
+    # skip_schema controls Stage 1 (schema alias matching) - Default: True (skip alias, send all YAML fields to LLM)
     skip_schema = payload.get("skip_schema", True)
 
     db = _get_db_session()
@@ -980,8 +1179,7 @@ def auto_map_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                 context_budget["narrative_blocks_trimmed"],
             )
         schema_mappings = []
-        generic_mappings = []
-        schema_id = None  # Track for Stage 2
+        schema_id = None
         schema_obj = None
         schema_table_row_labels: Dict[str, Any] = {}
         schema_summary: Optional[Dict[str, Any]] = None
@@ -1051,12 +1249,15 @@ def auto_map_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                 else:
                     logger.info("Skipping alias mapping (skip_schema=True) — will use LLM only for schema fields")
             else:
-                logger.info("Template not recognized by schema system - will use generic analyzer")
+                raise ValueError(
+                    f"Template {template_id} does not match any known schema. "
+                    "Only pre-defined master templates are supported."
+                )
 
+        except ValueError:
+            raise
         except Exception as e:
-            logger.warning(f"Schema identification failed (will fall back to generic): {e}")
-            schema_mappings = []
-            schema_id = None
+            raise RuntimeError(f"Schema identification failed for template {template_id}: {e}") from e
         finally:
             # Always clean up — even if load_workbook or identify_template throws
             if workbook is not None:
@@ -1070,8 +1271,15 @@ def auto_map_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         # === STEP 1.5: Targeted LLM for unmapped YAML fields (Stage 2) ===
         # Ask LLM specifically: "find values for these 63 named fields in the Azure DI data"
         # Much cheaper and more accurate than the generic 6-batch sheet mapper for schema fields.
-        # Always runs when schema is available (independent of skip_generic_mapping)
+        # Always runs when schema is available
         llm_service_targeted = None
+        om_structure_artifact: Optional[Dict[str, Any]] = None
+        structure_plan: Dict[str, Any] = {
+            "fields_to_extract": [],
+            "tables_to_extract": [],
+            "skipped_targets": [],
+            "review_required_targets": [],
+        }
         if schema_id:
             try:
                 from app.verticals.real_estate.template_filling.excel.schema_based import SchemaMapper
@@ -1095,6 +1303,40 @@ def auto_map_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                             fill_run_id=fill_run_id,
                         )
 
+                        tracker.update_progress(
+                            status="mapping",
+                            current_stage="auto_mapping",
+                            progress_percent=52,
+                            message="Detecting OM source map..."
+                        )
+                        detected_structure = asyncio.run(
+                            llm_service_targeted.detect_om_structure(pdf_fields)
+                        )
+                        om_structure_artifact = _build_om_structure_artifact(
+                            detected_structure,
+                            llm_service_targeted.model,
+                        )
+
+                        repo.merge_fill_run_extracted_data(
+                            fill_run_id,
+                            {"om_structure": om_structure_artifact},
+                        )
+
+                        structure_plan = _plan_schema_targets_for_structure(
+                            unmapped_fields,
+                            schema_tables,
+                            detected_structure,
+                        )
+                        unmapped_fields = structure_plan["fields_to_extract"]
+                        schema_tables = structure_plan["tables_to_extract"]
+                        logger.info(
+                            "OM structure plan: extract fields=%s tables=%s skipped=%s review=%s",
+                            len(unmapped_fields),
+                            len(schema_tables),
+                            len(structure_plan["skipped_targets"]),
+                            len(structure_plan["review_required_targets"]),
+                        )
+
                     if unmapped_fields:
                         logger.info(
                             f"🎯 Stage 2: {len(unmapped_fields)} unmapped YAML fields → targeted LLM"
@@ -1108,7 +1350,13 @@ def auto_map_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
 
                         targeted_values = asyncio.run(
                             llm_service_targeted.extract_schema_field_values(
-                                unmapped_fields, pdf_fields
+                                unmapped_fields,
+                                pdf_fields,
+                                om_structure=(
+                                    om_structure_artifact.get("effective")
+                                    if om_structure_artifact
+                                    else None
+                                ),
                             )
                         )
 
@@ -1269,107 +1517,21 @@ def auto_map_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                             progress_percent=70,
                             message=f"All schema fields matched ({len(schema_mappings)} total)"
                         )
-            except Exception as e:
-                logger.warning(f"Stage 2 targeted mapping failed (continuing to Stage 3): {e}")
+            except Exception:
+                logger.error("Stage 2 targeted mapping failed", exc_info=True)
+                raise
 
-        # === STEP 2: Generic + LLM mapping for remaining cells (unless skip_generic_mapping) ===
-        llm_service = None
-        if not skip_generic_mapping:
-            # Get cells already mapped by schema (Stage 1 + Stage 2)
-            schema_mapped_cells = mapping_coordinator.get_schema_mapped_cells(schema_mappings)
+        # === STEP 2: Merge schema mappings (schema alias + targeted LLM) ===
+        raw_mappings = schema_mappings
 
-            # Filter Excel schema to exclude schema-mapped cells
-            filtered_excel_schema = mapping_coordinator.filter_generic_schema(
-                excel_schema,
-                schema_mapped_cells
-            )
-
-            # Only run LLM if there are unmapped cells
-            if filtered_excel_schema:
-                # Initialize LLM service
-                llm_service = TemplateFillLLMService(
-                    prompt_version=settings.re_template_prompt_version,
-                    capture_io_log=settings.capture_llm_io_log,
-                    fill_run_id=fill_run_id,
-                )
-
-                # Progress callback for batch processing
-                def on_batch_complete(batch_num, total_batches, batch_mappings):
-                    """Report progress after each batch is mapped."""
-                    # Stage 3 progress: 70% (start) → 85% (end)
-                    batch_progress = 70 + int((batch_num / total_batches) * 15)
-                    tracker.update_progress(
-                        status="mapping",
-                        current_stage="auto_mapping",
-                        progress_percent=batch_progress,
-                        message=f"Mapping remaining cells (batch {batch_num}/{total_batches})..."
-                    )
-                    # Celery heartbeat: yield between batches to reset heartbeat timer
-                    self.update_state(
-                        state="PROGRESS",
-                        meta={"stage": f"generic_batch_{batch_num}_of_{total_batches}"}
-                    )
-                    logger.info(f"Batch {batch_num}/{total_batches} mapped: {len(batch_mappings)} fields")
-
-                # Auto-map fields (LLM call) with batching and progress tracking
-                mapping_result = asyncio.run(
-                    llm_service.auto_map_fields(
-                        pdf_fields=pdf_fields,
-                        excel_schema=filtered_excel_schema,
-                        on_batch_complete=on_batch_complete
-                    )
-                )
-                generic_mappings = mapping_result.get("mappings") or []
-
-                # Extract token usage for observability
-                usage = mapping_result.get("usage", {})
-                llm_input_tokens = usage.get("input_tokens", 0)
-                llm_output_tokens = usage.get("output_tokens", 0)
-                llm_cache_read_tokens = usage.get("cache_read_input_tokens", 0)
-                llm_cache_write_tokens = usage.get("cache_creation_input_tokens", 0)
-                llm_model = usage.get("model", settings.synthesis_llm_model)
-                llm_batches = usage.get("total_batches", 1)
-
-                # Calculate cache hit rate (percentage of input tokens read from cache)
-                total_effective_input = llm_input_tokens + llm_cache_read_tokens
-                llm_cache_hit_rate = (llm_cache_read_tokens / total_effective_input) if total_effective_input > 0 else 0.0
-
-                # Compute LLM cost
-                llm_cost = compute_llm_cost(llm_model, llm_input_tokens, llm_output_tokens) if (llm_input_tokens + llm_output_tokens) > 0 else 0.0
-
-                logger.info(
-                    f"Generic mapping: {len(generic_mappings)} additional fields mapped | "
-                    f"Tokens: input={llm_input_tokens:,}, output={llm_output_tokens:,}, "
-                    f"cache_hit_rate={llm_cache_hit_rate:.1%}, cost=${llm_cost:.4f}"
-                )
-            else:
-                logger.info("All cells mapped by schema - skipping generic mapping")
-        else:
-            logger.info("Schema-only mode - skipping generic mapping")
-
-        # === STEP 3: Merge mappings (schema takes priority) ===
-        raw_mappings = mapping_coordinator.merge_mappings(schema_mappings, generic_mappings)
-
-        # Log mapping source breakdown
-        schema_count = sum(1 for m in raw_mappings if m.get("source") == "schema")
-        generic_count = len(raw_mappings) - schema_count
-
-        logger.info(
-            f"Mapping sources: {schema_count} schema (100% accurate), "
-            f"{generic_count} generic (LLM)"
-        )
-
-        # Deduplicate by Excel cell only - one cell should have one source.
-        # Enforce strict tier precedence first, then confidence:
-        #   Tier 1 (schema) > Tier 2 (targeted_schema) > Tier 3 (generic LLM)
-        # This prevents lower tiers from overriding higher-tier mappings.
+        # Deduplicate by Excel cell — schema alias beats targeted_schema beats any other source.
         def _tier_priority(mapping: dict) -> int:
             source = mapping.get("source")
             if source == "schema":
-                return 3
-            if source == "targeted_schema":
                 return 2
-            return 1
+            if source == "targeted_schema":
+                return 1
+            return 0
 
         best_by_cell: dict[str, dict] = {}
         for m in raw_mappings:
@@ -1398,37 +1560,45 @@ def auto_map_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         # Count unique PDF fields that have at least one mapping
         unique_pdf_fields_mapped = len(set(m.get("pdf_field_id") for m in mappings if m.get("pdf_field_id")))
 
-        # Log deduplication stats
+        targeted_count = sum(1 for m in mappings if m.get("source") == "targeted_schema")
+        schema_count = sum(1 for m in mappings if m.get("source") == "schema")
+
         logger.info(
             f"Mapping deduplication: {len(raw_mappings)} raw → "
             f"{len(mappings)} after cell dedup "
             f"({unique_pdf_fields_mapped} unique PDF fields mapped to {len(mappings)} Excel cells) "
-            f"[{schema_count} schema + {len(mappings) - schema_count} generic]"
+            f"[{schema_count} alias + {targeted_count} targeted_llm]"
         )
 
-        # Build mapping_result for logging/UI consumers
-        targeted_count = sum(1 for m in mappings if m.get("source") == "targeted_schema")
-        generic_count = len(mappings) - schema_count - targeted_count
         mapping_result = {
             "mappings": mappings,
             "total_mapped": total_mapped_fields,
             "schema_mapped_count": schema_count,
             "targeted_schema_count": targeted_count,
-            "generic_mapped_count": generic_count,
-            "high_confidence_count": sum(1 for m in mappings if m.get("confidence", 0) >= 0.85)
+            "high_confidence_count": sum(1 for m in mappings if m.get("confidence", 0) >= STRUCTURE_HIGH_CONFIDENCE)
         }
 
         field_mapping = {
-            # Use augmented pdf_fields (includes virtual entries for Stage 2 targeted values)
             "pdf_fields": pdf_fields,
             "mappings": mappings,
         }
         if context_budget.get("context_budget_applied"):
             field_mapping["context_budget"] = context_budget
         if schema_obj:
-            field_mapping["yaml_cell_status"] = _build_yaml_cell_status(schema_obj, mappings)
+            field_mapping["yaml_cell_status"] = _build_yaml_cell_status(
+                schema_obj,
+                mappings,
+                skipped_targets=structure_plan.get("skipped_targets"),
+                review_required_targets=structure_plan.get("review_required_targets"),
+            )
         if schema_summary:
             field_mapping["schema_summary"] = schema_summary
+        if om_structure_artifact:
+            field_mapping["om_structure_summary"] = {
+                "extractor_version": om_structure_artifact.get("extractor_version"),
+                "confidence_summary": om_structure_artifact.get("confidence_summary"),
+                "edited": om_structure_artifact.get("edited"),
+            }
 
         # Persist metadata (mapping, token data, completion flag)
         # Progress updates via SSE (JobState)
@@ -1439,19 +1609,6 @@ def auto_map_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
             "user_edited_count": 0,
             "auto_mapping_completed": True,
         }
-
-        # Add token tracking data if generic mapping was used
-        if not skip_generic_mapping and 'llm_cost' in locals():
-            metadata_params.update({
-                "input_tokens": llm_input_tokens,
-                "output_tokens": llm_output_tokens,
-                "cache_read_tokens": llm_cache_read_tokens,
-                "cache_write_tokens": llm_cache_write_tokens,
-                "model_name": llm_model,
-                "llm_batches_count": llm_batches,
-                "cache_hit_rate": llm_cache_hit_rate,
-                "cost_usd": llm_cost,
-            })
 
         metadata_params["status"] = "awaiting_review"
         metadata_params["current_stage"] = "auto_mapping"
@@ -1469,23 +1626,19 @@ def auto_map_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         logger.info(
             f"Auto-mapping complete: {len(mappings)} Excel cells mapped "
             f"(from {unique_pdf_fields_mapped} unique PDF fields) — "
-            f"{schema_count} alias, {targeted_count} targeted LLM, {generic_count} generic LLM"
+            f"{schema_count} alias + {targeted_count} targeted LLM"
         )
 
-        # Reuse targeted_count and generic_count already computed above
-
-        # Build user-friendly message
-        if schema_count > 0 or targeted_count > 0:
-            parts = []
-            if schema_count:
-                parts.append(f"{schema_count} alias")
-            if targeted_count:
-                parts.append(f"{targeted_count} targeted LLM")
-            if generic_count > 0:
-                parts.append(f"{generic_count} generic LLM")
-            status_msg = f"Mapped {len(mappings)} cells ({', '.join(parts)})"
-        else:
-            status_msg = f"Mapped {len(mappings)} cells ({mapping_result.get('high_confidence_count', 0)} high confidence)"
+        parts = []
+        if schema_count:
+            parts.append(f"{schema_count} alias")
+        if targeted_count:
+            parts.append(f"{targeted_count} targeted LLM")
+        status_msg = (
+            f"Mapped {len(mappings)} cells ({', '.join(parts)})"
+            if parts
+            else f"Mapped {len(mappings)} cells"
+        )
 
         tracker.update_progress(
             status="awaiting_review",
@@ -1678,8 +1831,7 @@ def fill_excel_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
 
         # Generate storage key: fills/{YYYY}/{MM}/{DD}/{fill_run_id}_{template_name}_filled{ext}
         # Date-partitioned, consistent with workflow-artifacts. Readable in R2 browser.
-        from datetime import datetime as _dt
-        _now = _dt.utcnow()
+        _now = datetime.now(timezone.utc)
         safe_template_name = template.name.replace("/", "_").replace("\\", "_")
         storage_key = (
             f"fills/{_now.year}/{_now.month:02d}/{_now.day:02d}"
@@ -1701,7 +1853,7 @@ def fill_excel_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
             artifact=artifact,
             status="completed",
             filling_completed=True,
-            completed_at=datetime.utcnow(),
+            completed_at=datetime.now(timezone.utc),
             total_fields_filled=fill_summary.get("total_cells_filled", 0),
             processing_time_ms=(fill_run.processing_time_ms or 0) + int((time.monotonic() - start_time) * 1000)
         )

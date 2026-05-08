@@ -66,27 +66,3 @@ class PromptSet(ABC):
     ) -> PromptPair:
         """Build prompts for extracting table row values via RAG chunks (batch)."""
 
-    # -- Stage 3: generic auto-mapping (system + per-batch user) -----------
-
-    @abstractmethod
-    def build_auto_map_system(
-        self,
-        pdf_fields_json: str,
-    ) -> str:
-        """Build the system prompt (with PDF fields) for generic auto-mapping.
-
-        Returns the raw system prompt string (not a PromptPair) because
-        auto_map_fields sends multiple user-message batches against a single
-        cached system prompt.
-        """
-
-    @abstractmethod
-    def build_auto_map_user(
-        self,
-        sheet_batch_schema: Dict[str, Any],
-    ) -> str:
-        """Build one user-message batch for generic auto-mapping."""
-
-    @abstractmethod
-    def get_auto_map_response_model(self) -> Type[BaseModel]:
-        """Return the Pydantic model for auto-mapping structured output."""

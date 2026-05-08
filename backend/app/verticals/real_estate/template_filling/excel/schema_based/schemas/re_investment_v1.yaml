@@ -31,6 +31,10 @@ fields:
     label_cell: "D2"
     value_cell: "F2"
     data_type: "text"
+    source_period: "static"
+    source_basis: "om_property_summary"
+    fill_when: ["always"]
+    requires_structure: []
     pdf_aliases:
       - "Deal Name"
       - "Property Name"
@@ -41,6 +45,10 @@ fields:
     label_cell: "D3"
     value_cell: "F3"
     data_type: "text"
+    source_period: "static"
+    source_basis: "om_property_summary"
+    fill_when: ["always"]
+    requires_structure: []
     pdf_aliases:
       - "City"
       - "Location City"
@@ -50,6 +58,10 @@ fields:
     label_cell: "D4"
     value_cell: "F4"
     data_type: "text"
+    source_period: "static"
+    source_basis: "om_property_summary"
+    fill_when: ["always"]
+    requires_structure: []
     pdf_aliases:
       - "State"
       - "State Code"
@@ -59,6 +71,10 @@ fields:
     label_cell: "D5"
     value_cell: "F5"
     data_type: "text"
+    source_period: "static"
+    source_basis: "om_property_summary"
+    fill_when: ["always"]
+    requires_structure: []
     pdf_aliases:
       - "Zip"
       - "Zip Code"
@@ -69,6 +85,10 @@ fields:
     label_cell: "D6"
     value_cell: "F6"
     data_type: "text"
+    source_period: "static"
+    source_basis: "om_property_summary"
+    fill_when: ["always"]
+    requires_structure: []
     pdf_aliases:
       - "Address"
       - "Street Address"
@@ -79,6 +99,10 @@ fields:
     label_cell: "D7"
     value_cell: "F7"
     data_type: "text"
+    source_period: "static"
+    source_basis: "om_market_summary"
+    fill_when: ["market_summary_present"]
+    requires_structure: []
     pdf_aliases:
       - "MSA"
       - "Metropolitan Area"
@@ -89,6 +113,10 @@ fields:
     label_cell: "D8"
     value_cell: "F8"
     data_type: "number"
+    source_period: "static"
+    source_basis: "om_property_summary"
+    fill_when: ["always"]
+    requires_structure: []
     pdf_aliases:
       - "Year Built"
       - "Construction Year"
@@ -99,6 +127,10 @@ fields:
     label_cell: "D9"
     value_cell: "F9"
     data_type: "number"
+    source_period: "static"
+    source_basis: "om_property_summary"
+    fill_when: ["always"]
+    requires_structure: []
     pdf_aliases:
       - "Year Renovated"
       - "Renovation Year"
@@ -109,6 +141,10 @@ fields:
     label_cell: "D10"
     value_cell: "F10"
     data_type: "text"
+    source_period: "static"
+    source_basis: "om_property_summary"
+    fill_when: ["always"]
+    requires_structure: []
     pdf_aliases:
       - "Asset Class"
       - "Class"
@@ -119,6 +155,10 @@ fields:
     label_cell: "D11"
     value_cell: "F11"
     data_type: "number"
+    source_period: "static"
+    source_basis: "om_property_summary"
+    fill_when: ["always"]
+    requires_structure: []
     pdf_aliases:
       - "# Buildings"
       - "Number of Buildings"
@@ -129,6 +169,10 @@ fields:
     label_cell: "D12"
     value_cell: "F12"
     data_type: "number"
+    source_period: "static"
+    source_basis: "om_unit_mix"
+    fill_when: ["unit_mix_present"]
+    requires_structure: []
     pdf_aliases:
       - "# Parking"
       - "Number of Parking"
@@ -140,6 +184,10 @@ fields:
     label_cell: "D13"
     value_cell: "F13"
     data_type: "number"
+    source_period: "static"
+    source_basis: "om_property_summary"
+    fill_when: ["always"]
+    requires_structure: []
     pdf_aliases:
       - "Acres"
       - "Lot Size"
@@ -150,6 +198,10 @@ fields:
     label_cell: "D14"
     value_cell: "F14"
     data_type: "number"
+    source_period: "static"
+    source_basis: "om_property_summary"
+    fill_when: ["always"]
+    requires_structure: []
     pdf_aliases:
       - "Units"
       - "Total Units"
@@ -161,6 +213,10 @@ fields:
     label_cell: "D15"
     value_cell: "F15"
     data_type: "text"
+    source_period: "static"
+    source_basis: "om_property_summary"
+    fill_when: ["always"]
+    requires_structure: []
     pdf_aliases:
       - "Management Software"        # exact label p10
       - "Property Management"
@@ -172,6 +228,10 @@ fields:
     label_cell: "D16"
     value_cell: "F16"
     data_type: "date"
+    source_period: "static"
+    source_basis: "om_rent_roll"
+    fill_when: ["rent_roll_present"]
+    requires_structure: []
     pdf_aliases:
       - "RR as of Date"
       - "Rent Roll Date"
@@ -184,6 +244,10 @@ fields:
     label_cell: "B3"
     value_cell: "C3"
     data_type: "text"
+    source_period: "static"
+    source_basis: "om_property_summary"
+    fill_when: ["always"]
+    requires_structure: []
     pdf_aliases:
       - "Property Name"
       - "Complex Name"
@@ -197,6 +261,10 @@ fields:
     label_cell: "B4"
     value_cell: "C4"
     data_type: "text"
+    source_period: "static"
+    source_basis: "om_property_summary"
+    fill_when: ["always"]
+    requires_structure: []
     pdf_aliases:
       - "Property Address"
       - "Address"
@@ -208,6 +276,10 @@ fields:
     label_cell: "B6"
     value_cell: "C6"
     data_type: "number"
+    source_period: "static"
+    source_basis: "om_unit_mix"
+    fill_when: ["unit_mix_present"]
+    requires_structure: []
     description: "Storage rentable unit count for the Dashboard. Include climate-controlled and non-climate storage units only; exclude parking, residential, office, retail, and other non-storage spaces."
     extraction_rule: "If the OM has a unit mix, sum only rows that are storage units. Do not use total units if that total includes parking, residential, or other non-storage spaces. If storage-only count cannot be determined, leave null."
     pdf_aliases:
@@ -226,6 +298,10 @@ fields:
     label_cell: "B8"
     value_cell: "C8"
     data_type: "currency"
+    source_period: "static"
+    source_basis: "om_property_summary"
+    fill_when: ["always"]
+    requires_structure: []
     pdf_aliases:
       - "Asking Price"
       - "Listing Price"
@@ -246,6 +322,10 @@ fields:
     label_cell: "B8"
     value_cell: "C8"
     data_type: "currency"
+    source_period: "static"
+    source_basis: "om_property_summary"
+    fill_when: ["always"]
+    requires_structure: []
     pdf_aliases:
       - "Asking Price"
       - "Listing Price"
@@ -258,6 +338,10 @@ fields:
     label_cell: "B10"
     value_cell: "C10"
     data_type: "currency"
+    source_period: "current"
+    source_basis: "om_operating_statement"
+    fill_when: ["t12_present", "current_operating_statement_present"]
+    requires_structure: ["column_map.t12", "column_map.current"]
     description: "Current or in-place operating expense per storage unit for the Napkin current screen."
     extraction_rule: "Use current or in-place operating expenses divided by storage-only unit count. Exclude parking and residential units from the denominator. Do not use pro forma, stabilized, or Year 1 expense per unit."
     pdf_aliases:
@@ -272,6 +356,10 @@ fields:
     label_cell: "B11"
     value_cell: "C11"
     data_type: "percentage"
+    source_period: "current"
+    source_basis: "om_operating_statement"
+    fill_when: ["t12_present", "current_operating_statement_present"]
+    requires_structure: ["column_map.t12", "column_map.current"]
     description: "Current or in-place cap rate for the Napkin current screen."
     extraction_rule: "Use the OM-stated current/in-place/walk-in cap rate, or current NOI divided by asking price if the current cap rate is not stated. Do not use pro forma or exit cap rate."
     pdf_aliases:
@@ -285,6 +373,10 @@ fields:
     label_cell: "B12"
     value_cell: "C12"
     data_type: "percentage"
+    source_period: "current"
+    source_basis: "om_operating_statement"
+    fill_when: ["t12_present", "current_operating_statement_present"]
+    requires_structure: ["column_map.t12", "column_map.current"]
     description: "Current economic vacancy rate for the Napkin current screen."
     extraction_rule: "Use current or in-place economic vacancy / vacancy and credit loss. Do not use physical vacancy alone, rent concessions alone, Year 1 vacancy, or pro forma vacancy."
     pdf_aliases:
@@ -301,6 +393,10 @@ fields:
     label_cell: "B30"
     value_cell: "C30"
     data_type: "number"
+    source_period: "static"
+    source_basis: "om_property_summary"
+    fill_when: ["always"]
+    requires_structure: []
     description: "Year the storage facility was built."
     pdf_aliases:
       - "Year Built"
@@ -313,6 +409,10 @@ fields:
     label_cell: "B31"
     value_cell: "C31"
     data_type: "number"
+    source_period: "static"
+    source_basis: "om_unit_mix"
+    fill_when: ["unit_mix_present"]
+    requires_structure: []
     description: "Storage rentable unit count for the Napkin helper section."
     extraction_rule: "If the OM has a unit mix, sum only climate-controlled and non-climate storage rows. Exclude parking, residential, office, retail, and other non-storage spaces. If storage-only count cannot be determined, leave null."
     pdf_aliases:
@@ -328,6 +428,10 @@ fields:
     label_cell: "B32"
     value_cell: "C32"
     data_type: "number"
+    source_period: "static"
+    source_basis: "om_property_summary"
+    fill_when: ["always"]
+    requires_structure: []
     description: "Rentable square footage for the storage facility."
     extraction_rule: "Use storage rentable square footage when available. If the only value includes non-storage buildings or residential area, use it only if the OM presents it as the facility rentable square footage."
     pdf_aliases:
@@ -342,6 +446,10 @@ fields:
     label_cell: "B33"
     value_cell: "C33"
     data_type: "number"
+    source_period: "static"
+    source_basis: "om_unit_mix"
+    fill_when: ["unit_mix_present"]
+    requires_structure: []
     description: "Current vacant unit count for the helper section, if the OM states a unit count."
     extraction_rule: "Use vacant unit count, not a vacancy percentage. Leave null if only vacancy rate is stated."
     pdf_aliases:
@@ -355,6 +463,10 @@ fields:
     label_cell: "B36"
     value_cell: "C36"
     data_type: "number"
+    source_period: "static"
+    source_basis: "om_market_summary"
+    fill_when: ["market_summary_present"]
+    requires_structure: []
     description: "Population around the subject property."
     extraction_rule: "Prefer 3-mile population for self-storage market screening. Use another radius only if the OM does not provide 3-mile population, and cite the radius in reasoning."
     pdf_aliases:
@@ -370,6 +482,10 @@ fields:
     label_cell: "B37"
     value_cell: "C37"
     data_type: "percentage"
+    source_period: "static"
+    source_basis: "om_market_summary"
+    fill_when: ["market_summary_present"]
+    requires_structure: []
     description: "Population growth rate around the subject property."
     extraction_rule: "Prefer 3-mile population growth. Leave null if the OM does not state population growth; do not infer it from population alone."
     pdf_aliases:
@@ -387,6 +503,10 @@ fields:
     label_cell: "F5"
     value_cell: "G5"
     data_type: "currency"
+    source_period: "pro_forma"
+    source_basis: "om_operating_statement"
+    fill_when: ["pro_forma_operating_statement_present"]
+    requires_structure: ["column_map.pro_forma"]
     description: "Pro forma or stabilized average effective monthly rent per storage unit."
     extraction_rule: "Use pro forma or stabilized average effective rent per storage unit per month. If the OM does not provide a pro forma or stabilized rent, leave null. Do not use current/in-place rent."
     pdf_aliases:
@@ -401,6 +521,10 @@ fields:
     label_cell: "F6"
     value_cell: "G6"
     data_type: "currency"
+    source_period: "pro_forma"
+    source_basis: "om_operating_statement"
+    fill_when: ["pro_forma_operating_statement_present"]
+    requires_structure: ["column_map.pro_forma"]
     description: "Pro forma or stabilized annual other income per storage unit."
     extraction_rule: "Use pro forma or stabilized annual other income divided by storage-only unit count. Do not use current other income per unit."
     pdf_aliases:
@@ -415,6 +539,10 @@ fields:
     label_cell: "F10"
     value_cell: "G10"
     data_type: "currency"
+    source_period: "pro_forma"
+    source_basis: "om_operating_statement"
+    fill_when: ["pro_forma_operating_statement_present"]
+    requires_structure: ["column_map.pro_forma"]
     description: "Pro forma or stabilized operating expense per storage unit."
     extraction_rule: "Use pro forma or stabilized operating expenses divided by storage-only unit count. Do not use current or Year 1 expense per unit unless it is explicitly the stabilized/pro forma basis."
     pdf_aliases:
@@ -429,6 +557,10 @@ fields:
     label_cell: "F11"
     value_cell: "G11"
     data_type: "percentage"
+    source_period: "pro_forma"
+    source_basis: "om_operating_statement"
+    fill_when: ["pro_forma_operating_statement_present"]
+    requires_structure: ["column_map.pro_forma"]
     description: "Pro forma or stabilized cap rate used by the Napkin pro forma screen."
     extraction_rule: "Use OM-stated pro forma or stabilized cap rate. Do not use current/walk-in cap rate or sale/exit cap rate."
     pdf_aliases:
@@ -441,6 +573,10 @@ fields:
     label_cell: "F12"
     value_cell: "G12"
     data_type: "percentage"
+    source_period: "pro_forma"
+    source_basis: "om_operating_statement"
+    fill_when: ["pro_forma_operating_statement_present"]
+    requires_structure: ["column_map.pro_forma"]
     description: "Pro forma or stabilized economic vacancy rate for the Napkin pro forma screen."
     extraction_rule: "Use pro forma or stabilized economic vacancy / vacancy and credit loss. Do not use current vacancy, Year 1 vacancy, or physical vacancy alone."
     pdf_aliases:
@@ -459,6 +595,10 @@ fields:
     label_cell: "B19"
     value_cell: "C19"
     data_type: "currency"
+    source_period: "current"
+    source_basis: "om_operating_statement"
+    fill_when: ["t12_present", "current_operating_statement_present"]
+    requires_structure: ["column_map.t12", "column_map.current"]
     description: "Actual/current annual real estate tax expense."
     extraction_rule: "Use T12, actual, or current real estate tax expense only. Leave null if the OM only provides Year 1 or pro forma taxes."
     pdf_aliases:
@@ -472,6 +612,10 @@ fields:
     label_cell: "B20"
     value_cell: "C20"
     data_type: "currency"
+    source_period: "current"
+    source_basis: "om_operating_statement"
+    fill_when: ["t12_present", "current_operating_statement_present"]
+    requires_structure: ["column_map.t12", "column_map.current"]
     description: "Actual/current annual insurance expense."
     extraction_rule: "Use T12, actual, or current insurance expense only. Leave null if the OM only provides Year 1 or pro forma insurance."
     pdf_aliases:
@@ -483,6 +627,10 @@ fields:
     label_cell: "B21"
     value_cell: "C21"
     data_type: "currency"
+    source_period: "current"
+    source_basis: "om_operating_statement"
+    fill_when: ["t12_present", "current_operating_statement_present"]
+    requires_structure: ["column_map.t12", "column_map.current"]
     description: "Actual/current annual contract services expense."
     extraction_rule: "Use T12, actual, or current contract services expense only. Leave null if the OM only provides Year 1 or pro forma contract services."
     pdf_aliases:
@@ -494,6 +642,10 @@ fields:
     label_cell: "B22"
     value_cell: "C22"
     data_type: "currency"
+    source_period: "current"
+    source_basis: "om_operating_statement"
+    fill_when: ["t12_present", "current_operating_statement_present"]
+    requires_structure: ["column_map.t12", "column_map.current"]
     description: "Actual/current annual trash removal expense."
     extraction_rule: "Use T12, actual, or current trash removal expense only. Leave null if the OM only provides Year 1 or pro forma trash/utilities."
     pdf_aliases:
@@ -506,6 +658,10 @@ fields:
     label_cell: "B23"
     value_cell: "C23"
     data_type: "currency"
+    source_period: "current"
+    source_basis: "om_operating_statement"
+    fill_when: ["t12_present", "current_operating_statement_present"]
+    requires_structure: ["column_map.t12", "column_map.current"]
     description: "Actual/current annual electric expense."
     extraction_rule: "Use T12, actual, or current electric expense only. Leave null if the OM only provides Year 1 or pro forma electric/utilities."
     pdf_aliases:
@@ -517,6 +673,10 @@ fields:
     label_cell: "B24"
     value_cell: "C24"
     data_type: "currency"
+    source_period: "current"
+    source_basis: "om_operating_statement"
+    fill_when: ["t12_present", "current_operating_statement_present"]
+    requires_structure: ["column_map.t12", "column_map.current"]
     description: "Actual/current annual fuel or gas and oil expense."
     extraction_rule: "Use T12, actual, or current fuel/gas and oil expense only. Leave null if the OM only provides Year 1 or pro forma utilities."
     pdf_aliases:
@@ -528,6 +688,10 @@ fields:
     label_cell: "B25"
     value_cell: "C25"
     data_type: "currency"
+    source_period: "current"
+    source_basis: "om_operating_statement"
+    fill_when: ["t12_present", "current_operating_statement_present"]
+    requires_structure: ["column_map.t12", "column_map.current"]
     description: "Actual/current annual water and sewer expense."
     extraction_rule: "Use T12, actual, or current water and sewer expense only. Leave null if the OM only provides Year 1 or pro forma utilities."
     pdf_aliases:
@@ -539,6 +703,10 @@ fields:
     label_cell: "B26"
     value_cell: "C26"
     data_type: "currency"
+    source_period: "current"
+    source_basis: "om_operating_statement"
+    fill_when: ["t12_present", "current_operating_statement_present"]
+    requires_structure: ["column_map.t12", "column_map.current"]
     description: "Actual/current annual other utilities expense."
     extraction_rule: "Use T12, actual, or current other utilities expense only. Leave null if the OM only provides Year 1 or pro forma utilities."
     pdf_aliases:
@@ -550,6 +718,10 @@ fields:
     label_cell: "B27"
     value_cell: "C27"
     data_type: "currency"
+    source_period: "current"
+    source_basis: "om_operating_statement"
+    fill_when: ["t12_present", "current_operating_statement_present"]
+    requires_structure: ["column_map.t12", "column_map.current"]
     description: "Actual/current annual legal expense."
     extraction_rule: "Use T12, actual, or current legal expense only. Leave null if the OM only provides Year 1 or pro forma legal expense."
     pdf_aliases:
@@ -561,6 +733,10 @@ fields:
     label_cell: "B28"
     value_cell: "C28"
     data_type: "currency"
+    source_period: "current"
+    source_basis: "om_operating_statement"
+    fill_when: ["t12_present", "current_operating_statement_present"]
+    requires_structure: ["column_map.t12", "column_map.current"]
     description: "Actual/current annual property management fee expense."
     extraction_rule: "Use T12, actual, or current property management expense only. Leave null if the OM only provides Year 1 or pro forma management fee."
     pdf_aliases:
@@ -572,6 +748,10 @@ fields:
     label_cell: "B29"
     value_cell: "C29"
     data_type: "currency"
+    source_period: "current"
+    source_basis: "om_operating_statement"
+    fill_when: ["t12_present", "current_operating_statement_present"]
+    requires_structure: ["column_map.t12", "column_map.current"]
     description: "Actual/current annual repairs and maintenance expense."
     extraction_rule: "Use T12, actual, or current repairs and maintenance expense only. Leave null if the OM only provides Year 1 or pro forma repairs and maintenance."
     pdf_aliases:
@@ -583,6 +763,10 @@ fields:
     label_cell: "B30"
     value_cell: "C30"
     data_type: "currency"
+    source_period: "current"
+    source_basis: "om_operating_statement"
+    fill_when: ["t12_present", "current_operating_statement_present"]
+    requires_structure: ["column_map.t12", "column_map.current"]
     description: "Actual/current annual administrative expense."
     extraction_rule: "Use T12, actual, or current administrative expense only. Leave null if the OM only provides Year 1 or pro forma administrative expense."
     pdf_aliases:
@@ -594,6 +778,10 @@ fields:
     label_cell: "B31"
     value_cell: "C31"
     data_type: "currency"
+    source_period: "current"
+    source_basis: "om_operating_statement"
+    fill_when: ["t12_present", "current_operating_statement_present"]
+    requires_structure: ["column_map.t12", "column_map.current"]
     description: "Actual/current annual personnel or payroll expense."
     extraction_rule: "Use T12, actual, or current personnel/payroll expense only. Leave null if the OM only provides Year 1 or pro forma payroll."
     pdf_aliases:
@@ -607,6 +795,10 @@ fields:
     label_cell: "B32"
     value_cell: "C32"
     data_type: "currency"
+    source_period: "current"
+    source_basis: "om_operating_statement"
+    fill_when: ["t12_present", "current_operating_statement_present"]
+    requires_structure: ["column_map.t12", "column_map.current"]
     description: "Actual/current annual advertising or marketing expense."
     extraction_rule: "Use T12, actual, or current advertising/marketing expense only. Leave null if the OM only provides Year 1 or pro forma marketing."
     pdf_aliases:
@@ -620,6 +812,10 @@ fields:
     label_cell: "B33"
     value_cell: "C33"
     data_type: "currency"
+    source_period: "current"
+    source_basis: "om_operating_statement"
+    fill_when: ["t12_present", "current_operating_statement_present"]
+    requires_structure: ["column_map.t12", "column_map.current"]
     description: "Actual/current annual landscaping or grounds expense."
     extraction_rule: "Use T12, actual, or current landscaping/grounds expense only. Leave null if the OM only provides Year 1 or pro forma landscaping."
     pdf_aliases:
@@ -631,6 +827,10 @@ fields:
     label_cell: "B34"
     value_cell: "C34"
     data_type: "currency"
+    source_period: "current"
+    source_basis: "om_operating_statement"
+    fill_when: ["t12_present", "current_operating_statement_present"]
+    requires_structure: ["column_map.t12", "column_map.current"]
     description: "Actual/current annual credit card fees expense."
     extraction_rule: "Use T12, actual, or current credit card fees expense only. Leave null if the OM only provides Year 1 or pro forma credit card fees."
     pdf_aliases:
@@ -642,6 +842,10 @@ fields:
     label_cell: "B35"
     value_cell: "C35"
     data_type: "currency"
+    source_period: "current"
+    source_basis: "om_operating_statement"
+    fill_when: ["t12_present", "current_operating_statement_present"]
+    requires_structure: ["column_map.t12", "column_map.current"]
     description: "Actual/current annual miscellaneous expense."
     extraction_rule: "Use T12, actual, or current miscellaneous expense only. Leave null if the OM only provides Year 1 or pro forma miscellaneous expenses."
     pdf_aliases:
@@ -655,6 +859,10 @@ fields:
     label_cell: "G30"
     value_cell: "H30"
     data_type: "currency"
+    source_period: "current"
+    source_basis: "om_operating_statement"
+    fill_when: ["t12_present", "current_operating_statement_present"]
+    requires_structure: ["column_map.t12", "column_map.current"]
     description: "Current annual insurance policy income in the Actuals & Unit Mix other income section."
     extraction_rule: "Use current or actual insurance/tenant insurance income. Do not use projected other income."
     pdf_aliases:
@@ -667,6 +875,10 @@ fields:
     label_cell: "G31"
     value_cell: "H31"
     data_type: "currency"
+    source_period: "current"
+    source_basis: "om_operating_statement"
+    fill_when: ["t12_present", "current_operating_statement_present"]
+    requires_structure: ["column_map.t12", "column_map.current"]
     description: "Current annual admin fee income in the Actuals & Unit Mix other income section."
     extraction_rule: "Use current or actual admin fee income. Do not use projected other income."
     pdf_aliases:
@@ -680,6 +892,10 @@ fields:
     label_cell: "G32"
     value_cell: "H32"
     data_type: "currency"
+    source_period: "current"
+    source_basis: "om_operating_statement"
+    fill_when: ["t12_present", "current_operating_statement_present"]
+    requires_structure: ["column_map.t12", "column_map.current"]
     description: "Current annual late fee income in the Actuals & Unit Mix other income section."
     extraction_rule: "Use current or actual late fee income. Do not use projected other income."
     pdf_aliases:
@@ -691,6 +907,10 @@ fields:
     label_cell: "G33"
     value_cell: "H33"
     data_type: "currency"
+    source_period: "current"
+    source_basis: "om_operating_statement"
+    fill_when: ["t12_present", "current_operating_statement_present"]
+    requires_structure: ["column_map.t12", "column_map.current"]
     description: "Current annual covered parking income in the Actuals & Unit Mix other income section."
     extraction_rule: "Use current or actual covered parking income. Do not use projected other income."
     pdf_aliases:
@@ -702,6 +922,10 @@ fields:
     label_cell: "G34"
     value_cell: "H34"
     data_type: "currency"
+    source_period: "current"
+    source_basis: "om_operating_statement"
+    fill_when: ["t12_present", "current_operating_statement_present"]
+    requires_structure: ["column_map.t12", "column_map.current"]
     description: "Current annual uncovered parking income in the Actuals & Unit Mix other income section."
     extraction_rule: "Use current or actual uncovered parking income. Do not use projected other income."
     pdf_aliases:
@@ -713,6 +937,10 @@ fields:
     label_cell: "G35"
     value_cell: "H35"
     data_type: "currency"
+    source_period: "current"
+    source_basis: "om_operating_statement"
+    fill_when: ["t12_present", "current_operating_statement_present"]
+    requires_structure: ["column_map.t12", "column_map.current"]
     description: "Current annual residential income in the Actuals & Unit Mix other income section."
     extraction_rule: "Use current or actual residential rental income. Do not use projected other income."
     pdf_aliases:
@@ -724,6 +952,10 @@ fields:
     label_cell: "G36"
     value_cell: "H36"
     data_type: "currency"
+    source_period: "current"
+    source_basis: "om_operating_statement"
+    fill_when: ["t12_present", "current_operating_statement_present"]
+    requires_structure: ["column_map.t12", "column_map.current"]
     description: "Current annual miscellaneous income in the Actuals & Unit Mix other income section."
     extraction_rule: "Use current or actual miscellaneous income. Do not use projected other income."
     pdf_aliases:
@@ -735,6 +967,10 @@ fields:
     label_cell: "G37"
     value_cell: "H37"
     data_type: "currency"
+    source_period: "current"
+    source_basis: "om_operating_statement"
+    fill_when: ["t12_present", "current_operating_statement_present"]
+    requires_structure: ["column_map.t12", "column_map.current"]
     description: "Additional current annual miscellaneous income in the Actuals & Unit Mix other income section."
     extraction_rule: "Use current or actual miscellaneous income not already captured in H36. Do not use projected other income."
     pdf_aliases:
@@ -749,6 +985,10 @@ fields:
     label_cell: "B31"
     value_cell: "E31"
     data_type: "currency"
+    source_period: "year1"
+    source_basis: "om_operating_statement"
+    fill_when: ["year1_operating_statement_present", "pro_forma_operating_statement_present"]
+    requires_structure: ["column_map.year1", "column_map.pro_forma"]
     description: "Year 1 white label expense input in the P&L projection."
     extraction_rule: "Use Year 1 white label expense if explicitly stated. If Year 1 is unavailable, use pro forma/stabilized white label expense. Do not use current or T12 actuals."
     pdf_aliases:
@@ -760,6 +1000,10 @@ fields:
     label_cell: "B32"
     value_cell: "E32"
     data_type: "currency"
+    source_period: "year1"
+    source_basis: "om_operating_statement"
+    fill_when: ["year1_operating_statement_present", "pro_forma_operating_statement_present"]
+    requires_structure: ["column_map.year1", "column_map.pro_forma"]
     description: "Year 1 personnel/payroll expense input in the P&L projection."
     extraction_rule: "Use Year 1 personnel/payroll expense. If Year 1 is unavailable, use pro forma/stabilized personnel/payroll expense. Do not use current or T12 actuals."
     pdf_aliases:
@@ -773,6 +1017,10 @@ fields:
     label_cell: "B33"
     value_cell: "E33"
     data_type: "currency"
+    source_period: "year1"
+    source_basis: "om_operating_statement"
+    fill_when: ["year1_operating_statement_present", "pro_forma_operating_statement_present"]
+    requires_structure: ["column_map.year1", "column_map.pro_forma"]
     description: "Year 1 advertising/marketing expense input in the P&L projection."
     extraction_rule: "Use Year 1 advertising/marketing expense. If Year 1 is unavailable, use pro forma/stabilized advertising/marketing expense. Do not use current or T12 actuals."
     pdf_aliases:
@@ -785,6 +1033,10 @@ fields:
     label_cell: "B36"
     value_cell: "E36"
     data_type: "currency"
+    source_period: "year1"
+    source_basis: "om_operating_statement"
+    fill_when: ["year1_operating_statement_present", "pro_forma_operating_statement_present"]
+    requires_structure: ["column_map.year1", "column_map.pro_forma"]
     description: "Year 1 miscellaneous expense input in the P&L projection."
     extraction_rule: "Use Year 1 miscellaneous expense for the Misc 2 row. If Year 1 is unavailable, use pro forma/stabilized miscellaneous expense. Do not use current or T12 actuals."
     pdf_aliases:
@@ -826,6 +1078,10 @@ tables:
     row_identifier_column: "G"
     description: "Storage-only unit mix and current average rent rows for the Actuals & Unit Mix sheet."
     extraction_rule: "Extract one row per storage unit size/type. Include climate-controlled and non-climate storage. Exclude parking rows. Exclude residential rows. Exclude office, retail, and other non-storage rows. Keep current rent average aligned to the same row as the unit type."
+    source_period: "current"
+    source_basis: "om_unit_mix"
+    fill_when: ["unit_mix_present"]
+    requires_structure: []
     columns:
       - excel_column: "G"
         header: "Type"

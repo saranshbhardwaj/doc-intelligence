@@ -1,6 +1,11 @@
 from pathlib import Path
 
 import yaml
+import pytest
+
+from app.verticals.real_estate.template_filling.excel.schema_based.schema_loader import (
+    SchemaLoader,
+)
 
 
 SCHEMA_PATH = (
@@ -24,6 +29,10 @@ def _schema_fields():
 def _schema_tables():
     schema = yaml.safe_load(SCHEMA_PATH.read_text())
     return schema.get("tables", [])
+
+
+def _loaded_schema():
+    return SchemaLoader(schemas_dir=str(SCHEMA_PATH.parent)).load_schema("re_investment_v1")
 
 
 def _field(field_id):
@@ -59,6 +68,86 @@ def test_dashboard_only_extracts_om_fact_cells():
         "C6": "storage_unit_count",
         "C8": "asking_price",
     }
+
+
+def test_yaml_contract_metadata_uses_closed_enums():
+    allowed_periods = {"current", "t12", "year1", "pro_forma", "stabilized", "static"}
+    allowed_basis = {
+        "om_operating_statement",
+        "om_unit_mix",
+        "om_property_summary",
+        "om_market_summary",
+        "om_rent_roll",
+        "om_rent_comps",
+        "om_capex_schedule",
+    }
+    allowed_fill_when = {
+        "always",
+        "current_operating_statement_present",
+        "year1_operating_statement_present",
+        "pro_forma_operating_statement_present",
+        "t12_present",
+        "unit_mix_present",
+        "rent_roll_present",
+        "rent_comps_present",
+        "market_summary_present",
+    }
+
+    loaded_schema = _loaded_schema()
+    targets = loaded_schema.fields + loaded_schema.tables
+
+    assert targets
+    for target in targets:
+        assert target.get("source_period") in allowed_periods
+        assert target.get("source_basis") in allowed_basis
+        fill_when = target.get("fill_when")
+        if isinstance(fill_when, str):
+            fill_when = [fill_when]
+        assert fill_when
+        assert set(fill_when).issubset(allowed_fill_when)
+
+
+def test_active_yaml_targets_declare_contract_metadata_explicitly():
+    targets = _schema_fields() + _schema_tables()
+
+    assert targets
+    for target in targets:
+        missing = [
+            key
+            for key in ("source_period", "source_basis", "fill_when", "requires_structure")
+            if key not in target
+        ]
+        assert missing == [], f"{target['id']} missing {missing}"
+
+
+def test_schema_loader_rejects_unknown_contract_metadata(tmp_path):
+    schema = yaml.safe_load(SCHEMA_PATH.read_text())
+    schema["fields"][0]["source_period"] = "broker-vibes"
+    schema_path = tmp_path / "bad_schema.yaml"
+    schema_path.write_text(yaml.safe_dump(schema), encoding="utf-8")
+
+    loader = SchemaLoader(schemas_dir=str(tmp_path))
+
+    with pytest.raises(ValueError, match="source_period"):
+        loader.load_schema("bad_schema")
+
+
+def test_schema_loader_rejects_missing_contract_metadata_for_operating_targets(tmp_path):
+    schema = yaml.safe_load(SCHEMA_PATH.read_text())
+    target = next(
+        field
+        for field in schema["fields"]
+        if field["id"] == "actuals_unit_mix_expenses_re_tax"
+    )
+    for key in ("source_period", "source_basis", "fill_when", "requires_structure"):
+        target.pop(key, None)
+    schema_path = tmp_path / "missing_contract.yaml"
+    schema_path.write_text(yaml.safe_dump(schema), encoding="utf-8")
+
+    loader = SchemaLoader(schemas_dir=str(tmp_path))
+
+    with pytest.raises(ValueError, match="missing contract metadata"):
+        loader.load_schema("missing_contract")
 
 
 def test_napkin_current_fields_are_period_specific():

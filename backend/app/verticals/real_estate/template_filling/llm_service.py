@@ -254,10 +254,76 @@ class TemplateFillLLMService:
             logger.error(f"Error detecting PDF fields: {e}", exc_info=True)
             raise
 
+    async def detect_om_structure(self, pdf_fields: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Detect OM column map and section presence before cell extraction."""
+        if not pdf_fields:
+            return {}
+
+        kv_fields = [f for f in pdf_fields if f.get("source") == "key_value_pairs"]
+        table_block_fields = [f for f in pdf_fields if f.get("source") == "table_block"]
+        narrative_block_fields = [f for f in pdf_fields if f.get("source") == "narrative_block"]
+        fields_for_llm = kv_fields + table_block_fields + narrative_block_fields
+        if not fields_for_llm:
+            fields_for_llm = pdf_fields
+        stripped_pdf_fields = [self._strip_pdf_field(f) for f in fields_for_llm]
+        pdf_fields_json = json.dumps(stripped_pdf_fields, separators=(",", ":"), ensure_ascii=False)
+
+        pair = self.prompts.build_detect_om_structure(pdf_fields_json)
+        system_arg = [
+            {
+                "type": "text",
+                "text": pair.system_prompt,
+                "cache_control": {"type": "ephemeral"},
+            }
+        ]
+
+        t0 = time.time()
+        message = await asyncio.to_thread(
+            self.client.messages.parse,
+            model=self.model,
+            max_tokens=self.max_tokens,
+            temperature=0.0,
+            timeout=settings.synthesis_llm_timeout_seconds,
+            system=system_arg,
+            messages=[{"role": "user", "content": pair.user_message}],
+            output_format=pair.response_model,
+        )
+        duration_ms = int((time.time() - t0) * 1000)
+
+        usage = getattr(message, "usage", None)
+        cache_creation = cache_read = input_tokens = output_tokens = 0
+        if usage is not None:
+            cache_creation = getattr(usage, "cache_creation_input_tokens", 0) or 0
+            cache_read = getattr(usage, "cache_read_input_tokens", 0) or 0
+            input_tokens = getattr(usage, "input_tokens", 0) or 0
+            output_tokens = getattr(usage, "output_tokens", 0) or 0
+        self._record_llm_metrics(input_tokens, output_tokens, cache_read, cache_creation)
+
+        result = message.parsed_output.model_dump()
+
+        if self.capture_io_log and self._io_log_repo:
+            self._io_log_repo.save_io_log(
+                source_type="template_fill",
+                source_id=self.fill_run_id,
+                stage="detect_om_structure",
+                prompt_version=self.prompts.version,
+                system_prompt=pair.system_prompt,
+                user_message=pair.user_message,
+                output=result,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                cache_creation_tokens=cache_creation,
+                cache_read_tokens=cache_read,
+                duration_ms=duration_ms,
+            )
+
+        return result
+
     async def extract_schema_field_values(
         self,
         unmapped_fields: List[Dict[str, Any]],
         pdf_fields: List[Dict[str, Any]],
+        om_structure: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Stage 2: Targeted extraction of specific YAML schema fields from Azure DI output.
@@ -290,7 +356,9 @@ class TemplateFillLLMService:
         table_block_fields = [f for f in pdf_fields if f.get("source") == "table_block"]
         narrative_block_fields = [f for f in pdf_fields if f.get("source") == "narrative_block"]
         # Fall back to all fields if no table_block fields exist (backward compat)
-        fields_for_llm = kv_fields + table_block_fields + narrative_block_fields if table_block_fields else pdf_fields
+        fields_for_llm = kv_fields + table_block_fields + narrative_block_fields
+        if not fields_for_llm:
+            fields_for_llm = pdf_fields
         stripped_pdf_fields = [self._strip_pdf_field(f) for f in fields_for_llm]
         pdf_fields_json = json.dumps(stripped_pdf_fields, separators=(",", ":"), ensure_ascii=False)
 
@@ -299,7 +367,11 @@ class TemplateFillLLMService:
         )
 
         # Build prompt pair from versioned prompt set
-        pair = self.prompts.build_extract_schema_fields(pdf_fields_json, unmapped_fields)
+        pair = self.prompts.build_extract_schema_fields(
+            pdf_fields_json,
+            unmapped_fields,
+            om_structure=om_structure,
+        )
         system_prompt = pair.system_prompt
         user_message = pair.user_message
 
@@ -938,6 +1010,12 @@ For each requested schema table:
                 "data_start_row": schema_table.get("data_start_row"),
                 "data_end_row": schema_table.get("data_end_row", schema_table.get("data_start_row")),
                 "row_identifier_column": schema_table.get("row_identifier_column"),
+                "description": schema_table.get("description"),
+                "extraction_rule": schema_table.get("extraction_rule"),
+                "source_period": schema_table.get("source_period"),
+                "source_basis": schema_table.get("source_basis"),
+                "fill_when": schema_table.get("fill_when"),
+                "requires_structure": schema_table.get("requires_structure", []),
                 "row_labels": row_labels,
                 "columns": columns,
             })
@@ -1095,433 +1173,4 @@ For each requested schema table:
             return int(fallback_page)
 
         return 0
-
-    async def auto_map_fields(
-        self,
-        pdf_fields: List[Dict[str, Any]],
-        excel_schema: Dict[str, Any],
-        on_batch_complete=None,
-        use_cache: bool = True,
-    ) -> Dict[str, Any]:
-        """
-        Automatically map PDF fields to Excel cells using sheet batching.
-
-        Uses Anthropic's Structured Outputs to GUARANTEE valid JSON response.
-
-        **Optimized Sheet Batching Strategy (fixes 200k token overflow):**
-        - System prompt: Instructions + ALL PDF fields (cached once, ~12k tokens)
-        - Batches Excel sheets into groups of 4 sheets
-        - User message: Compressed sheet batch (~9k tokens per batch)
-        - Total per call: ~12k (cached) + ~9k (user) = ~21k tokens
-        - Total calls: ~6 calls for 21 sheets (vs 9 calls with old PDF batching)
-
-        **Token Efficiency:**
-        - PDF fields cached once, reused across all sheet batches
-        - Each sheet batch creates unique user message
-        - Avoids 200k+ token overflow from sending full schema
-
-        Args:
-            pdf_fields: List of detected PDF fields (from Azure DI)
-            excel_schema: Excel template schema (all sheets)
-            on_batch_complete: Optional callback(batch_num, total_batches, batch_mappings)
-            use_cache: Enable prompt caching (default: True)
-
-        Returns:
-            {
-                "mappings": [...],
-                "total_mapped": 38,
-                "high_confidence_count": 25,
-                ...
-            }
-        """
-        logger.info(
-            f"🔄 Auto-mapping {len(pdf_fields)} PDF fields across "
-            f"{len(excel_schema.get('sheets', []))} sheets (sheet batching strategy)"
-        )
-
-        if not pdf_fields or not excel_schema.get("sheets"):
-            return {"mappings": [], "total_mapped": 0, "total_unmapped": 0, "high_confidence_count": 0}
-
-        # Batch sheets (not PDF fields) to stay under token limits
-        SHEETS_PER_BATCH = 4
-
-        try:
-            all_mappings = []
-            total_high_confidence = 0
-
-            # Track aggregated token usage across all batches
-            total_input_tokens = 0
-            total_output_tokens = 0
-            total_cache_creation_tokens = 0
-            total_cache_read_tokens = 0
-
-            # Step 1: Compress full Excel schema
-            compressed_schema = self._compress_excel_schema(excel_schema)
-            sheets = compressed_schema.get("sheets", [])
-            total_sheets = len(sheets)
-            total_batches = (total_sheets + SHEETS_PER_BATCH - 1) // SHEETS_PER_BATCH
-
-            logger.info(
-                f"📊 Batching strategy: {total_sheets} sheets / {SHEETS_PER_BATCH} per batch = "
-                f"{total_batches} LLM calls"
-            )
-
-            # Step 2: Build system prompt with ALL PDF fields (cached once, reused)
-            stripped_fields = [self._strip_pdf_field(field) for field in pdf_fields]
-            pdf_fields_json = json.dumps(stripped_fields, separators=(",", ":"), ensure_ascii=False)
-            system_prompt = self.prompts.build_auto_map_system(pdf_fields_json)
-
-            # Estimate and log token counts
-            system_tokens = count_tokens(system_prompt)
-            logger.info(
-                f"📝 System prompt (PDF fields): ~{system_tokens:,} tokens "
-                f"({len(stripped_fields)} fields, will be cached)"
-            )
-
-            # Step 3: Process Excel sheets in batches
-            for i in range(0, total_sheets, SHEETS_PER_BATCH):
-                sheet_batch = sheets[i:i + SHEETS_PER_BATCH]
-                batch_num = (i // SHEETS_PER_BATCH) + 1
-                sheet_names = [s.get("name", f"Sheet{idx}") for idx, s in enumerate(sheet_batch, start=i)]
-
-                logger.info(
-                    f"\n📋 Batch {batch_num}/{total_batches}: Processing {len(sheet_batch)} sheets: "
-                    f"{', '.join(sheet_names[:3])}{'...' if len(sheet_names) > 3 else ''}"
-                )
-
-                # Build sheet batch schema
-                sheet_batch_schema = self._extract_sheet_batch_schema(compressed_schema, sheet_batch)
-                user_message = self.prompts.build_auto_map_user(sheet_batch_schema)
-
-                # Estimate and log token counts for this batch
-                user_tokens = count_tokens(user_message)
-                total_tokens = system_tokens + user_tokens
-                logger.info(
-                    f"   📊 Tokens: system ~{system_tokens:,} (cached) + "
-                    f"user ~{user_tokens:,} = ~{total_tokens:,} total"
-                )
-
-                # Warn if approaching limit
-                if total_tokens > 150000:
-                    logger.warning(
-                        f"⚠️  Batch {batch_num} approaching token limit: {total_tokens:,} tokens "
-                        f"(max 200k). Consider reducing SHEETS_PER_BATCH."
-                    )
-
-                # Build cached system prompt
-                system_arg: Any
-                if use_cache:
-                    system_arg = [
-                        {
-                            "type": "text",
-                            "text": system_prompt,
-                            "cache_control": {"type": "ephemeral"},
-                        }
-                    ]
-                else:
-                    system_arg = system_prompt
-
-                # Use Anthropic Structured Outputs
-                t0 = time.time()
-                message = await asyncio.to_thread(
-                    self.client.messages.parse,
-                    model=self.model,
-                    max_tokens=settings.synthesis_llm_max_tokens,
-                    temperature=0.0,
-                    timeout=settings.synthesis_llm_timeout_seconds,
-                    system=system_arg,
-                    messages=[{"role": "user", "content": user_message}],
-                    output_format=self.prompts.get_auto_map_response_model(),
-                )
-                batch_duration_ms = int((time.time() - t0) * 1000)
-
-                # Log actual cache usage from Anthropic and accumulate totals
-                usage = getattr(message, "usage", None)
-                if usage is not None:
-                    cache_creation = getattr(usage, "cache_creation_input_tokens", None) or 0
-                    cache_read = getattr(usage, "cache_read_input_tokens", None) or 0
-                    input_tokens = getattr(usage, "input_tokens", None) or 0
-                    output_tokens = getattr(usage, "output_tokens", None) or 0
-
-                    # Record metrics for this batch
-                    self._record_llm_metrics(input_tokens, output_tokens, cache_read, cache_creation)
-
-                    # Accumulate token totals across all batches
-                    total_input_tokens += input_tokens
-                    total_output_tokens += output_tokens
-                    total_cache_creation_tokens += cache_creation
-                    total_cache_read_tokens += cache_read
-
-                    if cache_creation > 0 or cache_read > 0:
-                        logger.info(
-                            f"   💾 Cache stats: creation={cache_creation:,}, read={cache_read:,}, "
-                            f"input={input_tokens:,}, output={output_tokens:,}"
-                        )
-
-                parsed_output = message.parsed_output
-                batch_result = parsed_output.model_dump()
-
-                # Collect mappings from this batch
-                batch_mappings = batch_result.get("mappings", [])
-                all_mappings.extend(batch_mappings)
-                total_high_confidence += batch_result.get("high_confidence_count", 0)
-
-                logger.info(
-                    f"   ✅ Batch {batch_num}/{total_batches} complete: "
-                    f"{len(batch_mappings)} mappings, "
-                    f"{batch_result.get('high_confidence_count', 0)} high confidence"
-                )
-
-                if self.capture_io_log and self._io_log_repo:
-                    self._io_log_repo.save_io_log(
-                        source_type="template_fill",
-                        source_id=self.fill_run_id,
-                        stage=f"auto_map_fields_batch_{batch_num}",
-                        prompt_version=self.prompts.version,
-                        user_message=user_message,
-                        output=batch_result,
-                        input_tokens=input_tokens if usage else 0,
-                        output_tokens=output_tokens if usage else 0,
-                        cache_creation_tokens=cache_creation if usage else 0,
-                        cache_read_tokens=cache_read if usage else 0,
-                        duration_ms=batch_duration_ms,
-                    )
-
-                # Call progress callback if provided
-                if on_batch_complete:
-                    on_batch_complete(batch_num, total_batches, batch_mappings)
-
-            # Aggregate results
-            result = {
-                "mappings": all_mappings,
-                "total_mapped": len(all_mappings),
-                "total_unmapped": len(pdf_fields) - len(all_mappings),
-                "high_confidence_count": total_high_confidence,
-                # Token usage data for observability
-                "usage": {
-                    "input_tokens": total_input_tokens,
-                    "output_tokens": total_output_tokens,
-                    "cache_creation_input_tokens": total_cache_creation_tokens,
-                    "cache_read_input_tokens": total_cache_read_tokens,
-                    "total_batches": total_batches,
-                    "model": self.model,
-                }
-            }
-
-            # Add status to all mappings
-            for mapping in result.get("mappings", []):
-                if "status" not in mapping:
-                    mapping["status"] = "auto_mapped"
-
-            logger.info(
-                f"\n✅ Auto-mapping complete: {result.get('total_mapped', 0)} total mappings across "
-                f"{total_sheets} sheets ({result.get('high_confidence_count', 0)} high confidence, "
-                f"{result.get('total_unmapped', 0)} unmapped) | "
-                f"Tokens: input={total_input_tokens:,}, output={total_output_tokens:,}, "
-                f"cache_read={total_cache_read_tokens:,}"
-            )
-
-            return result
-
-        except Exception as e:
-            logger.error(f"❌ Error auto-mapping fields: {e}", exc_info=True)
-            raise
-
-    def _compress_excel_schema(self, excel_schema: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Compress Excel schema to reduce token usage by ~70-80%.
-
-        Removes verbose metadata while keeping essential mapping information:
-        - Limits fillable_cells to max 20 samples per table
-        - Removes: column_headers_detailed, current_value, is_merged, data_rows
-        - Keeps: cell, label, type, col_header, row_label, sheet name
-
-        This allows large templates (1200+ fields, 30+ tables) to fit within token limits.
-        """
-        compressed = {
-            "total_key_value_fields": excel_schema.get("total_key_value_fields", 0),
-            "total_tables": excel_schema.get("total_tables", 0),
-            "has_formulas": excel_schema.get("has_formulas", False),
-            "sheets": []
-        }
-
-        for sheet in excel_schema.get("sheets", []):
-            compressed_sheet = {
-                "name": sheet.get("name"),
-                "index": sheet.get("index"),
-            }
-
-            # Compress key-value fields (remove current_value, is_merged)
-            kv_fields = sheet.get("key_value_fields", [])
-            compressed_sheet["key_value_fields"] = [
-                {
-                    "cell": kv.get("cell"),
-                    "label": kv.get("label"),
-                    "type": kv.get("type"),
-                    "row": kv.get("row"),
-                    "col": kv.get("col"),
-                }
-                for kv in kv_fields
-            ]
-
-            # Compress tables (limit fillable_cells to 20, remove verbose metadata)
-            tables = sheet.get("tables", [])
-            compressed_tables = []
-            for table in tables:
-                # Limit fillable_cells to max 20 samples (instead of 100)
-                fillable_cells = table.get("fillable_cells", [])[:20]
-
-                compressed_table = {
-                    "table_name": table.get("table_name"),
-                    "start_row": table.get("start_row"),
-                    "start_col": table.get("start_col"),
-                    "end_col": table.get("end_col"),
-                    "column_headers": table.get("column_headers", []),  # Keep hierarchical headers
-                    "total_fillable_cells": table.get("total_fillable_cells", 0),
-                    # Simplified fillable_cells (remove col_letter, keep essentials)
-                    "fillable_cells": [
-                        {
-                            "cell": cell.get("cell"),
-                            "row": cell.get("row"),
-                            "col": cell.get("col"),
-                            "row_label": cell.get("row_label"),
-                            "col_header": cell.get("col_header"),
-                            "type": cell.get("type"),
-                        }
-                        for cell in fillable_cells
-                    ]
-                }
-                compressed_tables.append(compressed_table)
-
-            compressed_sheet["tables"] = compressed_tables
-            compressed["sheets"].append(compressed_sheet)
-
-        logger.info(
-            f"Compressed Excel schema: {len(excel_schema.get('sheets', []))} sheets, "
-            f"{compressed['total_key_value_fields']} KV fields, {compressed['total_tables']} tables"
-        )
-
-        return compressed
-
-    def _strip_pdf_field(self, field: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Remove unnecessary fields from PDF field to reduce tokens (~26% reduction).
-
-        Removes: description, source (not used by mapping logic)
-        Keeps: id, name, type, extracted_value, confidence, citations (all required)
-        For table_block fields: also keeps table_name, table_columns, table_rows (full context)
-        For narrative_block fields: also keeps full_text and section (rich context for LLM)
-        """
-        stripped = {
-            "id": field.get("id"),
-            "name": field.get("name"),
-            "type": field.get("type"),
-            "extracted_value": field.get("extracted_value"),
-            "confidence": field.get("confidence"),
-            "citations": field.get("citations", []),
-        }
-        # Preserve full table structure for table_block fields
-        if field.get("type") == "table":
-            if field.get("table_name"):
-                stripped["table_name"] = field.get("table_name")
-            if field.get("table_columns"):
-                stripped["table_columns"] = field.get("table_columns")
-            if field.get("table_rows"):
-                stripped["table_rows"] = field.get("table_rows")
-        # Preserve full narrative text for narrative_block fields
-        elif field.get("type") == "narrative":
-            if field.get("full_text"):
-                stripped["full_text"] = field.get("full_text")
-            if field.get("section"):
-                stripped["section"] = field.get("section")
-        return stripped
-
-    def _build_table_context_from_pdf_fields(self, pdf_fields: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Build table extraction context from pdf_fields (detect_fields_task output).
-
-        Uses the same structured data Stage 1.5 (extract_schema_field_values) already sends to the LLM.
-        Passing the same pdf_fields across all table batch calls means the system prompt is identical
-        each time — enabling Anthropic prompt cache hits (~10x cheaper after the first call).
-        """
-        context = []
-        for f in pdf_fields:
-            source = f.get("source")
-            if source not in ("key_value_pairs", "table_block", "narrative_block"):
-                continue
-            if source == "table_block":
-                page_number = f.get("page_number")
-                cols = f.get("table_columns", [])
-                rows = f.get("table_rows", [])
-                text = f.get("name", "") + "\n" + " | ".join(str(c) for c in cols) + "\n"
-                text += "\n".join(" | ".join(str(v) for v in row) for row in rows)
-            elif source == "narrative_block":
-                page_number = f.get("page_number")
-                text = f.get("full_text") or f.get("extracted_value") or ""
-            else:  # key_value_pairs — bbox.page is exact (Azure DI per-pair bounding_regions)
-                page_number = (f.get("bbox", {}) or {}).get("page") or f.get("page_number")
-                text = f"{f.get('name', '')}: {f.get('extracted_value', '')}"
-            context.append({"text": text, "page_number": page_number, "section_type": source})
-        return context
-
-    def _build_table_rag_text_context(self, chunks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """
-        Build text-only RAG context from retrieved chunks for table extraction.
-        Uses DocumentChunk.text + page metadata only.
-        """
-        context: List[Dict[str, Any]] = []
-        for chunk in chunks:
-            metadata = chunk.get("chunk_metadata") or {}
-            if isinstance(metadata, str):
-                try:
-                    metadata = json.loads(metadata)
-                except Exception:
-                    metadata = {}
-
-            page_range = metadata.get("page_range")
-            bbox_page = (metadata.get("bbox", {}) or {}).get("page")
-            if bbox_page:
-                # Table chunks — bbox.page is the exact page
-                page_number = bbox_page
-            elif isinstance(page_range, list) and len(page_range) >= 2 and page_range[0] != page_range[-1]:
-                # Multi-page KV chunk — chunk.page_number is only the start, not reliable
-                page_number = None
-            else:
-                page_number = chunk.get("page_number") or metadata.get("page_number")
-
-            context.append({
-                "text": chunk.get("text") or "",
-                "page_number": page_number,
-                "section_type": chunk.get("section_type") or metadata.get("chunk_type"),
-            })
-
-        return context
-
-    def _extract_sheet_batch_schema(
-        self,
-        full_schema: Dict[str, Any],
-        sheet_batch: List[Dict[str, Any]]
-    ) -> Dict[str, Any]:
-        """
-        Extract a subset of sheets from the full compressed schema.
-
-        Args:
-            full_schema: Full compressed Excel schema
-            sheet_batch: List of sheet dicts to extract
-
-        Returns:
-            Schema with only the specified sheets
-        """
-        return {
-            "total_key_value_fields": sum(
-                len(s.get("key_value_fields", [])) for s in sheet_batch
-            ),
-            "total_tables": sum(
-                len(s.get("tables", [])) for s in sheet_batch
-            ),
-            "has_formulas": full_schema.get("has_formulas", False),
-            "sheets": sheet_batch
-        }
-
-    # _build_system_prompt_with_pdf_fields and _build_sheet_batch_user_message
-    # moved to prompts/v1.py (build_auto_map_system / build_auto_map_user)
 

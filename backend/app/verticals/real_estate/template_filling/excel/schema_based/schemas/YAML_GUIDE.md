@@ -14,10 +14,79 @@
   label_cell: "B5"                # Cell containing the label
   value_cell: "C5"                # Cell where value should be filled
   data_type: "text"               # text, number, currency, percentage, date
+  source_period: "static"         # current, t12, year1, pro_forma, stabilized, static
+  source_basis: "om_property_summary"
+  fill_when: ["always"]
+  requires_structure: []          # e.g. ["column_map.year1"] for period-specific fields
   pdf_aliases:                    # What to look for in PDF (add many!)
     - "Primary Alias"
     - "Alternative Name"
     - "Common Abbreviation"
+```
+
+## Source Map Contract
+
+The schema should describe when a field is allowed to be filled. The fill pipeline first detects an OM Source Map with operating-statement columns and section-presence flags. Fields that depend on a missing or low-confidence structure key are skipped with a structured reason instead of guessed.
+
+Allowed `source_period` values:
+- `current`
+- `t12`
+- `year1`
+- `pro_forma`
+- `stabilized`
+- `static`
+
+Allowed `source_basis` values:
+- `om_operating_statement`
+- `om_unit_mix`
+- `om_property_summary`
+- `om_market_summary`
+- `om_rent_roll`
+- `om_rent_comps`
+- `om_capex_schedule`
+
+Allowed `fill_when` values:
+- `always`
+- `current_operating_statement_present`
+- `year1_operating_statement_present`
+- `pro_forma_operating_statement_present`
+- `t12_present`
+- `unit_mix_present`
+- `rent_roll_present`
+- `rent_comps_present`
+- `market_summary_present`
+
+Structured skip reasons surfaced to review:
+- `missing_section`
+- `low_structure_confidence`
+- `structure_key_missing`
+- `data_type_mismatch`
+- `extraction_returned_null`
+
+Examples:
+
+```yaml
+- id: "actuals_real_estate_taxes"
+  sheet: "Actuals&UnitMix"
+  label_cell: "B19"
+  value_cell: "C19"
+  data_type: "currency"
+  source_period: "current"
+  source_basis: "om_operating_statement"
+  fill_when: ["current_operating_statement_present"]
+  requires_structure: ["column_map.current"]
+  extraction_rule: "Use actual/current real estate taxes only. Do not use Year 1 or pro forma values."
+
+- id: "pnl_year1_personnel_expense"
+  sheet: "P&L"
+  label_cell: "B32"
+  value_cell: "E32"
+  data_type: "currency"
+  source_period: "year1"
+  source_basis: "om_operating_statement"
+  fill_when: ["year1_operating_statement_present"]
+  requires_structure: ["column_map.year1"]
+  extraction_rule: "Use Year 1 personnel/payroll expense. Do not use current or T12 actuals."
 ```
 
 ## Finding PDF Aliases

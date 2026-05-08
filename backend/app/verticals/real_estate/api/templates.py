@@ -7,7 +7,7 @@ Provides Excel template upload, management, and filling functionality.
 
 import os
 import shutil
-from datetime import datetime
+from datetime import datetime, timezone
 
 import openpyxl
 from io import BytesIO
@@ -317,8 +317,7 @@ async def upload_template(
 
         # Generate storage key: templates/{YYYY}/{MM}/{DD}/{template_id}_{filename}
         # Date-partitioned, consistent with workflow-artifacts. Readable in R2 browser.
-        from datetime import datetime as _dt
-        _now = _dt.utcnow()
+        _now = datetime.now(timezone.utc)
         safe_template_filename = file.filename.replace("/", "_").replace("\\", "_")
         storage_key = (
             f"templates/{_now.year}/{_now.month:02d}/{_now.day:02d}"

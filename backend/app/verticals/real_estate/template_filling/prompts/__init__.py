@@ -6,11 +6,14 @@ from .base import PromptPair as PromptPair, PromptSet
 from .v1 import (
     V1PromptSet,
     # Pydantic response models — explicit re-exports for downstream imports
-    AutoMappingResult as AutoMappingResult,
     DetectedField as DetectedField,
     ExtractedFieldValue as ExtractedFieldValue,
     FieldDetectionResult as FieldDetectionResult,
     FieldMapping as FieldMapping,
+    OMColumnMap as OMColumnMap,
+    OMSectionPresence as OMSectionPresence,
+    OMStructureDetectionResult as OMStructureDetectionResult,
+    OMStructureKey as OMStructureKey,
     SchemaFieldExtractionResult as SchemaFieldExtractionResult,
     SchemaFieldResult as SchemaFieldResult,
     SchemaTableExtractionResult as SchemaTableExtractionResult,
