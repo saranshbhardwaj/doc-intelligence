@@ -151,6 +151,23 @@ class TemplateFillLLMService:
         else:
             self._io_log_repo = None
 
+    def _build_cached_context_system_arg(
+        self,
+        context_json: str,
+        task_system_prompt: str,
+    ) -> List[Dict[str, Any]]:
+        """Build a reusable cached context block plus task-specific instructions."""
+        system_arg: List[Dict[str, Any]] = [
+            {
+                "type": "text",
+                "text": self.prompts.build_azure_di_context_block(context_json),
+                "cache_control": {"type": "ephemeral"},
+            }
+        ]
+        if task_system_prompt:
+            system_arg.append({"type": "text", "text": task_system_prompt})
+        return system_arg
+
     def _record_llm_metrics(
         self,
         input_tokens: int | None,
@@ -269,13 +286,10 @@ class TemplateFillLLMService:
         pdf_fields_json = json.dumps(stripped_pdf_fields, separators=(",", ":"), ensure_ascii=False)
 
         pair = self.prompts.build_detect_om_structure(pdf_fields_json)
-        system_arg = [
-            {
-                "type": "text",
-                "text": pair.system_prompt,
-                "cache_control": {"type": "ephemeral"},
-            }
-        ]
+        system_arg = self._build_cached_context_system_arg(
+            pdf_fields_json,
+            pair.system_prompt,
+        )
 
         t0 = time.time()
         message = await asyncio.to_thread(
@@ -375,13 +389,10 @@ class TemplateFillLLMService:
         system_prompt = pair.system_prompt
         user_message = pair.user_message
 
-        system_arg = [
-            {
-                "type": "text",
-                "text": system_prompt,
-                "cache_control": {"type": "ephemeral"},
-            }
-        ]
+        system_arg = self._build_cached_context_system_arg(
+            pdf_fields_json,
+            system_prompt,
+        )
 
         t0 = time.time()
         message = await asyncio.to_thread(
@@ -849,6 +860,7 @@ For each requested schema table:
         schema_table: Dict[str, Any],
         context_chunks: List[Dict[str, Any]],
         row_labels: Optional[List[str]] = None,
+        om_structure: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         RAG-based targeted extraction for a single schema table using retrieved chunks.
@@ -884,15 +896,16 @@ For each requested schema table:
             "columns": columns,
         }
 
-        pair = self.prompts.build_extract_table_values_rag_single(context_json, table_request)
+        pair = self.prompts.build_extract_table_values_rag_single(
+            context_json,
+            table_request,
+            om_structure=om_structure,
+        )
 
-        system_arg = [
-            {
-                "type": "text",
-                "text": pair.system_prompt,
-                "cache_control": {"type": "ephemeral"},
-            }
-        ]
+        system_arg = self._build_cached_context_system_arg(
+            context_json,
+            pair.system_prompt,
+        )
 
         t0 = time.time()
         response = await asyncio.to_thread(
@@ -964,6 +977,7 @@ For each requested schema table:
         context_chunks: List[Dict[str, Any]],
         row_labels_by_table: Optional[Dict[str, List[str]]] = None,
         prebuilt_context_json: Optional[str] = None,
+        om_structure: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         RAG-based targeted extraction for a batch of schema tables using retrieved chunks.
@@ -1025,18 +1039,18 @@ For each requested schema table:
 
         # Build prompt pair from versioned prompt set
         pair = self.prompts.build_extract_table_values_rag(
-            context_json, table_requests, TABLE_HEADER_EQUIVALENTS
+            context_json,
+            table_requests,
+            TABLE_HEADER_EQUIVALENTS,
+            om_structure=om_structure,
         )
         system_prompt = pair.system_prompt
         user_message = pair.user_message
 
-        system_arg = [
-            {
-                "type": "text",
-                "text": system_prompt,
-                "cache_control": {"type": "ephemeral"},
-            }
-        ]
+        system_arg = self._build_cached_context_system_arg(
+            context_json,
+            system_prompt,
+        )
 
         # USE messages.create instead of messages.parse (table extraction)
         t0 = time.time()
@@ -1103,6 +1117,91 @@ For each requested schema table:
             }
 
         return result_dict
+
+    def _strip_pdf_field(self, field: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Remove unnecessary fields from PDF field to reduce prompt tokens.
+
+        Keeps the values needed by the LLM for extraction and citation support.
+        """
+        stripped = {
+            "id": field.get("id"),
+            "name": field.get("name"),
+            "type": field.get("type"),
+            "extracted_value": field.get("extracted_value"),
+            "confidence": field.get("confidence"),
+            "citations": field.get("citations", []),
+        }
+        if field.get("type") == "table":
+            if field.get("table_name"):
+                stripped["table_name"] = field.get("table_name")
+            if field.get("table_columns"):
+                stripped["table_columns"] = field.get("table_columns")
+            if field.get("table_rows"):
+                stripped["table_rows"] = field.get("table_rows")
+        elif field.get("type") == "narrative":
+            if field.get("full_text"):
+                stripped["full_text"] = field.get("full_text")
+            if field.get("section"):
+                stripped["section"] = field.get("section")
+        return stripped
+
+    def _build_table_context_from_pdf_fields(self, pdf_fields: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Build table extraction context from Azure DI pdf_fields."""
+        context = []
+        for field in pdf_fields:
+            source = field.get("source")
+            if source not in ("key_value_pairs", "table_block", "narrative_block"):
+                continue
+            if source == "table_block":
+                page_number = field.get("page_number")
+                columns = field.get("table_columns", [])
+                rows = field.get("table_rows", [])
+                text = field.get("name", "") + "\n" + " | ".join(str(c) for c in columns) + "\n"
+                formatted_rows = []
+                for row in rows:
+                    values = row.values() if isinstance(row, dict) else row
+                    formatted_rows.append(" | ".join(str(v) for v in values))
+                text += "\n".join(formatted_rows)
+            elif source == "narrative_block":
+                page_number = field.get("page_number")
+                text = field.get("full_text") or field.get("extracted_value") or ""
+            else:
+                page_number = (field.get("bbox", {}) or {}).get("page") or field.get("page_number")
+                text = f"{field.get('name', '')}: {field.get('extracted_value', '')}"
+            context.append({
+                "text": text,
+                "page_number": page_number,
+                "section_type": source,
+            })
+        return context
+
+    def _build_table_rag_text_context(self, chunks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Build text-only table extraction context from retrieved document chunks."""
+        context: List[Dict[str, Any]] = []
+        for chunk in chunks:
+            metadata = chunk.get("chunk_metadata") or {}
+            if isinstance(metadata, str):
+                try:
+                    metadata = json.loads(metadata)
+                except Exception:
+                    metadata = {}
+
+            page_range = metadata.get("page_range")
+            bbox_page = (metadata.get("bbox", {}) or {}).get("page")
+            if bbox_page:
+                page_number = bbox_page
+            elif isinstance(page_range, list) and len(page_range) >= 2 and page_range[0] != page_range[-1]:
+                page_number = None
+            else:
+                page_number = chunk.get("page_number") or metadata.get("page_number")
+
+            context.append({
+                "text": chunk.get("text") or "",
+                "page_number": page_number,
+                "section_type": chunk.get("section_type") or metadata.get("chunk_type"),
+            })
+        return context
 
     def _format_chunks_with_citations(self, chunks: List[Dict[str, Any]]) -> str:
         """Format chunks with citation tokens for LLM consumption."""

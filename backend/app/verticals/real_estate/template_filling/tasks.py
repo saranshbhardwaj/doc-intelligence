@@ -337,6 +337,40 @@ def _build_om_structure_artifact(
     }
 
 
+def _fail_fill_run(
+    repo: TemplateRepository,
+    tracker: JobProgressTracker,
+    fill_run_id: str,
+    stage: str,
+    exc: Exception,
+    *,
+    is_retryable: bool = False,
+) -> None:
+    """Persist a stage failure to the DB and emit SSE error+end so the frontend terminates."""
+    repo.update_fill_run(
+        fill_run_id,
+        status="failed",
+        error_stage=stage,
+        error_message=str(exc),
+    )
+    tracker.mark_error(
+        error_stage=stage,
+        error_message=str(exc),
+        error_type=f"{stage}_failed",
+        is_retryable=is_retryable,
+    )
+
+
+# Keep the old name as a thin alias so existing callers and tests don't break.
+def _mark_auto_mapping_exception(
+    repo: TemplateRepository,
+    tracker: JobProgressTracker,
+    fill_run_id: str,
+    exc: Exception,
+) -> None:
+    _fail_fill_run(repo, tracker, fill_run_id, "auto_mapping", exc)
+
+
 def _get_structure_entry(structure: Dict[str, Any], dotted_key: str) -> Optional[Dict[str, Any]]:
     node: Any = structure or {}
     for part in dotted_key.split("."):
@@ -1049,21 +1083,8 @@ def detect_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
 
     except Exception as e:
         logger.error(f"Field detection failed: {e}", exc_info=True)
-
-        repo.update_fill_run(
-            fill_run_id,
-            status="failed",
-            error_stage="field_detection",
-            error_message=str(e)
-        )
-
-        tracker.update_progress(
-            status="failed",
-            current_stage="field_detection",
-            message=f"Field detection failed: {str(e)}"
-        )
+        _fail_fill_run(repo, tracker, fill_run_id, "field_detection", e)
         _reverse_template_fill_shadow(fill_run_id, "field_detection_failed", "field_detection")
-
         db.close()
         return {"status": "failed", "error": str(e), **payload}
 
@@ -1295,6 +1316,7 @@ def auto_map_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                     ]
 
                     schema_tables = schema_obj.tables or []
+                    source_pdf_fields_for_table_context = list(pdf_fields)
 
                     if unmapped_fields or schema_tables:
                         llm_service_targeted = TemplateFillLLMService(
@@ -1439,10 +1461,16 @@ def auto_map_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
 
                         # Build context JSON once — identical for every batch (enables Anthropic cache hits)
                         table_context_json: Optional[str] = None
-                        if pdf_fields:
-                            context_payload = llm_service_targeted._build_table_context_from_pdf_fields(pdf_fields)
+                        if source_pdf_fields_for_table_context:
+                            context_payload = llm_service_targeted._build_table_context_from_pdf_fields(
+                                source_pdf_fields_for_table_context
+                            )
                             table_context_json = json.dumps(context_payload, separators=(",", ":"), ensure_ascii=False)
-                            logger.info(f"Table context built once: {len(pdf_fields)} fields → {len(table_context_json)} chars")
+                            logger.info(
+                                "Table context built once: %s source fields → %s chars",
+                                len(source_pdf_fields_for_table_context),
+                                len(table_context_json),
+                            )
 
                         for batch_key, batch_tables in table_batches.items():
                             if not table_context_json:
@@ -1470,9 +1498,14 @@ def auto_map_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                             batch_result = asyncio.run(
                                 llm_service_targeted.extract_schema_table_values_rag_batch(
                                     batch_tables,
-                                    pdf_fields,
+                                    source_pdf_fields_for_table_context,
                                     row_labels_by_table=row_labels_by_table,
                                     prebuilt_context_json=table_context_json,
+                                    om_structure=(
+                                        om_structure_artifact.get("effective")
+                                        if om_structure_artifact
+                                        else None
+                                    ),
                                 )
                             )
                             if batch_result:
@@ -1664,18 +1697,7 @@ def auto_map_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
     except Exception as e:
         logger.error(f"Auto-mapping failed: {e}", exc_info=True)
 
-        repo.update_fill_run(
-            fill_run_id,
-            status="failed",
-            error_stage="auto_mapping",
-            error_message=str(e)
-        )
-
-        tracker.update_progress(
-            status="failed",
-            current_stage="auto_mapping",
-            message=f"Auto-mapping failed: {str(e)}"
-        )
+        _mark_auto_mapping_exception(repo, tracker, fill_run_id, e)
         _reverse_template_fill_shadow(fill_run_id, "auto_mapping_failed", "auto_mapping")
 
         db.close()

@@ -25,6 +25,15 @@ class PromptSet(ABC):
 
     version: str
 
+    def build_azure_di_context_block(self, context_json: str) -> str:
+        """Build the cacheable Azure DI context block shared across extraction calls."""
+        return (
+            "Azure Document Intelligence context:\n"
+            "```json\n"
+            f"{context_json}\n"
+            "```"
+        )
+
     # -- Stage 1: field detection ------------------------------------------
 
     @abstractmethod
@@ -42,6 +51,7 @@ class PromptSet(ABC):
         self,
         pdf_fields_json: str,
         unmapped_fields: List[Dict[str, Any]],
+        om_structure: Dict[str, Any] | None = None,
     ) -> PromptPair:
         """Build prompts for extracting YAML-schema field values from Azure DI data."""
 
@@ -52,6 +62,7 @@ class PromptSet(ABC):
         self,
         context_json: str,
         table_request: Dict[str, Any],
+        om_structure: Dict[str, Any] | None = None,
     ) -> PromptPair:
         """Build prompts for RAG-based single-table extraction."""
 
@@ -63,6 +74,7 @@ class PromptSet(ABC):
         context_json: str,
         table_requests: List[Dict[str, Any]],
         header_equivalents: str,
+        om_structure: Dict[str, Any] | None = None,
     ) -> PromptPair:
         """Build prompts for extracting table row values via RAG chunks (batch)."""
 

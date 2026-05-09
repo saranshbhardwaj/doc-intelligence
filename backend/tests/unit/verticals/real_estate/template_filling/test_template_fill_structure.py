@@ -1,8 +1,12 @@
 import pytest
+from types import SimpleNamespace
 
 from app.repositories.template_repository import _merge_extracted_data
+from app.verticals.real_estate.template_filling.llm_service import TemplateFillLLMService
+from app.verticals.real_estate.template_filling.prompts.base import PromptPair
 from app.verticals.real_estate.template_filling.prompts.v1 import (
     OMStructureDetectionResult,
+    SchemaTableExtractionResult,
     V1PromptSet,
 )
 from app.verticals.real_estate.template_filling.source_map import (
@@ -12,6 +16,7 @@ from app.verticals.real_estate.template_filling.source_map import (
 from app.verticals.real_estate.template_filling.tasks import (
     _build_om_structure_artifact,
     _build_structure_confidence_summary,
+    _mark_auto_mapping_exception,
     _plan_schema_targets_for_structure,
     _target_status,
 )
@@ -36,6 +41,44 @@ def test_structure_detection_prompt_uses_shared_threshold_constants():
     assert f">={STRUCTURE_HIGH_CONFIDENCE:.2f}" in prompt.user_message
     assert f"{STRUCTURE_LOW_CONFIDENCE:.2f}-" in prompt.user_message
     assert f"<{STRUCTURE_LOW_CONFIDENCE:.2f}" in prompt.user_message
+
+
+def test_structure_detection_result_allows_partial_source_map_for_planner_degrade():
+    parsed = OMStructureDetectionResult(
+        column_map={
+            "current": {
+                "present": True,
+                "label": "CURRENT",
+                "confidence": 0.95,
+                "citations": ["[S1:p6]"],
+            }
+        },
+        section_presence={
+            "year1_operating_statement_present": {
+                "present": True,
+                "label": "YEAR 1",
+                "confidence": 0.92,
+                "citations": ["[S1:p6]"],
+            }
+        },
+    ).model_dump()
+
+    plan = _plan_schema_targets_for_structure(
+        [
+            {
+                "id": "year1_expense",
+                "sheet": "P&L",
+                "value_cell": "E31",
+                "fill_when": "year1_operating_statement_present",
+                "requires_structure": ["column_map.year1"],
+            }
+        ],
+        [],
+        parsed,
+    )
+
+    assert plan["fields_to_extract"] == []
+    assert plan["skipped_targets"][0]["skip_reason"] == "structure_key_missing"
 
 
 def test_structure_confidence_summary_collects_low_keys():
@@ -252,11 +295,172 @@ def test_extract_schema_field_prompt_uses_trimmed_source_map_context():
         om_structure=full_structure,
     )
 
-    assert '"label": "YEAR 1"' in prompt.system_prompt
-    assert '"confidence": 0.92' in prompt.system_prompt
-    assert "citations" not in prompt.system_prompt
-    assert "evidence" not in prompt.system_prompt
-    assert "[S1:p6]" not in prompt.system_prompt
+    # Source Map goes in user_message so system_prompt stays static (cacheable).
+    assert '"label": "YEAR 1"' in prompt.user_message
+    assert '"confidence": 0.92' in prompt.user_message
+    # trim_om_structure_for_prompt strips citations/evidence — only labels/confidence included.
+    assert "[S1:p6]" not in prompt.user_message
+    assert '"evidence"' not in prompt.user_message
+    assert "YEAR 1" not in prompt.system_prompt
+
+
+def test_extract_table_prompt_uses_trimmed_source_map_context():
+    full_structure = {
+        "column_map": {
+            "current": {
+                "present": True,
+                "label": "CURRENT",
+                "confidence": 0.93,
+                "citations": ["[S1:p16]"],
+                "evidence": "CURRENT operating column",
+            }
+        },
+        "section_presence": {
+            "unit_mix_present": {
+                "present": True,
+                "label": "Unit Mix",
+                "confidence": 0.96,
+                "citations": ["[S2:p15]"],
+                "evidence": "Unit mix table",
+            }
+        },
+    }
+
+    prompt = V1PromptSet().build_extract_table_values_rag(
+        "[]",
+        [{"table_id": "actuals_unit_mix_storage_unit_mix"}],
+        "headers",
+        om_structure=full_structure,
+    )
+
+    # Source Map goes in user_message so system_prompt stays static (cacheable).
+    assert '"label": "CURRENT"' in prompt.user_message
+    assert '"confidence": 0.93' in prompt.user_message
+    assert "[S1:p16]" not in prompt.user_message
+    assert '"evidence"' not in prompt.user_message
+    assert "CURRENT" not in prompt.system_prompt
+
+
+def test_shared_azure_context_block_is_stable_across_source_map_and_scalar_calls():
+    prompt_set = V1PromptSet()
+    context_json = '[{"id":"table_1","source":"table_block"}]'
+
+    source_map_context = prompt_set.build_azure_di_context_block(context_json)
+    scalar_context = prompt_set.build_azure_di_context_block(context_json)
+
+    assert source_map_context == scalar_context
+    assert context_json in source_map_context
+
+
+@pytest.mark.asyncio
+async def test_table_extraction_service_passes_om_structure_to_prompt_builder():
+    captured = {}
+
+    class PromptSpy:
+        version = "v1"
+
+        def build_extract_table_values_rag(
+            self,
+            context_json,
+            table_requests,
+            header_equivalents,
+            om_structure=None,
+        ):
+            captured["om_structure"] = om_structure
+            return PromptPair(
+                system_prompt="system",
+                user_message="user",
+                response_model=SchemaTableExtractionResult,
+            )
+
+        def build_azure_di_context_block(self, context_json):
+            return f"context: {context_json}"
+
+    class MessageSpy:
+        def create(self, **_kwargs):
+            return SimpleNamespace(
+                content=[
+                    SimpleNamespace(
+                        text='{"results":[],"total_tables":0,"total_rows":0}'
+                    )
+                ],
+                usage=SimpleNamespace(
+                    input_tokens=0,
+                    output_tokens=0,
+                    cache_creation_input_tokens=0,
+                    cache_read_input_tokens=0,
+                ),
+            )
+
+    service = TemplateFillLLMService.__new__(TemplateFillLLMService)
+    service.prompts = PromptSpy()
+    service.client = SimpleNamespace(messages=MessageSpy())
+    service.model = "test-model"
+    service.max_tokens = 1024
+    service.capture_io_log = False
+    service._io_log_repo = None
+    service._record_llm_metrics = lambda *_args, **_kwargs: None
+
+    structure = {"column_map": {"current": {"present": True, "confidence": 0.9}}}
+    await service.extract_schema_table_values_rag_batch(
+        [
+            {
+                "id": "table_a",
+                "sheet": "Actuals&UnitMix",
+                "data_start_row": 5,
+                "data_end_row": 5,
+                "columns": [{"excel_column": "G", "header": "Type"}],
+            }
+        ],
+        [{"source": "table_block", "type": "table", "table_rows": []}],
+        om_structure=structure,
+    )
+
+    assert captured["om_structure"] is structure
+
+
+def test_table_context_excludes_targeted_schema_virtual_fields():
+    service = TemplateFillLLMService.__new__(TemplateFillLLMService)
+
+    context = service._build_table_context_from_pdf_fields(
+        [
+            {"source": "table_block", "name": "Unit Mix", "table_rows": [["5x10"]]},
+            {
+                "source": "targeted_schema",
+                "name": "pnl_year1_personnel_expense",
+                "extracted_value": "$17,250",
+            },
+        ]
+    )
+
+    assert len(context) == 1
+    assert "Unit Mix" in context[0]["text"]
+
+
+def test_auto_mapping_exception_uses_mark_error_for_sse_termination():
+    class RepoSpy:
+        def __init__(self):
+            self.updated = None
+
+        def update_fill_run(self, fill_run_id, **kwargs):
+            self.updated = {"fill_run_id": fill_run_id, **kwargs}
+
+    class TrackerSpy:
+        def __init__(self):
+            self.error = None
+
+        def mark_error(self, **kwargs):
+            self.error = kwargs
+
+    repo = RepoSpy()
+    tracker = TrackerSpy()
+
+    _mark_auto_mapping_exception(repo, tracker, "run-1", RuntimeError("source map failed"))
+
+    assert repo.updated["status"] == "failed"
+    assert repo.updated["error_stage"] == "auto_mapping"
+    assert tracker.error["error_stage"] == "auto_mapping"
+    assert tracker.error["error_message"] == "source map failed"
 
 
 def test_om_structure_artifact_keeps_original_and_effective_independent():

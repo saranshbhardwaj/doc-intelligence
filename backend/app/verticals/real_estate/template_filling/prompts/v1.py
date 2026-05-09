@@ -142,31 +142,46 @@ class OMStructureKey(BaseModel):
 class OMColumnMap(BaseModel):
     """Operating-statement column map."""
 
-    current: OMStructureKey = Field(description="Current or in-place operating column")
-    t12: OMStructureKey = Field(description="Trailing 12 month actuals operating column")
-    year1: OMStructureKey = Field(description="Year 1 or underwriting operating column")
-    pro_forma: OMStructureKey = Field(description="Pro forma operating column")
-    stabilized: OMStructureKey = Field(description="Stabilized operating column")
+    current: Optional[OMStructureKey] = Field(
+        default=None,
+        description="Current or in-place operating column",
+    )
+    t12: Optional[OMStructureKey] = Field(
+        default=None,
+        description="Trailing 12 month actuals operating column",
+    )
+    year1: Optional[OMStructureKey] = Field(
+        default=None,
+        description="Year 1 or underwriting operating column",
+    )
+    pro_forma: Optional[OMStructureKey] = Field(
+        default=None,
+        description="Pro forma operating column",
+    )
+    stabilized: Optional[OMStructureKey] = Field(
+        default=None,
+        description="Stabilized operating column",
+    )
 
 
 class OMSectionPresence(BaseModel):
     """Section-routing flags for template extraction."""
 
-    current_operating_statement_present: OMStructureKey
-    year1_operating_statement_present: OMStructureKey
-    pro_forma_operating_statement_present: OMStructureKey
-    t12_present: OMStructureKey
-    unit_mix_present: OMStructureKey
-    rent_roll_present: OMStructureKey
-    rent_comps_present: OMStructureKey
-    market_summary_present: OMStructureKey
+    current_operating_statement_present: Optional[OMStructureKey] = None
+    year1_operating_statement_present: Optional[OMStructureKey] = None
+    pro_forma_operating_statement_present: Optional[OMStructureKey] = None
+    t12_present: Optional[OMStructureKey] = None
+    unit_mix_present: Optional[OMStructureKey] = None
+    rent_roll_present: Optional[OMStructureKey] = None
+    rent_comps_present: Optional[OMStructureKey] = None
+    market_summary_present: Optional[OMStructureKey] = None
 
 
 class OMStructureDetectionResult(BaseModel):
     """Source Map for a real estate OM."""
 
-    column_map: OMColumnMap
-    section_presence: OMSectionPresence
+    column_map: OMColumnMap = Field(default_factory=OMColumnMap)
+    section_presence: OMSectionPresence = Field(default_factory=OMSectionPresence)
 
 
 # ============================================================================
@@ -177,13 +192,20 @@ class OMStructureDetectionResult(BaseModel):
 class V1PromptSet(PromptSet):
     version = "v1"
 
+    def build_azure_di_context_block(self, context_json: str) -> str:
+        return (
+            "Azure Document Intelligence context:\n"
+            "```json\n"
+            f"{context_json}\n"
+            "```"
+        )
+
     def build_detect_om_structure(self, pdf_fields_json: str) -> PromptPair:
         system_prompt = (
             "You are detecting the document structure of a real estate offering memorandum "
             "before extracting values into an analyst Excel model.\n\n"
-            "Use the Azure Document Intelligence data below. Return structure only; do not "
-            "extract cell values.\n\n"
-            f"```json\n{pdf_fields_json}\n```"
+            "Use the Azure Document Intelligence context in the cached system block. "
+            "Return structure only; do not extract cell values."
         )
         user_message = (
             "Detect the OM Source Map with two artifacts: `column_map` and `section_presence`.\n\n"
@@ -221,16 +243,14 @@ class V1PromptSet(PromptSet):
         if om_structure:
             prompt_structure = trim_om_structure_for_prompt(om_structure)
             structure_context = (
-                "\n\nDetected OM Source Map to respect during extraction:\n"
-                f"```json\n{json.dumps(prompt_structure, indent=2)}\n```"
+                "Detected OM Source Map — use this to resolve which column to pull values from "
+                "(e.g. T12 vs Year 1 vs Pro Forma):\n"
+                f"```json\n{json.dumps(prompt_structure, indent=2)}\n```\n\n"
             )
         system_prompt = (
             "You are extracting values from a real estate PDF for specific named schema fields.\n\n"
-            "Below is the complete list of key-value pairs, full tables, and market context "
-            "(narratives) extracted by Azure Document Intelligence:\n"
-            f"```json\n{pdf_fields_json}\n```\n\n"
-            f"{structure_context}\n\n"
-            "For each requested schema field, find its value from the Azure DI data above.\n"
+            "Use the Azure Document Intelligence context in the cached system block.\n\n"
+            "For each requested schema field, find its value from the Azure DI data.\n"
             "Match by the field's aliases and semantic meaning. For example:\n"
             '- A field with aliases ["City", "Location City"] might appear as "City:", "Location:", "Property City", etc.\n'
             '- A field with aliases ["Asking Price", "Purchase Price"] might appear as "List Price", "Sale Price", etc.\n\n'
@@ -256,8 +276,9 @@ class V1PromptSet(PromptSet):
             for f in unmapped_fields
         ]
         user_message = (
+            f"{structure_context}"
             f"Find values for these {len(fields_for_request)} schema fields from the Azure DI data "
-            f"in the system prompt.\n\n"
+            f"in the cached system block.\n\n"
             f"Fields to extract:\n```json\n"
             f"{json.dumps(fields_for_request, indent=2)}\n```\n\n"
             f"IMPORTANT - Data Type Validation Rules:\n"
@@ -298,17 +319,23 @@ class V1PromptSet(PromptSet):
         context_json: str,
         table_requests: List[Dict[str, Any]],
         header_equivalents: str,
+        om_structure: Optional[Dict[str, Any]] = None,
     ) -> PromptPair:
+        structure_context = ""
+        if om_structure:
+            prompt_structure = trim_om_structure_for_prompt(om_structure)
+            structure_context = (
+                "Detected OM Source Map — use this to resolve which column to pull values from:\n"
+                f"```json\n{json.dumps(prompt_structure, indent=2)}\n```\n\n"
+            )
         system_prompt = (
             "You are extracting table values from a real estate PDF for multiple YAML schema tables.\n\n"
-            "You are given a small, high-signal set of retrieved chunks (tables + key-value pairs).\n"
-            "Use ONLY this context to extract values. Do not guess.\n\n"
-            "Retrieved context:\n"
-            f"```json\n{context_json}\n```\n\n"
+            "Use ONLY the cached Azure Document Intelligence context to extract values. Do not guess.\n\n"
             f"{header_equivalents}\n"
         )
 
         user_message = (
+            f"{structure_context}"
             "Extract values for these schema tables and return a JSON object.\n\n"
             f"```json\n{json.dumps(table_requests, indent=2)}\n```\n\n"
             "Rules:\n"
@@ -461,17 +488,23 @@ Each chunk has metadata in the header:
         self,
         context_json: str,
         table_request: Dict[str, Any],
+        om_structure: Optional[Dict[str, Any]] = None,
     ) -> PromptPair:
+        structure_context = ""
+        if om_structure:
+            prompt_structure = trim_om_structure_for_prompt(om_structure)
+            structure_context = (
+                "Detected OM Source Map — use this to resolve which column to pull values from:\n"
+                f"```json\n{json.dumps(prompt_structure, indent=2)}\n```\n\n"
+            )
         system_prompt = (
             "You are extracting table values from a real estate PDF for a single YAML schema table.\n\n"
-            "You are given a small, high-signal set of retrieved chunks (tables + key-value pairs).\n"
-            "Use ONLY this context to extract values. Do not guess.\n\n"
-            "Retrieved context:\n"
-            f"```json\n{context_json}\n```\n\n"
+            "Use ONLY the cached Azure Document Intelligence context to extract values. Do not guess.\n\n"
             f"{self._TABLE_HEADER_EQUIVALENTS}"
         )
 
         user_message = (
+            f"{structure_context}"
             "Extract values for this schema table:\n\n"
             f"```json\n{json.dumps(table_request, indent=2)}\n```\n\n"
             "Rules:\n"
