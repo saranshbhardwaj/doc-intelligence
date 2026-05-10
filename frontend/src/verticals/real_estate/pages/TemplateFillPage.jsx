@@ -4,15 +4,18 @@
  * Layout: [PDF Viewer 50%] | [Tabbed: Fields/Excel 50%]
  */
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useAppAuth } from "@/hooks/useAppAuth";
 import DocumentViewer from '../../../components/pdf/DocumentViewer';
 import FieldsList from '../components/FieldsList';
 import ExcelGridView from '../components/ExcelGridView';
+import SourceMapView from '../components/SourceMapView';
+import SourceMapWarningBanner from '../components/SourceMapWarningBanner';
+import { STRUCTURE_LOW_CONFIDENCE, tierForConfidence } from '../utils/sourceMapConfidence';
 import { useTemplateFill, useTemplateFillActions, useUser } from '../../../store';
 import { TemplateFillRunPageSkeleton } from '../../../components/skeletons/PageSkeletons';
-import { Loader2, AlertCircle, FileText, Table, List, Download, CheckCircle2, ExternalLink, X, Search, GitMerge, FileSpreadsheet, PartyPopper } from 'lucide-react';
+import { Loader2, AlertCircle, FileText, Table, List, Download, CheckCircle2, ExternalLink, X, Search, GitMerge, FileSpreadsheet, PartyPopper, Layers } from 'lucide-react';
 import { Badge } from '../../../components/ui/badge';
 import { Button } from '../../../components/ui/button';
 import { Tabs, TabsContent } from '../../../components/ui/tabs';
@@ -528,6 +531,20 @@ export default function TemplateFillPage() {
     }
   }
 
+  // Must be before early returns to satisfy Rules of Hooks.
+  const omStructure = fillRun?.extracted_data?.om_structure ?? null;
+  const structureChipCounts = useMemo(() => {
+    if (!omStructure?.effective) return null;
+    const { column_map = {}, section_presence = {} } = omStructure.effective;
+    const counts = { high: 0, mid: 0, low: 0, total: 0 };
+    for (const e of [...Object.values(column_map), ...Object.values(section_presence)]) {
+      if (!e || e.present !== true || e.confidence == null) continue;
+      counts[tierForConfidence(e.confidence)]++;
+      counts.total++;
+    }
+    return counts;
+  }, [omStructure]);
+
   if (isLoading) {
     return (
       <AppLayout>
@@ -643,6 +660,7 @@ export default function TemplateFillPage() {
     compact: true,
   };
   const contextBudgetWarning = fillRun.field_mapping?.context_budget?.user_warning;
+  const omStructureSummary = fillRun.field_mapping?.om_structure_summary ?? null;
 
   return (
     <AppLayout lockViewport pageHeader={pageHeader}>
@@ -721,6 +739,17 @@ export default function TemplateFillPage() {
                 {contextBudgetWarning}
               </AlertDescription>
             </Alert>
+          </div>
+        )}
+        {omStructureSummary && (
+          omStructureSummary.low_confidence_keys?.length > 0 ||
+          (omStructureSummary.min_confidence != null && omStructureSummary.min_confidence < STRUCTURE_LOW_CONFIDENCE)
+        ) && (
+          <div className="px-6 pt-3">
+            <SourceMapWarningBanner
+              summary={omStructureSummary}
+              onReview={() => setActiveTab('structure')}
+            />
           </div>
         )}
 
@@ -835,6 +864,45 @@ export default function TemplateFillPage() {
                         {fillRun.total_fields_mapped || 0}/{fillRun.total_template_fields || 0}
                       </span>
                     </button>
+                    {omStructure && (
+                      <button
+                        onClick={() => setActiveTab('structure')}
+                        className={cn(
+                          'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium tracking-[0.08px] transition-all duration-150',
+                          activeTab === 'structure'
+                            ? 'bg-background shadow-sm text-foreground'
+                            : 'text-muted-foreground hover:text-foreground',
+                        )}
+                      >
+                        <Layers className="h-3.5 w-3.5" />
+                        Structure
+                        {structureChipCounts && (
+                          <span className="ml-0.5 flex items-center gap-0.5 text-[10px] tabular-nums">
+                            {structureChipCounts.high > 0 && (
+                              <span className={activeTab === 'structure' ? 'text-success' : 'text-success/60'}>
+                                {structureChipCounts.high} ok
+                              </span>
+                            )}
+                            {structureChipCounts.mid > 0 && (
+                              <>
+                                {structureChipCounts.high > 0 && <span className="text-muted-foreground/40">·</span>}
+                                <span className={activeTab === 'structure' ? 'text-warning' : 'text-warning/60'}>
+                                  {structureChipCounts.mid} review
+                                </span>
+                              </>
+                            )}
+                            {structureChipCounts.low > 0 && (
+                              <>
+                                {(structureChipCounts.high > 0 || structureChipCounts.mid > 0) && <span className="text-muted-foreground/40">·</span>}
+                                <span className={activeTab === 'structure' ? 'text-destructive' : 'text-destructive/60'}>
+                                  {structureChipCounts.low} low
+                                </span>
+                              </>
+                            )}
+                          </span>
+                        )}
+                      </button>
+                    )}
                     <button
                       onClick={() => setActiveTab('fields')}
                       className={cn(
@@ -877,6 +945,14 @@ export default function TemplateFillPage() {
                 </div>
               </div>
 
+
+              <TabsContent value="structure" className="flex-1 min-h-0 overflow-auto m-0">
+                <SourceMapView
+                  omStructure={omStructure}
+                  citationContext={fillRun.citation_context}
+                  onCitationClick={handleCitationClick}
+                />
+              </TabsContent>
 
               <TabsContent value="fields" className="flex-1 min-h-0 overflow-auto m-0">
                 <FieldsList

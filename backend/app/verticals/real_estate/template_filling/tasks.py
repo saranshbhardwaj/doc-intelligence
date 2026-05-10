@@ -1,12 +1,11 @@
 """Celery tasks for Excel template filling pipeline.
 
 Task Flow:
-1. analyze_template_task: Analyze uploaded Excel to detect fillable cells
-2. detect_fields_task: Analyze PDF to identify structured fields (LLM call 1)
-3. auto_map_fields_task: Match PDF fields to Excel cells (LLM call 2)
-4. extract_data_task: Extract values from PDF (LLM call 3)
-5. fill_excel_task: Fill Excel template with data (openpyxl)
-6. start_fill_run_chain: Orchestrate the full pipeline
+1. detect_fields_task: Analyze PDF to identify structured fields (LLM call 1)
+2. auto_map_fields_task: Match PDF fields to Excel cells (LLM call 2)
+3. extract_data_task: Extract values from PDF (LLM call 3)
+4. fill_excel_task: Fill Excel template with data (openpyxl)
+5. start_fill_run_chain: Orchestrate the full pipeline
 """
 
 import asyncio
@@ -153,19 +152,24 @@ def _build_budgeted_pdf_fields(pdf_fields: List[Dict[str, Any]]) -> tuple[List[D
     item_limit = settings.template_fill_max_pdf_context_items
     char_limit = settings.template_fill_max_llm_context_chars
 
-    trimmed_fields: List[Dict[str, Any]] = []
+    llm_fields: List[Dict[str, Any]] = []
+    narrative_fields: List[Dict[str, Any]] = []
     table_blocks_trimmed = 0
     narrative_blocks_trimmed = 0
 
     for field in pdf_fields:
         if not isinstance(field, dict):
             continue
+        source = field.get("source")
         trimmed, meta = _trim_context_field(field)
-        table_blocks_trimmed += meta["table_blocks_trimmed"]
-        narrative_blocks_trimmed += meta["narrative_blocks_trimmed"]
-        trimmed_fields.append(trimmed)
+        if source == "narrative_block":
+            narrative_blocks_trimmed += meta["narrative_blocks_trimmed"]
+            narrative_fields.append(trimmed)
+        else:
+            table_blocks_trimmed += meta["table_blocks_trimmed"]
+            llm_fields.append(trimmed)
 
-    ordered_fields = sorted(enumerate(trimmed_fields), key=lambda item: (_context_priority(item[1]), item[0]))
+    ordered_fields = sorted(enumerate(llm_fields), key=lambda item: (_context_priority(item[1]), item[0]))
     selected_with_index: List[tuple[int, Dict[str, Any]]] = []
     chars_used = 0
 
@@ -182,10 +186,11 @@ def _build_budgeted_pdf_fields(pdf_fields: List[Dict[str, Any]]) -> tuple[List[D
         selected_with_index.append((original_index, field))
         chars_used += field_chars
 
-    selected_fields = [field for _, field in sorted(selected_with_index, key=lambda item: item[0])]
+    selected_llm_fields = [field for _, field in sorted(selected_with_index, key=lambda item: item[0])]
+    selected_fields = selected_llm_fields + narrative_fields
 
     context_budget_applied = (
-        len(selected_fields) != len(pdf_fields)
+        len(selected_llm_fields) != len(llm_fields)
         or table_blocks_trimmed > 0
         or narrative_blocks_trimmed > 0
     )
@@ -197,9 +202,9 @@ def _build_budgeted_pdf_fields(pdf_fields: List[Dict[str, Any]]) -> tuple[List[D
 
     metadata = {
         "context_budget_applied": context_budget_applied,
-        "context_items_original": len(pdf_fields),
-        "context_items_used": len(selected_fields),
-        "context_items_dropped": max(len(pdf_fields) - len(selected_fields), 0),
+        "context_items_original": len(llm_fields),
+        "context_items_used": len(selected_llm_fields),
+        "context_items_dropped": max(len(llm_fields) - len(selected_llm_fields), 0),
         "context_chars_used": chars_used,
         "context_chars_limit": char_limit,
         "context_items_limit": item_limit,
@@ -319,6 +324,186 @@ def _build_structure_confidence_summary(structure: Dict[str, Any]) -> Dict[str, 
             if float(entry.get("confidence") or 0) < STRUCTURE_LOW_CONFIDENCE
         ],
     }
+
+
+def _field_search_text(field: Dict[str, Any]) -> str:
+    parts: List[str] = []
+    for key in ("name", "table_name", "section", "extracted_value"):
+        value = field.get(key)
+        if value:
+            parts.append(str(value))
+    for column in field.get("table_columns") or []:
+        parts.append(str(column))
+    for row in (field.get("table_rows") or [])[:8]:
+        values = row.values() if isinstance(row, dict) else row
+        parts.extend(str(value) for value in values)
+    full_text = field.get("full_text")
+    if full_text:
+        parts.append(str(full_text)[:1500])
+    return " ".join(parts).lower()
+
+
+def _set_inferred_section(
+    structure: Dict[str, Any],
+    section_key: str,
+    *,
+    label: str,
+    confidence: float,
+    citations: Optional[List[str]] = None,
+    evidence: str,
+) -> None:
+    section_presence = structure.setdefault("section_presence", {})
+    existing = section_presence.get(section_key)
+    if isinstance(existing, dict) and existing.get("present"):
+        return
+    section_presence[section_key] = {
+        "present": True,
+        "label": label,
+        "confidence": confidence,
+        "citations": citations or [],
+        "evidence": evidence,
+    }
+
+
+def _augment_om_structure_from_pdf_fields(
+    structure: Dict[str, Any],
+    pdf_fields: List[Dict[str, Any]],
+) -> Dict[str, Any]:
+    """
+    Add deterministic section-presence signals from Azure DI fields.
+
+    The LLM Source Map may omit optional section flags. The planner treats missing
+    flags as "do not extract", so use high-signal table/narrative evidence to avoid
+    skipping real OM sections that Azure DI already found.
+    """
+    augmented = copy.deepcopy(structure or {})
+    augmented.setdefault("column_map", {})
+    augmented.setdefault("section_presence", {})
+
+    operating_section_for_column = {
+        "current": "current_operating_statement_present",
+        "t12": "t12_present",
+        "year1": "year1_operating_statement_present",
+        "pro_forma": "pro_forma_operating_statement_present",
+        "stabilized": "pro_forma_operating_statement_present",
+    }
+    for column_key, section_key in operating_section_for_column.items():
+        column_entry = _get_structure_entry(augmented, f"column_map.{column_key}")
+        if column_entry and column_entry.get("present"):
+            _set_inferred_section(
+                augmented,
+                section_key,
+                label=column_entry.get("label") or column_key,
+                confidence=float(column_entry.get("confidence") or STRUCTURE_HIGH_CONFIDENCE),
+                citations=column_entry.get("citations") or [],
+                evidence=f"Inferred from detected `{column_key}` operating column.",
+            )
+
+    for field in pdf_fields or []:
+        text = _field_search_text(field)
+        citations = field.get("citations") or []
+        label = field.get("table_name") or field.get("name") or field.get("section") or "Detected section"
+
+        has_unit_columns = (
+            ("# units" in text or "units" in text or "unit count" in text)
+            and ("sqft" in text or "sq ft" in text or "sf" in text)
+            and ("rent" in text or "occupancy" in text)
+        )
+        if (
+            "unit mix" in text
+            or "target rent analysis" in text
+            or ("rent roll" in text and has_unit_columns)
+            or has_unit_columns
+        ):
+            _set_inferred_section(
+                augmented,
+                "unit_mix_present",
+                label=label,
+                confidence=0.9,
+                citations=citations,
+                evidence="Inferred from Azure DI table with unit count, size, rent, or occupancy columns.",
+            )
+
+        if "rent roll" in text:
+            _set_inferred_section(
+                augmented,
+                "rent_roll_present",
+                label=label,
+                confidence=0.9,
+                citations=citations,
+                evidence="Inferred from Azure DI rent roll table or heading.",
+            )
+
+        if (
+            "rent compar" in text
+            or "rental rate comparison" in text
+            or ("distance" in text and ("rent/sqft" in text or "rent/sq ft" in text))
+        ):
+            _set_inferred_section(
+                augmented,
+                "rent_comps_present",
+                label=label,
+                confidence=0.9,
+                citations=citations,
+                evidence="Inferred from Azure DI rent comparable table or heading.",
+            )
+
+        if (
+            "population" in text
+            or "household income" in text
+            or "storage sqft" in text
+            or "sqft/capita" in text
+            or "demographic" in text
+            or "market summary" in text
+        ):
+            _set_inferred_section(
+                augmented,
+                "market_summary_present",
+                label=label,
+                confidence=0.85,
+                citations=citations,
+                evidence="Inferred from Azure DI market or demographic context.",
+            )
+
+        if "gross potential rent" in text and ("net operating income" in text or "expenses" in text):
+            if "current" in text:
+                _set_inferred_section(
+                    augmented,
+                    "current_operating_statement_present",
+                    label=label,
+                    confidence=0.9,
+                    citations=citations,
+                    evidence="Inferred from Azure DI operating statement table.",
+                )
+            if "year 1" in text or "year-one" in text or "year one" in text:
+                _set_inferred_section(
+                    augmented,
+                    "year1_operating_statement_present",
+                    label=label,
+                    confidence=0.9,
+                    citations=citations,
+                    evidence="Inferred from Azure DI operating statement table.",
+                )
+            if "pro forma" in text or "pro-forma" in text:
+                _set_inferred_section(
+                    augmented,
+                    "pro_forma_operating_statement_present",
+                    label=label,
+                    confidence=0.9,
+                    citations=citations,
+                    evidence="Inferred from Azure DI operating statement table.",
+                )
+            if "t-12" in text or "trailing 12" in text or "t12" in text:
+                _set_inferred_section(
+                    augmented,
+                    "t12_present",
+                    label=label,
+                    confidence=0.9,
+                    citations=citations,
+                    evidence="Inferred from Azure DI operating statement table.",
+                )
+
+    return augmented
 
 
 def _build_om_structure_artifact(
@@ -597,124 +782,6 @@ def _build_yaml_cell_status(
         "unmapped_target_cells": len(unmapped_cells),
     }
 
-
-@shared_task(bind=True)
-def analyze_template_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
-    """
-    Analyze an uploaded Excel template to detect fillable cells, formulas, sheets.
-
-    Args:
-        payload: {
-            "template_id": str,
-            "file_path": str,  # Local path or storage key
-            "job_id": str (optional)
-        }
-
-    Returns:
-        Updated payload with schema_metadata
-    """
-    template_id = payload["template_id"]
-    file_path = payload["file_path"]
-    job_id = payload.get("job_id")
-
-    db = _get_db_session()
-    repo = TemplateRepository(db)
-    tracker = JobProgressTracker(db, job_id) if job_id else None
-
-    try:
-        logger.info(f"Analyzing template: {template_id}")
-
-        if tracker:
-            tracker.update_progress(
-                status="analyzing",
-                current_stage="template_analysis",
-                progress_percent=10,
-                message="Analyzing Excel template structure"
-            )
-
-        # Initialize Excel handler
-        handler = ExcelHandler()
-
-        # Get template to determine file extension
-        template = repo.get_template(template_id)
-        file_ext = template.file_extension if template else ".xlsx"
-
-        # Download from storage if needed
-        if not Path(file_path).exists():
-            storage = get_storage_backend()
-            local_path = f"/tmp/{template_id}{file_ext}"
-            storage.download(file_path, local_path)
-            file_path = local_path
-
-        # Analyze template
-        schema_metadata = handler.analyze_template(file_path)
-
-        # If template matches a known YAML schema, persist schema-level totals
-        # so UI can report YAML target fields (not all detected Excel fillables).
-        schema_summary = None
-        workbook = None
-        try:
-            from openpyxl import load_workbook
-
-            workbook = load_workbook(file_path, data_only=False)
-            schema_id = mapping_coordinator.identify_template(workbook)
-            if schema_id:
-                schema_obj = mapping_coordinator.schema_loader.load_schema(schema_id)
-                if schema_obj:
-                    schema_summary = _compute_schema_counts(schema_obj)
-        except Exception as schema_err:
-            logger.warning(
-                f"Could not compute YAML schema summary during template analysis: {schema_err}"
-            )
-        finally:
-            if workbook is not None:
-                try:
-                    workbook.close()
-                except Exception:
-                    pass
-
-        if isinstance(schema_metadata, dict) and schema_summary:
-            schema_metadata["schema_summary"] = schema_summary
-            schema_metadata["total_yaml_fields"] = schema_summary.get("total_yaml_fields")
-
-        # Update template with schema
-        repo.update_template(
-            template_id,
-            schema_metadata=schema_metadata
-        )
-
-        db.close()
-
-        total_kv = schema_metadata.get('total_key_value_fields', 0)
-        total_tables = schema_metadata.get('total_tables', 0)
-
-        logger.info(
-            f"Template analysis complete: {total_kv} key-value fields, {total_tables} tables"
-        )
-
-        if tracker:
-            tracker.update_progress(
-                status="completed",
-                current_stage="template_analysis",
-                progress_percent=100,
-                message=f"Template analyzed: {total_kv} key-value fields, {total_tables} tables detected"
-            )
-
-        payload["schema_metadata"] = schema_metadata
-        return {"status": "completed", **payload}
-
-    except Exception as e:
-        logger.error(f"Template analysis failed: {e}", exc_info=True)
-        if tracker:
-            tracker.update_progress(
-                status="failed",
-                current_stage="template_analysis",
-                message=f"Template analysis failed: {str(e)}"
-            )
-        db.close()
-        return {"status": "failed", "error": str(e), **payload}
-
-
 @shared_task(bind=True)
 def detect_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
     """
@@ -922,7 +989,7 @@ def detect_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
             table_data_rows = table_dict.get("table_data", [])
 
             # Create per-column fields for schema alias matching (Stage 1)
-            for col_header in column_headers:
+            for col_idx, col_header in enumerate(column_headers):
                 if not col_header or col_header.lower() in ["", "none", "n/a"]:
                     continue
 
@@ -930,7 +997,6 @@ def detect_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                 extracted_value = ""
                 if table_data_rows and len(table_data_rows) > 0:
                     try:
-                        col_idx = column_headers.index(col_header)
                         if col_idx < len(table_data_rows[0]):
                             extracted_value = table_data_rows[0][col_idx]
                     except (ValueError, IndexError):
@@ -950,11 +1016,6 @@ def detect_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                 if chunk_bbox:
                     field_data["bbox"] = chunk_bbox
 
-                # DEBUG: Log first table field's bbox
-                if len([f for f in detected_fields if f.get("source") == "table"]) == 0:
-                    logger.info(f"[FIELD_DETECTION] First table field: '{col_header}', "
-                              f"page={table_page}, has bbox: {chunk_bbox is not None}, bbox={chunk_bbox}")
-
                 detected_fields.append(field_data)
                 field_id_counter += 1
 
@@ -963,17 +1024,16 @@ def detect_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
             if column_headers:
                 detected_fields.append({
                     "id": f"tbl_block_{field_id_counter}",
-                    "name": table_dict.get("table_name", "Table"),
+                    "name": table_name or "Table",
                     "type": "table",
                     "extracted_value": "",
                     "confidence": 0.9,
                     "citations": [citation],
                     "source": "table_block",
-                    # Pass complete table structure from chunk.tables
-                    "table_name": table_dict.get("table_name", ""),
-                    "table_columns": table_dict.get("column_headers", []),
-                    "table_rows": table_dict.get("table_data", []),
-                    "page_number": table_dict.get("page_number"),
+                    "table_name": table_name,
+                    "table_columns": column_headers,
+                    "table_rows": table_data_rows,
+                    "page_number": table_page,
                 })
                 field_id_counter += 1
 
@@ -999,6 +1059,7 @@ def detect_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
 
             # Create one narrative_block field with full text for LLM context
             # Narrative provides market/economic/demographic context for better field matching
+
             detected_fields.append({
                 "id": f"narrative_block_{field_id_counter}",
                 "name": f"narrative: {section_heading}" if section_heading else "narrative",
@@ -1333,6 +1394,10 @@ def auto_map_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                         )
                         detected_structure = asyncio.run(
                             llm_service_targeted.detect_om_structure(pdf_fields)
+                        )
+                        detected_structure = _augment_om_structure_from_pdf_fields(
+                            detected_structure,
+                            pdf_fields,
                         )
                         om_structure_artifact = _build_om_structure_artifact(
                             detected_structure,

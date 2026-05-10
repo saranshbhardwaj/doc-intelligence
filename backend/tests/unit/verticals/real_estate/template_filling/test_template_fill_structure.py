@@ -14,6 +14,7 @@ from app.verticals.real_estate.template_filling.source_map import (
     STRUCTURE_LOW_CONFIDENCE,
 )
 from app.verticals.real_estate.template_filling.tasks import (
+    _augment_om_structure_from_pdf_fields,
     _build_om_structure_artifact,
     _build_structure_confidence_summary,
     _mark_auto_mapping_exception,
@@ -79,6 +80,78 @@ def test_structure_detection_result_allows_partial_source_map_for_planner_degrad
 
     assert plan["fields_to_extract"] == []
     assert plan["skipped_targets"][0]["skip_reason"] == "structure_key_missing"
+
+
+def test_source_map_augmentation_infers_sections_from_detected_pdf_fields():
+    structure = {
+        "column_map": {
+            "current": {
+                "present": True,
+                "label": "CURRENT",
+                "confidence": 0.95,
+                "citations": ["[S1:p6]"],
+            },
+            "year1": {
+                "present": True,
+                "label": "YEAR-ONE",
+                "confidence": 0.95,
+                "citations": ["[S1:p6]"],
+            },
+            "pro_forma": {
+                "present": True,
+                "label": "PRO FORMA",
+                "confidence": 0.95,
+                "citations": ["[S1:p6]"],
+            },
+        },
+        "section_presence": {},
+    }
+    pdf_fields = [
+        {
+            "source": "table_block",
+            "name": "Target Rent Analysis",
+            "table_name": "Target Rent Analysis",
+            "table_columns": ["Type", "# Units", "SqFt", "Current Rent"],
+            "table_rows": [["5x10", "26", "50", "$75"]],
+            "citations": ["[S2:p15]"],
+        }
+    ]
+
+    augmented = _augment_om_structure_from_pdf_fields(structure, pdf_fields)
+
+    sections = augmented["section_presence"]
+    assert sections["current_operating_statement_present"]["present"] is True
+    assert sections["year1_operating_statement_present"]["present"] is True
+    assert sections["pro_forma_operating_statement_present"]["present"] is True
+    assert sections["unit_mix_present"]["present"] is True
+    assert sections["unit_mix_present"]["citations"] == ["[S2:p15]"]
+
+    plan = _plan_schema_targets_for_structure(
+        [
+            {
+                "id": "year1_expense",
+                "sheet": "P&L",
+                "value_cell": "E31",
+                "fill_when": ["year1_operating_statement_present"],
+                "requires_structure": ["column_map.year1"],
+            }
+        ],
+        [
+            {
+                "id": "actuals_unit_mix_storage_unit_mix",
+                "sheet": "Actuals&UnitMix",
+                "fill_when": ["unit_mix_present"],
+                "requires_structure": [],
+            }
+        ],
+        augmented,
+    )
+
+    assert [field["id"] for field in plan["fields_to_extract"]] == ["year1_expense"]
+    assert [table["id"] for table in plan["tables_to_extract"]] == [
+        "actuals_unit_mix_storage_unit_mix"
+    ]
+    assert plan["skipped_targets"] == []
 
 
 def test_structure_confidence_summary_collects_low_keys():

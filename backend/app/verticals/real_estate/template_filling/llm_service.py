@@ -22,6 +22,7 @@ from app.utils.metrics import LLM_TOKEN_USAGE, LLM_CACHE_HITS, LLM_CACHE_MISSES,
 from app.utils.costs import compute_llm_cost
 from app.verticals.real_estate.template_filling.prompts import (
     get_prompt_set,
+    OMStructureDetectionResult,
     SchemaTableExtractionResult,
 )
 
@@ -121,6 +122,49 @@ def _resolve_column_map(
 # ============================================================================
 # LLM Service
 # ============================================================================
+
+_OM_STRUCTURE_KEY_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "present": {"type": "boolean"},
+        "label": {"type": ["string", "null"]},
+        "confidence": {"type": "number"},
+        "citations": {"type": "array", "items": {"type": "string"}},
+        "evidence": {"type": ["string", "null"]},
+    },
+    "required": ["present", "confidence"],
+}
+
+_OM_STRUCTURE_TOOL_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "column_map": {
+            "type": "object",
+            "properties": {
+                "current": _OM_STRUCTURE_KEY_SCHEMA,
+                "t12": _OM_STRUCTURE_KEY_SCHEMA,
+                "year1": _OM_STRUCTURE_KEY_SCHEMA,
+                "pro_forma": _OM_STRUCTURE_KEY_SCHEMA,
+                "stabilized": _OM_STRUCTURE_KEY_SCHEMA,
+            },
+        },
+        "section_presence": {
+            "type": "object",
+            "properties": {
+                "current_operating_statement_present": _OM_STRUCTURE_KEY_SCHEMA,
+                "year1_operating_statement_present": _OM_STRUCTURE_KEY_SCHEMA,
+                "pro_forma_operating_statement_present": _OM_STRUCTURE_KEY_SCHEMA,
+                "t12_present": _OM_STRUCTURE_KEY_SCHEMA,
+                "unit_mix_present": _OM_STRUCTURE_KEY_SCHEMA,
+                "rent_roll_present": _OM_STRUCTURE_KEY_SCHEMA,
+                "rent_comps_present": _OM_STRUCTURE_KEY_SCHEMA,
+                "market_summary_present": _OM_STRUCTURE_KEY_SCHEMA,
+            },
+        },
+    },
+    "required": ["column_map", "section_presence"],
+}
+
 
 class TemplateFillLLMService:
     """LLM service for intelligent template filling operations with guaranteed valid JSON."""
@@ -278,8 +322,7 @@ class TemplateFillLLMService:
 
         kv_fields = [f for f in pdf_fields if f.get("source") == "key_value_pairs"]
         table_block_fields = [f for f in pdf_fields if f.get("source") == "table_block"]
-        narrative_block_fields = [f for f in pdf_fields if f.get("source") == "narrative_block"]
-        fields_for_llm = kv_fields + table_block_fields + narrative_block_fields
+        fields_for_llm = kv_fields + table_block_fields
         if not fields_for_llm:
             fields_for_llm = pdf_fields
         stripped_pdf_fields = [self._strip_pdf_field(f) for f in fields_for_llm]
@@ -293,14 +336,19 @@ class TemplateFillLLMService:
 
         t0 = time.time()
         message = await asyncio.to_thread(
-            self.client.messages.parse,
+            self.client.messages.create,
             model=self.model,
             max_tokens=self.max_tokens,
             temperature=0.0,
             timeout=settings.synthesis_llm_timeout_seconds,
             system=system_arg,
             messages=[{"role": "user", "content": pair.user_message}],
-            output_format=pair.response_model,
+            tools=[{
+                "name": "detect_om_structure",
+                "description": "Return the detected OM column map and section presence.",
+                "input_schema": _OM_STRUCTURE_TOOL_SCHEMA,
+            }],
+            tool_choice={"type": "tool", "name": "detect_om_structure"},
         )
         duration_ms = int((time.time() - t0) * 1000)
 
@@ -313,7 +361,17 @@ class TemplateFillLLMService:
             output_tokens = getattr(usage, "output_tokens", 0) or 0
         self._record_llm_metrics(input_tokens, output_tokens, cache_read, cache_creation)
 
-        result = message.parsed_output.model_dump()
+        tool_block = next((b for b in message.content if b.type == "tool_use"), None)
+        if tool_block is None:
+            logger.error("detect_om_structure: no tool_use block in response")
+            return {}
+
+        try:
+            parsed = OMStructureDetectionResult.model_validate(tool_block.input)
+            result = parsed.model_dump()
+        except Exception as e:
+            logger.error(f"detect_om_structure: Pydantic validation failed: {e}")
+            return {}
 
         if self.capture_io_log and self._io_log_repo:
             self._io_log_repo.save_io_log(
@@ -363,21 +421,27 @@ class TemplateFillLLMService:
             f"from {len(pdf_fields)} Azure DI fields"
         )
 
-        # Split into KV, table_block, and narrative_block fields for LLM context.
-        # Per-column table fields (source="table") are excluded — they are redundant
-        # because table_block fields already contain the full table with all rows.
-        kv_fields = [f for f in pdf_fields if f.get("source") == "key_value_pairs"]
-        table_block_fields = [f for f in pdf_fields if f.get("source") == "table_block"]
-        narrative_block_fields = [f for f in pdf_fields if f.get("source") == "narrative_block"]
-        # Fall back to all fields if no table_block fields exist (backward compat)
-        fields_for_llm = kv_fields + table_block_fields + narrative_block_fields
-        if not fields_for_llm:
-            fields_for_llm = pdf_fields
+        # Build LLM context from KV and table_block fields only.
+        # Narrative blocks pass through the budget in tasks.py for citation bbox resolution
+        # but are excluded from LLM context — they inflate token usage without improving accuracy.
+        # Per-column table fields (source="table") are also excluded — table_block fields already
+        # contain the full table with all rows.
+        kv_fields, table_block_fields, narrative_count = [], [], 0
+        for f in pdf_fields:
+            src = f.get("source")
+            if src == "key_value_pairs":
+                kv_fields.append(f)
+            elif src == "table_block":
+                table_block_fields.append(f)
+            elif src == "narrative_block":
+                narrative_count += 1
+        fields_for_llm = kv_fields + table_block_fields or pdf_fields
         stripped_pdf_fields = [self._strip_pdf_field(f) for f in fields_for_llm]
         pdf_fields_json = json.dumps(stripped_pdf_fields, separators=(",", ":"), ensure_ascii=False)
 
         logger.info(
-            f"🎯 Stage 2 LLM context: {len(kv_fields)} KV fields + {len(table_block_fields)} table blocks + {len(narrative_block_fields)} narrative blocks"
+            f"🎯 Stage 2 LLM context: {len(kv_fields)} KV fields + {len(table_block_fields)} table blocks"
+            f" ({narrative_count} narrative blocks excluded)"
         )
 
         # Build prompt pair from versioned prompt set
@@ -466,146 +530,6 @@ class TemplateFillLLMService:
 
         return result_by_field
 
-    # async def extract_schema_field_values(
-    #     self,
-    #     unmapped_fields: List[Dict[str, Any]],
-    #     pdf_fields: List[Dict[str, Any]],
-    # ) -> Dict[str, Any]:
-    #     if not unmapped_fields or not pdf_fields:
-    #         return {}
-
-    #     logger.info(
-    #         f"🎯 Stage 2 targeted extraction: {len(unmapped_fields)} unmapped schema fields "
-    #         f"from {len(pdf_fields)} Azure DI fields"
-    #     )
-
-    #     kv_fields = [f for f in pdf_fields if f.get("source") == "key_value_pairs"]
-    #     table_block_fields = [f for f in pdf_fields if f.get("source") == "table_block"]
-    #     narrative_block_fields = [f for f in pdf_fields if f.get("source") == "narrative_block"]
-    #     fields_for_llm = kv_fields + table_block_fields + narrative_block_fields if table_block_fields else pdf_fields
-    #     stripped_pdf_fields = [self._strip_pdf_field(f) for f in fields_for_llm]
-    #     pdf_fields_json = json.dumps(stripped_pdf_fields, separators=(",", ":"), ensure_ascii=False)
-
-    #     logger.info(
-    #         f"🎯 Stage 2 LLM context: {len(kv_fields)} KV fields + "
-    #         f"{len(table_block_fields)} table blocks + {len(narrative_block_fields)} narrative blocks"
-    #     )
-
-    #     system_prompt = f"""You are extracting values from a real estate PDF for specific named schema fields.
-
-    # Below is the complete list of key-value pairs, full tables, and market context (narratives) extracted by Azure Document Intelligence:
-    # ```json
-    # {pdf_fields_json}
-    # ```
-
-    # For each requested schema field, find its value from the Azure DI data above.
-    # Match by the field's aliases and semantic meaning. For example:
-    # - A field with aliases ["City", "Location City"] might appear as "City:", "Location:", "Property City", etc.
-    # - A field with aliases ["Asking Price", "Purchase Price"] might appear as "List Price", "Sale Price", etc.
-
-    # Be aggressive in matching — if a value is semantically equivalent to an alias, extract it.
-    # Return null only if the value genuinely cannot be found anywhere in the PDF data."""
-
-    #     fields_for_request = [
-    #         {
-    #             "id": f["id"],
-    #             "aliases": f.get("pdf_aliases", []),
-    #             "data_type": f.get("data_type", "text"),
-    #         }
-    #         for f in unmapped_fields
-    #     ]
-
-    #     user_message = (
-    #         f"Find values for these {len(fields_for_request)} schema fields from the Azure DI data "
-    #         f"in the system prompt.\n\n"
-    #         f"Fields to extract:\n```json\n"
-    #         f"{json.dumps(fields_for_request, indent=2)}\n```\n\n"
-    #         f"IMPORTANT - Data Type Validation Rules:\n"
-    #         f"- currency: Must be numeric with $ sign (e.g., '$450,000'). Return null for non-numeric text.\n"
-    #         f"- number: Must be numeric (e.g., '100', '3.14'). Return null for non-numeric text.\n"
-    #         f"- percentage: Must include % (e.g., '65%', '8.11%'). Return null if not a percentage.\n"
-    #         f"- date: Must be a date (e.g., '2026-03-10', 'March 10, 2026'). Return null for non-dates.\n"
-    #         f"- text: Any text value is acceptable.\n\n"
-    #         f"CRITICAL: You MUST attempt to find a value for every single field. "
-    #         f"Do not skip fields. If a field has multiple possible aliases, try all of them. "
-    #         f"Only return null if the value is truly absent from the PDF data.\n\n"
-    #         f"Return ONLY a JSON object matching this exact structure, no markdown:\n"
-    #         "{\n"
-    #         '  "results": [\n'
-    #         "    {\n"
-    #         '      "field_id": "field_id_here",\n'
-    #         '      "value": "extracted value or null",\n'
-    #         '      "confidence": 0.95,\n'
-    #         '      "citations": ["[S1:p3]"],\n'
-    #         '      "reasoning": "Found as currency: $2,500,000 in KV pair Listing Price"\n'
-    #         "    }\n"
-    #         "  ],\n"
-    #         f'  "total_found": 10,\n'
-    #         f'  "total_not_found": 2\n'
-    #         "}\n"
-    #     )
-
-    #     system_arg = [
-    #         {
-    #             "type": "text",
-    #             "text": system_prompt,
-    #             "cache_control": {"type": "ephemeral"},
-    #         }
-    #     ]
-
-    #     response = await asyncio.to_thread(
-    #         self.client.messages.create,
-    #         model=self.model,
-    #         max_tokens=self.max_tokens,
-    #         temperature=0.0,
-    #         timeout=settings.synthesis_llm_timeout_seconds,
-    #         system=system_arg,
-    #         messages=[{"role": "user", "content": user_message}],
-    #     )
-
-    #     # Log token usage
-    #     usage = getattr(response, "usage", None)
-    #     if usage is not None:
-    #         cache_creation = getattr(usage, "cache_creation_input_tokens", 0) or 0
-    #         cache_read = getattr(usage, "cache_read_input_tokens", 0) or 0
-    #         input_tokens = getattr(usage, "input_tokens", 0) or 0
-    #         output_tokens = getattr(usage, "output_tokens", 0) or 0
-    #         logger.info(
-    #             f"🎯 Stage 2 tokens: input={input_tokens:,}, output={output_tokens:,}, "
-    #             f"cache_creation={cache_creation:,}, cache_read={cache_read:,}"
-    #         )
-
-    #     raw_text = response.content[0].text.strip()
-    #     if raw_text.startswith("```"):
-    #         raw_text = re.sub(r"^```(?:json)?\n?", "", raw_text)
-    #         raw_text = re.sub(r"\n?```$", "", raw_text)
-
-    #     try:
-    #         raw_result = json.loads(raw_text)
-    #         parsed = SchemaFieldExtractionResult(**raw_result)
-    #     except (json.JSONDecodeError, ValidationError) as e:
-    #         logger.error(f"Failed to parse field extraction response: {e}\nRaw: {raw_text[:500]}")
-    #         return {}
-
-    #     result_by_field: Dict[str, Any] = {}
-    #     for item in parsed.results:
-    #         if item.value:
-    #             result_by_field[item.field_id] = {
-    #                 "value": item.value,
-    #                 "confidence": item.confidence,
-    #                 "citations": item.citations,
-    #                 "reasoning": item.reasoning,
-    #             }
-
-    #     found_count = len(result_by_field)
-    #     not_found_count = len(unmapped_fields) - found_count
-    #     logger.info(
-    #         f"✅ Stage 2 complete: {found_count}/{len(unmapped_fields)} fields found "
-    #         f"({not_found_count} not present in this PDF)"
-    #     )
-
-    #     return result_by_field
-
     async def extract_schema_table_values(
         self,
         schema_tables: List[Dict[str, Any]],
@@ -635,8 +559,7 @@ class TemplateFillLLMService:
 
         kv_fields = [f for f in pdf_fields if f.get("source") == "key_value_pairs"]
         table_block_fields = [f for f in pdf_fields if f.get("source") == "table_block"]
-        narrative_block_fields = [f for f in pdf_fields if f.get("source") == "narrative_block"]
-        fields_for_llm = kv_fields + table_block_fields + narrative_block_fields if table_block_fields else pdf_fields
+        fields_for_llm = kv_fields + table_block_fields if (kv_fields or table_block_fields) else pdf_fields
 
         if not table_block_fields:
             logger.warning("Stage 2 table extraction skipped: no table_block fields found in pdf_fields")
