@@ -260,6 +260,34 @@ def _get_table_batch_key(table_def: Dict[str, Any]) -> str:
     return sheet.lower()
 
 
+def _parse_citation_pages(citations: List[Any]) -> List[int]:
+    """Parse citation strings like '[S3:p15]' or 'Page 15' into page numbers."""
+    pages: List[int] = []
+    for cit in (citations or []):
+        for m in re.finditer(r":p(\d+)|[Pp]age\s*(\d+)", str(cit)):
+            pages.append(int(m.group(1) or m.group(2)))
+    return pages
+
+
+def _get_section_citation_pages(om_structure: Dict[str, Any], section_key: str) -> List[int]:
+    """Return page numbers cited by the structure detection entry for a given section key."""
+    if not om_structure:
+        return []
+    for bucket in ("section_presence", "column_map"):
+        entry = (om_structure.get(bucket) or {}).get(section_key)
+        if entry:
+            return _parse_citation_pages(entry.get("citations") or [])
+    return []
+
+
+def _field_page(field: Dict[str, Any]) -> Optional[int]:
+    """Return the page number for a raw pdf_field regardless of source type."""
+    source = field.get("source")
+    if source == "key_value_pairs":
+        return (field.get("bbox") or {}).get("page") or field.get("page_number")
+    return field.get("page_number")
+
+
 def _compute_schema_counts(schema_obj: Any) -> Dict[str, Any]:
     fields = getattr(schema_obj, "fields", []) or []
     tables = getattr(schema_obj, "tables", []) or []
@@ -1340,23 +1368,44 @@ def auto_map_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                             batch_key = _get_table_batch_key(table_def)
                             table_batches.setdefault(batch_key, []).append(table_def)
 
-                        # Build context JSON once — identical for every batch (enables Anthropic cache hits)
-                        table_context_json: Optional[str] = None
-                        if source_pdf_fields_for_table_context:
-                            context_payload = llm_service_targeted._build_table_context_from_pdf_fields(
-                                source_pdf_fields_for_table_context
-                            )
-                            table_context_json = json.dumps(context_payload, separators=(",", ":"), ensure_ascii=False)
-                            logger.info(
-                                "Table context built once: %s source fields → %s chars",
-                                len(source_pdf_fields_for_table_context),
-                                len(table_context_json),
-                            )
+                        effective_om = (
+                            om_structure_artifact.get("effective") if om_structure_artifact else None
+                        )
 
                         for batch_key, batch_tables in table_batches.items():
-                            if not table_context_json:
+                            if not source_pdf_fields_for_table_context:
                                 logger.info(f"No pdf_fields available for table batch {batch_key}")
                                 continue
+
+                            # Collect citation pages for this batch's fill_when keys
+                            fill_when_keys: set = set()
+                            for tbl in batch_tables:
+                                for k in (tbl.get("fill_when") or []):
+                                    fill_when_keys.add(k)
+                            citation_pages: List[int] = []
+                            for key in fill_when_keys:
+                                citation_pages.extend(
+                                    _get_section_citation_pages(effective_om or {}, key)
+                                )
+
+                            if citation_pages:
+                                filtered = [
+                                    f for f in source_pdf_fields_for_table_context
+                                    if (pg := _field_page(f)) is None
+                                    or any(abs(pg - p) <= 2 for p in citation_pages)
+                                ]
+                                logger.info(
+                                    "Table context filtered for batch %s: %s → %s fields (citation pages %s)",
+                                    batch_key, len(source_pdf_fields_for_table_context),
+                                    len(filtered), sorted(set(citation_pages)),
+                                )
+                            else:
+                                filtered = source_pdf_fields_for_table_context
+
+                            context_payload = llm_service_targeted._build_table_context_from_pdf_fields(filtered)
+                            table_context_json: Optional[str] = json.dumps(
+                                context_payload, separators=(",", ":"), ensure_ascii=False
+                            )
 
                             row_labels_by_table: Dict[str, List[str]] = {}
 
