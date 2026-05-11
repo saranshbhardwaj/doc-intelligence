@@ -140,41 +140,26 @@ class OMStructureKey(BaseModel):
 
 
 class OMColumnMap(BaseModel):
-    """Operating-statement column map."""
+    """Operating-statement column map. All five keys are required."""
 
-    current: Optional[OMStructureKey] = Field(
-        default=None,
-        description="Current or in-place operating column",
-    )
-    t12: Optional[OMStructureKey] = Field(
-        default=None,
-        description="Trailing 12 month actuals operating column",
-    )
-    year1: Optional[OMStructureKey] = Field(
-        default=None,
-        description="Year 1 or underwriting operating column",
-    )
-    pro_forma: Optional[OMStructureKey] = Field(
-        default=None,
-        description="Pro forma operating column",
-    )
-    stabilized: Optional[OMStructureKey] = Field(
-        default=None,
-        description="Stabilized operating column",
-    )
+    current: OMStructureKey = Field(description="Current or in-place operating column")
+    t12: OMStructureKey = Field(description="Trailing 12 month actuals operating column")
+    year1: OMStructureKey = Field(description="Year 1 or underwriting operating column")
+    pro_forma: OMStructureKey = Field(description="Pro forma operating column")
+    stabilized: OMStructureKey = Field(description="Stabilized operating column")
 
 
 class OMSectionPresence(BaseModel):
-    """Section-routing flags for template extraction."""
+    """Section-routing flags for template extraction. All eight keys are required."""
 
-    current_operating_statement_present: Optional[OMStructureKey] = None
-    year1_operating_statement_present: Optional[OMStructureKey] = None
-    pro_forma_operating_statement_present: Optional[OMStructureKey] = None
-    t12_present: Optional[OMStructureKey] = None
-    unit_mix_present: Optional[OMStructureKey] = None
-    rent_roll_present: Optional[OMStructureKey] = None
-    rent_comps_present: Optional[OMStructureKey] = None
-    market_summary_present: Optional[OMStructureKey] = None
+    current_operating_statement_present: OMStructureKey
+    year1_operating_statement_present: OMStructureKey
+    pro_forma_operating_statement_present: OMStructureKey
+    t12_present: OMStructureKey
+    unit_mix_present: OMStructureKey
+    rent_roll_present: OMStructureKey
+    rent_comps_present: OMStructureKey
+    market_summary_present: OMStructureKey
 
 
 class OMStructureDetectionResult(BaseModel):
@@ -200,36 +185,77 @@ class V1PromptSet(PromptSet):
             "```"
         )
 
-    def build_detect_om_structure(self, pdf_fields_json: str) -> PromptPair:
+    def build_detect_om_structure(self) -> PromptPair:
         system_prompt = (
             "You are detecting the document structure of a real estate offering memorandum "
             "before extracting values into an analyst Excel model.\n\n"
-            "Use the Azure Document Intelligence context in the cached system block. "
-            "Return structure only; do not extract cell values."
+            "The structural inventory in the cached context block lists every table block, "
+            "key-value pair, and section heading extracted by Azure Document Intelligence. "
+            "Return structure only — do not extract cell values."
         )
         user_message = (
-            "Detect the OM Source Map with two artifacts: `column_map` and `section_presence`.\n\n"
-            "`column_map` must identify operating-statement period columns: current, t12, "
-            "year1, pro_forma, and stabilized. For each key return present, label, confidence, "
-            "citations, and evidence. Evidence should quote or summarize the page/table header "
-            "that supports the key.\n\n"
-            "`section_presence` must identify routing flags: "
-            "current_operating_statement_present, year1_operating_statement_present, "
-            "pro_forma_operating_statement_present, t12_present, unit_mix_present, "
-            "rent_roll_present, rent_comps_present, market_summary_present. For each flag "
-            "return present, label, confidence, citations, and evidence.\n\n"
-            "CRITICAL — table of contents rule: A section is 'present' only when you find its "
-            "actual content in the document — real data, tables, or analysis from that section. "
-            "A section name appearing in a table of contents, index, or chapter listing does NOT "
-            "constitute presence. Citations must point to pages containing substantive section "
-            "content, never to a table-of-contents page. If you can only find a TOC reference "
-            "and no actual content, set present=false.\n\n"
-            f"Confidence policy: use >={STRUCTURE_HIGH_CONFIDENCE:.2f} for clear table headers "
-            f"or explicit section titles with actual data; {STRUCTURE_LOW_CONFIDENCE:.2f}-"
-            f"{STRUCTURE_HIGH_CONFIDENCE - 0.01:.2f} for likely but ambiguous evidence; "
-            f"<{STRUCTURE_LOW_CONFIDENCE:.2f} when uncertain. Use citations like [S1:p5] "
-            "from the input data.\n\n"
-            "Return ONLY JSON matching the response schema."
+            "Detect the OM Source Map. You MUST return ALL 13 keys explicitly with "
+            "present=true or present=false. Omitting any key is an error.\n\n"
+            "─── STEP 1: INVENTORY ─────────────────────────────────────────────────────\n"
+            "Before deciding anything, scan the inventory in the cached context. For each "
+            "table block write one line: ID, page, name (if any), column headers, and the "
+            "document section it most likely represents.\n\n"
+            "─── STEP 2: EVIDENCE + VERDICT (ALL 13 KEYS REQUIRED) ─────────────────────\n"
+            "For each key below, state which table block IDs (or 'none') provide evidence, "
+            "then your verdict (present=true/false) and confidence. Do not skip any key.\n\n"
+            "COLUMN MAP keys (5 required):\n"
+            "  • current      — 'Current', 'In-Place', 'Actual' operating column\n"
+            "  • t12          — 'T-12', 'Trailing 12', 'T12 Actuals' operating column\n"
+            "  • year1        — 'Year 1', 'Year-One', 'Underwriting' operating column\n"
+            "  • pro_forma    — 'Pro Forma', 'Stabilized Pro Forma' operating column\n"
+            "  • stabilized   — 'Stabilized' operating column (distinct from pro_forma)\n\n"
+            "SECTION PRESENCE keys (8 required):\n"
+            "  • current_operating_statement_present\n"
+            "  • year1_operating_statement_present\n"
+            "  • pro_forma_operating_statement_present\n"
+            "  • t12_present\n"
+            "  • unit_mix_present\n"
+            "  • rent_roll_present\n"
+            "  • rent_comps_present\n"
+            "  • market_summary_present\n\n"
+            "─── STEP 3: SHAPE PATTERNS ────────────────────────────────────────────────\n"
+            "Use these generic CRE patterns to match tables by meaning, not exact strings:\n\n"
+            "OPERATING STATEMENT (current / year1 / pro_forma / t12):\n"
+            "  A multi-column income/expense table with rows for Gross Potential Rent, "
+            "Effective Gross Income, Operating Expenses, and Net Operating Income. Column "
+            "headers name the time period: 'Current', 'In-Place', 'Actual', 'T-12 Actuals', "
+            "'Year 1', 'Year One', 'Year-One', 'Pro Forma', 'Underwriting', 'Stabilized'. "
+            "Each period maps to one column_map key AND one section_presence key. Set "
+            "present=true for section_presence only when you find actual data rows — not "
+            "just a column header with no data.\n\n"
+            "unit_mix_present:\n"
+            "  Tabular breakdown with one row per unit type/size/floor-plan. Columns include "
+            "unit count (e.g., '# Units', 'Total Units', 'Quantity'), unit size (e.g., 'SqFt', "
+            "'SF', 'Unit Size', 'Square Feet'), and rent (e.g., 'Rent', 'Standard Rate', "
+            "'Monthly Rent', 'Asking Rent'). Header phrasing varies — match by meaning.\n\n"
+            "rent_roll_present:\n"
+            "  Detailed per-unit or per-tenant listing with individual unit numbers, tenant "
+            "names or 'vacant', lease start/end dates, and current rent. Typically has many "
+            "more rows than a unit mix (one row per unit, not per unit type).\n\n"
+            "rent_comps_present:\n"
+            "  Comparable-properties grid listing competing properties with their unit types "
+            "and asking rents. Columns often include property name/address, distance, unit "
+            "type, and rent/sqft. A bar chart or single line titled 'rent comparison' alone "
+            "does NOT count — look for a multi-row competitor table.\n\n"
+            "market_summary_present:\n"
+            "  Tables or paragraphs with market/demographic data: population, household "
+            "income, vacancy rates, storage sqft per capita, submarket statistics, or MSA "
+            "analysis. A market section requires substantive data, not just a heading.\n\n"
+            "─── TABLE OF CONTENTS RULE ─────────────────────────────────────────────────\n"
+            "A section is present ONLY when its actual content appears in the document. "
+            "Section names in a table of contents or index do NOT count. Citations must "
+            "point to pages with substantive content, not TOC pages. When you can only "
+            "find a TOC reference and no actual data, set present=false.\n\n"
+            f"─── CONFIDENCE POLICY ──────────────────────────────────────────────────────\n"
+            f"≥{STRUCTURE_HIGH_CONFIDENCE:.2f}: clear table headers with actual data rows. "
+            f"{STRUCTURE_LOW_CONFIDENCE:.2f}–{STRUCTURE_HIGH_CONFIDENCE - 0.01:.2f}: "
+            f"likely but ambiguous evidence. <{STRUCTURE_LOW_CONFIDENCE:.2f}: uncertain. "
+            "Use citations like [S3:p15] from the inventory."
         )
         return PromptPair(
             system_prompt=system_prompt,

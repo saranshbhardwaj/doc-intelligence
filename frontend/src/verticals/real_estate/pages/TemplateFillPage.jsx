@@ -949,6 +949,7 @@ export default function TemplateFillPage() {
               <TabsContent value="structure" className="flex-1 min-h-0 overflow-auto m-0">
                 <SourceMapView
                   omStructure={omStructure}
+                  cellStatus={fillRun.field_mapping?.yaml_cell_status}
                   citationContext={fillRun.citation_context}
                   onCitationClick={handleCitationClick}
                 />

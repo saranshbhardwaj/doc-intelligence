@@ -123,48 +123,6 @@ def _resolve_column_map(
 # LLM Service
 # ============================================================================
 
-_OM_STRUCTURE_KEY_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "present": {"type": "boolean"},
-        "label": {"type": ["string", "null"]},
-        "confidence": {"type": "number"},
-        "citations": {"type": "array", "items": {"type": "string"}},
-        "evidence": {"type": ["string", "null"]},
-    },
-    "required": ["present", "confidence"],
-}
-
-_OM_STRUCTURE_TOOL_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "column_map": {
-            "type": "object",
-            "properties": {
-                "current": _OM_STRUCTURE_KEY_SCHEMA,
-                "t12": _OM_STRUCTURE_KEY_SCHEMA,
-                "year1": _OM_STRUCTURE_KEY_SCHEMA,
-                "pro_forma": _OM_STRUCTURE_KEY_SCHEMA,
-                "stabilized": _OM_STRUCTURE_KEY_SCHEMA,
-            },
-        },
-        "section_presence": {
-            "type": "object",
-            "properties": {
-                "current_operating_statement_present": _OM_STRUCTURE_KEY_SCHEMA,
-                "year1_operating_statement_present": _OM_STRUCTURE_KEY_SCHEMA,
-                "pro_forma_operating_statement_present": _OM_STRUCTURE_KEY_SCHEMA,
-                "t12_present": _OM_STRUCTURE_KEY_SCHEMA,
-                "unit_mix_present": _OM_STRUCTURE_KEY_SCHEMA,
-                "rent_roll_present": _OM_STRUCTURE_KEY_SCHEMA,
-                "rent_comps_present": _OM_STRUCTURE_KEY_SCHEMA,
-                "market_summary_present": _OM_STRUCTURE_KEY_SCHEMA,
-            },
-        },
-    },
-    "required": ["column_map", "section_presence"],
-}
-
 
 class TemplateFillLLMService:
     """LLM service for intelligent template filling operations with guaranteed valid JSON."""
@@ -315,41 +273,114 @@ class TemplateFillLLMService:
             logger.error(f"Error detecting PDF fields: {e}", exc_info=True)
             raise
 
+    def _build_structural_inventory(self, pdf_fields: List[Dict[str, Any]]) -> str:
+        """Build a human-readable structural inventory for LLM consumption."""
+        table_lines: List[str] = []
+        kv_lines: List[str] = []
+        heading_lines: List[str] = []
+
+        table_idx = 1
+        kv_idx = 1
+        heading_idx = 1
+
+        for field in pdf_fields:
+            source = field.get("source")
+            citations = field.get("citations") or []
+            citation_str = citations[0] if citations else ""
+
+            if source == "table_block":
+                page = field.get("page_number") or ""
+                name = field.get("table_name") or field.get("name") or ""
+                columns = field.get("table_columns") or []
+                rows = field.get("table_rows") or []
+                col_str = " / ".join(str(c) for c in columns[:8]) if columns else "(no columns)"
+                sample_rows = rows[:3]
+                sample_str = ""
+                for row in sample_rows:
+                    vals = list(row.values()) if isinstance(row, dict) else list(row)
+                    sample_str += f"\n      row: {[str(v) for v in vals[:8]]}"
+                page_str = f"page {page}" if page else "page ?"
+                name_str = f'"{name}"' if name else "no name"
+                table_lines.append(
+                    f"  T{table_idx} ({page_str}, {name_str}):\n"
+                    f"    columns: {col_str}"
+                    f"{sample_str}\n"
+                    f"    citation: {citation_str}"
+                )
+                table_idx += 1
+
+            elif source == "key_value_pairs":
+                page_raw = (field.get("bbox") or {}).get("page") or field.get("page_number") or ""
+                name = field.get("name") or ""
+                value = field.get("extracted_value") or ""
+                if name or value:
+                    kv_lines.append(
+                        f"  K{kv_idx} (page {page_raw}): {name!r} → {str(value)[:80]!r}"
+                    )
+                    kv_idx += 1
+
+            elif source == "narrative_block":
+                page = field.get("page_number") or ""
+                section = field.get("section") or ""
+                full_text = (field.get("full_text") or "")[:120]
+                if section:
+                    heading_lines.append(f"  N{heading_idx} (page {page}): {section!r}")
+                    heading_idx += 1
+                elif full_text:
+                    heading_lines.append(f"  N{heading_idx} (page {page}): {full_text!r}")
+                    heading_idx += 1
+
+        parts: List[str] = []
+        if table_lines:
+            parts.append("TABLE BLOCKS:\n" + "\n".join(table_lines))
+        if kv_lines:
+            parts.append("KEY-VALUE PAIRS:\n" + "\n".join(kv_lines))
+        if heading_lines:
+            parts.append("SECTION HEADINGS:\n" + "\n".join(heading_lines))
+
+        return "\n\n".join(parts) if parts else "(no structured content found)"
+
     async def detect_om_structure(self, pdf_fields: List[Dict[str, Any]]) -> Dict[str, Any]:
-        """Detect OM column map and section presence before cell extraction."""
+        """Detect OM column map and section presence before cell extraction.
+
+        Uses messages.parse (structured output) so Pydantic schema enforcement is
+        handled by the API — all 13 keys are guaranteed to be present in the response.
+        """
         if not pdf_fields:
             return {}
 
-        kv_fields = [f for f in pdf_fields if f.get("source") == "key_value_pairs"]
-        table_block_fields = [f for f in pdf_fields if f.get("source") == "table_block"]
-        fields_for_llm = kv_fields + table_block_fields
-        if not fields_for_llm:
-            fields_for_llm = pdf_fields
-        stripped_pdf_fields = [self._strip_pdf_field(f) for f in fields_for_llm]
-        pdf_fields_json = json.dumps(stripped_pdf_fields, separators=(",", ":"), ensure_ascii=False)
+        inventory_text = self._build_structural_inventory(pdf_fields)
+        pair = self.prompts.build_detect_om_structure()
 
-        pair = self.prompts.build_detect_om_structure(pdf_fields_json)
-        system_arg = self._build_cached_context_system_arg(
-            pdf_fields_json,
-            pair.system_prompt,
-        )
+        system_arg: List[Dict[str, Any]] = [
+            {
+                "type": "text",
+                "text": inventory_text,
+                "cache_control": {"type": "ephemeral"},
+            }
+        ]
+        if pair.system_prompt:
+            system_arg.append({"type": "text", "text": pair.system_prompt})
 
         t0 = time.time()
-        message = await asyncio.to_thread(
-            self.client.messages.create,
-            model=self.model,
-            max_tokens=self.max_tokens,
-            temperature=0.0,
-            timeout=settings.synthesis_llm_timeout_seconds,
-            system=system_arg,
-            messages=[{"role": "user", "content": pair.user_message}],
-            tools=[{
-                "name": "detect_om_structure",
-                "description": "Return the detected OM column map and section presence.",
-                "input_schema": _OM_STRUCTURE_TOOL_SCHEMA,
-            }],
-            tool_choice={"type": "tool", "name": "detect_om_structure"},
-        )
+        try:
+            message = await asyncio.to_thread(
+                self.client.messages.parse,
+                model=self.model,
+                max_tokens=self.max_tokens,
+                temperature=0.0,
+                timeout=settings.synthesis_llm_timeout_seconds,
+                system=system_arg,
+                messages=[{"role": "user", "content": pair.user_message}],
+                output_format=OMStructureDetectionResult,
+            )
+        except Exception as e:
+            logger.warning(
+                f"detect_om_structure: LLM call failed — structure detection skipped, "
+                f"all section-gated fields will be extracted without gating. Error: {e}",
+                exc_info=True,
+            )
+            return {}
         duration_ms = int((time.time() - t0) * 1000)
 
         usage = getattr(message, "usage", None)
@@ -361,17 +392,20 @@ class TemplateFillLLMService:
             output_tokens = getattr(usage, "output_tokens", 0) or 0
         self._record_llm_metrics(input_tokens, output_tokens, cache_read, cache_creation)
 
-        tool_block = next((b for b in message.content if b.type == "tool_use"), None)
-        if tool_block is None:
-            logger.error("detect_om_structure: no tool_use block in response")
+        parsed = message.parsed_output
+        if parsed is None:
+            logger.warning(
+                "detect_om_structure: parsed_output is None — structure detection skipped, "
+                "all section-gated fields will be extracted without gating."
+            )
             return {}
 
-        try:
-            parsed = OMStructureDetectionResult.model_validate(tool_block.input)
-            result = parsed.model_dump()
-        except Exception as e:
-            logger.error(f"detect_om_structure: Pydantic validation failed: {e}")
-            return {}
+        result = parsed.model_dump()
+        logger.info(
+            f"detect_om_structure: complete — "
+            f"column_map detected={sum(1 for v in result.get('column_map', {}).values() if v.get('present'))} "
+            f"section_presence detected={sum(1 for v in result.get('section_presence', {}).values() if v.get('present'))}"
+        )
 
         if self.capture_io_log and self._io_log_repo:
             self._io_log_repo.save_io_log(
@@ -421,12 +455,14 @@ class TemplateFillLLMService:
             f"from {len(pdf_fields)} Azure DI fields"
         )
 
-        # Build LLM context from KV and table_block fields only.
-        # Narrative blocks pass through the budget in tasks.py for citation bbox resolution
-        # but are excluded from LLM context — they inflate token usage without improving accuracy.
-        # Per-column table fields (source="table") are also excluded — table_block fields already
-        # contain the full table with all rows.
-        kv_fields, table_block_fields, narrative_count = [], [], 0
+        # Build LLM context from KV and table_block fields.
+        # Narrative blocks are normally excluded (inflate tokens, rarely improve KV accuracy).
+        # Exception: include cover-page narrative blocks (page <= 5) when property-summary fields
+        # are being extracted — property name and address often appear only in cover-page prose.
+        needs_property_summary = any(
+            f.get("source_basis") == "om_property_summary" for f in unmapped_fields
+        )
+        kv_fields, table_block_fields, narrative_fields, narrative_count = [], [], [], 0
         for f in pdf_fields:
             src = f.get("source")
             if src == "key_value_pairs":
@@ -435,13 +471,17 @@ class TemplateFillLLMService:
                 table_block_fields.append(f)
             elif src == "narrative_block":
                 narrative_count += 1
-        fields_for_llm = kv_fields + table_block_fields or pdf_fields
+                if needs_property_summary and (f.get("page_number") or 99) <= 5:
+                    narrative_fields.append(f)
+
+        fields_for_llm = (kv_fields + table_block_fields + narrative_fields) if (kv_fields or table_block_fields) else pdf_fields
         stripped_pdf_fields = [self._strip_pdf_field(f) for f in fields_for_llm]
         pdf_fields_json = json.dumps(stripped_pdf_fields, separators=(",", ":"), ensure_ascii=False)
 
         logger.info(
             f"🎯 Stage 2 LLM context: {len(kv_fields)} KV fields + {len(table_block_fields)} table blocks"
-            f" ({narrative_count} narrative blocks excluded)"
+            f" + {len(narrative_fields)} cover-page narrative blocks"
+            f" ({narrative_count - len(narrative_fields)} narrative blocks excluded)"
         )
 
         # Build prompt pair from versioned prompt set

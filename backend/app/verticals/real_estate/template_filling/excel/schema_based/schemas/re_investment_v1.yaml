@@ -89,10 +89,15 @@ fields:
     source_basis: "om_property_summary"
     fill_when: ["always"]
     requires_structure: []
+    description: "Full street address of the property including city, state, and zip."
+    extraction_rule: "Use the full street address including number, street, city, state, and zip. Format: '1234 Main St, City, ST 12345'."
     pdf_aliases:
       - "Address"
       - "Street Address"
       - "Property Address"
+      - "Site Address"
+      - "Location"
+      - "Property Location"
 
   - id: "rediq_msa"
     sheet: "redIQ"
@@ -248,6 +253,8 @@ fields:
     source_basis: "om_property_summary"
     fill_when: ["always"]
     requires_structure: []
+    description: "The name of the self-storage property or facility being analyzed."
+    extraction_rule: "Use the official property or facility name. For self-storage, this is typically the brand/trade name of the storage facility (e.g. 'Tulsa Self Storage', 'CubeSmart Tulsa'). Do not include the full address."
     pdf_aliases:
       - "Property Name"
       - "Complex Name"
@@ -255,6 +262,10 @@ fields:
       - "Asset Name"
       - "Building Name"
       - "Store Name"
+      - "Storage Facility"
+      - "Self Storage Facility"
+      - "Property"
+      - "Site Name"
 
   - id: "property_address"
     sheet: "DASHBOARD"
@@ -265,11 +276,15 @@ fields:
     source_basis: "om_property_summary"
     fill_when: ["always"]
     requires_structure: []
+    description: "Full street address of the property including city, state, and zip code."
+    extraction_rule: "Use the full street address. Include street number, street name, city, state, and zip code. Format: '1234 Main St, City, ST 12345'."
     pdf_aliases:
       - "Property Address"
       - "Address"
       - "Location"
       - "Street Address"
+      - "Site Address"
+      - "Property Location"
 
   - id: "storage_unit_count"
     sheet: "DASHBOARD"
@@ -508,13 +523,18 @@ fields:
     fill_when: ["pro_forma_operating_statement_present"]
     requires_structure: ["column_map.pro_forma"]
     description: "Pro forma or stabilized average effective monthly rent per storage unit."
-    extraction_rule: "Use pro forma or stabilized average effective rent per storage unit per month. If the OM does not provide a pro forma or stabilized rent, leave null. Do not use current/in-place rent."
+    extraction_rule: "Use pro forma or stabilized average effective rent per storage unit per month. If the OM does not provide a pro forma or stabilized rent, leave null. Do not use current/in-place rent. For self-storage, this is typically expressed as $/unit/month."
     pdf_aliases:
       - "Pro Forma Average Effective Rent"
       - "Stabilized Average Effective Rent"
       - "Proforma Average Rent"
       - "Market Average Rent"
       - "Average Market Rent"
+      - "Pro Forma Avg Effective Rent"
+      - "Stabilized Avg Eff Rent"
+      - "Average Stabilized Rent"
+      - "Pro Forma Average Monthly Rent"
+      - "Projected Average Rent"
   
   - id: "napkin_proforma_other_income_per_unit"
     sheet: "Napkin"
@@ -863,12 +883,15 @@ fields:
     source_basis: "om_operating_statement"
     fill_when: ["t12_present", "current_operating_statement_present"]
     requires_structure: ["column_map.t12", "column_map.current"]
-    description: "Current annual insurance policy income in the Actuals & Unit Mix other income section."
-    extraction_rule: "Use current or actual insurance/tenant insurance income. Do not use projected other income."
+    description: "Current annual tenant insurance / insurance policy income in the Actuals & Unit Mix other income section."
+    extraction_rule: "Use current or actual tenant insurance or insurance policy income (an ancillary income source, not an expense). Do not use property insurance expense rows. Do not use projected other income."
     pdf_aliases:
-      - "Property Insurance"         # exact PDF label p16
-      - "Insurance Expense"
-      - "Current Property Insurance"
+      - "Tenant Insurance"
+      - "Tenant Insurance Income"
+      - "Insurance Policy"
+      - "Insurance Income"
+      - "Insurance Policy Income"
+      - "Tenant Protection Plan"
 
   - id: "actuals_unit_mix_current_admin_fee"
     sheet: "Actuals&UnitMix"

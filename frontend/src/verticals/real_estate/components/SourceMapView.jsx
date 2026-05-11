@@ -1,4 +1,5 @@
-import React from 'react';
+import React, { useState } from 'react';
+import { ChevronDown, ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { CitationBadges } from './CitationBadge';
 import { tierForConfidence } from '../utils/sourceMapConfidence';
@@ -109,19 +110,108 @@ function SectionGroup({ title, keys, data, citationContext, onCitationClick }) {
   );
 }
 
-export default function SourceMapView({ omStructure, citationContext, onCitationClick }) {
+const SKIP_REASON_LABELS = {
+  missing_section: 'Section not present in this OM',
+  structure_key_missing: 'Structure key not detected',
+  low_structure_confidence: 'Low structure confidence',
+};
+
+function formatFieldId(id) {
+  if (!id) return '?';
+  // Strip common prefixes (e.g. "rediq_", "napkin_", "actuals_")
+  const stripped = id.replace(/^(rediq|napkin|actuals|proforma|market)_/, '');
+  // Convert snake_case to Title Case words
+  return stripped
+    .split('_')
+    .map(w => w.charAt(0).toUpperCase() + w.slice(1))
+    .join(' ');
+}
+
+function SkippedSection({ skippedCells }) {
+  const [open, setOpen] = useState(false);
+  if (!skippedCells?.length) return null;
+
+  const byReason = {};
+  for (const cell of skippedCells) {
+    const reason = cell.skip_reason || 'unknown';
+    if (!byReason[reason]) byReason[reason] = [];
+    const label = cell.excel_sheet
+      ? `${formatFieldId(cell.target_id)} (${cell.excel_sheet} ${cell.excel_cell || ''})`
+      : formatFieldId(cell.target_id);
+    byReason[reason].push(label);
+  }
+
+  return (
+    <div className="border border-border rounded-lg overflow-hidden">
+      <button
+        type="button"
+        onClick={() => setOpen(o => !o)}
+        className="flex items-center justify-between w-full px-3 py-2 bg-muted/50 border-b border-border hover:bg-muted/70 transition-colors"
+      >
+        <span className="text-xs font-semibold text-foreground tracking-[0.08px]">
+          Skipped Fields
+        </span>
+        <div className="flex items-center gap-2">
+          <span className="text-[10px] text-muted-foreground tabular-nums">
+            {skippedCells.length} skipped — section absent or undetected
+          </span>
+          {open
+            ? <ChevronDown className="h-3 w-3 text-muted-foreground" />
+            : <ChevronRight className="h-3 w-3 text-muted-foreground" />
+          }
+        </div>
+      </button>
+      {open && (
+        <div className="divide-y divide-border/50 px-3 py-2 flex flex-col gap-2">
+          {Object.entries(byReason).map(([reason, ids]) => (
+            <div key={reason}>
+              <p className="text-[10px] font-medium text-muted-foreground mb-1">
+                {SKIP_REASON_LABELS[reason] || reason}
+              </p>
+              <p className="text-[10px] text-muted-foreground/70">
+                {ids.slice(0, 6).join(', ')}{ids.length > 6 ? ` +${ids.length - 6} more` : ''}
+              </p>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default function SourceMapView({ omStructure, cellStatus, citationContext, onCitationClick }) {
   const effective = omStructure?.effective;
   const columnMap = effective?.column_map ?? {};
   const sectionPresence = effective?.section_presence ?? {};
   const detectedAt = omStructure?.detected_at;
 
+  const allKeys = [...COLUMN_MAP_KEYS, ...SECTION_PRESENCE_KEYS];
+  const allData = { ...columnMap, ...sectionPresence };
+  const detectedCount = allKeys.filter(({ key }) => allData[key]?.present === true).length;
+  const absentKeys = allKeys
+    .filter(({ key }) => allData[key] && allData[key].present === false)
+    .map(({ label }) => label);
+
+  const skippedCells = cellStatus?.skipped_cells;
+
   return (
     <div className="flex flex-col gap-3 p-3">
-      {detectedAt && (
-        <p className="text-[10px] text-muted-foreground px-1">
-          Detected at {new Date(detectedAt).toLocaleString()}
+      <div className="px-1 flex flex-col gap-0.5">
+        <p className="text-xs text-foreground font-medium">
+          Detected {detectedCount} of {allKeys.length} structural keys
         </p>
-      )}
+        {absentKeys.length > 0 && (
+          <p className="text-[10px] text-muted-foreground">
+            Not present in this OM: {absentKeys.slice(0, 4).join(', ')}
+            {absentKeys.length > 4 ? ` +${absentKeys.length - 4} more` : ''}
+          </p>
+        )}
+        {detectedAt && (
+          <p className="text-[10px] text-muted-foreground/60">
+            Detected at {new Date(detectedAt).toLocaleString()}
+          </p>
+        )}
+      </div>
       <SectionGroup
         title="Operating Statement Columns"
         keys={COLUMN_MAP_KEYS}
@@ -136,6 +226,7 @@ export default function SourceMapView({ omStructure, citationContext, onCitation
         citationContext={citationContext}
         onCitationClick={onCitationClick}
       />
+      <SkippedSection skippedCells={skippedCells} />
     </div>
   );
 }
