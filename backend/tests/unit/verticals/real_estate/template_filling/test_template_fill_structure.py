@@ -12,10 +12,12 @@ from app.verticals.real_estate.template_filling.prompts.v1 import (
 from app.verticals.real_estate.template_filling.source_map import (
     STRUCTURE_HIGH_CONFIDENCE,
     STRUCTURE_LOW_CONFIDENCE,
+    normalize_om_structure_with_pdf_fields,
 )
 from app.verticals.real_estate.template_filling.tasks import (
-    _augment_om_structure_from_pdf_fields,
+    _build_narrative_pdf_field,
     _build_om_structure_artifact,
+    _build_scalar_context_for_batch,
     _build_structure_confidence_summary,
     _mark_auto_mapping_exception,
     _plan_schema_targets_for_structure,
@@ -24,9 +26,7 @@ from app.verticals.real_estate.template_filling.tasks import (
 
 
 def test_structure_detection_prompt_requests_column_map_and_section_presence():
-    prompt = V1PromptSet().build_detect_om_structure(
-        '[{"id":"table_1","source":"table_block","text":"CURRENT YEAR 1 PRO FORMA"}]'
-    )
+    prompt = V1PromptSet().build_detect_om_structure()
 
     assert prompt.response_model is OMStructureDetectionResult
     assert "column_map" in prompt.user_message
@@ -37,16 +37,16 @@ def test_structure_detection_prompt_requests_column_map_and_section_presence():
 
 
 def test_structure_detection_prompt_uses_shared_threshold_constants():
-    prompt = V1PromptSet().build_detect_om_structure("[]")
+    prompt = V1PromptSet().build_detect_om_structure()
 
-    assert f">={STRUCTURE_HIGH_CONFIDENCE:.2f}" in prompt.user_message
-    assert f"{STRUCTURE_LOW_CONFIDENCE:.2f}-" in prompt.user_message
+    assert f"≥{STRUCTURE_HIGH_CONFIDENCE:.2f}" in prompt.user_message
+    assert f"{STRUCTURE_LOW_CONFIDENCE:.2f}–" in prompt.user_message
     assert f"<{STRUCTURE_LOW_CONFIDENCE:.2f}" in prompt.user_message
 
 
 def test_structure_detection_result_allows_partial_source_map_for_planner_degrade():
-    parsed = OMStructureDetectionResult(
-        column_map={
+    parsed = {
+        "column_map": {
             "current": {
                 "present": True,
                 "label": "CURRENT",
@@ -54,7 +54,7 @@ def test_structure_detection_result_allows_partial_source_map_for_planner_degrad
                 "citations": ["[S1:p6]"],
             }
         },
-        section_presence={
+        "section_presence": {
             "year1_operating_statement_present": {
                 "present": True,
                 "label": "YEAR 1",
@@ -62,7 +62,7 @@ def test_structure_detection_result_allows_partial_source_map_for_planner_degrad
                 "citations": ["[S1:p6]"],
             }
         },
-    ).model_dump()
+    }
 
     plan = _plan_schema_targets_for_structure(
         [
@@ -82,31 +82,28 @@ def test_structure_detection_result_allows_partial_source_map_for_planner_degrad
     assert plan["skipped_targets"][0]["skip_reason"] == "structure_key_missing"
 
 
-def test_source_map_augmentation_infers_sections_from_detected_pdf_fields():
+def test_source_map_normalization_infers_sections_and_columns_from_detected_pdf_fields():
     structure = {
         "column_map": {
-            "current": {
-                "present": True,
-                "label": "CURRENT",
-                "confidence": 0.95,
-                "citations": ["[S1:p6]"],
-            },
-            "year1": {
-                "present": True,
-                "label": "YEAR-ONE",
-                "confidence": 0.95,
-                "citations": ["[S1:p6]"],
-            },
-            "pro_forma": {
-                "present": True,
-                "label": "PRO FORMA",
-                "confidence": 0.95,
-                "citations": ["[S1:p6]"],
-            },
+            "current": {"present": False, "confidence": 0.0, "citations": []},
+            "year1": {"present": False, "confidence": 0.0, "citations": []},
+            "pro_forma": {"present": False, "confidence": 0.0, "citations": []},
         },
         "section_presence": {},
     }
     pdf_fields = [
+        {
+            "source": "table_block",
+            "name": "Operating Summary",
+            "table_name": "Operating Summary",
+            "table_columns": ["Line Item", "CURRENT", "YEAR-ONE", "PRO FORMA"],
+            "table_rows": [
+                ["Gross Potential Rent", "$271,200", "$285,740", "$360,741"],
+                ["Total Operating Expenses", "$66,299", "$80,699", "$94,946"],
+                ["Net Operating Income", "$177,453", "$202,790", "$246,813"],
+            ],
+            "citations": ["[S1:p6]"],
+        },
         {
             "source": "table_block",
             "name": "Target Rent Analysis",
@@ -117,9 +114,13 @@ def test_source_map_augmentation_infers_sections_from_detected_pdf_fields():
         }
     ]
 
-    augmented = _augment_om_structure_from_pdf_fields(structure, pdf_fields)
+    augmented = normalize_om_structure_with_pdf_fields(structure, pdf_fields)
 
     sections = augmented["section_presence"]
+    columns = augmented["column_map"]
+    assert columns["current"]["present"] is True
+    assert columns["year1"]["present"] is True
+    assert columns["pro_forma"]["present"] is True
     assert sections["current_operating_statement_present"]["present"] is True
     assert sections["year1_operating_statement_present"]["present"] is True
     assert sections["pro_forma_operating_statement_present"]["present"] is True
@@ -154,6 +155,93 @@ def test_source_map_augmentation_infers_sections_from_detected_pdf_fields():
     assert plan["skipped_targets"] == []
 
 
+def test_scalar_context_for_structure_scopes_to_cited_pages_before_budgeting():
+    om_structure = {
+        "section_presence": {
+            "year1_operating_statement_present": {
+                "present": True,
+                "confidence": 0.95,
+                "citations": ["[S1:p6]"],
+            }
+        },
+        "column_map": {},
+    }
+    fields = [
+        {
+            "id": "page6-kv",
+            "source": "key_value_pairs",
+            "name": "Year 1 NOI",
+            "extracted_value": "$202,790",
+            "bbox": {"page": 6},
+        },
+        {
+            "id": "page8-kv",
+            "source": "key_value_pairs",
+            "name": "Too far from Year 1",
+            "extracted_value": "skip me",
+            "bbox": {"page": 8},
+        },
+        {
+            "id": "page30-kv",
+            "source": "key_value_pairs",
+            "name": "Unrelated Demographic",
+            "extracted_value": "42",
+            "bbox": {"page": 30},
+        },
+    ]
+    scalar_batch = [
+        {
+            "id": "pnl_year1_noi",
+            "source_basis": "om_operating_statement",
+            "fill_when": ["year1_operating_statement_present"],
+        }
+    ]
+
+    routed_fields, metadata = _build_scalar_context_for_batch(
+        fields,
+        om_structure,
+        scalar_batch,
+    )
+
+    assert [field["id"] for field in routed_fields] == ["page6-kv"]
+    assert metadata["routing_applied"] is True
+    assert metadata["citation_pages"] == [6]
+
+
+def test_source_map_normalization_does_not_treat_current_rent_unit_mix_as_operating_current_column():
+    normalized = normalize_om_structure_with_pdf_fields(
+        {"column_map": {}, "section_presence": {}},
+        [
+            {
+                "source": "table_block",
+                "table_name": "Unit Mix by Type",
+                "table_columns": ["Type", "# Units", "SqFt", "Current Rent"],
+                "table_rows": [["5x10", "26", "50", "$75"]],
+                "citations": ["[S2:p15]"],
+            }
+        ],
+    )
+
+    assert normalized["section_presence"]["unit_mix_present"]["present"] is True
+    assert normalized["column_map"]["current"]["present"] is False
+
+
+def test_scalar_context_for_always_fields_keeps_full_pool_before_budgeting():
+    fields = [
+        {"id": "cover", "source": "key_value_pairs", "bbox": {"page": 1}},
+        {"id": "market", "source": "key_value_pairs", "bbox": {"page": 18}},
+    ]
+
+    routed_fields, metadata = _build_scalar_context_for_batch(
+        fields,
+        {"section_presence": {}, "column_map": {}},
+        [{"id": "property_name", "source_basis": "om_property_summary", "fill_when": ["always"]}],
+    )
+
+    assert [field["id"] for field in routed_fields] == ["cover", "market"]
+    assert metadata["routing_applied"] is False
+
+
 def test_structure_confidence_summary_collects_low_keys():
     structure = {
         "column_map": {
@@ -170,6 +258,49 @@ def test_structure_confidence_summary_collects_low_keys():
     assert summary["min_confidence"] == 0.55
     assert summary["mean_confidence"] == 0.7533
     assert summary["low_confidence_keys"] == ["column_map.year1"]
+
+
+def test_om_structure_artifact_normalizes_citations_for_clickable_badges():
+    artifact = _build_om_structure_artifact(
+        {
+            "column_map": {
+                "current": {
+                    "present": True,
+                    "label": "CURRENT",
+                    "confidence": 0.95,
+                    "citations": ["S219:p6"],
+                }
+            },
+            "section_presence": {
+                "rent_comps_present": {
+                    "present": True,
+                    "label": "Rent Comps",
+                    "confidence": 0.9,
+                    "citations": ["S298:p22", "[S303:p22]"],
+                }
+            },
+        },
+        "model-a",
+    )
+
+    assert artifact["effective"]["column_map"]["current"]["citations"] == ["[D219:p6]"]
+    assert artifact["original"]["section_presence"]["rent_comps_present"]["citations"] == [
+        "[D298:p22]",
+        "[D303:p22]",
+    ]
+
+
+def test_narrative_pdf_field_preserves_page_number_for_cover_page_routing():
+    field = _build_narrative_pdf_field(
+        field_id_counter=77,
+        narrative_text="Tulsa Self Storage Units and Parking",
+        section_heading="Cover",
+        narrative_page=1,
+    )
+
+    assert field["id"] == "narrative_block_77"
+    assert field["page_number"] == 1
+    assert field["citations"] == ["[S77:p1]"]
 
 
 def test_pre_fill_planner_skips_missing_section_and_low_confidence_structure_key():

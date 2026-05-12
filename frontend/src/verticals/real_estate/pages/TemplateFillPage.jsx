@@ -13,6 +13,7 @@ import ExcelGridView from '../components/ExcelGridView';
 import SourceMapView from '../components/SourceMapView';
 import SourceMapWarningBanner from '../components/SourceMapWarningBanner';
 import { STRUCTURE_LOW_CONFIDENCE, tierForConfidence } from '../utils/sourceMapConfidence';
+import { shouldShowLargeDocumentContextWarning } from '../utils/templateFillWarnings';
 import { useTemplateFill, useTemplateFillActions, useUser } from '../../../store';
 import { TemplateFillRunPageSkeleton } from '../../../components/skeletons/PageSkeletons';
 import { Loader2, AlertCircle, FileText, Table, List, Download, CheckCircle2, ExternalLink, X, Search, GitMerge, FileSpreadsheet, PartyPopper, Layers } from 'lucide-react';
@@ -59,40 +60,6 @@ function AIPipelineView({ progress, message }) {
     return progress >= s.progress[0] && progress < (next?.progress[0] ?? 101);
   });
 
-  // Track when each stage becomes active so we can show elapsed time
-  const stageStartTimes = useRef({});
-  const [tick, setTick] = useState(0);
-
-  useEffect(() => {
-    const key = PIPELINE_STAGES[activeIndex]?.key;
-    if (key && stageStartTimes.current[key] === undefined) {
-      stageStartTimes.current[key] = Date.now();
-    }
-  }, [activeIndex]);
-
-  useEffect(() => {
-    const id = setInterval(() => setTick(t => t + 1), 1000);
-    return () => clearInterval(id);
-  }, []);
-
-  function getElapsed(stageKey, isDone, isActive) {
-    const start = stageStartTimes.current[stageKey];
-    if (!start) return null;
-    if (isDone) {
-      // Find when the next stage started (as a proxy for when this one ended)
-      const stageIdx = PIPELINE_STAGES.findIndex(s => s.key === stageKey);
-      const nextKey = PIPELINE_STAGES[stageIdx + 1]?.key;
-      const end = nextKey ? stageStartTimes.current[nextKey] : Date.now();
-      return end ? ((end - start) / 1000).toFixed(1) : null;
-    }
-    if (isActive) {
-      // eslint-disable-next-line no-unused-expressions
-      tick; // subscribe to tick
-      return ((Date.now() - start) / 1000).toFixed(1);
-    }
-    return null;
-  }
-
   return (
     <div className="h-full flex flex-col items-center justify-center p-6">
       <div className="glass-card rounded-2xl p-6 w-full max-w-sm space-y-5">
@@ -116,7 +83,6 @@ function AIPipelineView({ progress, message }) {
             const isDone = progress >= (PIPELINE_STAGES[i + 1]?.progress[0] ?? 101);
             const isActive = i === activeIndex;
             const isPending = !isDone && !isActive;
-            const elapsed = getElapsed(stage.key, isDone, isActive);
 
             return (
               <div
@@ -142,9 +108,6 @@ function AIPipelineView({ progress, message }) {
                   (isDone || isActive) ? 'text-foreground font-medium' : 'text-muted-foreground',
                 )}>
                   {stage.label}
-                </span>
-                <span className="text-xs font-mono tabular-nums text-muted-foreground w-12 text-right">
-                  {elapsed != null ? `${elapsed}s` : '—'}
                 </span>
               </div>
             );
@@ -660,6 +623,7 @@ export default function TemplateFillPage() {
     compact: true,
   };
   const contextBudgetWarning = fillRun.field_mapping?.context_budget?.user_warning;
+  const showLargeDocumentContextWarning = shouldShowLargeDocumentContextWarning(fillRun);
   const omStructureSummary = fillRun.field_mapping?.om_structure_summary ?? null;
 
   return (
@@ -730,7 +694,7 @@ export default function TemplateFillPage() {
         )}
         </div>
 
-        {contextBudgetWarning && (
+        {showLargeDocumentContextWarning && (
           <div className="px-6 pt-4">
             <Alert className="border-amber-200 bg-amber-50 text-amber-950">
               <AlertCircle className="h-4 w-4 text-amber-600" />

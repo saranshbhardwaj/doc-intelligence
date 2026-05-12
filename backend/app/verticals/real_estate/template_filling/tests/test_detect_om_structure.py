@@ -2,6 +2,8 @@
 
 import asyncio
 from typing import Any, Dict, List
+import json
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -12,7 +14,9 @@ from app.verticals.real_estate.template_filling.prompts.v1 import (
     OMSectionPresence,
     OMStructureDetectionResult,
     OMStructureKey,
+    SchemaFieldExtractionResult,
 )
+from app.verticals.real_estate.template_filling.prompts.base import PromptPair
 from app.verticals.real_estate.template_filling.tasks import (
     _plan_schema_targets_for_structure,
 )
@@ -246,6 +250,66 @@ class TestStructuralInventory:
         assert "PROPERTY DETAILS" in inventory
 
 
+@pytest.mark.asyncio
+async def test_property_summary_context_limits_cover_narrative_to_first_two_pages(monkeypatch):
+    with patch("app.verticals.real_estate.template_filling.llm_service.Anthropic"):
+        from app.verticals.real_estate.template_filling.llm_service import TemplateFillLLMService
+
+        svc = TemplateFillLLMService.__new__(TemplateFillLLMService)
+        svc.model = "test-model"
+        svc.max_tokens = 4096
+        svc.capture_io_log = False
+        svc._io_log_repo = None
+        svc.fill_run_id = "test-run"
+        svc.client = SimpleNamespace(messages=SimpleNamespace(parse=MagicMock()))
+        svc._record_llm_metrics = MagicMock()
+        svc.prompts = MagicMock()
+        svc.prompts.build_extract_schema_fields.return_value = PromptPair(
+            system_prompt="",
+            user_message="",
+            response_model=SchemaFieldExtractionResult,
+        )
+        message = SimpleNamespace(
+            parsed_output=SimpleNamespace(results=[]),
+            usage=None,
+        )
+        monkeypatch.setattr(asyncio, "to_thread", AsyncMock(return_value=message))
+
+        await svc.extract_schema_field_values(
+            [{"id": "property_name", "source_basis": "om_property_summary"}],
+            [
+                {
+                    "id": "cover-page-2",
+                    "source": "narrative_block",
+                    "type": "narrative",
+                    "page_number": 2,
+                    "full_text": "Tulsa Self Storage Units and Parking",
+                },
+                {
+                    "id": "cover-page-3",
+                    "source": "narrative_block",
+                    "type": "narrative",
+                    "page_number": 3,
+                    "full_text": "Later section copy",
+                },
+                {
+                    "id": "price",
+                    "source": "key_value_pairs",
+                    "type": "currency",
+                    "name": "Price",
+                    "extracted_value": "$2,500,000",
+                },
+            ],
+        )
+
+        prompt_context_json = svc.prompts.build_extract_schema_fields.call_args.args[0]
+        prompt_fields = json.loads(prompt_context_json)
+        prompt_ids = [field["id"] for field in prompt_fields]
+
+        assert "cover-page-2" in prompt_ids
+        assert "cover-page-3" not in prompt_ids
+
+
 # ---------------------------------------------------------------------------
 # Retry logic
 # ---------------------------------------------------------------------------
@@ -298,27 +362,24 @@ class TestRetryLogic:
         )
         return msg
 
-    def test_retry_on_pydantic_failure(self):
+    def test_successful_structured_parse_returns_source_map(self):
         svc = self._make_service()
-        partial_msg = self._make_message(self._partial_raw())
-        complete_msg = self._make_message(self._complete_raw())
-        call_count = 0
-
-        async def fake_create(**kwargs):
-            nonlocal call_count
-            call_count += 1
-            return partial_msg if call_count == 1 else complete_msg
+        svc.client = MagicMock()
+        parsed = OMStructureDetectionResult.model_validate(self._complete_raw())
+        complete_msg = MagicMock()
+        complete_msg.parsed_output = parsed
+        complete_msg.usage = MagicMock(
+            input_tokens=100,
+            output_tokens=50,
+            cache_creation_input_tokens=0,
+            cache_read_input_tokens=0,
+        )
 
         pdf_fields = [{"source": "table_block", "page_number": 1, "table_name": "T", "table_columns": [], "table_rows": [], "citations": []}]
-        with patch.object(svc, "_record_llm_metrics"):
-            with patch("asyncio.to_thread", side_effect=lambda fn, **kw: asyncio.coroutine(lambda: fn(**kw))()):
-                pass
-
-        # Use direct asyncio patching
         import asyncio as _asyncio
 
         async def run():
-            with patch("app.verticals.real_estate.template_filling.llm_service.asyncio.to_thread", new=AsyncMock(side_effect=[partial_msg, complete_msg])):
+            with patch("app.verticals.real_estate.template_filling.llm_service.asyncio.to_thread", new=AsyncMock(return_value=complete_msg)):
                 with patch.object(svc, "_record_llm_metrics"):
                     result = await svc.detect_om_structure(pdf_fields)
             return result

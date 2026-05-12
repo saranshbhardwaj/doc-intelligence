@@ -42,6 +42,7 @@ from app.verticals.real_estate.template_filling.source_map import (
     STRUCTURE_HIGH_CONFIDENCE,
     STRUCTURE_LOW_CONFIDENCE,
     as_list,
+    normalize_om_structure_with_pdf_fields,
 )
 
 
@@ -288,6 +289,78 @@ def _field_page(field: Dict[str, Any]) -> Optional[int]:
     return field.get("page_number")
 
 
+def _get_scalar_batch_key(field_def: Dict[str, Any]) -> str:
+    source_basis = field_def.get("source_basis") or "om_property_summary"
+    fill_when = "|".join(str(value) for value in as_list(field_def.get("fill_when")) if value)
+    return f"{source_basis}:{fill_when or 'always'}"
+
+
+def _build_narrative_pdf_field(
+    *,
+    field_id_counter: int,
+    narrative_text: str,
+    section_heading: str,
+    narrative_page: Optional[int],
+) -> Dict[str, Any]:
+    citation = f"[S{field_id_counter}:p{narrative_page}]"
+    return {
+        "id": f"narrative_block_{field_id_counter}",
+        "name": f"narrative: {section_heading}" if section_heading else "narrative",
+        "type": "narrative",
+        "extracted_value": narrative_text[:300],
+        "confidence": 0.8,
+        "citations": [citation],
+        "source": "narrative_block",
+        "full_text": narrative_text,
+        "section": section_heading,
+        "page_number": narrative_page,
+    }
+
+
+def _build_scalar_context_for_batch(
+    pdf_fields: List[Dict[str, Any]],
+    om_structure: Dict[str, Any],
+    batch_fields: List[Dict[str, Any]],
+) -> tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    """
+    Build scalar extraction context from the full evidence pool.
+
+    Structure-gated batches are routed to cited pages first, then budgeted.
+    Always/static batches keep the full pool and only apply budget limits.
+    """
+    fill_when_keys: set[str] = set()
+    for field_def in batch_fields or []:
+        for fill_when in as_list(field_def.get("fill_when")):
+            if fill_when and fill_when != "always":
+                fill_when_keys.add(str(fill_when))
+
+    citation_pages: List[int] = []
+    for key in sorted(fill_when_keys):
+        citation_pages.extend(_get_section_citation_pages(om_structure or {}, key))
+    unique_citation_pages = sorted(set(citation_pages))
+
+    routed_fields = pdf_fields
+    routing_applied = False
+    if unique_citation_pages:
+        routing_applied = True
+        routed_fields = [
+            field
+            for field in pdf_fields
+            if (page := _field_page(field)) is None
+            or any(abs(page - citation_page) <= 1 for citation_page in unique_citation_pages)
+        ]
+
+    budgeted_fields, budget_metadata = _build_budgeted_pdf_fields(routed_fields)
+    budget_metadata = {
+        **budget_metadata,
+        "routing_applied": routing_applied,
+        "citation_pages": unique_citation_pages,
+        "source_field_count_before_routing": len(pdf_fields),
+        "source_field_count_after_routing": len(routed_fields),
+    }
+    return budgeted_fields, budget_metadata
+
+
 def _compute_schema_counts(schema_obj: Any) -> Dict[str, Any]:
     fields = getattr(schema_obj, "fields", []) or []
     tables = getattr(schema_obj, "tables", []) or []
@@ -359,14 +432,25 @@ def _build_om_structure_artifact(
     model_name: str,
 ) -> Dict[str, Any]:
     """Build the stored Source Map artifact used by this fill run."""
+    normalized_structure = copy.deepcopy(detected_structure)
+    for bucket in ("column_map", "section_presence"):
+        for entry in (normalized_structure.get(bucket) or {}).values():
+            if isinstance(entry, dict):
+                raw_citations = []
+                for citation in entry.get("citations", []) or []:
+                    citation_text = str(citation).strip()
+                    if re.fullmatch(r"(?:S|D)\d+:p\d+", citation_text):
+                        citation_text = f"[{citation_text}]"
+                    raw_citations.append(citation_text)
+                entry["citations"] = normalize_citations(raw_citations)
     return {
         "extractor_version": "template_om_structure_v1",
         "model_name": model_name,
         "detected_at": datetime.now(timezone.utc).isoformat(),
         "edited": False,
-        "original": copy.deepcopy(detected_structure),
-        "effective": copy.deepcopy(detected_structure),
-        "confidence_summary": _build_structure_confidence_summary(detected_structure),
+        "original": copy.deepcopy(normalized_structure),
+        "effective": copy.deepcopy(normalized_structure),
+        "confidence_summary": _build_structure_confidence_summary(normalized_structure),
     }
 
 
@@ -903,23 +987,16 @@ def detect_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
             narrative_page = metadata_dict.get("page_number") or chunk.page_number
             if isinstance(narrative_page, str) and narrative_page.isdigit():
                 narrative_page = int(narrative_page)
-            citation = f"[S{field_id_counter}:p{narrative_page}]"
-
-            # Create one narrative_block field with full text for LLM context
-            # Narrative provides market/economic/demographic context for better field matching
-
-            detected_fields.append({
-                "id": f"narrative_block_{field_id_counter}",
-                "name": f"narrative: {section_heading}" if section_heading else "narrative",
-                "type": "narrative",
-                "extracted_value": narrative_text[:300],  # Summary (first 300 chars)
-                "confidence": 0.8,
-                "citations": [citation],
-                "source": "narrative_block",
-                # Full narrative text for LLM context
-                "full_text": narrative_text,
-                "section": section_heading,
-            })
+            # Create one narrative_block field with full text for LLM context.
+            # Narrative provides market/economic/demographic context for better field matching.
+            detected_fields.append(
+                _build_narrative_pdf_field(
+                    field_id_counter=field_id_counter,
+                    narrative_text=narrative_text,
+                    section_heading=section_heading,
+                    narrative_page=narrative_page,
+                )
+            )
             field_id_counter += 1
 
         elapsed_ms = int((time.time() - start_time) * 1000)
@@ -1070,8 +1147,11 @@ def auto_map_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
         if not excel_schema:
             raise ValueError(f"Template schema not found: {template_id}")
 
-        # Mutable copy — Stage 2 injects virtual pdf_fields for targeted values
-        pdf_fields = list(detection_result.get("fields", []))
+        # Keep the Azure DI evidence pool intact. Stage 2 adds virtual targeted
+        # fields to `pdf_fields`, but routing/budgeting always starts from the
+        # untouched originals below.
+        all_pdf_fields = list(detection_result.get("fields", []))
+        pdf_fields = list(all_pdf_fields)
 
         # Load citation_context built by detect_fields_task; we'll append targeted entries to it.
         # Reuse _fill_run_check already fetched above (avoids a second DB round-trip).
@@ -1083,31 +1163,12 @@ def auto_map_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
             for e in citation_context.get("citations", [])
             if e.get("bbox")
         }
-        pdf_fields, context_budget = _build_budgeted_pdf_fields(pdf_fields)
-        if detection_result.get("fields") and not pdf_fields:
-            raise ValueError(TOO_LARGE_CONTEXT_ERROR)
-        if context_budget.get("context_budget_applied"):
-            existing_field_mapping = (
-                fill_run_for_ctx.fill_run_data.field_mapping
-                if fill_run_for_ctx and fill_run_for_ctx.fill_run_data
-                else {}
-            ) or {}
-            repo.update_fill_run_data(
-                fill_run_id,
-                field_mapping={
-                    **existing_field_mapping,
-                    "pdf_fields": pdf_fields,
-                    "context_budget": context_budget,
-                },
-            )
-            logger.info(
-                "Template fill context budget applied: original=%s used=%s chars=%s table_trimmed=%s narrative_trimmed=%s",
-                context_budget["context_items_original"],
-                context_budget["context_items_used"],
-                context_budget["context_chars_used"],
-                context_budget["table_blocks_trimmed"],
-                context_budget["narrative_blocks_trimmed"],
-            )
+        context_budget: Dict[str, Any] = {
+            "context_budget_applied": False,
+            "user_warning": None,
+            "scalar_batches": {},
+            "table_batches": {},
+        }
         schema_mappings = []
         schema_id = None
         schema_obj = None
@@ -1225,7 +1286,7 @@ def auto_map_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                     ]
 
                     schema_tables = schema_obj.tables or []
-                    source_pdf_fields_for_table_context = list(pdf_fields)
+                    source_pdf_fields_for_table_context = list(all_pdf_fields)
 
                     if unmapped_fields or schema_tables:
                         llm_service_targeted = TemplateFillLLMService(
@@ -1241,7 +1302,11 @@ def auto_map_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                             message="Detecting OM source map..."
                         )
                         detected_structure = asyncio.run(
-                            llm_service_targeted.detect_om_structure(pdf_fields)
+                            llm_service_targeted.detect_om_structure(all_pdf_fields)
+                        )
+                        detected_structure = normalize_om_structure_with_pdf_fields(
+                            detected_structure,
+                            all_pdf_fields,
                         )
                         om_structure_artifact = _build_om_structure_artifact(
                             detected_structure,
@@ -1279,17 +1344,42 @@ def auto_map_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                             message=f"Finding values for {len(unmapped_fields)} schema fields..."
                         )
 
-                        targeted_values = asyncio.run(
-                            llm_service_targeted.extract_schema_field_values(
-                                unmapped_fields,
-                                pdf_fields,
-                                om_structure=(
-                                    om_structure_artifact.get("effective")
-                                    if om_structure_artifact
-                                    else None
-                                ),
+                        targeted_values: Dict[str, Any] = {}
+                        scalar_batches: Dict[str, List[Dict[str, Any]]] = {}
+                        for field_def in unmapped_fields:
+                            scalar_batches.setdefault(_get_scalar_batch_key(field_def), []).append(field_def)
+
+                        for batch_key, batch_fields in scalar_batches.items():
+                            scalar_context, scalar_budget = _build_scalar_context_for_batch(
+                                all_pdf_fields,
+                                om_structure_artifact.get("effective") if om_structure_artifact else {},
+                                batch_fields,
                             )
-                        )
+                            context_budget["scalar_batches"][batch_key] = scalar_budget
+                            if scalar_budget.get("context_budget_applied"):
+                                context_budget["context_budget_applied"] = True
+                                if scalar_budget.get("user_warning"):
+                                    context_budget["user_warning"] = scalar_budget["user_warning"]
+                            logger.info(
+                                "Scalar context prepared for batch %s: %s → %s fields (routing=%s, citation_pages=%s)",
+                                batch_key,
+                                scalar_budget["source_field_count_before_routing"],
+                                len(scalar_context),
+                                scalar_budget["routing_applied"],
+                                scalar_budget["citation_pages"],
+                            )
+                            batch_values = asyncio.run(
+                                llm_service_targeted.extract_schema_field_values(
+                                    batch_fields,
+                                    scalar_context,
+                                    om_structure=(
+                                        om_structure_artifact.get("effective")
+                                        if om_structure_artifact
+                                        else None
+                                    ),
+                                )
+                            )
+                            targeted_values.update(batch_values)
 
                         targeted_mappings = mapping_coordinator.create_targeted_schema_mappings(
                             unmapped_fields, targeted_values
@@ -1392,7 +1482,7 @@ def auto_map_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                                 filtered = [
                                     f for f in source_pdf_fields_for_table_context
                                     if (pg := _field_page(f)) is None
-                                    or any(abs(pg - p) <= 2 for p in citation_pages)
+                                    or any(abs(pg - p) <= 1 for p in citation_pages)
                                 ]
                                 logger.info(
                                     "Table context filtered for batch %s: %s → %s fields (citation pages %s)",
@@ -1402,7 +1492,20 @@ def auto_map_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                             else:
                                 filtered = source_pdf_fields_for_table_context
 
-                            context_payload = llm_service_targeted._build_table_context_from_pdf_fields(filtered)
+                            table_context_fields, table_budget = _build_budgeted_pdf_fields(filtered)
+                            table_budget = {
+                                **table_budget,
+                                "routing_applied": bool(citation_pages),
+                                "citation_pages": sorted(set(citation_pages)),
+                                "source_field_count_before_routing": len(source_pdf_fields_for_table_context),
+                                "source_field_count_after_routing": len(filtered),
+                            }
+                            context_budget["table_batches"][batch_key] = table_budget
+                            if table_budget.get("context_budget_applied"):
+                                context_budget["context_budget_applied"] = True
+                                if table_budget.get("user_warning"):
+                                    context_budget["user_warning"] = table_budget["user_warning"]
+                            context_payload = llm_service_targeted._build_table_context_from_pdf_fields(table_context_fields)
                             table_context_json: Optional[str] = json.dumps(
                                 context_payload, separators=(",", ":"), ensure_ascii=False
                             )
@@ -1428,7 +1531,7 @@ def auto_map_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                             batch_result = asyncio.run(
                                 llm_service_targeted.extract_schema_table_values_rag_batch(
                                     batch_tables,
-                                    source_pdf_fields_for_table_context,
+                                    table_context_fields,
                                     row_labels_by_table=row_labels_by_table,
                                     prebuilt_context_json=table_context_json,
                                     om_structure=(

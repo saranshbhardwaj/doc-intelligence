@@ -1,8 +1,9 @@
 import React, { useState } from 'react';
 import { ChevronDown, ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { CitationBadges } from './CitationBadge';
+import { CitationBadge } from './CitationBadge';
 import { tierForConfidence } from '../utils/sourceMapConfidence';
+import { groupSourceMapCitationsByPage } from '../utils/sourceMapCitations';
 
 // Canonical display order and friendly names for each group.
 const COLUMN_MAP_KEYS = [
@@ -42,6 +43,7 @@ function StructureRow({ friendlyLabel, entry, citationContext, onCitationClick }
   const detected = entry?.present === true;
   const tier = detected ? tierForConfidence(entry?.confidence) : 'unknown';
   const pct = entry?.confidence != null ? Math.round(entry.confidence * 100) : null;
+  const groupedCitations = groupSourceMapCitationsByPage(entry?.citations ?? []);
 
   return (
     <div className="flex items-start gap-3 py-2 px-3 rounded-md hover:bg-muted/40 transition-colors">
@@ -68,13 +70,27 @@ function StructureRow({ friendlyLabel, entry, citationContext, onCitationClick }
           )}>
             {pct != null ? `${pct}%` : ''}
           </span>
-          {entry.citations?.length > 0 && (
-            <CitationBadges
-              citations={entry.citations}
-              citationContext={citationContext}
-              onCitationClick={onCitationClick}
-              className="shrink-0"
-            />
+          {groupedCitations.length > 0 && (
+            <div className="flex items-center flex-wrap gap-1.5 shrink-0">
+              {groupedCitations.map((group) => {
+                const primaryCitation = group.primaryCitation;
+                const sourceIndexMatch = String(primaryCitation).match(/\[(?:S|D)(\d+):/i);
+                const sourceIndex = sourceIndexMatch?.[1] ? Number.parseInt(sourceIndexMatch[1], 10) : null;
+                const bbox = sourceIndex != null
+                  ? citationContext?.citations?.find((citation) => citation.source_index === sourceIndex)?.bbox ?? null
+                  : null;
+
+                return (
+                  <CitationBadge
+                    key={`${group.label}-${primaryCitation}`}
+                    citation={primaryCitation}
+                    label={group.label}
+                    onClick={onCitationClick}
+                    bbox={bbox}
+                  />
+                );
+              })}
+            </div>
           )}
         </>
       ) : (

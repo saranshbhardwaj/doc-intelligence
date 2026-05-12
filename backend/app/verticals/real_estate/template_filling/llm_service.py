@@ -457,7 +457,7 @@ class TemplateFillLLMService:
 
         # Build LLM context from KV and table_block fields.
         # Narrative blocks are normally excluded (inflate tokens, rarely improve KV accuracy).
-        # Exception: include cover-page narrative blocks (page <= 5) when property-summary fields
+        # Exception: include cover-page narrative blocks (page <= 2) when property-summary fields
         # are being extracted — property name and address often appear only in cover-page prose.
         needs_property_summary = any(
             f.get("source_basis") == "om_property_summary" for f in unmapped_fields
@@ -471,7 +471,7 @@ class TemplateFillLLMService:
                 table_block_fields.append(f)
             elif src == "narrative_block":
                 narrative_count += 1
-                if needs_property_summary and (f.get("page_number") or 99) <= 5:
+                if needs_property_summary and (f.get("page_number") or 99) <= 2:
                     narrative_fields.append(f)
 
         fields_for_llm = (kv_fields + table_block_fields + narrative_fields) if (kv_fields or table_block_fields) else pdf_fields

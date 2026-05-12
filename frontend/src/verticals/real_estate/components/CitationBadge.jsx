@@ -58,12 +58,13 @@ export function CitationBadge({
   onClick,
   className,
   sourceText = null,
-  bbox = null  // Optional bbox for PDF highlighting: { page, x0, y0, x1, y1 }
+  bbox = null,  // Optional bbox for PDF highlighting: { page, x0, y0, x1, y1 }
+  label = null,
 }) {
   const pageNumber = parseCitationPage(citation);
   const payload = buildCitationPayload(pageNumber, bbox);
   const effectivePage = typeof payload === 'number' ? payload : Number(payload?.page);
-  const displayText = Number.isFinite(effectivePage) ? `Page ${effectivePage}` : citation;
+  const displayText = label || (Number.isFinite(effectivePage) ? `Page ${effectivePage}` : citation);
 
   const handleClick = (e) => {
     e.stopPropagation();
