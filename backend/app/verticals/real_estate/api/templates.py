@@ -32,9 +32,11 @@ from app.utils.logging import logger
 from app.utils.id_generator import generate_id
 from app.verticals.real_estate.template_filling.excel_handler import ExcelHandler
 from app.verticals.real_estate.template_filling.tasks import (
-    _compute_schema_counts,
     continue_fill_run_chain,
     start_fill_run_chain,
+)
+from app.verticals.real_estate.template_filling.schema_planner import (
+    compute_schema_counts as _compute_schema_counts,
 )
 from app.verticals.real_estate.template_filling.excel.mapping_coordinator import MappingCoordinator
 
