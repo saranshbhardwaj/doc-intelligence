@@ -19,6 +19,7 @@ from app.verticals.real_estate.template_filling.tasks import (
     _build_om_structure_artifact,
     _build_scalar_context_for_batch,
     _build_structure_confidence_summary,
+    _consolidate_scalar_batches_by_context,
     _mark_auto_mapping_exception,
     _plan_schema_targets_for_structure,
     _target_status,
@@ -240,6 +241,60 @@ def test_scalar_context_for_always_fields_keeps_full_pool_before_budgeting():
 
     assert [field["id"] for field in routed_fields] == ["cover", "market"]
     assert metadata["routing_applied"] is False
+
+
+def test_scalar_batch_consolidation_merges_only_exact_context_matches():
+    consolidated = _consolidate_scalar_batches_by_context(
+        [
+            {
+                "batch_key": "operating:current",
+                "fields": [{"id": "current_noi"}],
+                "context": [{"id": "ctx-1"}, {"id": "ctx-2"}],
+                "budget": {"citation_pages": [16]},
+            },
+            {
+                "batch_key": "operating:pro_forma",
+                "fields": [{"id": "proforma_noi"}],
+                "context": [{"id": "ctx-1"}, {"id": "ctx-2"}],
+                "budget": {"citation_pages": [16]},
+            },
+            {
+                "batch_key": "market:summary",
+                "fields": [{"id": "population"}],
+                "context": [{"id": "ctx-3"}],
+                "budget": {"citation_pages": [29]},
+            },
+        ]
+    )
+
+    assert len(consolidated) == 2
+    merged = consolidated[0]
+    assert merged["batch_keys"] == ["operating:current", "operating:pro_forma"]
+    assert [field["id"] for field in merged["fields"]] == ["current_noi", "proforma_noi"]
+    assert [field["id"] for field in merged["context"]] == ["ctx-1", "ctx-2"]
+
+
+def test_scalar_batch_consolidation_does_not_merge_same_pages_with_different_contexts():
+    consolidated = _consolidate_scalar_batches_by_context(
+        [
+            {
+                "batch_key": "operating:current",
+                "fields": [{"id": "current_noi"}],
+                "context": [{"id": "ctx-1"}, {"id": "ctx-2"}],
+                "budget": {"citation_pages": [16]},
+            },
+            {
+                "batch_key": "operating:year1",
+                "fields": [{"id": "year1_noi"}],
+                "context": [{"id": "ctx-1"}],
+                "budget": {"citation_pages": [16]},
+            },
+        ]
+    )
+
+    assert len(consolidated) == 2
+    assert consolidated[0]["batch_keys"] == ["operating:current"]
+    assert consolidated[1]["batch_keys"] == ["operating:year1"]
 
 
 def test_structure_confidence_summary_collects_low_keys():

@@ -361,6 +361,38 @@ def _build_scalar_context_for_batch(
     return budgeted_fields, budget_metadata
 
 
+def _scalar_context_signature(context_fields: List[Dict[str, Any]]) -> tuple[str, ...]:
+    """Build a stable exact-match signature from routed scalar context ids."""
+    return tuple(str(field.get("id") or "") for field in context_fields or [])
+
+
+def _consolidate_scalar_batches_by_context(
+    prepared_batches: List[Dict[str, Any]],
+) -> List[Dict[str, Any]]:
+    """Merge scalar batches only when their routed contexts are exactly identical."""
+    consolidated_by_signature: Dict[tuple[str, ...], Dict[str, Any]] = {}
+    consolidated_order: List[tuple[str, ...]] = []
+
+    for prepared in prepared_batches or []:
+        signature = _scalar_context_signature(prepared.get("context") or [])
+        if signature not in consolidated_by_signature:
+            consolidated_by_signature[signature] = {
+                "context_signature": signature,
+                "batch_keys": [],
+                "fields": [],
+                "context": prepared.get("context") or [],
+                "budgets": [],
+            }
+            consolidated_order.append(signature)
+
+        consolidated = consolidated_by_signature[signature]
+        consolidated["batch_keys"].append(prepared.get("batch_key"))
+        consolidated["fields"].extend(prepared.get("fields") or [])
+        consolidated["budgets"].append(prepared.get("budget") or {})
+
+    return [consolidated_by_signature[signature] for signature in consolidated_order]
+
+
 def _compute_schema_counts(schema_obj: Any) -> Dict[str, Any]:
     fields = getattr(schema_obj, "fields", []) or []
     tables = getattr(schema_obj, "tables", []) or []
@@ -1349,6 +1381,7 @@ def auto_map_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                         for field_def in unmapped_fields:
                             scalar_batches.setdefault(_get_scalar_batch_key(field_def), []).append(field_def)
 
+                        prepared_scalar_batches: List[Dict[str, Any]] = []
                         for batch_key, batch_fields in scalar_batches.items():
                             scalar_context, scalar_budget = _build_scalar_context_for_batch(
                                 all_pdf_fields,
@@ -1368,6 +1401,36 @@ def auto_map_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                                 scalar_budget["routing_applied"],
                                 scalar_budget["citation_pages"],
                             )
+                            prepared_scalar_batches.append({
+                                "batch_key": batch_key,
+                                "fields": batch_fields,
+                                "context": scalar_context,
+                                "budget": scalar_budget,
+                            })
+
+                        consolidated_scalar_batches = _consolidate_scalar_batches_by_context(
+                            prepared_scalar_batches
+                        )
+                        context_budget["scalar_batch_summary"] = {
+                            "original_batch_count": len(prepared_scalar_batches),
+                            "consolidated_call_count": len(consolidated_scalar_batches),
+                        }
+                        logger.info(
+                            "Scalar LLM call consolidation: original_batches=%s consolidated_calls=%s",
+                            len(prepared_scalar_batches),
+                            len(consolidated_scalar_batches),
+                        )
+
+                        for consolidated_batch in consolidated_scalar_batches:
+                            batch_keys = consolidated_batch["batch_keys"]
+                            batch_fields = consolidated_batch["fields"]
+                            scalar_context = consolidated_batch["context"]
+                            if len(batch_keys) > 1:
+                                logger.info(
+                                    "Merged scalar batches with identical context: batches=%s fields=%s",
+                                    batch_keys,
+                                    len(batch_fields),
+                                )
                             batch_values = asyncio.run(
                                 llm_service_targeted.extract_schema_field_values(
                                     batch_fields,
