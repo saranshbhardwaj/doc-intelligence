@@ -897,6 +897,7 @@ For each requested schema table:
         result_dict: Dict[str, Any] = {}
         results = raw_result.get("results") if isinstance(raw_result, dict) else None
         if isinstance(results, list):
+            self._repair_table_result_citations(raw_result, context_payload)
             for table_result in results:
                 if table_result.get("table_id") == table_id:
                     result_dict[table_id] = {
@@ -1044,6 +1045,15 @@ For each requested schema table:
             logger.error(f"Failed to parse table extraction response: {e}\nRaw: {raw_text[:500]}")
             return {}
 
+        context_payload_for_citations: List[Dict[str, Any]]
+        try:
+            context_payload_for_citations = json.loads(context_json)
+            if not isinstance(context_payload_for_citations, list):
+                context_payload_for_citations = []
+        except Exception:
+            context_payload_for_citations = []
+        self._repair_table_result_citations(result, context_payload_for_citations)
+
         # Token usage
         usage = getattr(response, "usage", None)
         input_tokens = output_tokens = cache_creation = cache_read = 0
@@ -1136,7 +1146,11 @@ For each requested schema table:
                 "text": text,
                 "page_number": page_number,
                 "section_type": source,
+                "citations": field.get("citations", []),
             })
+            if field.get("citations"):
+                citation_hint = ", ".join(str(c) for c in field.get("citations", []))
+                context[-1]["text"] = f"Use citation {citation_hint} for this source.\n{context[-1]['text']}"
         return context
 
     def _build_table_rag_text_context(self, chunks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -1163,8 +1177,82 @@ For each requested schema table:
                 "text": chunk.get("text") or "",
                 "page_number": page_number,
                 "section_type": chunk.get("section_type") or metadata.get("chunk_type"),
+                "citations": chunk.get("citations", []),
             })
         return context
+
+    def _repair_table_result_citations(
+        self,
+        table_result: Dict[str, Any],
+        context_payload: List[Dict[str, Any]],
+    ) -> None:
+        """Replace local/mismatched table citations with global citations from the same page.
+
+        Table prompts use a compact routed context. If the LLM emits a local-looking
+        token like [S1:p15], the source index can point to an unrelated global PDF
+        field. Prefer a context citation whose page matches the token page.
+        """
+        page_to_citations: Dict[int, List[str]] = {}
+        valid_citation_pages: Dict[int, int] = {}
+
+        for entry in context_payload or []:
+            entry_page = entry.get("page_number")
+            if isinstance(entry_page, str) and entry_page.isdigit():
+                entry_page = int(entry_page)
+            citations = entry.get("citations") or []
+            if isinstance(citations, str):
+                citations = [citations]
+            for citation in citations:
+                citation_text = str(citation)
+                citation_page = self._parse_citation_page(citation_text) or entry_page
+                source_index = self._parse_citation_source_index(citation_text)
+                if isinstance(citation_page, int) and citation_page > 0:
+                    page_to_citations.setdefault(citation_page, []).append(citation_text)
+                    if source_index is not None:
+                        valid_citation_pages[source_index] = citation_page
+
+        if not page_to_citations:
+            return
+
+        results = table_result.get("results") if isinstance(table_result, dict) else None
+        if not isinstance(results, list):
+            return
+
+        for table in results:
+            rows = table.get("rows") if isinstance(table, dict) else None
+            if not isinstance(rows, list):
+                continue
+            for row in rows:
+                citations = row.get("citations") or []
+                if isinstance(citations, str):
+                    citations = [citations]
+                repaired: List[str] = []
+                for citation in citations:
+                    citation_text = str(citation)
+                    citation_page = self._parse_citation_page(citation_text)
+                    source_index = self._parse_citation_source_index(citation_text)
+                    source_page = valid_citation_pages.get(source_index) if source_index is not None else None
+                    if citation_page and source_page == citation_page:
+                        repaired.append(citation_text)
+                    elif citation_page and page_to_citations.get(citation_page):
+                        repaired.append(page_to_citations[citation_page][0])
+                    else:
+                        repaired.append(citation_text)
+                row["citations"] = list(dict.fromkeys(repaired))
+
+    @staticmethod
+    def _parse_citation_page(citation: str) -> Optional[int]:
+        match = re.search(r":\s*p(\d+)\]", str(citation), flags=re.IGNORECASE)
+        if not match:
+            return None
+        return int(match.group(1))
+
+    @staticmethod
+    def _parse_citation_source_index(citation: str) -> Optional[int]:
+        match = re.search(r"\[(?:S|D)(\d+):", str(citation), flags=re.IGNORECASE)
+        if not match:
+            return None
+        return int(match.group(1))
 
     def _format_chunks_with_citations(self, chunks: List[Dict[str, Any]]) -> str:
         """Format chunks with citation tokens for LLM consumption."""

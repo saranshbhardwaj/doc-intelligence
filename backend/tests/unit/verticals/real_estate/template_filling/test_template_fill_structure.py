@@ -2,6 +2,12 @@ import pytest
 from types import SimpleNamespace
 
 from app.repositories.template_repository import _merge_extracted_data
+from app.verticals.real_estate.template_filling.citations import (
+    resolve_bbox_from_citations as _resolve_bbox_from_citations,
+)
+from app.verticals.real_estate.template_filling.excel.mapping_coordinator import (
+    MappingCoordinator,
+)
 from app.verticals.real_estate.template_filling.llm_service import TemplateFillLLMService
 from app.verticals.real_estate.template_filling.prompts.base import PromptPair
 from app.verticals.real_estate.template_filling.prompts.v1 import (
@@ -14,15 +20,23 @@ from app.verticals.real_estate.template_filling.source_map import (
     STRUCTURE_LOW_CONFIDENCE,
     normalize_om_structure_with_pdf_fields,
 )
+from app.verticals.real_estate.template_filling.artifacts import (
+    build_om_structure_artifact as _build_om_structure_artifact,
+    build_structure_confidence_summary as _build_structure_confidence_summary,
+)
+from app.verticals.real_estate.template_filling.mapping_helpers import (
+    build_narrative_pdf_field as _build_narrative_pdf_field,
+    build_scalar_context_for_batch as _build_scalar_context_for_batch,
+    consolidate_scalar_batches_by_context as _consolidate_scalar_batches_by_context,
+)
+from app.verticals.real_estate.template_filling.schema_planner import (
+    _target_status,
+)
 from app.verticals.real_estate.template_filling.tasks import (
-    _build_narrative_pdf_field,
-    _build_om_structure_artifact,
-    _build_scalar_context_for_batch,
-    _build_structure_confidence_summary,
-    _consolidate_scalar_batches_by_context,
+    _build_targeted_virtual_pdf_field,
     _mark_auto_mapping_exception,
     _plan_schema_targets_for_structure,
-    _target_status,
+    _prepare_extracted_data_for_fill,
 )
 
 
@@ -561,6 +575,8 @@ def test_extract_schema_field_prompt_uses_trimmed_source_map_context():
     assert "[S1:p6]" not in prompt.user_message
     assert '"evidence"' not in prompt.user_message
     assert "YEAR 1" not in prompt.system_prompt
+    assert "Use the most specific citation token available for the exact value" in prompt.user_message
+    assert "If extracting an expense field" in prompt.user_message
 
 
 def test_extract_table_prompt_uses_trimmed_source_map_context():
@@ -598,6 +614,7 @@ def test_extract_table_prompt_uses_trimmed_source_map_context():
     assert "[S1:p16]" not in prompt.user_message
     assert '"evidence"' not in prompt.user_message
     assert "CURRENT" not in prompt.system_prompt
+    assert "Use the most specific citation token available for the exact value" in prompt.user_message
 
 
 def test_shared_azure_context_block_is_stable_across_source_map_and_scalar_calls():
@@ -696,6 +713,53 @@ def test_table_context_excludes_targeted_schema_virtual_fields():
     assert "Unit Mix" in context[0]["text"]
 
 
+def test_table_context_preserves_global_citations_for_table_fields():
+    service = TemplateFillLLMService.__new__(TemplateFillLLMService)
+
+    context = service._build_table_context_from_pdf_fields(
+        [
+            {
+                "id": "tbl_block_240",
+                "source": "table_block",
+                "name": "Unit Mix",
+                "page_number": 15,
+                "table_columns": ["Type", "# Units", "SqFt", "Current Rent"],
+                "table_rows": [{"Type": "5x10", "# Units": 26, "SqFt": 50, "Current Rent": 75}],
+                "citations": ["[S240:p15]"],
+            }
+        ]
+    )
+
+    assert context[0]["citations"] == ["[S240:p15]"]
+    assert "Use citation [S240:p15]" in context[0]["text"]
+
+
+def test_table_row_citation_repair_replaces_local_token_with_global_same_page():
+    service = TemplateFillLLMService.__new__(TemplateFillLLMService)
+    context_payload = [
+        {"page_number": 3, "citations": ["[S1:p3]"]},
+        {"page_number": 15, "citations": ["[S240:p15]"]},
+    ]
+    table_result = {
+        "results": [
+            {
+                "table_id": "unit_mix",
+                "rows": [
+                    {
+                        "row_index": 0,
+                        "values": {"K": "75"},
+                        "citations": ["[S1:p15]"],
+                    }
+                ],
+            }
+        ]
+    }
+
+    service._repair_table_result_citations(table_result, context_payload)
+
+    assert table_result["results"][0]["rows"][0]["citations"] == ["[S240:p15]"]
+
+
 def test_auto_mapping_exception_uses_mark_error_for_sse_termination():
     class RepoSpy:
         def __init__(self):
@@ -749,3 +813,179 @@ def test_merge_extracted_data_preserves_existing_values_and_adds_source_map():
     assert merged["llm_extracted"]["field_a"]["value"] == "A"
     assert merged["manual_edits"]["Sheet1"]["A1"]["value"] == "manual"
     assert merged["om_structure"]["effective"] == {"column_map": {}}
+
+
+def test_prepare_extracted_data_for_fill_preserves_om_structure():
+    prepared = _prepare_extracted_data_for_fill(
+        {
+            "om_structure": {
+                "effective": {
+                    "column_map": {
+                        "year1": {"present": True, "label": "YEAR-ONE"}
+                    }
+                }
+            },
+            "llm_extracted": {
+                "existing_field": {"value": "already here", "user_edited": False}
+            },
+            "manual_edits": {
+                "DASHBOARD": {
+                    "C3": {"value": "Manual name", "user_edited": True}
+                }
+            },
+        },
+        {
+            "pdf_fields": [
+                {
+                    "id": "new_field",
+                    "extracted_value": "New value",
+                    "confidence": 0.91,
+                    "citations": ["[S1:p1]"],
+                }
+            ]
+        },
+    )
+
+    assert prepared["om_structure"]["effective"]["column_map"]["year1"]["label"] == "YEAR-ONE"
+    assert prepared["llm_extracted"]["existing_field"]["value"] == "already here"
+    assert prepared["llm_extracted"]["new_field"]["value"] == "New value"
+    assert prepared["manual_edits"]["DASHBOARD"]["C3"]["value"] == "Manual name"
+
+
+def test_resolve_bbox_from_citations_requires_matching_source_and_page():
+    citation_context = {
+        "citations": [
+            {
+                "source_index": 240,
+                "page": 15,
+                "bbox": {"page": 15, "x0": 1, "y0": 2, "x1": 3, "y1": 4},
+            },
+            {
+                "source_index": 241,
+                "page": 16,
+                "bbox": {"page": 16, "x0": 5, "y0": 6, "x1": 7, "y1": 8},
+            },
+        ]
+    }
+
+    assert _resolve_bbox_from_citations(["[S240:p15]"], citation_context) == {
+        "page": 15,
+        "x0": 1,
+        "y0": 2,
+        "x1": 3,
+        "y1": 4,
+    }
+    assert _resolve_bbox_from_citations(["[S240:p16]"], citation_context) is None
+
+
+def test_targeted_table_virtual_field_copies_bbox_from_citation_context():
+    virtual_field = _build_targeted_virtual_pdf_field(
+        {
+            "pdf_field_id": "targeted_table_unit_mix_G10",
+            "pdf_field_name": "actuals_unit_mix_storage_unit_mix:G10",
+            "data_type": "text",
+            "extracted_value": "10 x 15",
+            "confidence": 0.95,
+            "citations": ["[S240:p15]"],
+            "reasoning": "Extracted from Unit Mix table",
+        },
+        {
+            "citations": [
+                {
+                    "source_index": 240,
+                    "page": 15,
+                    "bbox": {"page": 15, "x0": 1, "y0": 2, "x1": 3, "y1": 4},
+                }
+            ]
+        },
+    )
+
+    assert virtual_field["bbox"] == {"page": 15, "x0": 1, "y0": 2, "x1": 3, "y1": 4}
+    assert virtual_field["citations"] == ["[D240:p15]"]
+
+
+def test_targeted_schema_mapping_adds_analyst_display_metadata():
+    mappings = MappingCoordinator().create_targeted_schema_mappings(
+        [
+            {
+                "id": "napkin_current_expense_per_unit",
+                "sheet": "Napkin",
+                "value_cell": "C10",
+                "label_cell": "B10",
+                "data_type": "currency",
+                "source_basis": "om_operating_statement",
+                "source_period": "current",
+                "description": "Current or in-place operating expense per storage unit.",
+            }
+        ],
+        {
+            "napkin_current_expense_per_unit": {
+                "value": "$1,234",
+                "confidence": 0.96,
+                "citations": ["[S285:p16]"],
+                "reasoning": "Found in EXPENSES section, CURRENT column",
+            }
+        },
+    )
+
+    assert mappings[0]["display_label"] == "Current Expense Per Unit"
+    assert mappings[0]["display_context"] == "Napkin · Operating Statement · Expenses · Current"
+    assert mappings[0]["source_note"] == "Operating statement · Expenses section · Current period · Page 16"
+
+
+def test_targeted_table_mapping_adds_analyst_display_metadata():
+    mappings = MappingCoordinator().create_targeted_schema_table_mappings(
+        [
+            {
+                "id": "actuals_unit_mix_storage_unit_mix",
+                "sheet": "Actuals&UnitMix",
+                "description": "Storage unit mix",
+                "data_start_row": 5,
+                "data_end_row": 10,
+                "row_identifier_column": "G",
+                "columns": [
+                    {"excel_column": "G", "header": "Unit Type", "data_type": "text"},
+                    {"excel_column": "K", "header": "Current Rent Average", "data_type": "currency"},
+                ],
+            }
+        ],
+        {
+            "actuals_unit_mix_storage_unit_mix": {
+                "rows": [
+                    {
+                        "row_index": 0,
+                        "row_label": "5 x 10",
+                        "values": {"K": "$75"},
+                        "confidence": 0.95,
+                        "citations": ["[S240:p15]"],
+                        "reasoning": "Found in Unit Mix table",
+                    }
+                ]
+            }
+        },
+    )
+
+    assert mappings[0]["display_label"] == "Current Rent Average · 5 x 10"
+    assert mappings[0]["display_context"] == "Actuals & Unit Mix · Storage unit mix"
+    assert mappings[0]["source_note"] == "Storage unit mix · Page 15"
+
+
+def test_targeted_virtual_field_carries_display_metadata():
+    virtual_field = _build_targeted_virtual_pdf_field(
+        {
+            "pdf_field_id": "targeted_napkin_current_expense_per_unit",
+            "pdf_field_name": "napkin_current_expense_per_unit",
+            "data_type": "currency",
+            "extracted_value": "$1,234",
+            "confidence": 0.96,
+            "citations": ["[S285:p16]"],
+            "display_label": "Current Expense Per Unit",
+            "display_context": "Napkin · Operating Statement · Expenses · Current",
+            "source_note": "Operating statement · Expenses section · Current period · Page 16",
+        },
+        {"citations": []},
+    )
+
+    assert virtual_field["display_label"] == "Current Expense Per Unit"
+    assert virtual_field["display_context"] == "Napkin · Operating Statement · Expenses · Current"
+    assert virtual_field["source_note"] == "Operating statement · Expenses section · Current period · Page 16"

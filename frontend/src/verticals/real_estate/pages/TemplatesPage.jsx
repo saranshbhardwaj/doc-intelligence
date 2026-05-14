@@ -51,6 +51,17 @@ import {
   renameFillRun,
 } from '../../../api/re-templates';
 
+const FILL_PAGE_SIZE = 20;
+// Mirrors TemplateFillRun.PROCESSING_STATUSES (backend/app/db_models_templates.py)
+const ACTIVE_FILL_STATUSES = new Set([
+  'queued',
+  'detecting_fields',
+  'fields_detected',
+  'mapping',
+  'extracting',
+  'filling',
+]);
+
 export default function TemplatesPage() {
   const { getToken } = useAppAuth();
   const navigate = useNavigate();
@@ -66,7 +77,6 @@ export default function TemplatesPage() {
   const [searchQuery, setSearchQuery] = useState('');
 
   // Pagination for fill runs (page-based)
-  const FILL_PAGE_SIZE = 20;
   const [fillPage, setFillPage] = useState(0);
   const [fillTotal, setFillTotal] = useState(null);
   const [fillSortBy, setFillSortBy] = useState('date');
@@ -103,15 +113,11 @@ export default function TemplatesPage() {
     };
   }, []);
 
-  useEffect(() => {
-    setFillPage(0);
-    setFillRuns([]);
-    loadData(0);
-  }, [activeTab]);
-
-  async function loadData(page = fillPage) {
+  const loadData = React.useCallback(async (page, { silent = false } = {}) => {
     try {
-      setLoading(true);
+      if (!silent) {
+        setLoading(true);
+      }
       setError(null);
 
       if (activeTab === 'templates') {
@@ -143,12 +149,34 @@ export default function TemplatesPage() {
         setLoading(false);
       }
     }
-  }
+  }, [activeTab, getToken]);
+
+  useEffect(() => {
+    setFillPage(0);
+    setFillRuns([]);
+    loadData(0);
+  }, [activeTab, loadData]);
 
   async function goToFillPage(newPage) {
     setFillPage(newPage);
     await loadData(newPage);
   }
+
+  const hasActiveFillRunsRef = useRef(false);
+  hasActiveFillRunsRef.current =
+    activeTab === 'fills' && fillRuns.some((r) => ACTIVE_FILL_STATUSES.has(r.status));
+
+  useEffect(() => {
+    if (activeTab !== 'fills') return undefined;
+
+    const intervalId = window.setInterval(() => {
+      if (hasActiveFillRunsRef.current) {
+        loadData(fillPage, { silent: true });
+      }
+    }, 5000);
+
+    return () => window.clearInterval(intervalId);
+  }, [activeTab, fillPage, loadData]);
 
   async function handleUpload(file, metadata) {
     try {

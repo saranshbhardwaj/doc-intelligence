@@ -360,8 +360,11 @@ class TemplateFiller:
                         errors.append(f"Cell {excel_sheet}!{excel_cell} is in a merged range but top-left cell not found")
                         continue
 
-                    # Infer expected data type from cell format
-                    cell_type = self._infer_cell_type(target_cell)
+                    # Schema/YAML data_type is the contract for schema-based fills.
+                    # Excel templates often carry copied formatting that does not
+                    # match the semantic target cell, so use formatting only as a
+                    # fallback for older/generic mappings.
+                    cell_type = mapping.get("data_type") or self._infer_cell_type(target_cell)
 
                     # Validate value against expected type
                     validation_result = FieldValidator.validate(value, cell_type)

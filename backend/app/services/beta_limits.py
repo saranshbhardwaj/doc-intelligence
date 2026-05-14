@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import uuid
 from contextlib import contextmanager
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Generator, Optional
 
 from fastapi import HTTPException
@@ -17,6 +17,7 @@ from app.db_models_chat import ChatMessage, ChatSession
 from app.db_models_templates import TemplateFillRun
 from app.db_models_users import ShadowCreditLog, User
 from app.db_models_workflows import WorkflowRun
+from app.config import settings
 from app.utils.logging import logger
 
 
@@ -71,7 +72,7 @@ def _count_user_template_fills(db: Session, user: User) -> int:
         .filter(
             TemplateFillRun.user_id == user.id,
             TemplateFillRun.org_id == user.org_id,
-            TemplateFillRun.status != "failed",
+            TemplateFillRun.status != "failed",  # cancelled runs still count; only backend failures are excluded
             TemplateFillRun.created_at >= month_start,
         )
         .scalar()
@@ -197,6 +198,63 @@ def enforce_template_fill_limit(user: User) -> None:
         "template_fill_limit_exceeded",
         "Template-fill limit reached for this beta account.",
     )
+
+
+def enforce_fill_run_concurrency_limit(user: User, db: Optional[Session] = None) -> None:
+    """Raise HTTP 429 if the user already has too many active fill runs.
+
+    Uses PROCESSING_STATUSES from the model as the single source of truth so
+    review-paused runs do not consume concurrency slots.
+
+    Excludes fill runs older than template_fill_stuck_run_timeout_hours so that
+    a Celery worker crash (run stuck in a non-terminal status forever) cannot
+    permanently block a user from starting new runs.
+
+    db: optional; pass the request's session to avoid opening a second connection.
+    """
+    if user.tier == "admin":
+        return
+
+    stuck_cutoff = datetime.now(timezone.utc) - timedelta(
+        hours=settings.template_fill_stuck_run_timeout_hours
+    )
+
+    def _count(session: Session) -> int:
+        return (
+            session.query(func.count(TemplateFillRun.id))
+            .filter(
+                TemplateFillRun.user_id == user.id,
+                TemplateFillRun.org_id == user.org_id,
+                TemplateFillRun.status.in_(TemplateFillRun.PROCESSING_STATUSES),
+                TemplateFillRun.created_at >= stuck_cutoff,
+            )
+            .scalar()
+            or 0
+        )
+
+    if db is not None:
+        active_count = _count(db)
+    else:
+        with _get_session() as session:
+            active_count = _count(session)
+
+    limit = settings.template_fill_max_concurrent_per_user
+    if active_count >= limit:
+        retry_after = str(settings.template_fill_stuck_run_timeout_hours * 3600)
+        raise HTTPException(
+            status_code=429,
+            headers={"Retry-After": retry_after},
+            detail={
+                "error": "fill_run_concurrency_limit_exceeded",
+                "message": (
+                    f"You already have {active_count} fill run(s) in progress. "
+                    f"Wait for one to complete before starting another "
+                    f"(max {limit} concurrent)."
+                ),
+                "active": active_count,
+                "limit": limit,
+            },
+        )
 
 
 def enforce_chat_message_limit(user: User) -> None:

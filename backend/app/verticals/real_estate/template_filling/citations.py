@@ -59,3 +59,55 @@ def get_field_page(field: Dict[str, Any]) -> Optional[int]:
     if source == "key_value_pairs":
         return (field.get("bbox") or {}).get("page") or field.get("page_number")
     return field.get("page_number")
+
+
+def _parse_source_citation(citation: Any) -> tuple[Optional[int], Optional[int]]:
+    """Parse citation token into (source_index, page)."""
+    match = re.search(r"\[(?:S|D)(\d+):p(\d+)\]", str(citation))
+    if not match:
+        return None, None
+    return int(match.group(1)), int(match.group(2))
+
+
+def resolve_bbox_from_citations(
+    citations: List[Any],
+    citation_context: Optional[Dict[str, Any]],
+) -> Optional[Dict[str, Any]]:
+    """Resolve the first valid citation token to a bbox from citation_context.
+
+    The citation token and bbox must agree on page. This prevents stale or locally
+    renumbered citations from highlighting a valid bbox on the wrong page.
+    """
+    context_entries = (citation_context or {}).get("citations") or []
+    if not context_entries:
+        return None
+
+    by_source_index: Dict[int, Dict[str, Any]] = {}
+    for entry in context_entries:
+        source_index = entry.get("source_index")
+        if isinstance(source_index, int):
+            by_source_index[source_index] = entry
+
+    for citation in citations or []:
+        source_index, citation_page = _parse_source_citation(citation)
+        if source_index is None:
+            continue
+
+        entry = by_source_index.get(source_index)
+        if not entry:
+            continue
+
+        bbox = entry.get("bbox")
+        if not isinstance(bbox, dict):
+            continue
+
+        bbox_page = bbox.get("page") or entry.get("page")
+        if isinstance(bbox_page, str) and bbox_page.isdigit():
+            bbox_page = int(bbox_page)
+
+        if citation_page is not None and bbox_page is not None and int(bbox_page) != citation_page:
+            continue
+
+        return bbox
+
+    return None

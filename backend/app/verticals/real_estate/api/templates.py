@@ -27,7 +27,12 @@ from app.repositories.document_repository import DocumentRepository
 from app.repositories.job_repository import JobRepository
 from app.repositories.template_repository import TemplateRepository
 from app.core.storage.storage_factory import get_storage_backend
-from app.services.beta_limits import enforce_template_fill_limit, reserve_shadow_credits
+from app.services.beta_limits import (
+    enforce_fill_run_concurrency_limit,
+    enforce_template_fill_limit,
+    reserve_shadow_credits,
+)
+from app.services.user_rate_limiter import enforce_fill_run_rate_limit
 from app.utils.logging import logger
 from app.utils.id_generator import generate_id
 from app.verticals.real_estate.template_filling.excel_handler import ExcelHandler
@@ -704,20 +709,32 @@ async def start_fill(
     try:
         repo = TemplateRepository(db)
 
-        # Verify template exists and belongs to user
+        # Layer 1: per-user rate limit (Redis sliding window, fail-open)
+        enforce_fill_run_rate_limit(user.id)
+
+        # Layer 2: template ownership
         template = repo.get_template(template_id, user.org_id)
         if not template or template.user_id != user.id:
             raise HTTPException(status_code=404, detail="Template not found")
 
+        # Layer 3: document ownership (cross-org access guard)
+        document_repo = DocumentRepository()
+        document = document_repo.get_by_id(request.document_id, user.org_id)
+        if not document:
+            raise HTTPException(status_code=404, detail="Document not found")
+
+        # Layer 4: per-user concurrency cap (tighter filters, cheaper query)
+        enforce_fill_run_concurrency_limit(user, db)
+
+        # Layer 5: monthly quota
         enforce_template_fill_limit(user)
 
-        # Start async pipeline (worker will create JobState and TemplateFillRun)
         fill_run_id = start_fill_run_chain.delay(
             template_id=template_id,
             document_id=request.document_id,
             user_id=user.id,
             fill_run_name=request.name,
-        ).get()  # Wait for initial setup to complete
+        ).get()  # Wait for initial DB setup (fill_run record created)
 
         reserve_shadow_credits(
             user=user,

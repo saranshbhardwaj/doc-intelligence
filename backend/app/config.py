@@ -91,6 +91,13 @@ class Settings(BaseSettings):
     template_fill_max_llm_context_chars: int = 80_000
     template_fill_max_table_rows_per_block: int = 200
     template_fill_max_narrative_chars_per_block: int = 2_500
+    # Per-user rate limiting: max fill run starts per minute (sliding window)
+    template_fill_rate_limit_per_minute: int = 5
+    # Per-user concurrency: max simultaneously active (non-terminal) fill runs
+    template_fill_max_concurrent_per_user: int = 3
+    # Stuck run timeout: fill runs older than this are excluded from the concurrency count.
+    # Covers the case where a Celery worker crashes before marking the run as failed.
+    template_fill_stuck_run_timeout_hours: int = 2
     
     # LLM Settings - Expensive Model (Structured Extraction)
     llm_model: str = "claude-sonnet-4-5-20250929"

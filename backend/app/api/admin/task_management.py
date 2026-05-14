@@ -34,7 +34,7 @@ class TaskStatistics(BaseModel):
     """Statistics about tasks in various states."""
     workflow_runs: Dict[str, int]  # {"queued": 2, "running": 1, "completed": 50, "failed": 3}
     template_fill_runs: Dict[str, int]
-    total_stuck: int  # Total tasks in queued/running for >20 min
+    total_stuck: int  # Total workflow/template processing tasks older than the stuck threshold
 
 
 @router.post("/workflows/{run_id}/cancel", response_model=CancelTaskResponse)
@@ -91,7 +91,7 @@ async def cancel_template_fill_run(run_id: str, db: Session = Depends(get_db)):
     """Manually cancel a stuck template fill run.
 
     Sets status to 'failed' with appropriate error message.
-    Use this when a template fill is stuck in 'queued' or 'running' state.
+    Use this when a template fill is stuck in one of TemplateFillRun.PROCESSING_STATUSES.
 
     Args:
         run_id: Template fill run UUID
@@ -108,7 +108,7 @@ async def cancel_template_fill_run(run_id: str, db: Session = Depends(get_db)):
     if not run:
         raise HTTPException(status_code=404, detail="Template fill run not found")
 
-    if run.status in ["completed", "failed"]:
+    if run.status in TemplateFillRun.TERMINAL_STATUSES:
         raise HTTPException(
             status_code=400,
             detail=f"Cannot cancel template fill that is already {run.status}"
@@ -161,7 +161,9 @@ async def get_task_statistics(db: Session = Depends(get_db)):
         .all()
     )
 
-    # Count stuck tasks (queued/running for >20 min)
+    # Count stuck tasks older than the threshold. WorkflowRun and TemplateFillRun
+    # use different status vocabularies, so keep each query on its own model's
+    # processing states.
     threshold = datetime.utcnow() - timedelta(minutes=20)
     stuck_workflows = db.query(WorkflowRun).filter(
         WorkflowRun.status.in_(["queued", "running"]),
@@ -169,7 +171,7 @@ async def get_task_statistics(db: Session = Depends(get_db)):
     ).count()
 
     stuck_templates = db.query(TemplateFillRun).filter(
-        TemplateFillRun.status.in_(["queued", "running"]),
+        TemplateFillRun.status.in_(TemplateFillRun.PROCESSING_STATUSES),
         TemplateFillRun.created_at < threshold
     ).count()
 

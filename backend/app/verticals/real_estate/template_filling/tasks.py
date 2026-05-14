@@ -10,7 +10,6 @@ Task Flow:
 
 import asyncio
 import json
-import re
 import time
 from datetime import datetime, timezone
 from pathlib import Path
@@ -46,6 +45,7 @@ from app.verticals.real_estate.template_filling.citations import (
     build_citation_context,
     get_field_page,
     get_section_citation_pages,
+    resolve_bbox_from_citations,
 )
 from app.verticals.real_estate.template_filling.context_budget import build_budgeted_pdf_fields
 from app.verticals.real_estate.template_filling.mapping_helpers import (
@@ -114,6 +114,94 @@ def _mark_auto_mapping_exception(
     exc: Exception,
 ) -> None:
     _fail_fill_run(repo, tracker, fill_run_id, "auto_mapping", exc)
+
+
+def _prepare_extracted_data_for_fill(
+    extracted_data: Optional[Dict[str, Any]],
+    field_mapping: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Prepare extracted data for Excel filling without dropping stored artifacts."""
+
+    prepared = dict(extracted_data) if isinstance(extracted_data, dict) else {}
+
+    raw_llm_extracted = prepared.get("llm_extracted")
+    if isinstance(raw_llm_extracted, dict):
+        llm_extracted = dict(raw_llm_extracted)  # copy to avoid mutating caller's data
+    else:
+        if raw_llm_extracted is not None:
+            logger.warning(
+                "llm_extracted is not a dict (type: %s), resetting to empty dict",
+                type(raw_llm_extracted),
+            )
+        llm_extracted = {}
+
+    manual_edits = prepared.get("manual_edits", {})
+    if not isinstance(manual_edits, dict):
+        logger.warning(
+            "manual_edits is not a dict (type: %s), resetting to empty dict",
+            type(manual_edits),
+        )
+        manual_edits = {}
+    else:
+        cleaned_manual_edits = {}
+        for sheet_name, cells in manual_edits.items():
+            if isinstance(cells, dict):
+                cleaned_manual_edits[sheet_name] = cells
+            else:
+                logger.warning(
+                    "Skipping corrupted manual_edits entry: %s (type: %s)",
+                    sheet_name,
+                    type(cells),
+                )
+        manual_edits = cleaned_manual_edits
+
+    for pdf_field in field_mapping.get("pdf_fields", []):
+        field_id = pdf_field.get("id")
+        auto_mapped_value = pdf_field.get("extracted_value")
+
+        if field_id and field_id not in llm_extracted and auto_mapped_value is not None:
+            field_entry = {
+                "value": auto_mapped_value,
+                "confidence": pdf_field.get("confidence", 0.95),
+                "citations": pdf_field.get("citations", []),
+                "user_edited": False,
+            }
+            if "bbox" in pdf_field:
+                field_entry["bbox"] = pdf_field["bbox"]
+
+            llm_extracted[field_id] = field_entry
+
+    prepared["llm_extracted"] = llm_extracted
+    prepared["manual_edits"] = manual_edits
+    return prepared
+
+
+def _build_targeted_virtual_pdf_field(
+    mapping: Dict[str, Any],
+    citation_context: Dict[str, Any],
+) -> Dict[str, Any]:
+    """Build a virtual pdf_field for a targeted schema mapping."""
+
+    citations = normalize_citations(mapping.get("citations", []))
+    virtual_field = {
+        "id": mapping.get("pdf_field_id"),
+        "name": mapping.get("pdf_field_name"),
+        "type": mapping.get("data_type", "text"),
+        "extracted_value": mapping.get("extracted_value"),
+        "confidence": mapping.get("confidence", 0.7),
+        "citations": citations,
+        "reasoning": mapping.get("reasoning"),
+        "source": "targeted_schema",
+    }
+    for display_key in ("display_label", "display_context", "source_note"):
+        if mapping.get(display_key):
+            virtual_field[display_key] = mapping[display_key]
+
+    field_bbox = resolve_bbox_from_citations(citations, citation_context)
+    if field_bbox:
+        virtual_field["bbox"] = field_bbox
+
+    return virtual_field
 
 
 # ---------------------------------------------------------------------------
@@ -490,11 +578,6 @@ def auto_map_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
 
         fill_run_for_ctx = _fill_run_check
         citation_context = (fill_run_for_ctx.fill_run_data.citation_context or {"citations": []}) if (fill_run_for_ctx and fill_run_for_ctx.fill_run_data) else {"citations": []}
-        _source_field_bbox: Dict[int, Dict] = {
-            e["source_index"]: e["bbox"]
-            for e in citation_context.get("citations", [])
-            if e.get("bbox")
-        }
         context_budget: Dict[str, Any] = {
             "context_budget_applied": False,
             "user_warning": None,
@@ -731,33 +814,17 @@ def auto_map_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                             unmapped_fields, targeted_values
                         )
 
+                        targeted_mapping_by_field_id = {
+                            mapping.get("pdf_field_name"): mapping
+                            for mapping in targeted_mappings
+                        }
                         for field_def in unmapped_fields:
                             fid = field_def["id"]
-                            if fid in targeted_values:
-                                result = targeted_values[fid]
-                                normalized_cits = normalize_citations(result.get("citations", []))
-
-                                field_bbox = None
-                                for cit in normalized_cits:
-                                    cm = re.search(r'\[(?:S|D)(\d+):', cit)
-                                    if cm:
-                                        field_bbox = _source_field_bbox.get(int(cm.group(1)))
-                                        if field_bbox:
-                                            break
-
-                                virtual_field = {
-                                    "id": f"targeted_{fid}",
-                                    "name": fid,
-                                    "type": field_def.get("data_type", "text"),
-                                    "extracted_value": result["value"],
-                                    "confidence": result["confidence"],
-                                    "citations": normalized_cits,
-                                    "reasoning": result.get("reasoning"),
-                                    "source": "targeted_schema",
-                                }
-                                if field_bbox:
-                                    virtual_field["bbox"] = field_bbox
-                                pdf_fields.append(virtual_field)
+                            mapping = targeted_mapping_by_field_id.get(fid)
+                            if mapping:
+                                pdf_fields.append(
+                                    _build_targeted_virtual_pdf_field(mapping, citation_context)
+                                )
 
                         schema_mappings = schema_mappings + targeted_mappings
 
@@ -882,16 +949,9 @@ def auto_map_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                             extracted_value = mapping.get("extracted_value")
                             if extracted_value is None:
                                 continue
-                            pdf_fields.append({
-                                "id": mapping.get("pdf_field_id"),
-                                "name": mapping.get("pdf_field_name"),
-                                "type": mapping.get("data_type", "text"),
-                                "extracted_value": extracted_value,
-                                "confidence": mapping.get("confidence", 0.7),
-                                "citations": normalize_citations(mapping.get("citations", [])),
-                                "reasoning": mapping.get("reasoning"),
-                                "source": "targeted_schema",
-                            })
+                            pdf_fields.append(
+                                _build_targeted_virtual_pdf_field(mapping, citation_context)
+                            )
 
                         schema_mappings = schema_mappings + targeted_table_mappings
 
@@ -1115,47 +1175,15 @@ def fill_excel_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
 
         output_local_path = f"/tmp/filled_{fill_run_id}{file_ext}"
 
-        extracted_data = (fill_run.fill_run_data.extracted_data if fill_run.fill_run_data else {}) or {"llm_extracted": {}, "manual_edits": {}}
-
+        extracted_data = _prepare_extracted_data_for_fill(
+            fill_run.fill_run_data.extracted_data if fill_run.fill_run_data else {},
+            field_mapping,
+        )
         llm_extracted = extracted_data.get("llm_extracted", {})
         manual_edits = extracted_data.get("manual_edits", {})
 
-        if not isinstance(manual_edits, dict):
-            logger.warning(f"manual_edits is not a dict (type: {type(manual_edits)}), resetting to empty dict")
-            manual_edits = {}
-        else:
-            cleaned_manual_edits = {}
-            for sheet_name, cells in manual_edits.items():
-                if isinstance(cells, dict):
-                    cleaned_manual_edits[sheet_name] = cells
-                else:
-                    logger.warning(f"Skipping corrupted manual_edits entry: {sheet_name} (type: {type(cells)})")
-            manual_edits = cleaned_manual_edits
-
-        pdf_fields = field_mapping.get('pdf_fields', [])
-        for pdf_field in pdf_fields:
-            field_id = pdf_field.get('id')
-            auto_mapped_value = pdf_field.get('extracted_value')
-
-            if field_id and field_id not in llm_extracted and auto_mapped_value is not None:
-                field_entry = {
-                    'value': auto_mapped_value,
-                    'confidence': pdf_field.get('confidence', 0.95),
-                    'citations': pdf_field.get('citations', []),
-                    'user_edited': False
-                }
-                if 'bbox' in pdf_field:
-                    field_entry['bbox'] = pdf_field['bbox']
-
-                llm_extracted[field_id] = field_entry
-
         user_edited_count = sum(len(cells) for cells in manual_edits.values())
         auto_mapped_count = len(llm_extracted) - sum(1 for data in llm_extracted.values() if data.get('user_edited'))
-
-        extracted_data = {
-            "llm_extracted": llm_extracted,
-            "manual_edits": manual_edits
-        }
 
         logger.info(
             f"Prepared extracted_data for filling: {user_edited_count} user-edited + "

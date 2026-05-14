@@ -328,6 +328,12 @@ class V1PromptSet(PromptSet):
             f"- percentage: Must include % (e.g., '65%', '8.11%'). Return null if not a percentage.\n"
             f"- date: Must be a date (e.g., '2026-03-10', 'March 10, 2026'). Return null for non-dates.\n"
             f"- text: Any text value is acceptable.\n\n"
+            f"Citation and reasoning rules:\n"
+            f"- Use the most specific citation token available for the exact value; do not cite a nearby source just because it is on the same page.\n"
+            f"- For key-value values, cite the matching key-value source token.\n"
+            f"- For table values, cite the matching table/source token from the context.\n"
+            f"- If extracting an expense field, describe it as coming from the EXPENSES section, not the INCOME section.\n"
+            f"- Reasoning must identify source section and period/column when available, e.g. 'Operating statement EXPENSES section, CURRENT column'.\n\n"
             f"CRITICAL: You MUST attempt to find a value for every single field. "
             f"Do not skip fields. If a field has multiple possible aliases, try all of them. "
             f"Only return null if the value is truly absent from the PDF data.\n\n"
@@ -384,7 +390,10 @@ class V1PromptSet(PromptSet):
             "- Use `excel_column` keys only in the `values` map.\n"
             "- If a column is missing, return null for that column.\n"
             "- Use row_labels when provided; if row_labels are empty or blank, use row_index order.\n"
-            "- Provide citations like [S1:p15] and reasoning per row.\n"
+            "- Provide citations using the exact citation tokens from the matching context entry's `citations` array, not local row numbers.\n"
+            "- If the matching context entry has citations [S240:p15], return [S240:p15]; do not rewrite it as [S1:p15].\n"
+            "- Use the most specific citation token available for the exact value; do not cite a nearby source just because it is on the same page.\n"
+            "- Provide reasoning per row, including section and period/column when available.\n"
             "- Never fabricate values.\n"
             "- For each row, values MUST include ALL excel_column keys from that table's columns.\n\n"
             "Return ONLY a JSON object matching this exact structure, no markdown:\n"
@@ -398,7 +407,7 @@ class V1PromptSet(PromptSet):
             '          "row_label": null,\n'
             '          "values": {"G": "5 x 10", "H": "26", "I": "50"},\n'
             '          "confidence": 0.95,\n'
-            '          "citations": ["[S1:p15]"],\n'
+            '          "citations": ["[S240:p15]"],\n'
             '          "reasoning": "Extracted from Table 7 NON-CLIMATE rows"\n'
             "        }\n"
             "      ]\n"
@@ -552,7 +561,10 @@ Each chunk has metadata in the header:
             "- Use `excel_column` keys only in the `values` map.\n"
             "- If a column is missing, return null for that column.\n"
             "- Use row_labels when provided; if row_labels are empty or blank, ignore them and use row_index order.\n"
-            "- Provide citations like [S1:p5] and a brief reasoning per row (reasoning is required).\n"
+            "- Provide citations using the exact citation tokens from the matching context entry's `citations` array, not local row numbers.\n"
+            "- If the matching context entry has citations [S240:p15], return [S240:p15]; do not rewrite it as [S1:p15].\n"
+            "- Use the most specific citation token available for the exact value; do not cite a nearby source just because it is on the same page.\n"
+            "- Provide a brief reasoning per row with section and period/column when available (reasoning is required).\n"
             "- Never fabricate values.\n"
             "\nCRITICAL: For each row, the `values` dict MUST include ALL excel_column keys "
             "listed in the table's `columns` array. "
@@ -569,7 +581,7 @@ Each chunk has metadata in the header:
             '          "row_label": null,\n'
             '          "values": {"G": "5 x 10", "H": "26", "I": "50"},\n'
             '          "confidence": 0.95,\n'
-            '          "citations": ["[S1:p15]"],\n'
+            '          "citations": ["[S240:p15]"],\n'
             '          "reasoning": "Extracted from Table 7"\n'
             "        }\n"
             "      ]\n"

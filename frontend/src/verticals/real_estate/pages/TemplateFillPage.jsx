@@ -4,11 +4,10 @@
  * Layout: [PDF Viewer 50%] | [Tabbed: Fields/Excel 50%]
  */
 
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useAppAuth } from "@/hooks/useAppAuth";
 import DocumentViewer from '../../../components/pdf/DocumentViewer';
-import FieldsList from '../components/FieldsList';
 import ExcelGridView from '../components/ExcelGridView';
 import SourceMapView from '../components/SourceMapView';
 import SourceMapWarningBanner from '../components/SourceMapWarningBanner';
@@ -16,7 +15,7 @@ import { STRUCTURE_LOW_CONFIDENCE, tierForConfidence } from '../utils/sourceMapC
 import { shouldShowLargeDocumentContextWarning } from '../utils/templateFillWarnings';
 import { useTemplateFill, useTemplateFillActions, useUser } from '../../../store';
 import { TemplateFillRunPageSkeleton } from '../../../components/skeletons/PageSkeletons';
-import { Loader2, AlertCircle, FileText, Table, List, Download, CheckCircle2, ExternalLink, X, Search, GitMerge, FileSpreadsheet, PartyPopper, Layers } from 'lucide-react';
+import { Loader2, AlertCircle, FileText, Table, Download, CheckCircle2, ExternalLink, X, Search, GitMerge, FileSpreadsheet, PartyPopper, Layers } from 'lucide-react';
 import { Badge } from '../../../components/ui/badge';
 import { Button } from '../../../components/ui/button';
 import { Tabs, TabsContent } from '../../../components/ui/tabs';
@@ -27,7 +26,6 @@ import { streamTemplateFillProgress, continueFillRun, downloadFilledExcel, start
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import FeedbackButton from '../../../components/feedback/FeedbackButton';
-import CompletionFeedbackModal from '../../../components/feedback/CompletionFeedbackModal';
 import { shouldPromptForFeedback } from '../../../utils/feedbackRules';
 import { usePostHog } from '@posthog/react';
 
@@ -40,6 +38,7 @@ function formatStatus(status) {
     'mapping': { label: 'Mapping Fields', variant: 'default' },
     'mapped': { label: 'Mapped', variant: 'default' },
     'awaiting_review': { label: 'Ready for Review', variant: 'default' },
+    'extracting': { label: 'Extracting Data', variant: 'default' },
     'filling': { label: 'Filling Template', variant: 'default' },
     'completed': { label: 'Completed', variant: 'success' },
     'failed': { label: 'Failed', variant: 'destructive' },
@@ -160,7 +159,6 @@ export default function TemplateFillPage() {
     fillRun,
     pdfUrl,
     pdfError,
-    selectedText,
     isLoading,
     error,
   } = useTemplateFill();
@@ -867,24 +865,6 @@ export default function TemplateFillPage() {
                         )}
                       </button>
                     )}
-                    <button
-                      onClick={() => setActiveTab('fields')}
-                      className={cn(
-                        'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium tracking-[0.08px] transition-all duration-150',
-                        activeTab === 'fields'
-                          ? 'bg-background shadow-sm text-foreground'
-                          : 'text-muted-foreground hover:text-foreground',
-                      )}
-                    >
-                      <List className="h-3.5 w-3.5" />
-                      Fields
-                      <span className={cn(
-                        'ml-0.5 tabular-nums text-[10px] tracking-[0.07px]',
-                        activeTab === 'fields' ? 'text-muted-foreground' : 'text-muted-foreground/60',
-                      )}>
-                        {fillRun.field_mapping?.pdf_fields?.length || 0}
-                      </span>
-                    </button>
                   </div>
 {activeTab === 'excel' && (
                     <Button
@@ -919,16 +899,6 @@ export default function TemplateFillPage() {
                 />
               </TabsContent>
 
-              <TabsContent value="fields" className="flex-1 min-h-0 overflow-auto m-0">
-                <FieldsList
-                  fillRunId={fillRunId}
-                  extractedData={fillRun.extracted_data}
-                  fieldMapping={fillRun.field_mapping}
-                  citationContext={fillRun.citation_context}
-                  selectedText={selectedText}
-                  onCitationClick={handleCitationClick}
-                />
-              </TabsContent>
 
               <TabsContent value="excel" className="flex-1 min-h-0 overflow-auto m-0">
                 {jobStatus === 'processing' ? (

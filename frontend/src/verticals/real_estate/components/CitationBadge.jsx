@@ -37,12 +37,16 @@ function parseCitationPage(citation) {
 
 /**
  * Build click payload for a citation badge.
- * Prefer bbox payload when available (more precise than citation token page).
+ * Prefer bbox payload when it agrees with the citation page (more precise than page-only).
  */
 function buildCitationPayload(pageNumber, bbox) {
   if (!bbox || typeof bbox !== 'object') return pageNumber || null;
 
   const bboxPage = Number(bbox.page);
+  if (Number.isFinite(pageNumber) && Number.isFinite(bboxPage) && pageNumber !== bboxPage) {
+    return pageNumber;
+  }
+
   if (Number.isFinite(bboxPage)) {
     return { ...bbox, page: bboxPage };
   }

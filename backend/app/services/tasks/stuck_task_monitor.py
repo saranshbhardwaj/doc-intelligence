@@ -1,7 +1,7 @@
 """Background task to clean up stuck workflow runs, template fills, and document jobs.
 
-Runs periodically via Celery Beat to fail tasks stuck in 'queued' or 'running'
-status for longer than the configured threshold (default: 20 minutes).
+Runs periodically via Celery Beat to fail tasks stuck in a processing status for
+longer than the configured threshold (default: 20 minutes).
 
 This prevents:
 - UI hanging forever on stuck workflows
@@ -37,7 +37,7 @@ STUCK_THRESHOLD_MINUTES = 20
 
 @shared_task(name="app.services.tasks.stuck_task_monitor.cleanup_stuck_tasks")
 def cleanup_stuck_tasks() -> Dict[str, Any]:
-    """Find and fail workflow/template runs and document jobs stuck in queued/running status.
+    """Find and fail workflow/template runs and document jobs stuck in processing statuses.
 
     Returns:
         Dict with cleanup statistics.
@@ -172,9 +172,9 @@ def _cleanup_stuck_workflow_runs(db: Session, threshold: datetime) -> int:
 
 
 def _cleanup_stuck_template_fills(db: Session, threshold: datetime) -> int:
-    """Fail template fill runs stuck in queued/running status."""
+    """Fail template fill runs stuck in TemplateFillRun.PROCESSING_STATUSES."""
     stuck_runs = db.query(TemplateFillRun).filter(
-        TemplateFillRun.status.in_(["queued", "running"]),
+        TemplateFillRun.status.in_(TemplateFillRun.PROCESSING_STATUSES),
         TemplateFillRun.created_at < threshold
     ).all()
 
