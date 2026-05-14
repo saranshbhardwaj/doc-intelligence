@@ -205,8 +205,19 @@ class AzureSmartChunker(DocumentChunker):
             # Check for section heading (starts new section)
             section_headings = paragraphs_by_role.get("sectionHeading", [])
             if section_headings:
-                # Save current section if it has content
-                if current_paragraphs:
+                # Save current section if it has content (paragraphs OR tables).
+                # Mirrors the final flush below: a section may legitimately contain
+                # only tables (e.g. demographics pages where every visible string is a
+                # table cell and Azure DI emits no role="content" paragraphs).
+                if current_paragraphs or current_tables:
+                    if not current_paragraphs and current_tables:
+                        logger.info(
+                            "[CHUNKER] Emitting table-only section: id=%s heading=%r tables=%d pages=%s",
+                            current_section_id,
+                            current_section_heading,
+                            len(current_tables),
+                            current_page_range,
+                        )
                     section_groups.append(SectionGroup(
                         section_id=current_section_id,
                         section_heading=current_section_heading,

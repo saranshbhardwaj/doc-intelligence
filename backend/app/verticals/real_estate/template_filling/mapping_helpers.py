@@ -2,7 +2,11 @@
 
 from typing import Any, Dict, List, Optional, Tuple
 
-from app.verticals.real_estate.template_filling.citations import get_section_citation_pages
+from app.verticals.real_estate.template_filling.citations import (
+    get_section_citation_pages,
+    get_structure_routing_pages,
+    resolve_pdf_field_page_info,
+)
 from app.verticals.real_estate.template_filling.context_budget import build_budgeted_pdf_fields
 from app.verticals.real_estate.template_filling.source_map import as_list
 
@@ -37,6 +41,7 @@ def build_narrative_pdf_field(
         "full_text": narrative_text,
         "section": section_heading,
         "page_number": narrative_page,
+        "page_range": [narrative_page, narrative_page] if narrative_page is not None else [],
     }
 
 
@@ -58,19 +63,22 @@ def build_scalar_context_for_batch(
                 fill_when_keys.add(str(fill_when))
 
     citation_pages: List[int] = []
+    routing_pages: List[int] = []
     for key in sorted(fill_when_keys):
         citation_pages.extend(get_section_citation_pages(om_structure or {}, key))
+        routing_pages.extend(get_structure_routing_pages(om_structure or {}, key))
     unique_citation_pages = sorted(set(citation_pages))
+    unique_routing_pages = sorted(set(routing_pages))
 
     routed_fields = pdf_fields
     routing_applied = False
-    if unique_citation_pages:
+    if unique_routing_pages:
         routing_applied = True
         routed_fields = [
             field
             for field in pdf_fields
             if (page := _field_page_for_routing(field)) is None
-            or any(abs(page - citation_page) <= 1 for citation_page in unique_citation_pages)
+            or page in unique_routing_pages
         ]
 
     budgeted_fields, budget_metadata = build_budgeted_pdf_fields(routed_fields)
@@ -78,6 +86,7 @@ def build_scalar_context_for_batch(
         **budget_metadata,
         "routing_applied": routing_applied,
         "citation_pages": unique_citation_pages,
+        "routing_pages": unique_routing_pages,
         "source_field_count_before_routing": len(pdf_fields),
         "source_field_count_after_routing": len(routed_fields),
     }
@@ -86,10 +95,8 @@ def build_scalar_context_for_batch(
 
 def _field_page_for_routing(field: Dict[str, Any]) -> Optional[int]:
     """Return page number for routing purposes (same logic as citations.get_field_page)."""
-    source = field.get("source")
-    if source == "key_value_pairs":
-        return (field.get("bbox") or {}).get("page") or field.get("page_number")
-    return field.get("page_number")
+    anchor_page, _ = resolve_pdf_field_page_info(field)
+    return anchor_page
 
 
 def scalar_context_signature(context_fields: List[Dict[str, Any]]) -> Tuple[str, ...]:

@@ -3,6 +3,8 @@ from types import SimpleNamespace
 
 from app.repositories.template_repository import _merge_extracted_data
 from app.verticals.real_estate.template_filling.citations import (
+    get_structure_routing_pages as _get_structure_routing_pages,
+    resolve_pdf_field_page_info as _resolve_pdf_field_page_info,
     resolve_bbox_from_citations as _resolve_bbox_from_citations,
 )
 from app.verticals.real_estate.template_filling.excel.mapping_coordinator import (
@@ -16,8 +18,12 @@ from app.verticals.real_estate.template_filling.prompts.v1 import (
     V1PromptSet,
 )
 from app.verticals.real_estate.template_filling.source_map import (
+    MARKET_CONTENT_PAGE,
+    MARKET_TOC_PAGE,
+    MARKET_WEAK_PAGE,
     STRUCTURE_HIGH_CONFIDENCE,
     STRUCTURE_LOW_CONFIDENCE,
+    _classify_market_page_text,
     normalize_om_structure_with_pdf_fields,
 )
 from app.verticals.real_estate.template_filling.artifacts import (
@@ -221,6 +227,340 @@ def test_scalar_context_for_structure_scopes_to_cited_pages_before_budgeting():
     assert [field["id"] for field in routed_fields] == ["page6-kv"]
     assert metadata["routing_applied"] is True
     assert metadata["citation_pages"] == [6]
+
+
+def test_pdf_field_page_info_prefers_bbox_then_page_range_then_regions_then_fallback():
+    anchor, pages = _resolve_pdf_field_page_info(
+        {
+            "bbox": {"page": 12},
+            "page_range": [10, 11],
+            "bounding_regions": [{"page_number": 9}],
+            "page_number": 8,
+        }
+    )
+
+    assert anchor == 12
+    assert pages == [12, 10, 11, 9, 8]
+
+    anchor, pages = _resolve_pdf_field_page_info(
+        {
+            "page_range": [25, 30],
+            "page_number": 25,
+        }
+    )
+
+    assert anchor == 25
+    assert pages == [25, 30]
+
+
+def test_pdf_field_page_info_prefers_explicit_page_for_table_derived_fields():
+    anchor, pages = _resolve_pdf_field_page_info(
+        {
+            "source": "table_block",
+            "bbox": {"page": 20},
+            "page_number": 26,
+            "page_range": [26, 26],
+        }
+    )
+
+    assert anchor == 26
+    assert pages == [26, 20]
+
+
+def test_structure_routing_pages_prefer_explicit_pages_then_range_then_citation_window():
+    om_structure = {
+        "section_presence": {
+            "market_summary_present": {
+                "present": True,
+                "citations": ["[S353:p29]"],
+                "routing_pages": [25, 26, 27, 28, 29, 30],
+                "page_range": [25, 30],
+            },
+            "unit_mix_present": {
+                "present": True,
+                "citations": ["[S240:p15]"],
+            },
+            "rent_comps_present": {
+                "present": True,
+                "page_range": [22, 23],
+                "citations": ["[S298:p22]"],
+            },
+        },
+        "column_map": {},
+    }
+
+    assert _get_structure_routing_pages(om_structure, "market_summary_present") == [
+        25,
+        26,
+        27,
+        28,
+        29,
+        30,
+    ]
+    assert _get_structure_routing_pages(om_structure, "rent_comps_present") == [22, 23]
+    assert _get_structure_routing_pages(om_structure, "unit_mix_present") == [14, 15, 16]
+
+
+def test_scalar_context_uses_market_routing_pages_instead_of_single_citation_window():
+    om_structure = {
+        "section_presence": {
+            "market_summary_present": {
+                "present": True,
+                "citations": ["[S353:p29]"],
+                "routing_pages": [25, 26, 27, 28, 29, 30],
+            }
+        },
+        "column_map": {},
+    }
+    fields = [
+        {"id": "page26-population-table", "source": "table_block", "page_number": 26},
+        {"id": "page29-employer-table", "source": "table_block", "page_number": 29},
+        {"id": "page31-unrelated", "source": "table_block", "page_number": 31},
+    ]
+
+    routed_fields, metadata = _build_scalar_context_for_batch(
+        fields,
+        om_structure,
+        [{"id": "napkin_population", "fill_when": ["market_summary_present"]}],
+    )
+
+    assert [field["id"] for field in routed_fields] == [
+        "page26-population-table",
+        "page29-employer-table",
+    ]
+    assert metadata["routing_pages"] == [25, 26, 27, 28, 29, 30]
+    assert metadata["citation_pages"] == [29]
+
+
+def test_market_source_map_normalization_adds_multi_page_routing_range():
+    normalized = normalize_om_structure_with_pdf_fields(
+        {
+            "column_map": {},
+            "section_presence": {
+                "market_summary_present": {
+                    "present": True,
+                    "label": "Market Summary",
+                    "confidence": 0.95,
+                    "citations": ["[S353:p29]"],
+                }
+            },
+        },
+        [
+            {
+                "id": "narrative_block_300",
+                "source": "narrative_block",
+                "section": "Market Overview",
+                "full_text": "Tulsa metro highlights and demographics",
+                "page_number": 25,
+                "citations": ["[S300:p25]"],
+            },
+            {
+                "id": "tbl_block_310",
+                "source": "table_block",
+                "table_name": "Population and Households by Income",
+                "table_columns": ["Population", "1 Mile", "3 Miles", "5 Miles"],
+                "table_rows": [["2023 Estimate", "10,509", "63,110", "153,689"]],
+                "page_number": 26,
+                "citations": ["[S310:p26]"],
+            },
+            {
+                "id": "tbl_block_320",
+                "source": "table_block",
+                "table_name": "Population Profile",
+                "table_columns": ["Population 25+ by Education Level", "Housing Units", "1 Mile", "3 Miles", "5 Miles"],
+                "table_rows": [["2023 Estimate Population Age 25+", "6,162", "38,240", "101,066"]],
+                "page_number": 27,
+                "citations": ["[S320:p27]"],
+            },
+            {
+                "id": "narrative_block_330",
+                "source": "narrative_block",
+                "section": "Demographics",
+                "full_text": "Population, income, employment, housing and education",
+                "page_number": 28,
+                "citations": ["[S330:p28]"],
+            },
+            {
+                "id": "tbl_block_353",
+                "source": "table_block",
+                "table_name": "Major Employers",
+                "table_columns": ["Major Employers", "Employees"],
+                "table_rows": [["American Airlines", "5,200"]],
+                "page_number": 29,
+                "citations": ["[S353:p29]"],
+            },
+            {
+                "id": "narrative_block_360",
+                "source": "narrative_block",
+                "section": "Demographics Map",
+                "full_text": "1 mile 3 miles 5 miles demographics map",
+                "page_number": 30,
+                "citations": ["[S360:p30]"],
+            },
+        ],
+    )
+
+    market_entry = normalized["section_presence"]["market_summary_present"]
+    assert market_entry["citations"] == ["[S353:p29]"]
+    assert market_entry["page_range"] == [25, 30]
+    assert market_entry["routing_pages"] == [25, 26, 27, 28, 29, 30]
+
+
+def test_market_page_classifier_distinguishes_toc_content_and_heading_only():
+    toc_text = (
+        "TABLE OF CONTENTS 5 SECTION 1 Executive Summary 9 SECTION 2 Property Information 14 "
+        "SECTION 3 Financial Analysis 19 SECTION 4 Rent Comparables 24 SECTION 5 Market Overview"
+    ).lower()
+    content_text = (
+        "Population Profile 2023 Estimate 153,689 households median household income "
+        "$41,726 employment major employers 1 mile 3 miles 5 miles"
+    ).lower()
+    heading_text = "Market Overview Demographics".lower()
+
+    assert _classify_market_page_text(toc_text) == MARKET_TOC_PAGE
+    assert _classify_market_page_text(content_text) == MARKET_CONTENT_PAGE
+    assert _classify_market_page_text(heading_text) == MARKET_WEAK_PAGE
+
+
+def test_market_source_map_routing_ignores_toc_market_mentions():
+    normalized = normalize_om_structure_with_pdf_fields(
+        {
+            "column_map": {},
+            "section_presence": {
+                "market_summary_present": {
+                    "present": True,
+                    "label": "Market Summary",
+                    "confidence": 0.95,
+                    "citations": ["[S353:p29]"],
+                }
+            },
+        },
+        [
+            {
+                "id": "toc_page_4",
+                "source": "narrative_block",
+                "section": "Table of Contents",
+                "full_text": (
+                    "TABLE OF CONTENTS 5 SECTION 1 Executive Summary 9 "
+                    "SECTION 2 Property Information 14 SECTION 3 Financial Analysis 19 "
+                    "SECTION 4 Rent Comparables 24 SECTION 5 Market Overview"
+                ),
+                "page_number": 4,
+                "citations": ["[S4:p4]"],
+            },
+            {
+                "id": "market_page_25",
+                "source": "narrative_block",
+                "section": "Market Overview",
+                "full_text": (
+                    "Tulsa metro highlights economy demographics population 1M "
+                    "households 407K median household income $59,300"
+                ),
+                "page_number": 25,
+                "citations": ["[S300:p25]"],
+            },
+            {
+                "id": "market_page_26",
+                "source": "table_block",
+                "table_name": "Population and Households by Income",
+                "table_columns": ["Population", "Households", "Household Income", "1 Mile", "3 Miles", "5 Miles"],
+                "table_rows": [["2023 Estimate", "10,509", "63,110", "153,689"]],
+                "page_number": 26,
+                "citations": ["[S310:p26]"],
+            },
+            {
+                "id": "market_page_27",
+                "source": "table_block",
+                "table_name": "Population Profile",
+                "table_columns": ["Population Profile", "Education Level", "Housing Units", "1 Mile", "3 Miles"],
+                "table_rows": [["2023 Estimate Population Age 25+", "6,162", "38,240", "101,066"]],
+                "page_number": 27,
+                "citations": ["[S320:p27]"],
+            },
+            {
+                "id": "market_page_28",
+                "source": "narrative_block",
+                "section": "Demographics",
+                "full_text": (
+                    "Population employment households housing income education. "
+                    "The median household income is $41,726 and per capita income is $28,049."
+                ),
+                "page_number": 28,
+                "citations": ["[S330:p28]"],
+            },
+            {
+                "id": "market_page_29",
+                "source": "table_block",
+                "table_name": "Major Employers",
+                "table_columns": ["Major Employers", "Employees"],
+                "table_rows": [["American Airlines", "5,200"]],
+                "page_number": 29,
+                "citations": ["[S353:p29]"],
+            },
+            {
+                "id": "market_page_30",
+                "source": "narrative_block",
+                "section": "Demographics Map",
+                "full_text": "Market overview demographics radius map 1 mile 3 miles 5 miles",
+                "page_number": 30,
+                "citations": ["[S360:p30]"],
+            },
+        ],
+    )
+
+    market_entry = normalized["section_presence"]["market_summary_present"]
+    assert market_entry["page_range"] == [25, 30]
+    assert market_entry["routing_pages"] == [25, 26, 27, 28, 29, 30]
+    assert 4 not in market_entry["routing_pages"]
+    assert market_entry["routing_source"] == "market_section_cluster"
+
+
+def test_market_source_map_repairs_toc_anchor_to_nearest_content_cluster():
+    normalized = normalize_om_structure_with_pdf_fields(
+        {
+            "column_map": {},
+            "section_presence": {
+                "market_summary_present": {
+                    "present": True,
+                    "label": "Market Summary",
+                    "confidence": 0.9,
+                    "citations": ["[S4:p4]"],
+                }
+            },
+        },
+        [
+            {
+                "id": "toc_page_4",
+                "source": "narrative_block",
+                "section": "Table of Contents",
+                "full_text": "TABLE OF CONTENTS SECTION 5 Market Overview 25",
+                "page_number": 4,
+                "citations": ["[S4:p4]"],
+            },
+            {
+                "id": "market_page_25",
+                "source": "narrative_block",
+                "section": "Market Overview",
+                "full_text": "Metro highlights demographics population households median household income $59,300",
+                "page_number": 25,
+                "citations": ["[S300:p25]"],
+            },
+            {
+                "id": "market_page_26",
+                "source": "table_block",
+                "table_name": "Population",
+                "table_columns": ["Population", "1 Mile", "3 Miles", "5 Miles"],
+                "table_rows": [["2023 Estimate", "10,509", "63,110", "153,689"]],
+                "page_number": 26,
+                "citations": ["[S310:p26]"],
+            },
+        ],
+    )
+
+    market_entry = normalized["section_presence"]["market_summary_present"]
+    assert market_entry["page_range"] == [25, 26]
+    assert market_entry["routing_pages"] == [25, 26]
+    assert market_entry["routing_source"] == "market_section_cluster_repaired_anchor"
 
 
 def test_source_map_normalization_does_not_treat_current_rent_unit_mix_as_operating_current_column():

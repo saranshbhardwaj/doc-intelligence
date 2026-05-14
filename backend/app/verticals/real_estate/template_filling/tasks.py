@@ -45,6 +45,7 @@ from app.verticals.real_estate.template_filling.citations import (
     build_citation_context,
     get_field_page,
     get_section_citation_pages,
+    get_structure_routing_pages,
     resolve_bbox_from_citations,
 )
 from app.verticals.real_estate.template_filling.context_budget import build_budgeted_pdf_fields
@@ -319,7 +320,9 @@ def detect_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                     "confidence": confidence,
                     "citations": [citation],
                     "description": f"Key-value field from page {kv_page_number}",
-                    "source": "key_value_pairs"
+                    "source": "key_value_pairs",
+                    "page_number": kv_page_number,
+                    "page_range": [kv_page_number, kv_page_number] if kv_page_number is not None else [],
                 }
                 if kv_bbox:
                     field_data["bbox"] = kv_bbox
@@ -355,6 +358,7 @@ def detect_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
             table_name = table_dict.get("table_name", "")
             column_headers = table_dict.get("column_headers", [])
             chunk_bbox = metadata.get("bbox", {})
+            table_page_range = metadata.get("page_range") if isinstance(metadata.get("page_range"), list) else []
 
             table_page = table_dict.get("page_number")
             if not table_page:
@@ -393,7 +397,9 @@ def detect_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                     "confidence": 0.9,
                     "citations": [citation],
                     "description": f"Column from table '{table_name}' on page {table_page}",
-                    "source": "table"
+                    "source": "table",
+                    "page_number": table_page,
+                    "page_range": table_page_range or ([table_page, table_page] if table_page is not None else []),
                 }
 
                 if chunk_bbox:
@@ -403,7 +409,7 @@ def detect_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                 field_id_counter += 1
 
             if column_headers:
-                detected_fields.append({
+                block_field = {
                     "id": f"tbl_block_{field_id_counter}",
                     "name": table_name or "Table",
                     "type": "table",
@@ -415,7 +421,11 @@ def detect_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                     "table_columns": column_headers,
                     "table_rows": table_data_rows,
                     "page_number": table_page,
-                })
+                    "page_range": table_page_range or ([table_page, table_page] if table_page is not None else []),
+                }
+                if chunk_bbox:
+                    block_field["bbox"] = chunk_bbox
+                detected_fields.append(block_field)
                 field_id_counter += 1
 
         # Process narrative chunks
@@ -760,12 +770,13 @@ def auto_map_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                                 if scalar_budget.get("user_warning"):
                                     context_budget["user_warning"] = scalar_budget["user_warning"]
                             logger.info(
-                                "Scalar context prepared for batch %s: %s → %s fields (routing=%s, citation_pages=%s)",
+                                "Scalar context prepared for batch %s: %s → %s fields (routing=%s, citation_pages=%s, routing_pages=%s)",
                                 batch_key,
                                 scalar_budget["source_field_count_before_routing"],
                                 len(scalar_context),
                                 scalar_budget["routing_applied"],
                                 scalar_budget["citation_pages"],
+                                scalar_budget.get("routing_pages"),
                             )
                             prepared_scalar_batches.append({
                                 "batch_key": batch_key,
@@ -875,21 +886,26 @@ def auto_map_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                                 for k in (tbl.get("fill_when") or []):
                                     fill_when_keys.add(k)
                             citation_pages: List[int] = []
+                            routing_pages: List[int] = []
                             for key in fill_when_keys:
                                 citation_pages.extend(
                                     get_section_citation_pages(effective_om or {}, key)
                                 )
+                                routing_pages.extend(
+                                    get_structure_routing_pages(effective_om or {}, key)
+                                )
 
-                            if citation_pages:
+                            unique_routing_pages = sorted(set(routing_pages))
+                            if unique_routing_pages:
                                 filtered = [
                                     f for f in source_pdf_fields_for_table_context
                                     if (pg := get_field_page(f)) is None
-                                    or any(abs(pg - p) <= 1 for p in citation_pages)
+                                    or pg in unique_routing_pages
                                 ]
                                 logger.info(
-                                    "Table context filtered for batch %s: %s → %s fields (citation pages %s)",
+                                    "Table context filtered for batch %s: %s → %s fields (routing pages %s; citation pages %s)",
                                     batch_key, len(source_pdf_fields_for_table_context),
-                                    len(filtered), sorted(set(citation_pages)),
+                                    len(filtered), unique_routing_pages, sorted(set(citation_pages)),
                                 )
                             else:
                                 filtered = source_pdf_fields_for_table_context
@@ -897,8 +913,9 @@ def auto_map_fields_task(self, payload: Dict[str, Any]) -> Dict[str, Any]:
                             table_context_fields, table_budget = build_budgeted_pdf_fields(filtered)
                             table_budget = {
                                 **table_budget,
-                                "routing_applied": bool(citation_pages),
+                                "routing_applied": bool(unique_routing_pages),
                                 "citation_pages": sorted(set(citation_pages)),
+                                "routing_pages": unique_routing_pages,
                                 "source_field_count_before_routing": len(source_pdf_fields_for_table_context),
                                 "source_field_count_after_routing": len(filtered),
                             }

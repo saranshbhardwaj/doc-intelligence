@@ -1,7 +1,7 @@
 """Citation parsing and context building for template fill runs."""
 
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 
 def build_citation_context(detected_fields: list, document_filename: str) -> dict:
@@ -26,7 +26,7 @@ def build_citation_context(detected_fields: list, document_filename: str) -> dic
         citations.append({
             "source_index": int(m.group(1)),
             "field_id": field["id"],
-            "page": (bbox or {}).get("page"),
+            "page": get_field_page(field),
             "filename": document_filename,
             "bbox": bbox,
         })
@@ -42,23 +42,133 @@ def parse_citation_pages(citations: List[Any]) -> List[int]:
     return pages
 
 
-def get_section_citation_pages(om_structure: Dict[str, Any], section_key: str) -> List[int]:
-    """Return page numbers cited by the structure detection entry for a given section key."""
-    if not om_structure:
+def _coerce_page_int(value: Any) -> Optional[int]:
+    try:
+        if value is None:
+            return None
+        return int(value)
+    except Exception:
+        return None
+
+
+def _unique_pages(pages: List[Optional[int]]) -> List[int]:
+    unique: List[int] = []
+    for page in pages:
+        parsed = _coerce_page_int(page)
+        if parsed is not None and parsed not in unique:
+            unique.append(parsed)
+    return unique
+
+
+def _expand_page_range(page_range: Any) -> List[int]:
+    if not isinstance(page_range, list) or not page_range:
         return []
+    pages = _unique_pages(page_range)
+    if len(pages) >= 2:
+        start, end = min(pages[0], pages[-1]), max(pages[0], pages[-1])
+        return list(range(start, end + 1))
+    return pages
+
+
+def resolve_pdf_field_page_info(field: Dict[str, Any]) -> Tuple[Optional[int], List[int]]:
+    """Resolve a pdf_field anchor page and known pages.
+
+    Mirrors DocumentChunk.resolve_page_info semantics for TemplateFill's derived
+    field dicts. Table/narrative-derived fields prefer their explicit derived
+    page provenance because chunk/table bboxes can be broader than the logical
+    source page. KV fields keep bbox-first behavior for precise highlighting.
+    """
+
+    field = field or {}
+    bbox_page = None
+    bbox = field.get("bbox")
+    if isinstance(bbox, dict):
+        bbox_page = _coerce_page_int(bbox.get("page"))
+
+    range_pages = _unique_pages(field.get("page_range") if isinstance(field.get("page_range"), list) else [])
+
+    region_pages: List[int] = []
+    for key in ("value_bounding_regions", "bounding_regions", "key_bounding_regions"):
+        regions = field.get(key)
+        if not isinstance(regions, list):
+            continue
+        for region in regions:
+            if isinstance(region, dict):
+                parsed = _coerce_page_int(region.get("page_number"))
+                if parsed is not None:
+                    region_pages.append(parsed)
+
+    fallback_page = _coerce_page_int(field.get("page_number"))
+    source = str(field.get("source") or "")
+    prefers_explicit_page = source in {"table", "table_block", "narrative_block"}
+
+    candidates: List[Optional[int]] = []
+    if prefers_explicit_page:
+        candidates.append(fallback_page)
+        if range_pages:
+            candidates.append(range_pages[0])
+        if region_pages:
+            candidates.append(region_pages[0])
+        candidates.append(bbox_page)
+    else:
+        candidates.append(bbox_page)
+        if range_pages:
+            candidates.append(range_pages[0])
+        if region_pages:
+            candidates.append(region_pages[0])
+        candidates.append(fallback_page)
+
+    anchor_page = next((page for page in candidates if page is not None), None)
+    all_pages = _unique_pages([anchor_page, *range_pages, *region_pages, fallback_page, bbox_page])
+    return anchor_page, all_pages
+
+
+def _structure_entry_for_key(om_structure: Dict[str, Any], section_key: str) -> Optional[Dict[str, Any]]:
+    if not om_structure:
+        return None
     for bucket in ("section_presence", "column_map"):
         entry = (om_structure.get(bucket) or {}).get(section_key)
-        if entry:
-            return parse_citation_pages(entry.get("citations") or [])
-    return []
+        if isinstance(entry, dict):
+            return entry
+    return None
+
+
+def get_section_citation_pages(om_structure: Dict[str, Any], section_key: str) -> List[int]:
+    """Return page numbers cited by the structure detection entry for a given section key."""
+    entry = _structure_entry_for_key(om_structure, section_key)
+    return parse_citation_pages(entry.get("citations") or []) if entry else []
+
+
+def get_structure_routing_pages(om_structure: Dict[str, Any], section_key: str) -> List[int]:
+    """Return extraction routing pages for a Source Map key.
+
+    routing_pages are explicit extraction hints. page_range is a section span.
+    Citations remain the audit fallback and get the legacy +/- 1 page window.
+    """
+
+    entry = _structure_entry_for_key(om_structure, section_key)
+    if not entry:
+        return []
+
+    routing_pages = _unique_pages(entry.get("routing_pages") if isinstance(entry.get("routing_pages"), list) else [])
+    if routing_pages:
+        return sorted(routing_pages)
+
+    range_pages = _expand_page_range(entry.get("page_range"))
+    if range_pages:
+        return range_pages
+
+    citation_pages = sorted(set(parse_citation_pages(entry.get("citations") or [])))
+    window_pages: set[int] = set()
+    for page in citation_pages:
+        window_pages.update({page - 1, page, page + 1})
+    return sorted(page for page in window_pages if page > 0)
 
 
 def get_field_page(field: Dict[str, Any]) -> Optional[int]:
     """Return the page number for a raw pdf_field regardless of source type."""
-    source = field.get("source")
-    if source == "key_value_pairs":
-        return (field.get("bbox") or {}).get("page") or field.get("page_number")
-    return field.get("page_number")
+    anchor_page, _ = resolve_pdf_field_page_info(field)
+    return anchor_page
 
 
 def _parse_source_citation(citation: Any) -> tuple[Optional[int], Optional[int]]:

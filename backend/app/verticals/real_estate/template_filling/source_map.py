@@ -3,9 +3,17 @@
 from __future__ import annotations
 
 import copy
+import logging
 import re
 from typing import Any, Dict, List
 
+from app.verticals.real_estate.template_filling.citations import (
+    parse_citation_pages,
+    resolve_pdf_field_page_info,
+)
+
+
+logger = logging.getLogger(__name__)
 
 STRUCTURE_HIGH_CONFIDENCE = 0.85
 STRUCTURE_LOW_CONFIDENCE = 0.60
@@ -59,6 +67,12 @@ COLUMN_TO_SECTION = {
     "pro_forma": "pro_forma_operating_statement_present",
     "stabilized": "pro_forma_operating_statement_present",
 }
+
+MARKET_MAX_CLUSTER_PAGES = 8
+MARKET_CONTENT_PAGE = "content"
+MARKET_TOC_PAGE = "toc_or_navigation"
+MARKET_WEAK_PAGE = "weak_heading_only"
+MARKET_UNKNOWN_PAGE = "unknown"
 
 
 def as_list(value: Any) -> List[Any]:
@@ -157,6 +171,199 @@ def _set_inferred_entry(
     }
 
 
+def _has_market_signal(text: str) -> bool:
+    return (
+        "market overview" in text
+        or "population profile" in text
+        or "population" in text
+        or "household" in text
+        or "household income" in text
+        or "demographic" in text
+        or "major employers" in text
+        or "storage sqft per capita" in text
+        or "employment" in text
+        or "median income" in text
+        or "per capita income" in text
+        or "housing units" in text
+        or "metro highlights" in text
+        or "economy" in text
+    )
+
+
+def _build_market_page_text_index(pdf_fields: List[Dict[str, Any]] | None) -> Dict[int, str]:
+    page_parts: Dict[int, List[str]] = {}
+    for field in pdf_fields or []:
+        text = _field_search_text(field)
+        if not text:
+            continue
+        _, pages = resolve_pdf_field_page_info(field)
+        for page in pages:
+            if page is not None and page > 0:
+                page_parts.setdefault(page, []).append(text)
+    return {page: " ".join(parts) for page, parts in page_parts.items()}
+
+
+def _market_content_score(text: str) -> int:
+    signals = (
+        "market overview",
+        "metro highlights",
+        "demographic",
+        "population",
+        "population profile",
+        "household",
+        "household income",
+        "median household income",
+        "per capita income",
+        "employment",
+        "major employers",
+        "employees",
+        "housing units",
+        "education",
+        "median age",
+        "economy",
+        "storage sqft per capita",
+        "msa",
+        "submarket",
+    )
+    return sum(1 for signal in signals if signal in text)
+
+
+def _market_value_score(text: str) -> int:
+    patterns = (
+        r"\$[\d,]+",
+        r"\b\d{1,3}(?:,\d{3})+\b",
+        r"\b\d+(?:\.\d+)?%",
+        r"\b20\d{2}\b",
+        r"\b[135]\s*miles?\b",
+        r"\b\d+(?:\.\d+)?\s*[mk]\b",
+    )
+    return sum(1 for pattern in patterns if re.search(pattern, text))
+
+
+def _toc_navigation_score(text: str) -> int:
+    signals = (
+        "table of contents",
+        "section 1",
+        "section 2",
+        "section 3",
+        "section 4",
+        "section 5",
+        "executive summary",
+        "property information",
+        "financial analysis",
+        "rent comparables",
+    )
+    return sum(1 for signal in signals if signal in text)
+
+
+def _classify_market_page_text(text: str) -> str:
+    if not text:
+        return MARKET_UNKNOWN_PAGE
+
+    toc_score = _toc_navigation_score(text)
+    content_score = _market_content_score(text)
+    value_score = _market_value_score(text)
+
+    if toc_score >= 2 and content_score < 3:
+        return MARKET_TOC_PAGE
+    if content_score >= 2 and value_score >= 1:
+        return MARKET_CONTENT_PAGE
+    if content_score >= 3 and len(text.split()) >= 25:
+        return MARKET_CONTENT_PAGE
+    if content_score >= 1:
+        return MARKET_WEAK_PAGE
+    return MARKET_UNKNOWN_PAGE
+
+
+def _classify_market_pages(page_text: Dict[int, str]) -> Dict[int, str]:
+    classifications: Dict[int, str] = {}
+    for page, text in page_text.items():
+        classification = _classify_market_page_text(text)
+        if classification != MARKET_UNKNOWN_PAGE:
+            classifications[page] = classification
+    return classifications
+
+
+def _cluster_from_anchor(page_classes: Dict[int, str], anchor: int) -> List[int]:
+    allowed = {MARKET_CONTENT_PAGE, MARKET_WEAK_PAGE}
+    if page_classes.get(anchor) not in allowed:
+        return []
+
+    pages = {anchor}
+    for direction in (-1, 1):
+        page = anchor + direction
+        while page_classes.get(page) in allowed:
+            candidate_pages = pages | {page}
+            if max(candidate_pages) - min(candidate_pages) + 1 > MARKET_MAX_CLUSTER_PAGES:
+                break
+            pages.add(page)
+            page += direction
+    return sorted(pages)
+
+
+def _nearest_content_page(anchor_pages: List[int], content_pages: List[int]) -> int | None:
+    if not content_pages:
+        return None
+    if not anchor_pages:
+        return content_pages[0]
+    return min(
+        content_pages,
+        key=lambda page: (min(abs(page - anchor) for anchor in anchor_pages), page),
+    )
+
+
+def _apply_market_routing_metadata(structure: Dict[str, Any], page_classes: Dict[int, str]) -> None:
+    entry = (structure.get("section_presence") or {}).get("market_summary_present")
+    if not isinstance(entry, dict) or not entry.get("present"):
+        return
+
+    anchor_pages = sorted(set(parse_citation_pages(entry.get("citations") or [])))
+    content_pages = sorted(
+        page for page, classification in page_classes.items()
+        if classification == MARKET_CONTENT_PAGE
+    )
+    excluded_toc_pages = sorted(
+        page for page, classification in page_classes.items()
+        if classification == MARKET_TOC_PAGE
+    )
+
+    accepted_anchor = next(
+        (page for page in anchor_pages if page_classes.get(page) == MARKET_CONTENT_PAGE),
+        None,
+    )
+    routing_source = "market_section_cluster"
+    if accepted_anchor is None:
+        accepted_anchor = _nearest_content_page(anchor_pages, content_pages)
+        routing_source = "market_section_cluster_repaired_anchor"
+    if accepted_anchor is None:
+        logger.info(
+            "Market routing skipped: anchor_pages=%s content_pages=%s excluded_toc_pages=%s",
+            anchor_pages,
+            content_pages,
+            excluded_toc_pages,
+        )
+        return
+
+    routing_pages = _cluster_from_anchor(page_classes, accepted_anchor)
+    if not routing_pages:
+        return
+
+    start, end = routing_pages[0], routing_pages[-1]
+
+    entry["page_range"] = [start, end]
+    entry["routing_pages"] = routing_pages
+    entry["routing_source"] = routing_source
+    logger.info(
+        "Market routing selected: anchor_pages=%s accepted_anchor=%s content_pages=%s excluded_toc_pages=%s routing_pages=%s routing_source=%s",
+        anchor_pages,
+        accepted_anchor,
+        content_pages,
+        excluded_toc_pages,
+        routing_pages,
+        routing_source,
+    )
+
+
 def _table_has_operating_rows(text: str) -> bool:
     return (
         "gross potential rent" in text
@@ -177,6 +384,7 @@ def normalize_om_structure_with_pdf_fields(
     """
     normalized = copy.deepcopy(structure or {})
     _ensure_known_structure_keys(normalized)
+    market_page_classes = _classify_market_pages(_build_market_page_text_index(pdf_fields))
 
     for field in pdf_fields or []:
         text = _field_search_text(field)
@@ -281,13 +489,7 @@ def normalize_om_structure_with_pdf_fields(
                 evidence="Inferred from Azure DI comparable-property table evidence.",
             )
 
-        if (
-            "market overview" in text
-            or "population profile" in text
-            or "household income" in text
-            or "demographic" in text
-            or "storage sqft per capita" in text
-        ):
+        if _has_market_signal(text):
             _set_inferred_entry(
                 normalized,
                 "section_presence",
@@ -298,4 +500,5 @@ def normalize_om_structure_with_pdf_fields(
                 evidence="Inferred from Azure DI market or demographic table/narrative evidence.",
             )
 
+    _apply_market_routing_metadata(normalized, market_page_classes)
     return normalized
