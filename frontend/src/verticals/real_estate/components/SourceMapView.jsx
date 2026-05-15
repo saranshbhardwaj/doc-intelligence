@@ -5,25 +5,34 @@ import { CitationBadge } from './CitationBadge';
 import { tierForConfidence } from '../utils/sourceMapConfidence';
 import { groupSourceMapCitationsByPage } from '../utils/sourceMapCitations';
 
-// Canonical display order and friendly names for each group.
+// Canonical display order, friendly names, and asset-class applicability.
+// `appliesTo` controls whether a key counts toward the "X of Y detected"
+// denominator and whether it appears in the UI. Self-storage OMs never have
+// rent rolls, and typically fold T-12 numbers into the Current column rather
+// than presenting a separate T-12 column or section.
 const COLUMN_MAP_KEYS = [
-  { key: 'current',    label: 'Current / In-Place' },
-  { key: 't12',        label: 'Trailing 12 Months (T12)' },
-  { key: 'year1',      label: 'Year 1' },
-  { key: 'pro_forma',  label: 'Pro Forma' },
-  { key: 'stabilized', label: 'Stabilized' },
+  { key: 'current',   label: 'Current / In-Place',       appliesTo: ['self_storage', 'multifamily', 'office'] },
+  { key: 't12',       label: 'Trailing 12 Months (T12)', appliesTo: ['multifamily', 'office'] },
+  { key: 'year1',     label: 'Year 1',                   appliesTo: ['self_storage', 'multifamily', 'office'] },
+  { key: 'pro_forma', label: 'Pro Forma / Stabilized',   appliesTo: ['self_storage', 'multifamily', 'office'] },
 ];
 
 const SECTION_PRESENCE_KEYS = [
-  { key: 'current_operating_statement_present',   label: 'Current Operating Statement' },
-  { key: 'year1_operating_statement_present',     label: 'Year 1 Operating Statement' },
-  { key: 'pro_forma_operating_statement_present', label: 'Pro Forma Operating Statement' },
-  { key: 't12_present',                           label: 'T12 Operating Statement' },
-  { key: 'unit_mix_present',                      label: 'Unit Mix' },
-  { key: 'rent_roll_present',                     label: 'Rent Roll' },
-  { key: 'rent_comps_present',                    label: 'Rent Comps' },
-  { key: 'market_summary_present',                label: 'Market Summary' },
+  { key: 'current_operating_statement_present',   label: 'Current Operating Statement',   appliesTo: ['self_storage', 'multifamily', 'office'] },
+  { key: 'year1_operating_statement_present',     label: 'Year 1 Operating Statement',    appliesTo: ['self_storage', 'multifamily', 'office'] },
+  { key: 'pro_forma_operating_statement_present', label: 'Pro Forma Operating Statement', appliesTo: ['self_storage', 'multifamily', 'office'] },
+  { key: 't12_present',                           label: 'T12 Operating Statement',       appliesTo: ['multifamily', 'office'] },
+  { key: 'unit_mix_present',                      label: 'Unit Mix',                      appliesTo: ['self_storage', 'multifamily'] },
+  { key: 'rent_roll_present',                     label: 'Rent Roll',                     appliesTo: ['multifamily', 'office'] },
+  { key: 'rent_comps_present',                    label: 'Rent Comps',                    appliesTo: ['self_storage', 'multifamily', 'office'] },
+  { key: 'market_summary_present',                label: 'Market Summary',                appliesTo: ['self_storage', 'multifamily', 'office'] },
 ];
+
+const DEFAULT_ASSET_CLASS = 'self_storage';
+
+function applicableFor(keys, assetClass) {
+  return keys.filter(({ appliesTo }) => appliesTo.includes(assetClass));
+}
 
 function ConfidenceDot({ tier }) {
   if (tier === 'unknown') return null;
@@ -195,13 +204,15 @@ function SkippedSection({ skippedCells }) {
   );
 }
 
-export default function SourceMapView({ omStructure, cellStatus, citationContext, onCitationClick }) {
+export default function SourceMapView({ omStructure, cellStatus, citationContext, onCitationClick, assetClass = DEFAULT_ASSET_CLASS }) {
   const effective = omStructure?.effective;
   const columnMap = effective?.column_map ?? {};
   const sectionPresence = effective?.section_presence ?? {};
   const detectedAt = omStructure?.detected_at;
 
-  const allKeys = [...COLUMN_MAP_KEYS, ...SECTION_PRESENCE_KEYS];
+  const columnKeys = applicableFor(COLUMN_MAP_KEYS, assetClass);
+  const sectionKeys = applicableFor(SECTION_PRESENCE_KEYS, assetClass);
+  const allKeys = [...columnKeys, ...sectionKeys];
   const allData = { ...columnMap, ...sectionPresence };
   const detectedCount = allKeys.filter(({ key }) => allData[key]?.present === true).length;
   const absentKeys = allKeys
@@ -230,14 +241,14 @@ export default function SourceMapView({ omStructure, cellStatus, citationContext
       </div>
       <SectionGroup
         title="Operating Statement Columns"
-        keys={COLUMN_MAP_KEYS}
+        keys={columnKeys}
         data={columnMap}
         citationContext={citationContext}
         onCitationClick={onCitationClick}
       />
       <SectionGroup
         title="Document Sections"
-        keys={SECTION_PRESENCE_KEYS}
+        keys={sectionKeys}
         data={sectionPresence}
         citationContext={citationContext}
         onCitationClick={onCitationClick}

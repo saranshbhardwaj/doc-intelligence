@@ -523,7 +523,7 @@ fields:
     fill_when: ["pro_forma_operating_statement_present"]
     requires_structure: ["column_map.pro_forma"]
     description: "Pro forma or stabilized average effective monthly rent per storage unit."
-    extraction_rule: "Use pro forma or stabilized average effective rent per storage unit per month. If the OM does not provide a pro forma or stabilized rent, leave null. Do not use current/in-place rent. For self-storage, this is typically expressed as $/unit/month."
+    extraction_rule: "Use pro forma or stabilized average effective rent per storage unit per month. If not directly stated, derive it as: pro forma Gross Potential Rent ÷ total storage unit count ÷ 12. Do not use current/in-place rent. For self-storage, this is typically expressed as $/unit/month."
     pdf_aliases:
       - "Pro Forma Average Effective Rent"
       - "Stabilized Average Effective Rent"
@@ -546,7 +546,7 @@ fields:
     fill_when: ["pro_forma_operating_statement_present"]
     requires_structure: ["column_map.pro_forma"]
     description: "Pro forma or stabilized annual other income per storage unit."
-    extraction_rule: "Use pro forma or stabilized annual other income divided by storage-only unit count. Do not use current other income per unit."
+    extraction_rule: "Use pro forma or stabilized other income per storage unit annually. If not directly stated, derive it as: pro forma total other income ÷ total storage unit count. Do not use current other income per unit."
     pdf_aliases:
       - "Pro Forma Other Income per Unit"
       - "Stabilized Other Income per Unit"

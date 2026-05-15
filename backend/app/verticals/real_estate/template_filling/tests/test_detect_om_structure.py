@@ -51,7 +51,6 @@ def _full_structure(
         "t12": False,
         "year1": True,
         "pro_forma": True,
-        "stabilized": False,
     }
     if section_overrides:
         section_defaults.update(section_overrides)
@@ -83,16 +82,16 @@ class TestOMStructureKeyRequired:
 
 class TestOMColumnMapRequired:
     def test_rejects_partial_output(self):
-        """column_map must have all five keys — omitting any raises ValidationError."""
+        """column_map must have all four keys — omitting any raises ValidationError."""
         with pytest.raises(ValidationError):
             OMColumnMap(
                 current=OMStructureKey(present=True, confidence=0.9),
-                # missing t12, year1, pro_forma, stabilized
+                # missing t12, year1, pro_forma
             )
 
     def test_accepts_complete(self):
         key = OMStructureKey(present=True, confidence=0.9)
-        cm = OMColumnMap(current=key, t12=key, year1=key, pro_forma=key, stabilized=key)
+        cm = OMColumnMap(current=key, t12=key, year1=key, pro_forma=key)
         assert cm.current.present is True
 
 
@@ -126,7 +125,7 @@ class TestOMStructureDetectionResultRequired:
     def test_rejects_missing_unit_mix_present(self):
         """Tool response missing unit_mix_present must fail Pydantic validation."""
         raw = {
-            "column_map": {k: {"present": True, "confidence": 0.9} for k in ("current", "t12", "year1", "pro_forma", "stabilized")},
+            "column_map": {k: {"present": True, "confidence": 0.9} for k in ("current", "t12", "year1", "pro_forma")},
             "section_presence": {
                 "current_operating_statement_present": {"present": True, "confidence": 0.9},
                 "year1_operating_statement_present": {"present": True, "confidence": 0.9},
@@ -153,9 +152,9 @@ class TestPromptContent:
         pair = prompts.build_detect_om_structure()
         return pair.user_message
 
-    def test_lists_all_five_column_keys(self):
+    def test_lists_all_four_column_keys(self):
         msg = self._get_user_message()
-        for key in ("current", "t12", "year1", "pro_forma", "stabilized"):
+        for key in ("current", "t12", "year1", "pro_forma"):
             assert key in msg, f"column key '{key}' missing from prompt"
 
     def test_lists_all_eight_section_keys(self):
@@ -332,7 +331,7 @@ class TestRetryLogic:
         key = {"present": True, "confidence": 0.9}
         false_key = {"present": False, "confidence": 0.0}
         return {
-            "column_map": {k: key for k in ("current", "t12", "year1", "pro_forma", "stabilized")},
+            "column_map": {k: key for k in ("current", "t12", "year1", "pro_forma")},
             "section_presence": {
                 "current_operating_statement_present": key,
                 "year1_operating_statement_present": key,

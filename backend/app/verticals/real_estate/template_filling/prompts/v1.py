@@ -140,13 +140,14 @@ class OMStructureKey(BaseModel):
 
 
 class OMColumnMap(BaseModel):
-    """Operating-statement column map. All five keys are required."""
+    """Operating-statement column map. All four keys are required."""
 
     current: OMStructureKey = Field(description="Current or in-place operating column")
     t12: OMStructureKey = Field(description="Trailing 12 month actuals operating column")
     year1: OMStructureKey = Field(description="Year 1 or underwriting operating column")
-    pro_forma: OMStructureKey = Field(description="Pro forma operating column")
-    stabilized: OMStructureKey = Field(description="Stabilized operating column")
+    pro_forma: OMStructureKey = Field(
+        description="Pro-forma / stabilized operating column (forward-looking)",
+    )
 
 
 class OMSectionPresence(BaseModel):
@@ -194,7 +195,7 @@ class V1PromptSet(PromptSet):
             "Return structure only — do not extract cell values."
         )
         user_message = (
-            "Detect the OM Source Map. You MUST return ALL 13 keys explicitly with "
+            "Detect the OM Source Map. You MUST return ALL 12 keys explicitly with "
             "present=true or present=false. Omitting any key is an error.\n\n"
             "─── STEP 1: INVENTORY ─────────────────────────────────────────────────────\n"
             "Before deciding anything, scan the inventory in the cached context. For each "
@@ -203,12 +204,23 @@ class V1PromptSet(PromptSet):
             "─── STEP 2: EVIDENCE + VERDICT (ALL 13 KEYS REQUIRED) ─────────────────────\n"
             "For each key below, state which table block IDs (or 'none') provide evidence, "
             "then your verdict (present=true/false) and confidence. Do not skip any key.\n\n"
-            "COLUMN MAP keys (5 required):\n"
+            "COLUMN MAP keys (4 required):\n"
             "  • current      — 'Current', 'In-Place', 'Actual' operating column\n"
-            "  • t12          — 'T-12', 'Trailing 12', 'T12 Actuals' operating column\n"
+            "  • t12          — Separate 'T-12', 'Trailing 12', 'T12 Actuals' column.\n"
+            "                   Set t12 present=false when T-12 numbers are folded INTO\n"
+            "                   the Current column (e.g. OM says 'Current Expenses based\n"
+            "                   on trailing 12-month expenses' with no separate T-12\n"
+            "                   column header). Only set present=true when T-12 is its\n"
+            "                   own column distinct from Current.\n"
             "  • year1        — 'Year 1', 'Year-One', 'Underwriting' operating column\n"
-            "  • pro_forma    — 'Pro Forma', 'Stabilized Pro Forma' operating column\n"
-            "  • stabilized   — 'Stabilized' operating column (distinct from pro_forma)\n\n"
+            "  • pro_forma    — Forward-looking pro-forma / stabilized column. Aliases:\n"
+            "                   'Pro Forma', 'ProForma', 'Stabilized', 'Stabilized Year',\n"
+            "                   'Stabilized Pro Forma', 'Fully Stabilized', 'Underwritten\n"
+            "                   Stabilized', 'Year 2 Projected', 'Year 3 Projected',\n"
+            "                   'Year 1 Projected' (when it is the forward-stabilized\n"
+            "                   column, not the Year-1 underwriting column). Self-storage\n"
+            "                   OMs use any of these labels for the same concept — pick\n"
+            "                   the forward-looking column distinct from Current and Year 1.\n\n"
             "SECTION PRESENCE keys (8 required):\n"
             "  • current_operating_statement_present\n"
             "  • year1_operating_statement_present\n"
@@ -224,10 +236,12 @@ class V1PromptSet(PromptSet):
             "  A multi-column income/expense table with rows for Gross Potential Rent, "
             "Effective Gross Income, Operating Expenses, and Net Operating Income. Column "
             "headers name the time period: 'Current', 'In-Place', 'Actual', 'T-12 Actuals', "
-            "'Year 1', 'Year One', 'Year-One', 'Pro Forma', 'Underwriting', 'Stabilized'. "
-            "Each period maps to one column_map key AND one section_presence key. Set "
-            "present=true for section_presence only when you find actual data rows — not "
-            "just a column header with no data.\n\n"
+            "'Year 1', 'Year One', 'Year-One', 'Pro Forma', 'Underwriting', 'Stabilized', "
+            "'Year 2 Projected', 'Year 3 Projected'. Map any 'Stabilized' or projected-year "
+            "column to pro_forma — there is no separate stabilized slot. Each period maps "
+            "to one column_map key AND one section_presence key. Set present=true for "
+            "section_presence only when you find actual data rows — not just a column "
+            "header with no data.\n\n"
             "unit_mix_present:\n"
             "  Tabular breakdown with one row per unit type/size/floor-plan. Columns include "
             "unit count (e.g., '# Units', 'Total Units', 'Quantity'), unit size (e.g., 'SqFt', "

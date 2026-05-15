@@ -57,14 +57,27 @@ def build_scalar_context_for_batch(
     Always/static batches keep the full pool and only apply budget limits.
     """
     fill_when_keys: set[str] = set()
+    requires_structure_keys: set[str] = set()
     for field_def in batch_fields or []:
         for fill_when in as_list(field_def.get("fill_when")):
             if fill_when and fill_when != "always":
                 fill_when_keys.add(str(fill_when))
+        for rk in as_list(field_def.get("requires_structure")):
+            if rk:
+                # "column_map.current" → "current"; strip bucket prefix
+                requires_structure_keys.add(str(rk).split(".", 1)[-1])
 
     citation_pages: List[int] = []
     routing_pages: List[int] = []
     for key in sorted(fill_when_keys):
+        citation_pages.extend(get_section_citation_pages(om_structure or {}, key))
+        routing_pages.extend(get_structure_routing_pages(om_structure or {}, key))
+    # Also expand routing with column_map citation pages from requires_structure.
+    # Column entries cite every page where that column physically appears (e.g. the
+    # offering summary on p.6 AND the full statement on p.16), so this ensures
+    # cover/summary pages are included even when section_presence only cites the
+    # detailed statement page.
+    for key in sorted(requires_structure_keys):
         citation_pages.extend(get_section_citation_pages(om_structure or {}, key))
         routing_pages.extend(get_structure_routing_pages(om_structure or {}, key))
     unique_citation_pages = sorted(set(citation_pages))

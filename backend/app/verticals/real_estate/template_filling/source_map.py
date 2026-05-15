@@ -48,7 +48,7 @@ SKIP_REASON_VALUES = {
     "extraction_returned_null",
 }
 
-COLUMN_MAP_KEYS = ("current", "t12", "year1", "pro_forma", "stabilized")
+COLUMN_MAP_KEYS = ("current", "t12", "year1", "pro_forma")
 SECTION_PRESENCE_KEYS = (
     "current_operating_statement_present",
     "year1_operating_statement_present",
@@ -65,7 +65,6 @@ COLUMN_TO_SECTION = {
     "t12": "t12_present",
     "year1": "year1_operating_statement_present",
     "pro_forma": "pro_forma_operating_statement_present",
-    "stabilized": "pro_forma_operating_statement_present",
 }
 
 MARKET_MAX_CLUSTER_PAGES = 8
