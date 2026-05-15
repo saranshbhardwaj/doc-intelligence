@@ -651,9 +651,15 @@ fields:
     source_basis: "om_operating_statement"
     fill_when: ["t12_present", "current_operating_statement_present"]
     requires_structure: ["column_map.t12", "column_map.current"]
-    description: "Actual/current annual contract services expense."
-    extraction_rule: "Use T12, actual, or current contract services expense only. Leave null if the OM only provides Year 1 or pro forma contract services."
+    description: "Actual/current annual contract services expense (includes security systems, monitoring, gate contracts, fire protection, and grounds contracts)."
+    extraction_rule: "Use T12, actual, or current contract services expense. Also use this field for Security, Security Systems, Security Monitoring, or any combined 'Contract Services (Fire, Security & Grounds)' line. Leave null if the OM only provides Year 1 or pro forma values."
     pdf_aliases:
+      - "Contract Services"
+      - "Security"
+      - "Security Systems"
+      - "Security Monitoring"
+      - "Contract Services (Fire, Security & Grounds)"
+      - "Fire & Security"
       - "Actuals & Unit Mix Contract Services"
       - "Actuals & Unit Mix Contract Services Expense"
 
