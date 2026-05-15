@@ -32,6 +32,69 @@ _SOURCE_PERIOD_LABELS = {
 }
 
 
+def _coerce_numeric(value: Any) -> Optional[float]:
+    """Best-effort numeric coercion for sanity-check comparisons."""
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    cleaned = str(value).replace(",", "").replace("$", "").strip()
+    if not cleaned:
+        return None
+    try:
+        return float(cleaned)
+    except ValueError:
+        return None
+
+
+def _drop_columns_violating_equality_guards(
+    columns: List[Dict[str, Any]],
+    values: Dict[str, Any],
+    table_id: str,
+    row_label: Optional[str],
+) -> Dict[str, Any]:
+    """
+    Apply `disallow_equal_to_column` guards declared on schema-table columns.
+
+    A column may declare `disallow_equal_to_column: "<other_excel_column>"` to mean
+    "if my numeric value equals the value in the named column for the same row, drop
+    my value rather than write a likely-wrong number." The cell will surface as
+    Unmapped for analyst review instead of carrying a duplicated value.
+    """
+    if not columns or not values:
+        return values
+
+    filtered = dict(values)
+    for col_def in columns:
+        excel_col = col_def.get("excel_column")
+        guard_col = col_def.get("disallow_equal_to_column")
+        if not excel_col or not guard_col:
+            continue
+        if excel_col not in filtered or guard_col not in filtered:
+            continue
+
+        own_numeric = _coerce_numeric(filtered[excel_col])
+        guard_numeric = _coerce_numeric(filtered[guard_col])
+        if own_numeric is None or guard_numeric is None:
+            continue
+        if own_numeric != guard_numeric:
+            continue
+
+        logger.warning(
+            "Schema sanity check: dropping %s=%s for table '%s' row '%s' because it equals "
+            "column %s=%s (disallow_equal_to_column). Cell will be left unmapped.",
+            excel_col,
+            filtered[excel_col],
+            table_id,
+            row_label,
+            guard_col,
+            filtered[guard_col],
+        )
+        filtered.pop(excel_col, None)
+
+    return filtered
+
+
 def _humanize_identifier(value: str) -> str:
     """Convert internal ids/sheet names into compact analyst-facing labels."""
 
@@ -354,6 +417,9 @@ class MappingCoordinator:
                 row_index = row.get("row_index")
                 row_label = row.get("row_label")
                 values = row.get("values", {}) or {}
+                values = _drop_columns_violating_equality_guards(
+                    columns, values, table_id, row.get("row_label")
+                )
                 confidence = row.get("confidence", 0.7)
                 citations = row.get("citations", [])
 

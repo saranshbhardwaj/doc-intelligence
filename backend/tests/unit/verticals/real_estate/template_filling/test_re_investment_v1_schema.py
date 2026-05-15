@@ -309,6 +309,8 @@ def test_actuals_unit_mix_unit_mix_table_is_storage_only_and_row_aligned():
     assert columns["I"]["header"] == "SqFt"
     assert columns["K"]["header"] == "Current Rent Average"
     assert columns["K"]["data_type"] == "currency"
+    # # Units must guard against being duplicated from SqFt — leave unmapped instead.
+    assert columns["H"]["disallow_equal_to_column"] == "I"
 
 
 def test_pnl_year1_expense_inputs_are_forward_basis_and_exclude_assumption_cells():

@@ -523,7 +523,7 @@ fields:
     fill_when: ["pro_forma_operating_statement_present"]
     requires_structure: ["column_map.pro_forma"]
     description: "Pro forma or stabilized average effective monthly rent per storage unit."
-    extraction_rule: "Use pro forma or stabilized average effective rent per storage unit per month. If not directly stated, derive it as: pro forma Gross Potential Rent ÷ total storage unit count ÷ 12. Do not use current/in-place rent. For self-storage, this is typically expressed as $/unit/month."
+    extraction_rule: "Use pro forma or stabilized average effective rent per storage unit per month. If not directly stated, derive it as: pro forma Gross Potential Rent ÷ total storage unit count ÷ 12. Do not use current/in-place rent. If neither a pro forma rent figure nor the inputs required to derive it are available, leave null. For self-storage, this is typically expressed as $/unit/month."
     pdf_aliases:
       - "Pro Forma Average Effective Rent"
       - "Stabilized Average Effective Rent"
@@ -1106,7 +1106,31 @@ tables:
     data_end_row: 19
     row_identifier_column: "G"
     description: "Storage-only unit mix and current average rent rows for the Actuals & Unit Mix sheet."
-    extraction_rule: "Extract one row per storage unit size/type. Include climate-controlled and non-climate storage. Exclude parking rows. Exclude residential rows. Exclude office, retail, and other non-storage rows. Keep current rent average aligned to the same row as the unit type."
+    extraction_rule: |
+      Extract one row per storage unit size/type (e.g. 5x10, 10x10, 10x15, 10x20, 10x30, 13x30).
+      Include climate-controlled and non-climate storage.
+      Exclude parking rows. Exclude residential rows. Exclude office, retail, and other non-storage rows.
+
+      CRITICAL — source discipline per column:
+        - `# Units` MUST come from the OM's unit-mix / unit-summary table (the table that shows
+          TOTAL UNITS or OCCUPIED UNITS per type, typically in the Financial Analysis / Unit Mix
+          Overview section). It is the COUNT of physical units for that size. It is NEVER the
+          per-unit square footage. If the only available table is the rent-comparables table
+          (which lists Sq.Ft./Unit and Rent/Unit but no count), LEAVE # Units NULL — do NOT
+          substitute SqFt for unit count.
+        - `SqFt` is the per-unit square footage for that size (e.g. 5x10 = 50, 10x10 = 100).
+          This is NOT total/aggregate rentable square footage.
+        - `Current Rent Average` is the monthly in-place / average rent per unit for that size.
+          It may come from the rent roll, an in-place rent summary, or the SUBJECT property's
+          own row in a rent-comparables table — never from competitor/comp rows.
+
+      JOIN strategy: When unit counts live on one page (unit-mix table) and current rents live
+      on another (rent comps / rent roll), JOIN the two tables on the unit size/type label
+      (e.g. "10 x 10"). Keep all three values (# Units, SqFt, Current Rent) aligned to the same
+      Excel row. Do NOT duplicate the SqFt value into the # Units column to fill a gap.
+
+      Sanity check: # Units and SqFt should almost never be identical. If they look identical
+      across multiple rows, the # Units column is probably wrong — prefer leaving it null.
     source_period: "current"
     source_basis: "om_unit_mix"
     fill_when: ["unit_mix_present"]
@@ -1115,16 +1139,32 @@ tables:
       - excel_column: "G"
         header: "Type"
         data_type: "text"
+        extraction_rule: "Unit size/type label, e.g. '5 x 10', '10 x 10', '10 x 20', '13 x 30'. Use the OM's exact label format for the size."
         pdf_aliases:
           - "Unit Type"
           - "Type"
+          - "Unit Size"
+          - "Size"
           - "Floor Plan"
           - "Unit Mix"
 
       - excel_column: "H"
         header: "# Units"
         data_type: "number"
+        # Drop this value if it equals the SqFt column for the same row. The LLM sometimes
+        # duplicates Sq.Ft./Unit into # Units when only a rent-comparables table is available
+        # (which has no unit count). Leaving the cell unmapped is safer than a wrong number.
+        disallow_equal_to_column: "I"
+        extraction_rule: |
+          COUNT of physical storage units for this size/type, sourced from the OM's unit-mix
+          or unit-summary table (look for column headers like 'Total Units', 'Occupied Units',
+          '# Units', 'Unit Count'). Typical values: 1-300 per row.
+          This is NEVER the per-unit square footage. If the unit-mix table is absent and only
+          a rent-comparables table is available (which has Sq.Ft./Unit but no count), LEAVE
+          THIS NULL — do NOT copy the SqFt value as a stand-in. Prefer null over a wrong number.
         pdf_aliases:
+          - "Total Units"
+          - "Occupied Units"
           - "# Units"
           - "Number of Units"
           - "Units"
@@ -1133,8 +1173,11 @@ tables:
       - excel_column: "I"
         header: "SqFt"
         data_type: "number"
+        extraction_rule: "Per-unit square footage for this size (e.g. 5x10 = 50, 10x10 = 100, 10x15 = 150). Not the total/aggregate square footage for all units of this type. Typically labeled 'Sq.Ft./Unit', 'Unit Size', or 'SF/Unit' in the OM."
         pdf_aliases:
           - "Sq.Ft./Unit"
+          - "SF/Unit"
+          - "Unit RSF"
           - "Sq Ft"
           - "Square Feet"
           - "SF"
@@ -1142,7 +1185,14 @@ tables:
       - excel_column: "K"
         header: "Current Rent Average"
         data_type: "currency"
+        extraction_rule: |
+          Average in-place / current monthly rent per unit for this size. Sources, in order
+          of preference: (1) the OM's in-place rent summary or rent roll average, (2) the
+          'Standard Rate' column in the unit-mix table, (3) the SUBJECT property's own row
+          in a rent-comparables table. NEVER use a competitor/comp property's rent. If the
+          OM only states annual rent, divide by 12 to get monthly.
         pdf_aliases:
+          - "Standard Rate"
           - "Average Rent"
           - "Avg Rent"
           - "Current Rent"

@@ -539,8 +539,8 @@ class TestVerdictUserThresholds:
         result = passing_result.model_copy()
         result.dscr_year_one = 1.20  # below default 1.25 but above custom 1.18
 
-        custom = UserUnderwritingThresholds(dscr_year_one_floor=1.18)
-        verdict = evaluate(result, default_criteria, thresholds=custom)
+        criteria = default_criteria.model_copy(update={"dscr_year_one_floor": 1.18})
+        verdict = evaluate(result, criteria)
 
         assert verdict.status == "worth_pursuing"
         assert not any(f.metric == "dscr_year_one" for f in verdict.failures)
@@ -549,8 +549,8 @@ class TestVerdictUserThresholds:
         result = passing_result.model_copy()
         result.dscr_year_one = 1.10  # below both default and custom
 
-        custom = UserUnderwritingThresholds(dscr_year_one_floor=1.18)
-        verdict = evaluate(result, default_criteria, thresholds=custom)
+        criteria = default_criteria.model_copy(update={"dscr_year_one_floor": 1.18})
+        verdict = evaluate(result, criteria)
 
         assert verdict.status == "below_standards"
         failure = next(f for f in verdict.failures if f.metric == "dscr_year_one")
@@ -558,9 +558,9 @@ class TestVerdictUserThresholds:
 
     def test_custom_stress_dscr_floor(self, passing_result, default_criteria):
         stress = [StressScenario(scenario_key="base", label="base", min_dscr=1.12)]  # below default 1.15, above custom 1.10
-        custom = UserUnderwritingThresholds(stress_dscr_floor=1.10)
+        criteria = default_criteria.model_copy(update={"stress_dscr_floor": 1.10})
 
-        verdict = evaluate(passing_result, default_criteria, stress_scenarios=stress, thresholds=custom)
+        verdict = evaluate(passing_result, criteria, stress_scenarios=stress)
 
         assert not any(f.metric == "stress_dscr_floor" for f in verdict.failures)
 

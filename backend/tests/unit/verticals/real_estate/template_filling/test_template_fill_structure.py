@@ -1273,6 +1273,64 @@ def test_targeted_schema_mapping_adds_analyst_display_metadata():
     assert mappings[0]["source_note"] == "Operating statement · Expenses section · Current period · Page 16"
 
 
+def test_targeted_table_mapping_drops_column_when_equality_guard_triggers():
+    mappings = MappingCoordinator().create_targeted_schema_table_mappings(
+        [
+            {
+                "id": "actuals_unit_mix_storage_unit_mix",
+                "sheet": "Actuals&UnitMix",
+                "description": "Storage unit mix",
+                "data_start_row": 5,
+                "data_end_row": 10,
+                "row_identifier_column": "G",
+                "columns": [
+                    {"excel_column": "G", "header": "Type", "data_type": "text"},
+                    {
+                        "excel_column": "H",
+                        "header": "# Units",
+                        "data_type": "number",
+                        "disallow_equal_to_column": "I",
+                    },
+                    {"excel_column": "I", "header": "SqFt", "data_type": "number"},
+                    {"excel_column": "K", "header": "Current Rent Average", "data_type": "currency"},
+                ],
+            }
+        ],
+        {
+            "actuals_unit_mix_storage_unit_mix": {
+                "rows": [
+                    {
+                        "row_index": 0,
+                        "row_label": "5 x 10",
+                        # H duplicates I — LLM likely pulled SqFt as #Units from rent comps.
+                        "values": {"H": "50", "I": "50", "K": "$43"},
+                        "confidence": 0.95,
+                        "citations": ["[S240:p23]"],
+                    },
+                    {
+                        "row_index": 1,
+                        "row_label": "10 x 10",
+                        # H differs from I — legitimate, both should be written.
+                        "values": {"H": "84", "I": "100", "K": "$65"},
+                        "confidence": 0.95,
+                        "citations": ["[S240:p16]"],
+                    },
+                ]
+            }
+        },
+    )
+
+    written_cells = {(m["excel_cell"], m["schema_table_column"]): m["extracted_value"] for m in mappings}
+    # Row 1 (5x10): H dropped, I and K still present.
+    assert ("H5", "H") not in written_cells
+    assert written_cells[("I5", "I")] == "50"
+    assert written_cells[("K5", "K")] == "$43"
+    # Row 2 (10x10): all three columns present because H != I.
+    assert written_cells[("H6", "H")] == "84"
+    assert written_cells[("I6", "I")] == "100"
+    assert written_cells[("K6", "K")] == "$65"
+
+
 def test_targeted_table_mapping_adds_analyst_display_metadata():
     mappings = MappingCoordinator().create_targeted_schema_table_mappings(
         [

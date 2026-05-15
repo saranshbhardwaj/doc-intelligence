@@ -52,10 +52,11 @@ def test_concurrency_limit_uses_processing_statuses(monkeypatch):
 
     monkeypatch.setattr(TemplateFillRun, "status", _StatusColumn(), raising=False)
     monkeypatch.setattr(TemplateFillRun, "user_id", _ComparableColumn(), raising=False)
+    monkeypatch.setattr(TemplateFillRun, "org_id", _ComparableColumn(), raising=False)
     monkeypatch.setattr(TemplateFillRun, "created_at", _ComparableColumn(), raising=False)
 
     db = _FakeSession(active_count=0)
-    user = SimpleNamespace(id="user-1", tier="standard")
+    user = SimpleNamespace(id="user-1", org_id="org-1", tier="standard")
 
     enforce_fill_run_concurrency_limit(user, db)
 
@@ -69,10 +70,11 @@ def test_concurrency_limit_raises_when_processing_runs_hit_limit(monkeypatch):
 
     monkeypatch.setattr(TemplateFillRun, "status", _StatusColumn(), raising=False)
     monkeypatch.setattr(TemplateFillRun, "user_id", _ComparableColumn(), raising=False)
+    monkeypatch.setattr(TemplateFillRun, "org_id", _ComparableColumn(), raising=False)
     monkeypatch.setattr(TemplateFillRun, "created_at", _ComparableColumn(), raising=False)
 
     db = _FakeSession(active_count=3)
-    user = SimpleNamespace(id="user-1", tier="standard")
+    user = SimpleNamespace(id="user-1", org_id="org-1", tier="standard")
 
     with pytest.raises(HTTPException) as exc_info:
         enforce_fill_run_concurrency_limit(user, db)
