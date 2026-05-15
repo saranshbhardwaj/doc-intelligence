@@ -153,6 +153,8 @@ export default function TemplateFillPage() {
   const [jobIdOverride, setJobIdOverride] = useState(null);
   const [showCompletionBanner, setShowCompletionBanner] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
+  const [downloadError, setDownloadError] = useState(null);
+  const [continueError, setContinueError] = useState(null);
 
   // Zustand store
   const {
@@ -249,8 +251,6 @@ export default function TemplateFillPage() {
           fill_run_id: fillRunId,
           fields_mapped: fillRun.total_fields_mapped ?? 0,
         });
-        setShowCompletionBanner(true);
-        setTimeout(() => setShowCompletionBanner(false), 8000);
       } else if (fillRun.status === 'failed') {
         setJobStatus('failed');
         setJobMessage(fillRun.error_message || 'Template fill failed');
@@ -263,8 +263,6 @@ export default function TemplateFillPage() {
         setJobStatus('idle'); // Clear progress overlay
         setJobProgress(100);
         setJobMessage('Ready for review');
-        setShowCompletionBanner(true);
-        setTimeout(() => setShowCompletionBanner(false), 6000);
       }
       // If status is 'completed' but no artifact yet, keep processing overlay visible
       if (fillRun.status === 'completed' && !fillRun.artifact) {
@@ -304,6 +302,9 @@ export default function TemplateFillPage() {
         // This handles the case where backend sends progress events with terminal status
         // instead of a separate "complete" event
         if (data.status === 'awaiting_review' || data.status === 'completed') {
+          // Show banner exactly once — triggered by SSE, not by page load or silent reloads
+          setShowCompletionBanner(true);
+          setTimeout(() => setShowCompletionBanner(false), data.status === 'completed' ? 8000 : 6000);
           // Don't clear progress overlay yet - wait for store to update with artifact
           // Reload to get final state (including artifact if completed)
           setTimeout(async () => {
@@ -318,6 +319,8 @@ export default function TemplateFillPage() {
       onComplete: async (_data) => {
         setJobProgress(100);
         setJobMessage('Complete');
+        setShowCompletionBanner(true);
+        setTimeout(() => setShowCompletionBanner(false), 8000);
         // Wait for backend to finish updating database, then reload
         // This ensures we get the final status and artifact data
         // Don't clear progress overlay until artifact is loaded
@@ -398,6 +401,7 @@ export default function TemplateFillPage() {
       // Download the filled Excel file
       try {
         setIsDownloading(true);
+        setDownloadError(null);
         const blob = await downloadFilledExcel(getToken, fillRunId);
         posthog?.capture('template_fill_downloaded', { fill_run_id: fillRunId });
 
@@ -428,14 +432,14 @@ export default function TemplateFillPage() {
         }, 100);
       } catch (err) {
         console.error('❌ Failed to download Excel file:', err);
-        setJobStatus('failed');
-        setJobMessage(`Failed to download Excel file: ${err.message}`);
+        setDownloadError(err.message || 'Download failed. Please try again.');
       } finally {
         setIsDownloading(false);
       }
     } else if (fillRun.status === 'awaiting_review') {
       // Continue with filling the template
       try {
+        setContinueError(null);
         setJobStatus('processing');
         setJobProgress(70);
         setJobMessage('Filling Excel template...');
@@ -457,11 +461,11 @@ export default function TemplateFillPage() {
         // The progress overlay will stay visible until a terminal status is reached
       } catch (err) {
         console.error('Failed to continue fill run:', err);
-        setJobStatus('failed');
+        setJobStatus('idle');
         if (err?.response?.status === 403 || err?.status === 403) {
-          setJobMessage('Monthly template fill limit reached. Contact support to increase your limit.');
+          setContinueError('Monthly fill limit reached. Contact support to increase your limit.');
         } else {
-          setJobMessage('Failed to continue fill run');
+          setContinueError('Failed to start filling. Please try again.');
         }
       }
     } else {
@@ -573,6 +577,11 @@ export default function TemplateFillPage() {
     <div className="flex items-center gap-2 shrink-0">
       {fillRun.status === 'completed' && fillRun.artifact ? (
         <>
+          {downloadError && (
+            <span className="text-[10px] text-destructive max-w-[160px] truncate" title={downloadError}>
+              {downloadError}
+            </span>
+          )}
           <Button
             size="sm"
             variant="default"
@@ -598,10 +607,17 @@ export default function TemplateFillPage() {
           />
         </>
       ) : fillRun.status === 'awaiting_review' ? (
-        <Button size="sm" onClick={handleContinue} className="bg-blue-600 hover:bg-blue-700 text-white h-7 rounded-lg px-2.5 text-[11px] tracking-[0.04px]">
-          <CheckCircle2 className="h-3.5 w-3.5 mr-1" />
-          Approve &amp; Fill
-        </Button>
+        <>
+          {continueError && (
+            <span className="text-[10px] text-destructive max-w-[180px] truncate" title={continueError}>
+              {continueError}
+            </span>
+          )}
+          <Button size="sm" onClick={handleContinue} className="bg-blue-600 hover:bg-blue-700 text-white h-7 rounded-lg px-2.5 text-[11px] tracking-[0.04px]">
+            <CheckCircle2 className="h-3.5 w-3.5 mr-1" />
+            Approve &amp; Fill
+          </Button>
+        </>
       ) : fillRun.status === 'filling' ? (
         <Button size="sm" disabled className="bg-muted h-7 rounded-lg px-2.5 text-[11px] tracking-[0.04px]">
           <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />

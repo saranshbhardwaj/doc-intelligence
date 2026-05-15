@@ -1058,8 +1058,9 @@ async def update_extracted_data(
                     field_data["user_edited"] = True
             total_fields = len(extracted_data)
 
-        # Write blob separately from lean metadata
-        repo.update_fill_run_data(fill_run_id, extracted_data=extracted_data)
+        # Write blob via merge to preserve keys not sent by the client (e.g. om_structure).
+        # A full replace would silently delete om_structure every time the user edits a field.
+        repo.merge_fill_run_extracted_data(fill_run_id, extracted_data)
 
         # Compute correction counts for analytics
         flat_fields = extracted_data.get("llm_extracted", extracted_data)
