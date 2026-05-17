@@ -17,7 +17,6 @@ from anthropic import Anthropic
 from app.config import settings
 from app.core.redis_client import get_redis_client_for_cache
 from app.utils.logging import logger
-from app.utils.token_utils import count_tokens
 from app.utils.metrics import LLM_TOKEN_USAGE, LLM_CACHE_HITS, LLM_CACHE_MISSES, LLM_REQUESTS_TOTAL, LLM_COST_USD
 from app.utils.costs import compute_llm_cost
 from app.verticals.real_estate.template_filling.prompts import (

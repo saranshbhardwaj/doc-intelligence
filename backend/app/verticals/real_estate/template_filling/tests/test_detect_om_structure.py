@@ -1,7 +1,7 @@
 """Tests for Source Map detection hardening."""
 
 import asyncio
-from typing import Any, Dict, List
+from typing import Any, Dict
 import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -190,7 +190,6 @@ class TestStructuralInventory:
             return svc
 
     def test_includes_all_table_blocks(self):
-        from app.verticals.real_estate.template_filling.llm_service import TemplateFillLLMService
         svc = self._make_service()
 
         pdf_fields = [

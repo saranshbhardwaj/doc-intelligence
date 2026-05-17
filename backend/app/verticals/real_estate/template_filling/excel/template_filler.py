@@ -1,7 +1,6 @@
 """Template filling functionality for Excel templates."""
 
 import os
-import re
 import zipfile
 from copy import deepcopy
 from dataclasses import dataclass
