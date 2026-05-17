@@ -17,6 +17,7 @@ import logging
 import time
 
 from app.core.rag.hybrid_retriever import HybridRetriever
+from app.core.rag.retrieval_query import RetrievalQuery
 from app.core.rag.reranker import Reranker
 from app.services.service_locator import get_reranker
 from app.config import settings
@@ -299,12 +300,17 @@ class ComparisonRetriever:
         """
         # Step 1: Hybrid retrieval (semantic + BM25 + RRF) with optional HyDE
         retrieval_start = time.monotonic()
+        rq = (
+            RetrievalQuery.from_query_understanding(query_understanding, query)
+            if query_understanding is not None
+            else RetrievalQuery.from_text(query)
+        )
         candidates = self.hybrid_retriever.retrieve(
-            query=query,
+            rq=rq,
             collection_id=collection_id,
             document_ids=[doc_id],
-            top_k=max(chunks_per_doc * 2, 20),  # Scale candidate pool with allocation
-            query_understanding=query_understanding  # For HyDE enhancement
+            top_k=max(chunks_per_doc * 2, 20),
+            query_understanding=query_understanding,
         )
         retrieval_ms = round((time.monotonic() - retrieval_start) * 1000, 2)
 

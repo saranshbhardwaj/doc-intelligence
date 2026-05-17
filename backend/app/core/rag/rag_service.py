@@ -42,6 +42,7 @@ from app.core.rag.comparison_flow import ComparisonChatHandler
 from app.core.rag.document_matching import DocumentMatcher
 from app.core.rag.query_decomposer import decompose_and_embed
 from app.core.rag.low_signal import is_low_signal_message, low_signal_response
+from app.core.rag.retrieval_query import RetrievalQuery
 from app.core.rag.eval_contract import (
     RAG_EVAL_CONTRACT_VERSION,
     serialize_chunk_for_eval,
@@ -315,15 +316,6 @@ class RAGService:
             else understanding.reformulated_query
         )
         narrow_explicit_fact_lookup = is_narrow_explicit_fact_lookup(understanding)
-
-        # For narrow fact lookups, enrich BM25 with synonym variants from QU.
-        # data_field_synonyms is the expanded list (e.g. "asking price" → 5 variants);
-        # data_fields stays tight (1-3 items) so narrow_explicit_fact_lookup is unaffected.
-        if narrow_explicit_fact_lookup and understanding.data_field_synonyms:
-            query_lower = retrieval_query.lower()
-            extra = [t for t in understanding.data_field_synonyms if t.lower() not in query_lower]
-            if extra:
-                retrieval_query = retrieval_query + " " + " ".join(extra)
 
         logger.info(
             "History and retrieval query decision",
@@ -658,15 +650,21 @@ class RAGService:
         if did_scope_to_single_doc or already_single_doc_scope:
             semantic_floor = 0.0
 
+        # Build structured retrieval query — separates semantic embedding text from
+        # lexical phrase constraints so BM25 can't be diluted by doc-name tokens.
+        retrieval_rq = RetrievalQuery.from_query_understanding(
+            understanding,
+            semantic_text=effective_retrieval_query,
+            doc_filenames=doc_filenames,
+        )
+
         # Use hybrid retriever (combines semantic + keyword search)
-        # Use reformulated query for better keyword matching, but pass understanding for HyDE
-        # Retrieve more candidates for potential re-ranking
         hybrid_results = self.hybrid_retriever.retrieve(
-            query=effective_retrieval_query,
+            rq=retrieval_rq,
             collection_id=collection_id,
             top_k=effective_top_k,
-            document_ids=scoped_doc_ids,  # May be narrowed to a single matched document
-            query_understanding=understanding,  # For HyDE enhancement
+            document_ids=scoped_doc_ids,
+            query_understanding=understanding,
             min_semantic_similarity=semantic_floor
         )
 
@@ -760,29 +758,64 @@ class RAGService:
             )
             rerank_start = time.monotonic()
 
-            # Re-rank with compression and metadata boosting.
-            # Run in thread pool to avoid blocking the asyncio event loop during CPU-bound inference.
-            relevant_chunks = await asyncio.get_running_loop().run_in_executor(
+            # Split hybrid candidates into two tracks before reranking.
+            #
+            # BYPASS track: BM25 keyword matches that are table or key-value chunks.
+            # The MS MARCO cross-encoder (trained on web-search paragraphs) gives extreme
+            # negative scores to structured financial table text, making it an unreliable
+            # judge for this content type. BM25 already proved keyword relevance, so the
+            # reranker signal is noise here — bypass it entirely.
+            #
+            # RERANK track: everything else — narrative text, semantic-only results.
+            # The cross-encoder handles these well.
+            _STRUCTURED_TYPES = {"table", "key_value_pairs"}
+            bypass_chunks = [
+                c for c in hybrid_results
+                if c.get("is_keyword_match")
+                and c.get("section_type") in _STRUCTURED_TYPES
+            ]
+            rerank_candidates = [
+                c for c in hybrid_results
+                if c["id"] not in {b["id"] for b in bypass_chunks}
+            ]
+
+            # Cap bypass slots to avoid crowding out all reranker results.
+            # In practice keyword+table matches are few (1-3), but guard against edge cases.
+            max_bypass = settings.rag_reranker_bypass_max_structured
+            bypass_chunks = sorted(
+                bypass_chunks, key=lambda c: c.get("raw_rank", 0), reverse=True
+            )[:max_bypass]
+
+            n_bypass = len(bypass_chunks)
+            n_rerank_slots = max(0, final_top_k - n_bypass)
+
+            reranked = await asyncio.get_running_loop().run_in_executor(
                 None,
                 functools.partial(
                     self.reranker.rerank,
                     query=user_message,
-                    chunks=hybrid_results,
+                    chunks=rerank_candidates,
                     query_understanding=understanding,
-                    top_k=final_top_k,
+                    top_k=n_rerank_slots,
                 )
             )
             rerank_ms = round((time.monotonic() - rerank_start) * 1000, 2)
             stage_timings_ms["rerank"] = rerank_ms
 
+            # Bypass chunks go first (LLM attends to early context more strongly)
+            relevant_chunks = bypass_chunks + reranked
+
             logger.info(
                 f"Re-ranking complete: {len(relevant_chunks)} final chunks selected",
                 extra={
                     "session_id": session_id,
-                    "top_rerank_score": relevant_chunks[0]["rerank_score"] if relevant_chunks else 0,
-                    "rerank_ms": rerank_ms
+                    "top_rerank_score": reranked[0]["rerank_score"] if reranked else 0,
+                    "rerank_ms": rerank_ms,
+                    "bypass_structured": [c["id"] for c in bypass_chunks],
+                    "rerank_candidates": len(rerank_candidates),
                 }
             )
+
         else:
             # No re-ranker: use hybrid results directly
             relevant_chunks = hybrid_results[:final_top_k]

@@ -13,6 +13,7 @@ from typing import List, Dict
 import logging
 from sqlalchemy.orm import Session
 from app.core.rag.hybrid_retriever import HybridRetriever
+from app.core.rag.retrieval_query import RetrievalQuery
 from app.services.service_locator import get_reranker
 from app.config import settings
 
@@ -105,11 +106,11 @@ class WorkflowRetriever:
             try:
                 # Hybrid retrieval for this query
                 candidates = self.hybrid_retriever.retrieve(
-                    query=query,
-                    collection_id=None,  # Use document_ids filter instead
-                    top_k=query_top_k,  # Adaptive per section
+                    rq=RetrievalQuery.from_text(query),
+                    collection_id=None,
+                    top_k=query_top_k,
                     document_ids=document_ids,
-                    min_semantic_similarity=settings.rag_workflow_semantic_similarity_floor
+                    min_semantic_similarity=settings.rag_workflow_semantic_similarity_floor,
                 )
 
                 # Merge into all_candidates (keep best hybrid_score)

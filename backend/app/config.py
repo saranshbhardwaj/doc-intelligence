@@ -315,6 +315,12 @@ class Settings(BaseSettings):
     # 0.4 preserves reranking for most real queries (confidence usually 0.7+) but skips timed-out/ambiguous cases.
     rag_reranker_skip_confidence_threshold: float = 0.4
 
+    # Maximum number of BM25 keyword+structured (table/key_value) chunks that bypass
+    # the reranker. The MS MARCO cross-encoder under-scores financial table text, so
+    # BM25-matched structured chunks are passed directly to the LLM. Cap prevents
+    # edge cases where many tables match a broad query from crowding out reranker results.
+    rag_reranker_bypass_max_structured: int = 3
+
     # Score inheritance factors for expanded chunks (0.0-1.0)
     # Lower = expanded chunks rank below original chunks
     rag_expansion_score_narrative: float = 0.90  # Table → linked narrative
