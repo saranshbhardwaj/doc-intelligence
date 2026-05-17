@@ -1,4 +1,6 @@
 import zipfile
+import shutil
+from uuid import uuid4
 from pathlib import Path
 
 import pytest
@@ -215,3 +217,54 @@ def test_template_without_dropdown_extlst_saves_normally(tmp_path):
     reopened = load_workbook(output_path, data_only=False)
     assert "Sheet1" in reopened.sheetnames
     reopened.close()
+
+
+def test_fill_template_validates_schema_mapping_against_yaml_data_type():
+    scratch_dir = Path("backend/tests/.tmp_template_filler") / uuid4().hex
+    scratch_dir.mkdir(parents=True, exist_ok=True)
+    template_path = scratch_dir / "template.xlsx"
+    output_path = scratch_dir / "filled.xlsx"
+
+    try:
+        workbook = Workbook()
+        sheet = workbook.active
+        sheet.title = "Actuals&UnitMix"
+        sheet["G10"] = None
+        sheet["G10"].number_format = "$#,##0"
+        workbook.save(template_path)
+        workbook.close()
+
+        filler = TemplateFiller()
+        summary = filler.fill_template(
+            str(template_path),
+            str(output_path),
+            field_mapping={
+                "mappings": [
+                    {
+                        "pdf_field_id": "targeted_table_unit_mix_G10",
+                        "excel_cell": "G10",
+                        "excel_sheet": "Actuals&UnitMix",
+                        "confidence": 0.95,
+                        "source": "targeted_schema",
+                        "data_type": "text",
+                    }
+                ]
+            },
+            extracted_data={
+                "llm_extracted": {
+                    "targeted_table_unit_mix_G10": {
+                        "value": "10 x 15",
+                        "confidence": 0.95,
+                    }
+                }
+            },
+        )
+
+        assert summary["confidence_stats"]["validation_errors"] == 0
+        assert summary["validation_error_cells"] == []
+
+        reopened = load_workbook(output_path, data_only=False)
+        assert reopened["Actuals&UnitMix"]["G10"].value == "10 x 15"
+        reopened.close()
+    finally:
+        shutil.rmtree(scratch_dir, ignore_errors=True)

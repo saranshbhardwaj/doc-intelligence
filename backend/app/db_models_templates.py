@@ -116,6 +116,31 @@ class TemplateFillRun(Base):
     status = Column(String(20), default="queued", index=True, nullable=False)
     current_stage = Column(String(50))
 
+    # Status classification — single source of truth for concurrency guards and queries.
+    # Add new statuses here; all enforcement code derives from these sets.
+    ACTIVE_STATUSES: frozenset = frozenset({
+        "queued",            # created, waiting for worker
+        "detecting_fields",  # PDF field extraction running
+        "fields_detected",   # detection done, mapping starting
+        "mapping",           # LLM mapping running
+        "awaiting_review",   # mapping done, waiting for user to proceed
+        "extracting",        # data extraction running (continuation phase)
+        "filling",           # Excel write running
+    })
+    TERMINAL_STATUSES: frozenset = frozenset({
+        "completed",
+        "failed",
+        "cancelled",
+    })
+    PROCESSING_STATUSES: frozenset = frozenset({
+        "queued",
+        "detecting_fields",
+        "fields_detected",
+        "mapping",
+        "extracting",
+        "filling",
+    })
+
     # Stage completion flags (for resume capability)
     field_detection_completed = Column(Boolean, default=False)
     auto_mapping_completed = Column(Boolean, default=False)

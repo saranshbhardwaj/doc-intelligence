@@ -4,9 +4,15 @@ Includes all Pydantic response models coupled to these prompts.
 """
 
 import json
-from typing import Any, Dict, List, Optional, Type
+from typing import Any, Dict, List, Optional
 
 from pydantic import BaseModel, Field, field_validator
+
+from app.verticals.real_estate.template_filling.source_map import (
+    STRUCTURE_HIGH_CONFIDENCE,
+    STRUCTURE_LOW_CONFIDENCE,
+    trim_om_structure_for_prompt,
+)
 
 from .base import PromptPair, PromptSet
 
@@ -47,14 +53,6 @@ class FieldMapping(BaseModel):
     citations: List[str] = Field(description="Citation tokens from PDF field")
     reasoning: str = Field(description="Explanation of why this mapping was made")
 
-
-class AutoMappingResult(BaseModel):
-    """Schema for auto-mapping response."""
-
-    mappings: List[FieldMapping] = Field(description="List of field mappings")
-    total_mapped: int = Field(description="Number of successfully mapped fields")
-    total_unmapped: int = Field(description="Number of unmapped fields")
-    high_confidence_count: int = Field(description="Number of high-confidence mappings (>0.8)")
 
 
 class ExtractedFieldValue(BaseModel):
@@ -131,6 +129,47 @@ class SchemaTableExtractionResult(BaseModel):
     total_rows: int = Field(description="Total rows returned across all tables")
 
 
+class OMStructureKey(BaseModel):
+    """One detected structure key with confidence and source support."""
+
+    present: bool = Field(description="Whether this key/section is present in the OM")
+    label: Optional[str] = Field(None, description="Detected OM label/header, when applicable")
+    confidence: float = Field(ge=0.0, le=1.0, description="Confidence in this structure key")
+    citations: List[str] = Field(default_factory=list, description="Citation tokens like [S1:p5]")
+    evidence: Optional[str] = Field(None, description="Short evidence quote or explanation")
+
+
+class OMColumnMap(BaseModel):
+    """Operating-statement column map. All four keys are required."""
+
+    current: OMStructureKey = Field(description="Current or in-place operating column")
+    t12: OMStructureKey = Field(description="Trailing 12 month actuals operating column")
+    year1: OMStructureKey = Field(description="Year 1 or underwriting operating column")
+    pro_forma: OMStructureKey = Field(
+        description="Pro-forma / stabilized operating column (forward-looking)",
+    )
+
+
+class OMSectionPresence(BaseModel):
+    """Section-routing flags for template extraction. All eight keys are required."""
+
+    current_operating_statement_present: OMStructureKey
+    year1_operating_statement_present: OMStructureKey
+    pro_forma_operating_statement_present: OMStructureKey
+    t12_present: OMStructureKey
+    unit_mix_present: OMStructureKey
+    rent_roll_present: OMStructureKey
+    rent_comps_present: OMStructureKey
+    market_summary_present: OMStructureKey
+
+
+class OMStructureDetectionResult(BaseModel):
+    """Source Map for a real estate OM."""
+
+    column_map: OMColumnMap = Field(default_factory=OMColumnMap)
+    section_presence: OMSectionPresence = Field(default_factory=OMSectionPresence)
+
+
 # ============================================================================
 # V1 Prompt Set
 # ============================================================================
@@ -139,19 +178,135 @@ class SchemaTableExtractionResult(BaseModel):
 class V1PromptSet(PromptSet):
     version = "v1"
 
+    def build_azure_di_context_block(self, context_json: str) -> str:
+        return (
+            "Azure Document Intelligence context:\n"
+            "```json\n"
+            f"{context_json}\n"
+            "```"
+        )
+
+    def build_detect_om_structure(self) -> PromptPair:
+        system_prompt = (
+            "You are detecting the document structure of a real estate offering memorandum "
+            "before extracting values into an analyst Excel model.\n\n"
+            "The structural inventory in the cached context block lists every table block, "
+            "key-value pair, and section heading extracted by Azure Document Intelligence. "
+            "Return structure only — do not extract cell values."
+        )
+        user_message = (
+            "Detect the OM Source Map. You MUST return ALL 12 keys explicitly with "
+            "present=true or present=false. Omitting any key is an error.\n\n"
+            "─── STEP 1: INVENTORY ─────────────────────────────────────────────────────\n"
+            "Before deciding anything, scan the inventory in the cached context. For each "
+            "table block write one line: ID, page, name (if any), column headers, and the "
+            "document section it most likely represents.\n\n"
+            "─── STEP 2: EVIDENCE + VERDICT (ALL 13 KEYS REQUIRED) ─────────────────────\n"
+            "For each key below, state which table block IDs (or 'none') provide evidence, "
+            "then your verdict (present=true/false) and confidence. Do not skip any key.\n\n"
+            "COLUMN MAP keys (4 required):\n"
+            "  • current      — 'Current', 'In-Place', 'Actual' operating column\n"
+            "  • t12          — Separate 'T-12', 'Trailing 12', 'T12 Actuals' column.\n"
+            "                   Set t12 present=false when T-12 numbers are folded INTO\n"
+            "                   the Current column (e.g. OM says 'Current Expenses based\n"
+            "                   on trailing 12-month expenses' with no separate T-12\n"
+            "                   column header). Only set present=true when T-12 is its\n"
+            "                   own column distinct from Current.\n"
+            "  • year1        — 'Year 1', 'Year-One', 'Underwriting' operating column\n"
+            "  • pro_forma    — Forward-looking pro-forma / stabilized column. Aliases:\n"
+            "                   'Pro Forma', 'ProForma', 'Stabilized', 'Stabilized Year',\n"
+            "                   'Stabilized Pro Forma', 'Fully Stabilized', 'Underwritten\n"
+            "                   Stabilized', 'Year 2 Projected', 'Year 3 Projected',\n"
+            "                   'Year 1 Projected' (when it is the forward-stabilized\n"
+            "                   column, not the Year-1 underwriting column). Self-storage\n"
+            "                   OMs use any of these labels for the same concept — pick\n"
+            "                   the forward-looking column distinct from Current and Year 1.\n\n"
+            "SECTION PRESENCE keys (8 required):\n"
+            "  • current_operating_statement_present\n"
+            "  • year1_operating_statement_present\n"
+            "  • pro_forma_operating_statement_present\n"
+            "  • t12_present\n"
+            "  • unit_mix_present\n"
+            "  • rent_roll_present\n"
+            "  • rent_comps_present\n"
+            "  • market_summary_present\n\n"
+            "─── STEP 3: SHAPE PATTERNS ────────────────────────────────────────────────\n"
+            "Use these generic CRE patterns to match tables by meaning, not exact strings:\n\n"
+            "OPERATING STATEMENT (current / year1 / pro_forma / t12):\n"
+            "  A multi-column income/expense table with rows for Gross Potential Rent, "
+            "Effective Gross Income, Operating Expenses, and Net Operating Income. Column "
+            "headers name the time period: 'Current', 'In-Place', 'Actual', 'T-12 Actuals', "
+            "'Year 1', 'Year One', 'Year-One', 'Pro Forma', 'Underwriting', 'Stabilized', "
+            "'Year 2 Projected', 'Year 3 Projected'. Map any 'Stabilized' or projected-year "
+            "column to pro_forma — there is no separate stabilized slot. Each period maps "
+            "to one column_map key AND one section_presence key. Set present=true for "
+            "section_presence only when you find actual data rows — not just a column "
+            "header with no data.\n\n"
+            "unit_mix_present:\n"
+            "  Tabular breakdown with one row per unit type/size/floor-plan. Columns include "
+            "unit count (e.g., '# Units', 'Total Units', 'Quantity'), unit size (e.g., 'SqFt', "
+            "'SF', 'Unit Size', 'Square Feet'), and rent (e.g., 'Rent', 'Standard Rate', "
+            "'Monthly Rent', 'Asking Rent'). Header phrasing varies — match by meaning.\n\n"
+            "rent_roll_present:\n"
+            "  Detailed per-unit or per-tenant listing with individual unit numbers, tenant "
+            "names or 'vacant', lease start/end dates, and current rent. Typically has many "
+            "more rows than a unit mix (one row per unit, not per unit type).\n\n"
+            "rent_comps_present:\n"
+            "  Comparable-properties grid where each row represents a distinct competing "
+            "property, identified by a property name or street address. Columns typically "
+            "include property name/address, distance, unit type, and a dollar-value rent or "
+            "rate figure. A bar chart or single line titled 'rent comparison' alone does NOT "
+            "count — look for a multi-row competitor table with property identifiers.\n"
+            "  EXCLUSIONS — the following are NOT rent comps even if they have multiple rows:\n"
+            "    • Traffic count tables (columns like YEAR / COUNT, or rows with years such "
+            "as 2020/2021/2022 paired with numeric counts like 6,579 or 10,394).\n"
+            "    • Demographic or census tables (population, household income by year).\n"
+            "    • Any table whose first data column contains years or numeric IDs rather "
+            "than property names or addresses.\n"
+            "  If the table's first data column looks like a year (e.g., 2020, 2021, 2022), "
+            "set rent_comps_present=false regardless of where it appears in the document.\n\n"
+            "market_summary_present:\n"
+            "  Tables or paragraphs with market/demographic data: population, household "
+            "income, vacancy rates, storage sqft per capita, submarket statistics, or MSA "
+            "analysis. A market section requires substantive data, not just a heading.\n\n"
+            "─── TABLE OF CONTENTS RULE ─────────────────────────────────────────────────\n"
+            "A section is present ONLY when its actual content appears in the document. "
+            "Section names in a table of contents or index do NOT count. Citations must "
+            "point to pages with substantive data tables or narrative, never to TOC, "
+            "section-list, index, disclaimer, or broker-roster pages. When you can only "
+            "find a TOC/reference listing and no actual data, set present=false.\n\n"
+            f"─── CONFIDENCE POLICY ──────────────────────────────────────────────────────\n"
+            f"≥{STRUCTURE_HIGH_CONFIDENCE:.2f}: clear table headers with actual data rows. "
+            f"{STRUCTURE_LOW_CONFIDENCE:.2f}–{STRUCTURE_HIGH_CONFIDENCE - 0.01:.2f}: "
+            f"likely but ambiguous evidence. <{STRUCTURE_LOW_CONFIDENCE:.2f}: uncertain. "
+            "Use citations like [S3:p15] from the inventory."
+        )
+        return PromptPair(
+            system_prompt=system_prompt,
+            user_message=user_message,
+            response_model=OMStructureDetectionResult,
+        )
+
     # -- Stage 2: schema field extraction ----------------------------------
 
     def build_extract_schema_fields(
         self,
         pdf_fields_json: str,
         unmapped_fields: List[Dict[str, Any]],
+        om_structure: Optional[Dict[str, Any]] = None,
     ) -> PromptPair:
+        structure_context = ""
+        if om_structure:
+            prompt_structure = trim_om_structure_for_prompt(om_structure)
+            structure_context = (
+                "Detected OM Source Map — use this to resolve which column to pull values from "
+                "(e.g. T12 vs Year 1 vs Pro Forma):\n"
+                f"```json\n{json.dumps(prompt_structure, indent=2)}\n```\n\n"
+            )
         system_prompt = (
             "You are extracting values from a real estate PDF for specific named schema fields.\n\n"
-            "Below is the complete list of key-value pairs, full tables, and market context "
-            "(narratives) extracted by Azure Document Intelligence:\n"
-            f"```json\n{pdf_fields_json}\n```\n\n"
-            "For each requested schema field, find its value from the Azure DI data above.\n"
+            "Use the Azure Document Intelligence context in the cached system block.\n\n"
+            "For each requested schema field, find its value from the Azure DI data.\n"
             "Match by the field's aliases and semantic meaning. For example:\n"
             '- A field with aliases ["City", "Location City"] might appear as "City:", "Location:", "Property City", etc.\n'
             '- A field with aliases ["Asking Price", "Purchase Price"] might appear as "List Price", "Sale Price", etc.\n\n'
@@ -162,14 +317,24 @@ class V1PromptSet(PromptSet):
         fields_for_request = [
             {
                 "id": f["id"],
+                "sheet": f.get("sheet"),
+                "value_cell": f.get("value_cell"),
+                "label_cell": f.get("label_cell"),
                 "aliases": f.get("pdf_aliases", []),
                 "data_type": f.get("data_type", "text"),
+                "description": f.get("description"),
+                "extraction_rule": f.get("extraction_rule"),
+                "source_period": f.get("source_period"),
+                "source_basis": f.get("source_basis"),
+                "fill_when": f.get("fill_when"),
+                "requires_structure": f.get("requires_structure", []),
             }
             for f in unmapped_fields
         ]
         user_message = (
+            f"{structure_context}"
             f"Find values for these {len(fields_for_request)} schema fields from the Azure DI data "
-            f"in the system prompt.\n\n"
+            f"in the cached system block.\n\n"
             f"Fields to extract:\n```json\n"
             f"{json.dumps(fields_for_request, indent=2)}\n```\n\n"
             f"IMPORTANT - Data Type Validation Rules:\n"
@@ -178,6 +343,12 @@ class V1PromptSet(PromptSet):
             f"- percentage: Must include % (e.g., '65%', '8.11%'). Return null if not a percentage.\n"
             f"- date: Must be a date (e.g., '2026-03-10', 'March 10, 2026'). Return null for non-dates.\n"
             f"- text: Any text value is acceptable.\n\n"
+            f"Citation and reasoning rules:\n"
+            f"- Use the most specific citation token available for the exact value; do not cite a nearby source just because it is on the same page.\n"
+            f"- For key-value values, cite the matching key-value source token.\n"
+            f"- For table values, cite the matching table/source token from the context.\n"
+            f"- If extracting an expense field, describe it as coming from the EXPENSES section, not the INCOME section.\n"
+            f"- Reasoning must identify source section and period/column when available, e.g. 'Operating statement EXPENSES section, CURRENT column'.\n\n"
             f"CRITICAL: You MUST attempt to find a value for every single field. "
             f"Do not skip fields. If a field has multiple possible aliases, try all of them. "
             f"Only return null if the value is truly absent from the PDF data.\n\n"
@@ -210,17 +381,23 @@ class V1PromptSet(PromptSet):
         context_json: str,
         table_requests: List[Dict[str, Any]],
         header_equivalents: str,
+        om_structure: Optional[Dict[str, Any]] = None,
     ) -> PromptPair:
+        structure_context = ""
+        if om_structure:
+            prompt_structure = trim_om_structure_for_prompt(om_structure)
+            structure_context = (
+                "Detected OM Source Map — use this to resolve which column to pull values from:\n"
+                f"```json\n{json.dumps(prompt_structure, indent=2)}\n```\n\n"
+            )
         system_prompt = (
             "You are extracting table values from a real estate PDF for multiple YAML schema tables.\n\n"
-            "You are given a small, high-signal set of retrieved chunks (tables + key-value pairs).\n"
-            "Use ONLY this context to extract values. Do not guess.\n\n"
-            "Retrieved context:\n"
-            f"```json\n{context_json}\n```\n\n"
+            "Use ONLY the cached Azure Document Intelligence context to extract values. Do not guess.\n\n"
             f"{header_equivalents}\n"
         )
 
         user_message = (
+            f"{structure_context}"
             "Extract values for these schema tables and return a JSON object.\n\n"
             f"```json\n{json.dumps(table_requests, indent=2)}\n```\n\n"
             "Rules:\n"
@@ -228,7 +405,10 @@ class V1PromptSet(PromptSet):
             "- Use `excel_column` keys only in the `values` map.\n"
             "- If a column is missing, return null for that column.\n"
             "- Use row_labels when provided; if row_labels are empty or blank, use row_index order.\n"
-            "- Provide citations like [S1:p15] and reasoning per row.\n"
+            "- Provide citations using the exact citation tokens from the matching context entry's `citations` array, not local row numbers.\n"
+            "- If the matching context entry has citations [S240:p15], return [S240:p15]; do not rewrite it as [S1:p15].\n"
+            "- Use the most specific citation token available for the exact value; do not cite a nearby source just because it is on the same page.\n"
+            "- Provide reasoning per row, including section and period/column when available.\n"
             "- Never fabricate values.\n"
             "- For each row, values MUST include ALL excel_column keys from that table's columns.\n\n"
             "Return ONLY a JSON object matching this exact structure, no markdown:\n"
@@ -242,7 +422,7 @@ class V1PromptSet(PromptSet):
             '          "row_label": null,\n'
             '          "values": {"G": "5 x 10", "H": "26", "I": "50"},\n'
             '          "confidence": 0.95,\n'
-            '          "citations": ["[S1:p15]"],\n'
+            '          "citations": ["[S240:p15]"],\n'
             '          "reasoning": "Extracted from Table 7 NON-CLIMATE rows"\n'
             "        }\n"
             "      ]\n"
@@ -259,208 +439,6 @@ class V1PromptSet(PromptSet):
             response_model=SchemaTableExtractionResult,
         )
 
-    # -- Stage 3: generic auto-mapping ------------------------------------
-
-    def build_auto_map_system(self, pdf_fields_json: str) -> str:
-        return f"""You are an expert real estate analyst mapping data fields from a PDF (Offering Memorandum) to cells in an Excel underwriting template.
-
-You will receive batches of Excel sheets as user messages. Your job is to map the PDF fields below to those Excel sheets.
-
-**PDF Fields (extracted from document):**
-
-```json
-{pdf_fields_json}
-```
-
----
-
-## Real Estate Terminology Reference (BIDIRECTIONAL)
-
-**PURPOSE**: This table provides HIGH-CONFIDENCE matches for common abbreviations and equivalent terms.
-**IMPORTANT**: This is an ADDED LAYER, not the only matching method. You should ALSO use semantic similarity for terms NOT listed here.
-
-Terms in each row are EQUIVALENT. Match in EITHER direction. Case-insensitive.
-
-### Pricing & Valuation
-| Equivalent Terms (any ↔ any) |
-|------------------------------|
-| **Price, Listing Price, Asking Price, Sale Price, Offer Price, Purchase Price, Offering Price, Contract Price** |
-| **Net Operating Income, NOI, Net Income, Operating Income, Annual NOI** |
-| **Capitalization Rate, Cap Rate, Going-In Cap, Going In Cap Rate, In-Place Cap** |
-| **Exit Cap Rate, Cap Rate at Refi, Refi Cap, Disposition Cap, Residual Cap, Terminal Cap** |
-| **Price Per Unit, $/Unit, PPU, Cost Per Unit, Price/Unit** |
-| **Price Per Square Foot, $/SF, PSF, Price/SF, Cost Per SF, Price Per SF, Price PSF** |
-
-### Financing & Loan Terms
-| Equivalent Terms (any ↔ any) |
-|------------------------------|
-| **Down Payment, Down Payment %, DP, DP%, Equity, Equity %, Cash Investment, Equity Contribution** |
-| **Loan Amount, Debt, Mortgage Amount, Financing Amount, Loan, Senior Debt, Mortgage** |
-| **Interest Rate, Rate, Int Rate, Note Rate, Loan Rate, Coupon, Mortgage Rate** |
-| **Amortization, Amort, Amort Period, Amortization Period, Amortization Term, Amort (Mos), Amort (Yrs)** |
-| **Interest-Only Period, I/O Period, I/O Mos, IO Months, IO, Interest Only, I/O, IO Period** |
-| **Loan to Value, LTV, Loan-to-Value, L/V, Leverage** |
-| **LTV at Refi, Loan to Value at Refi, Refi LTV, Exit LTV, Refinance LTV** |
-| **Debt Service Coverage Ratio, DSCR, DCR, Debt Coverage, DSC, Debt Service Coverage** |
-| **Debt Yield, DY, Debt Yield %, Yield on Debt** |
-| **Loan Term, Term, Loan Period, Maturity** |
-
-### Income & Expenses
-| Equivalent Terms (any ↔ any) |
-|------------------------------|
-| **Gross Potential Rent, GPR, Scheduled Rent, Gross Scheduled Income, GSI, Potential Gross Income, PGI** |
-| **Effective Gross Income, EGI, Gross Income, Total Income, Adjusted Gross Income** |
-| **Operating Expenses, OpEx, Total Expenses, Expenses, Total Operating Expenses, Operating Costs** |
-| **Vacancy, Vacancy Loss, Economic Vacancy, Physical Vacancy, Vacancy Rate, Vacancy %, V&C** |
-| **Cash-on-Cash Return, CoC, Cash Yield, Cash Return, Cash on Cash, COC Return, CoC %** |
-| **Internal Rate of Return, IRR, Levered IRR, Unlevered IRR, Project IRR, Investor IRR** |
-
-### Investment Structure (LP/GP Waterfall)
-| Equivalent Terms (any ↔ any) |
-|------------------------------|
-| **LP Split, Member Split, LP Share, Limited Partner Share, LP %, Investor Share, Member/LP Split** |
-| **GP Split, Sponsor Split, GP Share, General Partner Share, GP %, Promote Share** |
-| **Preferred Return, Pref, Pref Return, Hurdle, Hurdle Rate, Pref %, Preferred, Pref Return %** |
-| **Pre Hurdle Split, Pre-Pref Split, Before Hurdle, Pre Hurdle Member/LP Split** |
-| **Post Hurdle Split, Post-Pref Split, After Hurdle, Promote Split, Carried Interest, Promote** |
-| **Equity Multiple, EM, Multiple, Return Multiple, Total Multiple, MOIC** |
-
-### Property Metrics
-| Equivalent Terms (any ↔ any) |
-|------------------------------|
-| **Square Feet, SF, SqFt, Sq. Ft., RSF, GSF, NRA, Rentable SF, Gross SF, Net Rentable Area, Total SF** |
-| **Number of Units, Units, Unit Count, Total Units, # Units, # of Units, Unit #** |
-| **Occupancy Rate, Occupancy, Occ., Physical Occupancy, Economic Occupancy, Occupancy %** |
-| **Year Built, Built, Constructed, Construction Year, Yr Built, Year Constructed** |
-
-### Rent Roll / Unit Data
-| Equivalent Terms (any ↔ any) |
-|------------------------------|
-| **In-Place Rent, Current Rent, Actual Rent, Contract Rent, Existing Rent, Monthly Rent** |
-| **Market Rent, Asking Rent, Proforma Rent, Pro Forma Rent, Projected Rent, Achievable Rent** |
-| **Lease Expiration, Lease End, Expiry, Maturity Date, Lease Exp, End Date, Lease End Date** |
-| **Unit Type, Bed/Bath, BR/BA, Floor Plan, Unit Mix, Bedroom Count, Floorplan** |
-
----
-
-## Mapping Instructions
-
-1. **Three-Layer Matching Strategy:**
-   - **LAYER 1 (Highest Priority)**: Check the terminology table above. If a PDF field matches ANY term in a row, map to Excel cells with ANY equivalent term from that same row. Confidence: 0.95+
-   - **LAYER 2 (Semantic Matching)**: For terms NOT in the table, use semantic similarity (e.g., "Property Address" → "Address", "Building Name" → "Prop Name"). Confidence: 0.75-0.94
-   - **LAYER 3 (Context + Type)**: Consider data type compatibility and section context. A currency field in "Operating Statement" section likely maps to income/expense cells. Confidence: 0.50-0.74
-
-2. **Confidence Score Guidelines:**
-   - **0.95-1.0**: Exact match or terminology table match
-   - **0.85-0.94**: Strong semantic match with same data type
-   - **0.70-0.84**: Moderate match, terminology differs but meaning is clear
-   - **0.50-0.69**: Weak match, may need user review
-   - **0.10-0.49**: Low confidence, user should review
-   - **Below 0.10**: Do NOT create mapping
-
-3. **For each mapping, provide:**
-   - `pdf_field_id`: ID of the PDF field
-   - `pdf_field_name`: Name of the PDF field
-   - `excel_cell`: Cell reference (e.g., "B2")
-   - `excel_sheet`: Sheet name
-   - `excel_label`: The label from Excel (for tables: "col_header (row_label)")
-   - `confidence`: Confidence score (0.0-1.0)
-   - `citations`: COPY the citations array from the PDF field exactly
-   - `reasoning`: Brief explanation (e.g., "NOI maps to Net Operating Income - standard terminology")
-
-4. **CRITICAL Matching Rules:**
-   - Only create mappings with confidence >= 0.10
-   - ALWAYS preserve the "citations" array from the PDF field
-   - You MAY map the same PDF field to multiple Excel cells when those cells represent
-     the same metric in different sections/summaries (e.g., dashboard rollups)
-   - Do NOT map to cells that appear to be formula cells (calculated fields)
-   - For currencies: Match currency fields to currency cells
-   - For percentages: Match percentage fields to percentage cells
-   - **Case-insensitive matching**: "ASKING PRICE" = "Asking Price" = "asking price"
-   - **Partial match OK**: "Listing Price" matches "Price" if context is clear
-   - **Abbreviation matching**: "I/O Mos" = "Interest-Only Period", "Amort" = "Amortization"
-
-5. **CONCRETE MAPPING EXAMPLES:**
-
-   **Example 1 - Terminology Table Match (0.95+ confidence):**
-   - PDF field: `{{"name": "Listing Price", "extracted_value": "$2,500,000"}}`
-   - Excel cell: `{{"cell": "C8", "label": "Asking Price", "type": "currency"}}`
-   - Result: MAP with confidence 0.95 (terminology table: Price ↔ Asking Price)
-
-   **Example 2 - Terminology Table Match (0.95+ confidence):**
-   - PDF field: `{{"name": "Down Payment", "extracted_value": "35%"}}`
-   - Excel cell: `{{"cell": "D10", "label": "Down Payment %", "type": "percentage"}}`
-   - Result: MAP with confidence 0.98 (terminology table: Down Payment ↔ Down Payment %)
-
-   **Example 3 - Abbreviation Match (0.95+ confidence):**
-   - PDF field: `{{"name": "Interest Rate", "extracted_value": "6.50%"}}`
-   - Excel cell: `{{"cell": "E12", "label": "Rate", "type": "percentage"}}`
-   - Result: MAP with confidence 0.95 (terminology table: Interest Rate ↔ Rate)
-
-   **Example 4 - Semantic Match (0.85 confidence):**
-   - PDF field: `{{"name": "Property Address", "extracted_value": "123 Main St"}}`
-   - Excel cell: `{{"cell": "B3", "label": "Address", "type": "text"}}`
-   - Result: MAP with confidence 0.85 (semantic: Property Address → Address)
-
-   **Example 5 - Investment Structure (0.95 confidence):**
-   - PDF field: `{{"name": "LP Share", "extracted_value": "70%"}}`
-   - Excel cell: `{{"cell": "F20", "label": "Pre Hurdle Member/LP Split", "type": "percentage"}}`
-   - Result: MAP with confidence 0.95 (terminology table: LP Split ↔ Member/LP Split)
-
-6. **Table Mapping Strategy:**
-   - Match PDF rent roll data to Excel rent roll rows by unit number/type
-   - Match PDF operating statement line items to Excel expense categories
-   - Consider row_label AND col_header when matching table cells
-   - If PDF has aggregated data (e.g., "Total Units"), map to summary rows, not detail rows
-
-7. **Common Mapping Patterns:**
-   - Operating Statement → Income/Expense section of Excel
-   - Rent Roll → Unit detail table in Excel
-   - Property Summary → Property Info section of Excel
-   - Investment Highlights → Summary/Overview sheet
-   - Loan Terms → Financing/Assumptions section of Excel
-   - LP/GP Split → Waterfall or Returns section of Excel
-
-8. **MAXIMIZE MAPPINGS:**
-   - Your goal is to map as many PDF fields as possible to Excel cells
-   - When in doubt about a match, create the mapping with appropriate confidence (0.50-0.70) rather than skipping
-   - Users can review and reject incorrect mappings, but cannot create mappings you missed
-   - Every unmapped field requires manual user work - minimize this burden"""
-
-    def build_auto_map_user(self, sheet_batch_schema: Dict[str, Any]) -> str:
-        schema_json = json.dumps(sheet_batch_schema, separators=(",", ":"), ensure_ascii=False)
-
-        total_kv = sheet_batch_schema.get("total_key_value_fields", 0)
-        total_tables = sheet_batch_schema.get("total_tables", 0)
-        sheet_names = [s.get("name") for s in sheet_batch_schema.get("sheets", [])]
-
-        return f"""**Excel Template Sheets (batch of {len(sheet_names)}):**
-
-Sheets in this batch: {", ".join(sheet_names)}
-Total key-value fields: {total_kv}
-Total tables: {total_tables}
-
-**Excel Schema Structure:**
-
-1. **Key-Value Fields** (in `key_value_fields` array):
-    - Simple fillable cells with a nearby label
-    - Example: {{"cell": "B2", "label": "Property Name", "type": "text"}}
-    - Map PDF fields to these when the field name matches the label
-
-2. **Table Cells** (in `tables[].fillable_cells` array):
-    - Cells within structured tables
-    - Have both `col_header` (column name) and optionally `row_label` (row name)
-    - Example: {{"cell": "M28", "col_header": "Floor Plan", "row_label": "Unit 101", "type": "text"}}
-    - Map PDF fields by considering BOTH the column header AND row context
-
-```json
-{schema_json}
-```
-
-Map the PDF fields (from system prompt) to the cells in these sheets."""
-
-    def get_auto_map_response_model(self) -> Type[BaseModel]:
-        return AutoMappingResult
 
     # -- Stage 1: field detection ------------------------------------------
 
@@ -575,24 +553,33 @@ Each chunk has metadata in the header:
         self,
         context_json: str,
         table_request: Dict[str, Any],
+        om_structure: Optional[Dict[str, Any]] = None,
     ) -> PromptPair:
+        structure_context = ""
+        if om_structure:
+            prompt_structure = trim_om_structure_for_prompt(om_structure)
+            structure_context = (
+                "Detected OM Source Map — use this to resolve which column to pull values from:\n"
+                f"```json\n{json.dumps(prompt_structure, indent=2)}\n```\n\n"
+            )
         system_prompt = (
             "You are extracting table values from a real estate PDF for a single YAML schema table.\n\n"
-            "You are given a small, high-signal set of retrieved chunks (tables + key-value pairs).\n"
-            "Use ONLY this context to extract values. Do not guess.\n\n"
-            "Retrieved context:\n"
-            f"```json\n{context_json}\n```\n\n"
+            "Use ONLY the cached Azure Document Intelligence context to extract values. Do not guess.\n\n"
             f"{self._TABLE_HEADER_EQUIVALENTS}"
         )
 
         user_message = (
+            f"{structure_context}"
             "Extract values for this schema table:\n\n"
             f"```json\n{json.dumps(table_request, indent=2)}\n```\n\n"
             "Rules:\n"
             "- Use `excel_column` keys only in the `values` map.\n"
             "- If a column is missing, return null for that column.\n"
             "- Use row_labels when provided; if row_labels are empty or blank, ignore them and use row_index order.\n"
-            "- Provide citations like [S1:p5] and a brief reasoning per row (reasoning is required).\n"
+            "- Provide citations using the exact citation tokens from the matching context entry's `citations` array, not local row numbers.\n"
+            "- If the matching context entry has citations [S240:p15], return [S240:p15]; do not rewrite it as [S1:p15].\n"
+            "- Use the most specific citation token available for the exact value; do not cite a nearby source just because it is on the same page.\n"
+            "- Provide a brief reasoning per row with section and period/column when available (reasoning is required).\n"
             "- Never fabricate values.\n"
             "\nCRITICAL: For each row, the `values` dict MUST include ALL excel_column keys "
             "listed in the table's `columns` array. "
@@ -609,7 +596,7 @@ Each chunk has metadata in the header:
             '          "row_label": null,\n'
             '          "values": {"G": "5 x 10", "H": "26", "I": "50"},\n'
             '          "confidence": 0.95,\n'
-            '          "citations": ["[S1:p15]"],\n'
+            '          "citations": ["[S240:p15]"],\n'
             '          "reasoning": "Extracted from Table 7"\n'
             "        }\n"
             "      ]\n"

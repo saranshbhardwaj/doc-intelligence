@@ -222,7 +222,6 @@ backend/app/verticals/real_estate/
 
 ### Template fill pipeline
 ```
-analyze_template_task       → scan Excel for fillable cells
 detect_fields_task          → LLM detects structured fields in PDF
 auto_map_fields_task        → LLM maps PDF fields → Excel cells
 extract_data_task           → LLM extracts values from PDF text

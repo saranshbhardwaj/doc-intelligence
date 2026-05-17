@@ -4,7 +4,7 @@
  * Handles 3 modes: unmapped cell view, mapped cell view (read-only), and edit mode
  */
 
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useAppAuth } from "@/hooks/useAppAuth";
 import { useTemplateFillActions } from '../../../store';
 import {
@@ -41,7 +41,48 @@ import {
 } from '../../../components/ui/popover';
 import { Loader2, Info, Check, ChevronsUpDown } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { toast } from 'sonner';
 import { CitationSection } from './CitationBadge';
+
+function titleCase(value) {
+  return value
+    .replace(/([a-z])([A-Z])/g, '$1 $2')
+    .replace(/[_:/-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .replace(/\w\S*/g, (word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase());
+}
+
+function humanizeInternalFieldName(value) {
+  if (!value) return 'Unknown';
+
+  let cleaned = String(value);
+  [
+    'targeted_table_',
+    'targeted_',
+    'actuals_unit_mix_',
+    'napkin_',
+    'rediq_',
+    'dashboard_',
+    'pnl_',
+  ].some((prefix) => {
+    if (cleaned.startsWith(prefix)) {
+      cleaned = cleaned.slice(prefix.length);
+      return true;
+    }
+    return false;
+  });
+
+  return titleCase(cleaned);
+}
+
+function getFieldDisplayLabel(field, mapping = null) {
+  return (
+    field?.display_label ||
+    mapping?.display_label ||
+    humanizeInternalFieldName(field?.name || mapping?.pdf_field_name || field?.id)
+  );
+}
 
 export default function MappingDetailsDialog({
   selectedCell,
@@ -56,7 +97,17 @@ export default function MappingDetailsDialog({
   const { updateMappings, updateFieldData, loadFillRun } = useTemplateFillActions();
   const { mapping, pdfField, value, cellAddress, cellData, sheetName } = selectedCell;
 
-  const allPdfFields = fieldMapping?.pdf_fields || [];
+  const allPdfFields = useMemo(
+    () =>
+      (fieldMapping?.pdf_fields || []).filter(
+        (f) =>
+          f.extracted_value != null &&
+          f.extracted_value !== '' &&
+          !f.id?.startsWith('tbl_block_') &&
+          !f.id?.startsWith('narrative_block_'),
+      ),
+    [fieldMapping?.pdf_fields],
+  );
 
   const [isEditMode, setIsEditMode] = useState(false);
   const [isRemoving, setIsRemoving] = useState(false);
@@ -81,6 +132,10 @@ export default function MappingDetailsDialog({
 
   // Get currently selected field (for edit mode)
   const currentField = allPdfFields.find(f => f.id === selectedFieldId) || pdfField;
+  const displayLabel = getFieldDisplayLabel(pdfField, mapping);
+  const displayContext = pdfField?.display_context || mapping?.display_context;
+  const sourceNote = pdfField?.source_note || mapping?.source_note;
+  const aiReasoning = pdfField?.reasoning || mapping?.reasoning;
 
   function handleEditMapping() {
     setIsEditMode(true);
@@ -119,7 +174,14 @@ export default function MappingDetailsDialog({
         if (selectedFieldId !== mapping.pdf_field_id) {
           const updatedMappings = fieldMapping.mappings.map(m =>
             m.excel_cell === mapping.excel_cell && m.excel_sheet === mapping.excel_sheet
-              ? { ...m, pdf_field_id: selectedFieldId, pdf_field_name: currentField?.name }
+              ? {
+                  ...m,
+                  pdf_field_id: selectedFieldId,
+                  pdf_field_name: currentField?.name,
+                  display_label: currentField?.display_label,
+                  display_context: currentField?.display_context,
+                  source_note: currentField?.source_note,
+                }
               : m
           );
           await updateMappings(fillRunId, updatedMappings, getToken);
@@ -208,7 +270,7 @@ export default function MappingDetailsDialog({
       onClose();
     } catch (err) {
       console.error('Failed to save changes:', err);
-      alert('Failed to save changes');
+      toast.error('Failed to save changes');
     } finally {
       setIsSaving(false);
     }
@@ -238,7 +300,7 @@ export default function MappingDetailsDialog({
       onClose();
     } catch (err) {
       console.error('Failed to remove mapping:', err);
-      alert('Failed to remove mapping');
+      toast.error('Failed to remove mapping');
     } finally {
       setIsRemoving(false);
     }
@@ -322,10 +384,10 @@ export default function MappingDetailsDialog({
                     <ChevronsUpDown className="ml-2 h-3.5 w-3.5 shrink-0 opacity-50" />
                   </Button>
                 </PopoverTrigger>
-                <PopoverContent className="w-full p-0">
+                <PopoverContent className="w-[320px] p-0">
                   <Command>
                     <CommandInput placeholder="Search fields..." className="text-xs h-8" />
-                    <CommandList>
+                    <CommandList className="max-h-60 overflow-y-auto">
                       <CommandEmpty className="text-xs">No field found.</CommandEmpty>
                       <CommandGroup>
                         {allPdfFields.map((field) => (
@@ -349,6 +411,9 @@ export default function MappingDetailsDialog({
                               <span className="text-xs font-medium truncate">{field.name}</span>
                               <span className="text-xs text-muted-foreground truncate">
                                 {field.extracted_value}
+                                {field.page_number != null && (
+                                  <span className="ml-1.5 text-muted-foreground/50">p{field.page_number}</span>
+                                )}
                               </span>
                             </div>
                           </CommandItem>
@@ -435,11 +500,14 @@ export default function MappingDetailsDialog({
 
       {/* PDF Field Info */}
       <div className="mb-3">
-        <h4 className="text-xs font-semibold text-foreground mb-1.5">Mapped PDF Field</h4>
+        <h4 className="text-xs font-semibold text-foreground mb-1.5">Mapped Source</h4>
         <div className="bg-muted/50 rounded-lg p-2.5 border space-y-2">
           <div>
-            <span className="text-xs font-medium text-muted-foreground block mb-0.5">Field Name</span>
-            <p className="text-xs text-foreground font-mono">{pdfField?.name || 'Unknown'}</p>
+            <span className="text-xs font-medium text-muted-foreground block mb-0.5">Field</span>
+            <p className="text-xs text-foreground font-medium">{displayLabel}</p>
+            {displayContext && (
+              <p className="text-xs text-muted-foreground mt-0.5">{displayContext}</p>
+            )}
           </div>
           {value && (
             <div>
@@ -454,24 +522,37 @@ export default function MappingDetailsDialog({
         </div>
       </div>
 
-      {/* LLM Reasoning */}
-      {mapping.reasoning && (
+      {/* Source Note */}
+      {sourceNote && (
         <div className="mb-3">
           <h4 className="text-xs font-semibold text-foreground mb-1.5 flex items-center gap-1.5">
             <Info className="h-3.5 w-3.5 text-primary" />
-            AI Reasoning
+            Source Note
             {mapping.confidence != null && (
               <span className="ml-auto text-[11px] font-medium text-muted-foreground">
                 {Math.round(mapping.confidence * 100)}% confidence
               </span>
             )}
           </h4>
-          <div className="bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800 rounded-lg p-2.5">
+          <div className="bg-muted/50 border rounded-lg p-2.5">
             <p className="text-xs text-foreground leading-relaxed">
-              {mapping.reasoning}
+              {sourceNote}
             </p>
           </div>
         </div>
+      )}
+
+      {aiReasoning && (
+        <details className="mb-3 group">
+          <summary className="cursor-pointer list-none text-xs font-semibold text-muted-foreground hover:text-foreground">
+            AI reasoning
+          </summary>
+          <div className="mt-1.5 bg-muted/30 border rounded-lg p-2.5">
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              {aiReasoning}
+            </p>
+          </div>
+        </details>
       )}
 
       {/* Citations */}
@@ -519,22 +600,22 @@ export default function MappingDetailsDialog({
                     className="w-full justify-between h-8 text-xs"
                   >
                     {selectedFieldId
-                      ? allPdfFields.find((f) => f.id === selectedFieldId)?.name || 'Select field...'
+                      ? getFieldDisplayLabel(allPdfFields.find((f) => f.id === selectedFieldId), null) || 'Select field...'
                       : 'Select field...'}
                     <ChevronsUpDown className="ml-2 h-3.5 w-3.5 shrink-0 opacity-50" />
                   </Button>
                 </PopoverTrigger>
-                <PopoverContent className="w-full p-0">
+                <PopoverContent className="w-[320px] p-0">
                   <Command>
                     <CommandInput placeholder="Search fields..." className="text-xs h-8" />
-                    <CommandList>
+                    <CommandList className="max-h-60 overflow-y-auto">
                       <CommandEmpty className="text-xs">No field found.</CommandEmpty>
                       <CommandGroup>
                         {allPdfFields.map((field) => (
                           <CommandItem
                             key={field.id}
-                            value={`${field.id}::${field.name}`}
-                            keywords={[field.name, field.extracted_value || '']}
+                            value={`${field.id}::${getFieldDisplayLabel(field)}`}
+                            keywords={[getFieldDisplayLabel(field), field.name, field.extracted_value || '']}
                             onSelect={() => {
                               handleFieldChange(field.id);
                               setOpen(false);
@@ -548,9 +629,15 @@ export default function MappingDetailsDialog({
                               )}
                             />
                             <div className="flex flex-col flex-1 min-w-0">
-                              <span className="text-xs font-medium truncate">{field.name}</span>
+                              <span className="text-xs font-medium truncate">{getFieldDisplayLabel(field)}</span>
+                              {field.display_context && (
+                                <span className="text-xs text-muted-foreground truncate">{field.display_context}</span>
+                              )}
                               <span className="text-xs text-muted-foreground truncate">
                                 {field.extracted_value}
+                                {field.page_number != null && (
+                                  <span className="ml-1.5 text-muted-foreground/50">p{field.page_number}</span>
+                                )}
                               </span>
                             </div>
                           </CommandItem>
@@ -577,9 +664,16 @@ export default function MappingDetailsDialog({
                       <>
                         <div>
                           <span className="text-xs font-medium text-muted-foreground block mb-0.5">
-                            Field Name
+                            Field
                           </span>
-                          <p className="text-xs text-foreground font-mono">{selectedField.name}</p>
+                          <p className="text-xs text-foreground font-medium">
+                            {getFieldDisplayLabel(selectedField)}
+                          </p>
+                          {selectedField.display_context && (
+                            <p className="text-xs text-muted-foreground mt-0.5">
+                              {selectedField.display_context}
+                            </p>
+                          )}
                         </div>
                         <div>
                           <span className="text-xs font-medium text-muted-foreground block mb-1">

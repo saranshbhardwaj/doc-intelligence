@@ -7,7 +7,7 @@ Provides Excel template upload, management, and filling functionality.
 
 import os
 import shutil
-from datetime import datetime
+from datetime import datetime, timezone
 
 import openpyxl
 from io import BytesIO
@@ -27,14 +27,21 @@ from app.repositories.document_repository import DocumentRepository
 from app.repositories.job_repository import JobRepository
 from app.repositories.template_repository import TemplateRepository
 from app.core.storage.storage_factory import get_storage_backend
-from app.services.beta_limits import enforce_template_fill_limit, reserve_shadow_credits
+from app.services.beta_limits import (
+    enforce_fill_run_concurrency_limit,
+    enforce_template_fill_limit,
+    reserve_shadow_credits,
+)
+from app.services.user_rate_limiter import enforce_fill_run_rate_limit
 from app.utils.logging import logger
 from app.utils.id_generator import generate_id
 from app.verticals.real_estate.template_filling.excel_handler import ExcelHandler
 from app.verticals.real_estate.template_filling.tasks import (
-    _compute_schema_counts,
     continue_fill_run_chain,
     start_fill_run_chain,
+)
+from app.verticals.real_estate.template_filling.schema_planner import (
+    compute_schema_counts as _compute_schema_counts,
 )
 from app.verticals.real_estate.template_filling.excel.mapping_coordinator import MappingCoordinator
 
@@ -317,8 +324,7 @@ async def upload_template(
 
         # Generate storage key: templates/{YYYY}/{MM}/{DD}/{template_id}_{filename}
         # Date-partitioned, consistent with workflow-artifacts. Readable in R2 browser.
-        from datetime import datetime as _dt
-        _now = _dt.utcnow()
+        _now = datetime.now(timezone.utc)
         safe_template_filename = file.filename.replace("/", "_").replace("\\", "_")
         storage_key = (
             f"templates/{_now.year}/{_now.month:02d}/{_now.day:02d}"
@@ -703,20 +709,32 @@ async def start_fill(
     try:
         repo = TemplateRepository(db)
 
-        # Verify template exists and belongs to user
+        # Layer 1: per-user rate limit (Redis sliding window, fail-open)
+        enforce_fill_run_rate_limit(user.id)
+
+        # Layer 2: template ownership
         template = repo.get_template(template_id, user.org_id)
         if not template or template.user_id != user.id:
             raise HTTPException(status_code=404, detail="Template not found")
 
+        # Layer 3: document ownership (cross-org access guard)
+        document_repo = DocumentRepository()
+        document = document_repo.get_by_id(request.document_id, user.org_id)
+        if not document:
+            raise HTTPException(status_code=404, detail="Document not found")
+
+        # Layer 4: per-user concurrency cap (tighter filters, cheaper query)
+        enforce_fill_run_concurrency_limit(user, db)
+
+        # Layer 5: monthly quota
         enforce_template_fill_limit(user)
 
-        # Start async pipeline (worker will create JobState and TemplateFillRun)
         fill_run_id = start_fill_run_chain.delay(
             template_id=template_id,
             document_id=request.document_id,
             user_id=user.id,
             fill_run_name=request.name,
-        ).get()  # Wait for initial setup to complete
+        ).get()  # Wait for initial DB setup (fill_run record created)
 
         reserve_shadow_credits(
             user=user,
@@ -1040,8 +1058,9 @@ async def update_extracted_data(
                     field_data["user_edited"] = True
             total_fields = len(extracted_data)
 
-        # Write blob separately from lean metadata
-        repo.update_fill_run_data(fill_run_id, extracted_data=extracted_data)
+        # Write blob via merge to preserve keys not sent by the client (e.g. om_structure).
+        # A full replace would silently delete om_structure every time the user edits a field.
+        repo.merge_fill_run_extracted_data(fill_run_id, extracted_data)
 
         # Compute correction counts for analytics
         flat_fields = extracted_data.get("llm_extracted", extracted_data)

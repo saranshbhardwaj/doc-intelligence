@@ -1,5 +1,6 @@
 """Coordinator for Excel field mapping - handles schema-based + generic fallback."""
 
+import re
 from typing import Any, Dict, List, Optional
 
 from openpyxl import Workbook
@@ -9,6 +10,193 @@ from app.services.citations import normalize_citations
 
 from .schema_based import SchemaLoader, SchemaMapper, TemplateIdentifier
 from .schema_based.schema_loader import _normalize_field_name
+
+
+_SOURCE_BASIS_LABELS = {
+    "om_operating_statement": "Operating Statement",
+    "om_property_summary": "Property Summary",
+    "om_unit_mix": "Unit Mix",
+    "om_rent_roll": "Rent Roll",
+    "om_rent_comps": "Rent Comps",
+    "om_market_summary": "Market Summary",
+    "om_capex_schedule": "CapEx Schedule",
+}
+
+_SOURCE_PERIOD_LABELS = {
+    "static": "Static",
+    "current": "Current",
+    "t12": "T12",
+    "year1": "Year 1",
+    "pro_forma": "Pro Forma",
+    "stabilized": "Stabilized",
+}
+
+
+def _coerce_numeric(value: Any) -> Optional[float]:
+    """Best-effort numeric coercion for sanity-check comparisons."""
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        return float(value)
+    cleaned = str(value).replace(",", "").replace("$", "").strip()
+    if not cleaned:
+        return None
+    try:
+        return float(cleaned)
+    except ValueError:
+        return None
+
+
+def _drop_columns_violating_equality_guards(
+    columns: List[Dict[str, Any]],
+    values: Dict[str, Any],
+    table_id: str,
+    row_label: Optional[str],
+) -> Dict[str, Any]:
+    """
+    Apply `disallow_equal_to_column` guards declared on schema-table columns.
+
+    A column may declare `disallow_equal_to_column: "<other_excel_column>"` to mean
+    "if my numeric value equals the value in the named column for the same row, drop
+    my value rather than write a likely-wrong number." The cell will surface as
+    Unmapped for analyst review instead of carrying a duplicated value.
+    """
+    if not columns or not values:
+        return values
+
+    filtered = dict(values)
+    for col_def in columns:
+        excel_col = col_def.get("excel_column")
+        guard_col = col_def.get("disallow_equal_to_column")
+        if not excel_col or not guard_col:
+            continue
+        if excel_col not in filtered or guard_col not in filtered:
+            continue
+
+        own_numeric = _coerce_numeric(filtered[excel_col])
+        guard_numeric = _coerce_numeric(filtered[guard_col])
+        if own_numeric is None or guard_numeric is None:
+            continue
+        if own_numeric != guard_numeric:
+            continue
+
+        logger.warning(
+            "Schema sanity check: dropping %s=%s for table '%s' row '%s' because it equals "
+            "column %s=%s (disallow_equal_to_column). Cell will be left unmapped.",
+            excel_col,
+            filtered[excel_col],
+            table_id,
+            row_label,
+            guard_col,
+            filtered[guard_col],
+        )
+        filtered.pop(excel_col, None)
+
+    return filtered
+
+
+def _humanize_identifier(value: str) -> str:
+    """Convert internal ids/sheet names into compact analyst-facing labels."""
+
+    if not value:
+        return ""
+
+    cleaned = re.sub(r"(?<=[a-z])(?=[A-Z])", " ", str(value))
+    cleaned = cleaned.replace("&", " & ")
+    cleaned = re.sub(r"[_:/-]+", " ", cleaned)
+    cleaned = re.sub(r"\s+", " ", cleaned).strip()
+    return cleaned.title()
+
+
+def _friendly_sheet_name(sheet: str) -> str:
+    return _humanize_identifier(sheet).replace(" And ", " & ")
+
+
+def _field_label(field: Dict[str, Any]) -> str:
+    for alias in field.get("pdf_aliases") or []:
+        if alias:
+            label = str(alias)
+            for prefix in ("Actuals & Unit Mix ", "Napkin ", "P&L ", "Rediq "):
+                if label.lower().startswith(prefix.lower()):
+                    label = label[len(prefix):]
+                    break
+            return label
+
+    field_id = str(field.get("id") or "")
+    for prefix in (
+        "actuals_unit_mix_",
+        "napkin_",
+        "pnl_",
+        "rediq_",
+        "dashboard_",
+    ):
+        if field_id.startswith(prefix):
+            field_id = field_id[len(prefix):]
+            break
+    return _humanize_identifier(field_id)
+
+
+def _section_label_from_id(field_id: str) -> Optional[str]:
+    normalized = f"_{field_id.lower()}_"
+    if "_expenses_" in normalized or "_expense_" in normalized:
+        return "Expenses"
+    if "_income_" in normalized or "_revenue_" in normalized:
+        return "Income"
+    if "_unit_mix_" in normalized:
+        return "Unit Mix"
+    if "_rent_comps_" in normalized:
+        return "Rent Comps"
+    if "_market_" in normalized:
+        return "Market"
+    return None
+
+
+def _first_citation_page(citations: List[str]) -> Optional[int]:
+    for citation in citations:
+        match = re.search(r"\[[SD](?:\d+):p(\d+)\]", str(citation))
+        if match:
+            return int(match.group(1))
+    return None
+
+
+def _source_note(
+    *,
+    source_basis: Optional[str],
+    source_period: Optional[str],
+    section_label: Optional[str],
+    citations: List[str],
+) -> str:
+    parts = []
+    if source_basis:
+        basis = _SOURCE_BASIS_LABELS.get(source_basis, _humanize_identifier(source_basis))
+        parts.append("Operating statement" if basis == "Operating Statement" else basis)
+    if section_label and section_label.lower() != (parts[0].lower() if parts else ""):
+        parts.append(f"{section_label} section" if source_basis else section_label)
+    if source_period and source_period != "static":
+        period = _SOURCE_PERIOD_LABELS.get(source_period, _humanize_identifier(source_period))
+        parts.append(f"{period} period")
+
+    page = _first_citation_page(citations)
+    if page is not None:
+        parts.append(f"Page {page}")
+
+    return " · ".join(parts)
+
+
+def _display_context(field: Dict[str, Any]) -> str:
+    parts = [_friendly_sheet_name(field.get("sheet", ""))]
+    source_basis = field.get("source_basis")
+    source_period = field.get("source_period")
+    section_label = _section_label_from_id(str(field.get("id") or ""))
+
+    if source_basis:
+        parts.append(_SOURCE_BASIS_LABELS.get(source_basis, _humanize_identifier(source_basis)))
+    if section_label:
+        parts.append(section_label)
+    if source_period and source_period != "static":
+        parts.append(_SOURCE_PERIOD_LABELS.get(source_period, _humanize_identifier(source_period)))
+
+    return " · ".join(part for part in parts if part)
 
 
 class MappingCoordinator:
@@ -142,6 +330,8 @@ class MappingCoordinator:
             result = targeted_values.get(field_id)
             if not result or not result.get("value"):
                 continue
+            citations = normalize_citations(result.get("citations", []))
+            section_label = _section_label_from_id(field_id)
 
             mappings.append({
                 "pdf_field_id": f"targeted_{field_id}",
@@ -152,7 +342,17 @@ class MappingCoordinator:
                 "confidence": result["confidence"],
                 "source": "targeted_schema",
                 "reasoning": result.get("reasoning") or f"Stage 2 targeted extraction for schema field '{field_id}'",
-                "citations": normalize_citations(result.get("citations", [])),
+                "citations": citations,
+                "extracted_value": result["value"],
+                "data_type": field.get("data_type", "text"),
+                "display_label": _field_label(field),
+                "display_context": _display_context(field),
+                "source_note": _source_note(
+                    source_basis=field.get("source_basis"),
+                    source_period=field.get("source_period"),
+                    section_label=section_label,
+                    citations=citations,
+                ),
             })
 
         logger.info(
@@ -217,6 +417,9 @@ class MappingCoordinator:
                 row_index = row.get("row_index")
                 row_label = row.get("row_label")
                 values = row.get("values", {}) or {}
+                values = _drop_columns_violating_equality_guards(
+                    columns, values, table_id, row.get("row_label")
+                )
                 confidence = row.get("confidence", 0.7)
                 citations = row.get("citations", [])
 
@@ -251,6 +454,14 @@ class MappingCoordinator:
                     col_def = column_defs.get(excel_col, {})
                     excel_cell = f"{excel_col}{excel_row}"
                     data_type = col_def.get("data_type", "text")
+                    citations = normalize_citations(citations)
+                    column_label = str(col_def.get("header") or excel_col)
+                    display_label = column_label
+                    if row_label:
+                        display_label = f"{column_label} · {row_label}"
+                    table_description = str(
+                        table_def.get("description") or _humanize_identifier(table_id)
+                    )
                     mappings.append({
                         "pdf_field_id": f"targeted_table_{table_id}_{excel_cell}",
                         "pdf_field_name": f"{table_id}:{excel_cell}",
@@ -260,13 +471,24 @@ class MappingCoordinator:
                         "confidence": confidence,
                         "source": "targeted_schema",
                         "reasoning": row.get("reasoning") or f"Stage 2 targeted table extraction for '{table_id}'",
-                        "citations": normalize_citations(citations),
+                        "citations": citations,
                         "extracted_value": value,
                         "data_type": data_type,
                         "schema_table_id": table_id,
                         "schema_table_row_label": row_label,
                         "schema_table_row_index": row_index,
                         "schema_table_column": excel_col,
+                        "display_label": display_label,
+                        "display_context": (
+                            f"{_friendly_sheet_name(table_def.get('sheet', ''))} · "
+                            f"{table_description}"
+                        ),
+                        "source_note": _source_note(
+                            source_basis=None,
+                            source_period=None,
+                            section_label=table_description,
+                            citations=citations,
+                        ),
                     })
 
         logger.info(

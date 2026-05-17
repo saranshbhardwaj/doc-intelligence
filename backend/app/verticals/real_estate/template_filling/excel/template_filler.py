@@ -1,7 +1,6 @@
 """Template filling functionality for Excel templates."""
 
 import os
-import re
 import zipfile
 from copy import deepcopy
 from dataclasses import dataclass
@@ -360,8 +359,11 @@ class TemplateFiller:
                         errors.append(f"Cell {excel_sheet}!{excel_cell} is in a merged range but top-left cell not found")
                         continue
 
-                    # Infer expected data type from cell format
-                    cell_type = self._infer_cell_type(target_cell)
+                    # Schema/YAML data_type is the contract for schema-based fills.
+                    # Excel templates often carry copied formatting that does not
+                    # match the semantic target cell, so use formatting only as a
+                    # fallback for older/generic mappings.
+                    cell_type = mapping.get("data_type") or self._infer_cell_type(target_cell)
 
                     # Validate value against expected type
                     validation_result = FieldValidator.validate(value, cell_type)
@@ -472,87 +474,22 @@ class TemplateFiller:
             if manually_filled > 0:
                 logger.info(f"Filled {manually_filled} manually edited unmapped cells")
 
-            # Clean up broken external links to prevent file corruption
+            # Strip openpyxl's external link objects only — openpyxl cannot faithfully
+            # round-trip external link XML and produces a broken ZIP entry if these are
+            # left in. The formula strings themselves (e.g. =[File.xlsx]Sheet!A1) are
+            # preserved in their cells; Excel will prompt "Update Links?" on open, which
+            # is identical to opening the original template manually without the linked file.
             try:
                 if hasattr(workbook, '_external_links') and workbook._external_links:
-                    logger.warning(
-                        f"Template has {len(workbook._external_links)} external link(s) "
-                        f"(likely formulas referencing missing sheets). Removing to prevent corruption."
+                    logger.info(
+                        f"Template has {len(workbook._external_links)} external link reference(s) — "
+                        f"stripping openpyxl link objects (formula strings preserved in cells)."
                     )
                     workbook._external_links = []
                 else:
-                    logger.info("No external links detected - all formulas reference existing sheets")
+                    logger.info("No external links detected")
             except Exception as e:
-                logger.warning(f"Could not check/remove external links: {e}")
-
-            # Remove ALL named ranges to prevent corruption
-            try:
-                # workbook.defined_names is a DefinedNameDict - iterate directly
-                named_range_names = list(workbook.defined_names.keys())
-
-                if named_range_names:
-                    logger.warning(
-                        f"Removing {len(named_range_names)} named range(s) to prevent corruption: "
-                        f"{named_range_names[:5]}{'...' if len(named_range_names) > 5 else ''}"
-                    )
-                    for name in named_range_names:
-                        try:
-                            del workbook.defined_names[name]
-                            logger.debug(f"Deleted named range '{name}'")
-                        except Exception as e:
-                            logger.warning(f"Could not delete named range '{name}': {e}")
-                else:
-                    logger.info("No named ranges detected")
-            except Exception as e:
-                logger.warning(f"Could not remove named ranges: {e}")
-
-            # Clear formulas that reference missing sheets or external workbooks
-            try:
-                existing_sheets = set(workbook.sheetnames)
-                existing_sheets_lower = {s.lower() for s in existing_sheets}
-                formulas_cleared = 0
-
-                # Regex patterns to find sheet references in formulas:
-                # Pattern 1: 'Sheet Name'!A1 (quoted sheet name with spaces)
-                # Pattern 2: SheetName!A1 (unquoted sheet name)
-                sheet_ref_pattern = re.compile(r"(?:'([^']+)'|([A-Za-z_][A-Za-z0-9_]*))\s*!")
-
-                for sheet_name in workbook.sheetnames:
-                    sheet = workbook[sheet_name]
-                    for row in sheet.iter_rows():
-                        for cell in row:
-                            if cell.value and isinstance(cell.value, str) and cell.value.startswith('='):
-                                formula = cell.value
-                                should_clear = False
-
-                                # Check 1: External workbook reference (contains '[' and ']')
-                                if '[' in formula and ']' in formula:
-                                    logger.debug(f"Clearing formula in {sheet_name}!{cell.coordinate}: contains external workbook reference")
-                                    should_clear = True
-                                else:
-                                    # Check 2: Internal sheet reference to missing sheet
-                                    matches = sheet_ref_pattern.findall(formula)
-                                    for match in matches:
-                                        # match is a tuple: (quoted_name, unquoted_name)
-                                        ref_sheet = match[0] if match[0] else match[1]
-                                        if ref_sheet.lower() not in existing_sheets_lower:
-                                            logger.debug(f"Clearing formula in {sheet_name}!{cell.coordinate}: references missing sheet '{ref_sheet}'")
-                                            should_clear = True
-                                            break
-
-                                if should_clear:
-                                    cell.value = None
-                                    formulas_cleared += 1
-
-                if formulas_cleared > 0:
-                    logger.warning(
-                        f"Cleared {formulas_cleared} formula(s) referencing missing sheets or external workbooks "
-                        f"(temporary fix for partial template)"
-                    )
-                else:
-                    logger.info("No formulas reference missing sheets or external workbooks")
-            except Exception as e:
-                logger.warning(f"Could not clear formulas referencing missing sheets: {e}")
+                logger.warning(f"Could not strip external link objects: {e}")
 
             # Save filled workbook
             workbook.save(output_path)

@@ -25,6 +25,15 @@ class PromptSet(ABC):
 
     version: str
 
+    def build_azure_di_context_block(self, context_json: str) -> str:
+        """Build the cacheable Azure DI context block shared across extraction calls."""
+        return (
+            "Azure Document Intelligence context:\n"
+            "```json\n"
+            f"{context_json}\n"
+            "```"
+        )
+
     # -- Stage 1: field detection ------------------------------------------
 
     @abstractmethod
@@ -42,6 +51,7 @@ class PromptSet(ABC):
         self,
         pdf_fields_json: str,
         unmapped_fields: List[Dict[str, Any]],
+        om_structure: Dict[str, Any] | None = None,
     ) -> PromptPair:
         """Build prompts for extracting YAML-schema field values from Azure DI data."""
 
@@ -52,6 +62,7 @@ class PromptSet(ABC):
         self,
         context_json: str,
         table_request: Dict[str, Any],
+        om_structure: Dict[str, Any] | None = None,
     ) -> PromptPair:
         """Build prompts for RAG-based single-table extraction."""
 
@@ -63,30 +74,7 @@ class PromptSet(ABC):
         context_json: str,
         table_requests: List[Dict[str, Any]],
         header_equivalents: str,
+        om_structure: Dict[str, Any] | None = None,
     ) -> PromptPair:
         """Build prompts for extracting table row values via RAG chunks (batch)."""
 
-    # -- Stage 3: generic auto-mapping (system + per-batch user) -----------
-
-    @abstractmethod
-    def build_auto_map_system(
-        self,
-        pdf_fields_json: str,
-    ) -> str:
-        """Build the system prompt (with PDF fields) for generic auto-mapping.
-
-        Returns the raw system prompt string (not a PromptPair) because
-        auto_map_fields sends multiple user-message batches against a single
-        cached system prompt.
-        """
-
-    @abstractmethod
-    def build_auto_map_user(
-        self,
-        sheet_batch_schema: Dict[str, Any],
-    ) -> str:
-        """Build one user-message batch for generic auto-mapping."""
-
-    @abstractmethod
-    def get_auto_map_response_model(self) -> Type[BaseModel]:
-        """Return the Pydantic model for auto-mapping structured output."""

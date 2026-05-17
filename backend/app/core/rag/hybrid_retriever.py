@@ -5,7 +5,7 @@ Combines semantic (vector) search with keyword (BM25/FTS) search
 for improved retrieval quality.
 """
 
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Tuple
 from sqlalchemy.orm import Session
 from sqlalchemy import select, func
 from app.db_models_chat import DocumentChunk, CollectionDocument
@@ -13,6 +13,7 @@ from app.core.embeddings import get_embedding_provider
 from app.core.rag.query_analyzer import QueryAnalyzer
 from app.core.rag.query_understanding import is_narrow_explicit_fact_lookup
 from app.core.rag.metadata_booster import MetadataBooster
+from app.core.rag.retrieval_query import RetrievalQuery
 from app.config import settings
 from app.utils.logging import logger
 
@@ -56,49 +57,49 @@ class HybridRetriever:
 
     def retrieve(
         self,
-        query: str,
+        rq: RetrievalQuery,
         collection_id: Optional[str] = None,
         top_k: int = 20,
         document_ids: Optional[List[str]] = None,
-        query_understanding=None,  # QueryUnderstanding object (optional, for HyDE)
+        query_understanding=None,  # QueryUnderstanding object (optional, for HyDE + metadata boost)
         min_semantic_similarity: Optional[float] = None,
         section_types: Optional[List[str]] = None,  # e.g. ["narrative"], ["table", "key_value_pairs"]
     ) -> List[Dict]:
         """
-        Hybrid retrieval combining vector + keyword search
+        Hybrid retrieval combining vector + keyword search.
 
         Args:
-            query: User's search query
-            collection_id: Optional collection to search within (if None, uses document_ids filter)
-            top_k: Number of chunks to retrieve (for re-ranking)
-            document_ids: Optional filter by specific documents (required if collection_id is None)
-            query_understanding: Optional QueryUnderstanding object for HyDE enhancement
+            rq: Structured retrieval query with semantic text and lexical constraints.
+            collection_id: Optional collection to search within (if None, uses document_ids filter).
+            top_k: Number of chunks to retrieve (for re-ranking).
+            document_ids: Optional filter by specific documents (required if collection_id is None).
+            query_understanding: Optional QueryUnderstanding for HyDE and metadata boosting.
 
         Returns:
-            List of chunks with hybrid scores, sorted by relevance
+            List of chunks with hybrid scores, sorted by relevance.
         """
         # 1. Analyze query for content preferences
-        query_analysis = self.query_analyzer.analyze(query)
+        query_analysis = self.query_analyzer.analyze(rq.semantic_text)
 
         logger.debug(
             f"Hybrid retrieval: query_type={query_analysis['query_type']}, top_k={top_k}",
-            extra={"query": query[:50], "collection_id": collection_id}
+            extra={"query": rq.semantic_text[:50], "collection_id": collection_id}
         )
 
         # 2. Semantic search (vector similarity, with optional HyDE enhancement)
         semantic_results = self._semantic_search(
-            query,
+            rq,
             collection_id,
             top_k=top_k,
             document_ids=document_ids,
-            query_understanding=query_understanding,  # Pass for HyDE
+            query_understanding=query_understanding,
             min_semantic_similarity=min_semantic_similarity,
             section_types=section_types,
         )
 
-        # 3. Keyword search (BM25/FTS)
+        # 3. Keyword search (BM25/FTS) — uses structured lexical constraints from rq
         keyword_results = self._keyword_search(
-            query, collection_id, top_k=top_k, document_ids=document_ids,
+            rq, collection_id, top_k=top_k, document_ids=document_ids,
             section_types=section_types,
         )
 
@@ -138,7 +139,9 @@ class HybridRetriever:
             extra={
                 "top_score": ranked[0]["hybrid_score"] if ranked else 0,
                 "query_type": query_analysis["query_type"],
-                "chunk_type_counts": type_counts
+                "chunk_type_counts": type_counts,
+                "lexical_required": rq.lexical_required,
+                "lexical_optional_count": len(rq.lexical_optional),
             }
         )
 
@@ -146,7 +149,7 @@ class HybridRetriever:
 
     def _semantic_search(
         self,
-        query: str,
+        rq: RetrievalQuery,
         collection_id: Optional[str],
         top_k: int,
         document_ids: Optional[List[str]],
@@ -155,13 +158,15 @@ class HybridRetriever:
         section_types: Optional[List[str]] = None,
     ) -> List[Dict]:
         """
-        Semantic search using pgvector cosine similarity
+        Semantic search using pgvector cosine similarity.
 
         With optional HyDE (Hypothetical Document Embeddings) enhancement.
 
         Returns:
-            List of chunks with semantic_score (0-1, normalized)
+            List of chunks with semantic_score (0-1, normalized).
         """
+        query = rq.semantic_text
+
         # Generate query embedding, optionally enhanced with HyDE
         use_hyde = (
             query_understanding
@@ -175,7 +180,6 @@ class HybridRetriever:
             hyde_emb = self.embedder.embed_text(query_understanding.hypothetical_response)
 
             # Weighted average (query 40%, HyDE 60%)
-            # HyDE often performs better for complex queries
             query_embedding = [
                 0.4 * q + 0.6 * h
                 for q, h in zip(query_emb, hyde_emb)
@@ -316,41 +320,81 @@ class HybridRetriever:
 
         return chunks
 
+    def _build_tsqueries(self, rq: RetrievalQuery) -> Tuple:
+        """
+        Build (filter_tsquery, rank_tsquery) from a RetrievalQuery.
+
+        filter_tsquery:
+            Each required phrase is passed to phraseto_tsquery (ensures words appear
+            adjacent in the correct order), then all phrases are AND'd together.
+            This becomes the WHERE @@ predicate — only chunks matching ALL required
+            phrases pass. None when lexical_required is empty (broad queries).
+
+        rank_tsquery:
+            Required phrases OR'd with optional terms (via plainto_tsquery).
+            Used exclusively for ts_rank_cd scoring, never for filtering.
+            Falls back to plainto_tsquery(semantic_text) when both lists are empty.
+        """
+        filter_q = None
+        if rq.lexical_required:
+            parts = [func.phraseto_tsquery("english", p) for p in rq.lexical_required]
+            filter_q = parts[0]
+            for p in parts[1:]:
+                filter_q = filter_q.op("&&")(p)
+
+        rank_parts = []
+        for p in rq.lexical_required:
+            rank_parts.append(func.phraseto_tsquery("english", p))
+        for p in rq.lexical_optional:
+            rank_parts.append(func.plainto_tsquery("english", p))
+
+        if rank_parts:
+            rank_q = rank_parts[0]
+            for p in rank_parts[1:]:
+                rank_q = rank_q.op("||")(p)
+        else:
+            rank_q = func.plainto_tsquery("english", rq.semantic_text)
+
+        return filter_q, rank_q
+
     def _keyword_search(
         self,
-        query: str,
+        rq: RetrievalQuery,
         collection_id: Optional[str],
         top_k: int,
         document_ids: Optional[List[str]],
         section_types: Optional[List[str]] = None,
     ) -> List[Dict]:
         """
-        Keyword search using PostgreSQL Full-Text Search (ts_rank_cd)
+        Keyword search using PostgreSQL Full-Text Search (ts_rank_cd).
 
-        Uses BM25-like ranking with document length normalization
+        Uses a two-tsquery design:
+          - filter_tsquery: strict phrase-AND filter for the WHERE clause.
+            For narrow fact lookups this means only chunks containing the exact
+            required phrases (e.g. "loan amount" adjacent) pass — preventing
+            high-frequency doc-name tokens from flooding the result set.
+          - rank_tsquery: lenient OR query for ts_rank_cd scoring, including
+            synonyms and optional terms for recall boosting.
 
         Returns:
-            List of chunks with keyword_score (0-1, normalized)
+            List of chunks with keyword_score (0-1, normalized).
         """
-        # Convert query to tsquery using OR logic for better recall.
-        # plainto_tsquery uses AND (all terms must appear in the same chunk), which
-        # is too strict for RAG: financial documents split across many chunks often
-        # have only one or two of the query terms per chunk.
-        # websearch_to_tsquery with "term1 OR term2 OR ..." gives any-term matching,
-        # maximising recall for the BM25 leg while semantic search handles precision.
-        query_terms = query.strip().split()
-        if len(query_terms) == 1:
-            tsquery = func.plainto_tsquery('english', query)
-        else:
-            or_query = ' OR '.join(query_terms)
-            tsquery = func.websearch_to_tsquery('english', or_query)
+        filter_q, rank_q = self._build_tsqueries(rq)
 
-        # Use ts_rank_cd for ranking with document length normalization
-        # Normalization flag 2: divide by document length (BM25-like behavior)
+        # WHERE uses the strict filter when required phrases exist; otherwise the
+        # rank query (broad OR) — same recall as before for non-narrow queries.
+        match_q = filter_q if filter_q is not None else rank_q
+
+        # Chunks returned under a filter_q matched ALL required phrases as adjacent
+        # tokens. Flag them so callers can guarantee their inclusion past the reranker,
+        # which under-scores structured table text (MS MARCO training distribution).
+        is_phrase_match = filter_q is not None
+
+        # ts_rank_cd with document length normalization (BM25-like behavior)
         rank_expr = func.ts_rank_cd(
             DocumentChunk.text_search_vector,
-            tsquery,
-            2  # Normalization: divide by document length (prevents length bias)
+            rank_q,  # Always score with the lenient rank query
+            2
         ).label("rank")
 
         stmt = select(
@@ -381,8 +425,8 @@ class HybridRetriever:
         else:
             raise ValueError("Either collection_id or document_ids must be provided")
 
-        # Match filter (full-text search)
-        stmt = stmt.where(DocumentChunk.text_search_vector.op('@@')(tsquery))
+        # Match filter: strict phrase filter for narrow queries, broad OR for general ones
+        stmt = stmt.where(DocumentChunk.text_search_vector.op("@@")(match_q))
 
         # Optional section_type filter
         if section_types:
@@ -395,7 +439,7 @@ class HybridRetriever:
         results = self.db.execute(stmt).all()
 
         if not results:
-            logger.debug(f"No keyword matches found for query: {query[:50]}")
+            logger.debug(f"No keyword matches found for query: {rq.semantic_text[:50]}")
             return []
 
         # Normalize keyword scores to 0-1 range
@@ -428,11 +472,12 @@ class HybridRetriever:
                 "section_type": r.section_type,
                 "chunk_metadata": metadata,
                 "tables": r.tables,
-                # Extract bbox at top level for easy access
                 "bbox": metadata.get("bbox"),
                 "page_range": metadata.get("page_range"),
                 "keyword_score": normalized_score,
-                "raw_rank": r.rank
+                "raw_rank": r.rank,
+                "is_keyword_match": True,
+                "is_phrase_match": is_phrase_match,
             })
 
         return chunks
@@ -502,6 +547,14 @@ class HybridRetriever:
                 chunk_data["semantic_score"] = 0.0
             if "keyword_score" not in chunk_data:
                 chunk_data["keyword_score"] = 0.0
+
+            # Carry forward keyword-leg flags from the keyword result
+            kw_chunk = keyword_dict.get(chunk_id)
+            if kw_chunk:
+                if not chunk_data.get("is_keyword_match") and kw_chunk.get("is_keyword_match"):
+                    chunk_data["is_keyword_match"] = True
+                if not chunk_data.get("is_phrase_match") and kw_chunk.get("is_phrase_match"):
+                    chunk_data["is_phrase_match"] = True
 
             merged_dict[chunk_id] = chunk_data
 

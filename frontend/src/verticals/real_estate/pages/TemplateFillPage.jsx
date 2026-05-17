@@ -4,15 +4,18 @@
  * Layout: [PDF Viewer 50%] | [Tabbed: Fields/Excel 50%]
  */
 
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { useAppAuth } from "@/hooks/useAppAuth";
 import DocumentViewer from '../../../components/pdf/DocumentViewer';
-import FieldsList from '../components/FieldsList';
 import ExcelGridView from '../components/ExcelGridView';
+import SourceMapView from '../components/SourceMapView';
+import SourceMapWarningBanner from '../components/SourceMapWarningBanner';
+import { STRUCTURE_LOW_CONFIDENCE, tierForConfidence } from '../utils/sourceMapConfidence';
+import { shouldShowLargeDocumentContextWarning } from '../utils/templateFillWarnings';
 import { useTemplateFill, useTemplateFillActions, useUser } from '../../../store';
 import { TemplateFillRunPageSkeleton } from '../../../components/skeletons/PageSkeletons';
-import { Loader2, AlertCircle, FileText, Table, List, Download, CheckCircle2, ExternalLink, X, Search, GitMerge, FileSpreadsheet, PartyPopper } from 'lucide-react';
+import { Loader2, AlertCircle, FileText, Table, Download, CheckCircle2, ExternalLink, X, Search, GitMerge, FileSpreadsheet, PartyPopper, Layers } from 'lucide-react';
 import { Badge } from '../../../components/ui/badge';
 import { Button } from '../../../components/ui/button';
 import { Tabs, TabsContent } from '../../../components/ui/tabs';
@@ -23,7 +26,6 @@ import { streamTemplateFillProgress, continueFillRun, downloadFilledExcel, start
 import { cn } from '@/lib/utils';
 import { toast } from 'sonner';
 import FeedbackButton from '../../../components/feedback/FeedbackButton';
-import CompletionFeedbackModal from '../../../components/feedback/CompletionFeedbackModal';
 import { shouldPromptForFeedback } from '../../../utils/feedbackRules';
 import { usePostHog } from '@posthog/react';
 
@@ -36,6 +38,7 @@ function formatStatus(status) {
     'mapping': { label: 'Mapping Fields', variant: 'default' },
     'mapped': { label: 'Mapped', variant: 'default' },
     'awaiting_review': { label: 'Ready for Review', variant: 'default' },
+    'extracting': { label: 'Extracting Data', variant: 'default' },
     'filling': { label: 'Filling Template', variant: 'default' },
     'completed': { label: 'Completed', variant: 'success' },
     'failed': { label: 'Failed', variant: 'destructive' },
@@ -55,40 +58,6 @@ function AIPipelineView({ progress, message }) {
     const next = PIPELINE_STAGES[i + 1];
     return progress >= s.progress[0] && progress < (next?.progress[0] ?? 101);
   });
-
-  // Track when each stage becomes active so we can show elapsed time
-  const stageStartTimes = useRef({});
-  const [tick, setTick] = useState(0);
-
-  useEffect(() => {
-    const key = PIPELINE_STAGES[activeIndex]?.key;
-    if (key && stageStartTimes.current[key] === undefined) {
-      stageStartTimes.current[key] = Date.now();
-    }
-  }, [activeIndex]);
-
-  useEffect(() => {
-    const id = setInterval(() => setTick(t => t + 1), 1000);
-    return () => clearInterval(id);
-  }, []);
-
-  function getElapsed(stageKey, isDone, isActive) {
-    const start = stageStartTimes.current[stageKey];
-    if (!start) return null;
-    if (isDone) {
-      // Find when the next stage started (as a proxy for when this one ended)
-      const stageIdx = PIPELINE_STAGES.findIndex(s => s.key === stageKey);
-      const nextKey = PIPELINE_STAGES[stageIdx + 1]?.key;
-      const end = nextKey ? stageStartTimes.current[nextKey] : Date.now();
-      return end ? ((end - start) / 1000).toFixed(1) : null;
-    }
-    if (isActive) {
-      // eslint-disable-next-line no-unused-expressions
-      tick; // subscribe to tick
-      return ((Date.now() - start) / 1000).toFixed(1);
-    }
-    return null;
-  }
 
   return (
     <div className="h-full flex flex-col items-center justify-center p-6">
@@ -113,7 +82,6 @@ function AIPipelineView({ progress, message }) {
             const isDone = progress >= (PIPELINE_STAGES[i + 1]?.progress[0] ?? 101);
             const isActive = i === activeIndex;
             const isPending = !isDone && !isActive;
-            const elapsed = getElapsed(stage.key, isDone, isActive);
 
             return (
               <div
@@ -139,9 +107,6 @@ function AIPipelineView({ progress, message }) {
                   (isDone || isActive) ? 'text-foreground font-medium' : 'text-muted-foreground',
                 )}>
                   {stage.label}
-                </span>
-                <span className="text-xs font-mono tabular-nums text-muted-foreground w-12 text-right">
-                  {elapsed != null ? `${elapsed}s` : '—'}
                 </span>
               </div>
             );
@@ -188,13 +153,14 @@ export default function TemplateFillPage() {
   const [jobIdOverride, setJobIdOverride] = useState(null);
   const [showCompletionBanner, setShowCompletionBanner] = useState(false);
   const [isDownloading, setIsDownloading] = useState(false);
+  const [downloadError, setDownloadError] = useState(null);
+  const [continueError, setContinueError] = useState(null);
 
   // Zustand store
   const {
     fillRun,
     pdfUrl,
     pdfError,
-    selectedText,
     isLoading,
     error,
   } = useTemplateFill();
@@ -285,8 +251,6 @@ export default function TemplateFillPage() {
           fill_run_id: fillRunId,
           fields_mapped: fillRun.total_fields_mapped ?? 0,
         });
-        setShowCompletionBanner(true);
-        setTimeout(() => setShowCompletionBanner(false), 8000);
       } else if (fillRun.status === 'failed') {
         setJobStatus('failed');
         setJobMessage(fillRun.error_message || 'Template fill failed');
@@ -299,8 +263,6 @@ export default function TemplateFillPage() {
         setJobStatus('idle'); // Clear progress overlay
         setJobProgress(100);
         setJobMessage('Ready for review');
-        setShowCompletionBanner(true);
-        setTimeout(() => setShowCompletionBanner(false), 6000);
       }
       // If status is 'completed' but no artifact yet, keep processing overlay visible
       if (fillRun.status === 'completed' && !fillRun.artifact) {
@@ -340,6 +302,9 @@ export default function TemplateFillPage() {
         // This handles the case where backend sends progress events with terminal status
         // instead of a separate "complete" event
         if (data.status === 'awaiting_review' || data.status === 'completed') {
+          // Show banner exactly once — triggered by SSE, not by page load or silent reloads
+          setShowCompletionBanner(true);
+          setTimeout(() => setShowCompletionBanner(false), data.status === 'completed' ? 8000 : 6000);
           // Don't clear progress overlay yet - wait for store to update with artifact
           // Reload to get final state (including artifact if completed)
           setTimeout(async () => {
@@ -354,6 +319,8 @@ export default function TemplateFillPage() {
       onComplete: async (_data) => {
         setJobProgress(100);
         setJobMessage('Complete');
+        setShowCompletionBanner(true);
+        setTimeout(() => setShowCompletionBanner(false), 8000);
         // Wait for backend to finish updating database, then reload
         // This ensures we get the final status and artifact data
         // Don't clear progress overlay until artifact is loaded
@@ -434,6 +401,7 @@ export default function TemplateFillPage() {
       // Download the filled Excel file
       try {
         setIsDownloading(true);
+        setDownloadError(null);
         const blob = await downloadFilledExcel(getToken, fillRunId);
         posthog?.capture('template_fill_downloaded', { fill_run_id: fillRunId });
 
@@ -464,14 +432,14 @@ export default function TemplateFillPage() {
         }, 100);
       } catch (err) {
         console.error('❌ Failed to download Excel file:', err);
-        setJobStatus('failed');
-        setJobMessage(`Failed to download Excel file: ${err.message}`);
+        setDownloadError(err.message || 'Download failed. Please try again.');
       } finally {
         setIsDownloading(false);
       }
     } else if (fillRun.status === 'awaiting_review') {
       // Continue with filling the template
       try {
+        setContinueError(null);
         setJobStatus('processing');
         setJobProgress(70);
         setJobMessage('Filling Excel template...');
@@ -493,11 +461,11 @@ export default function TemplateFillPage() {
         // The progress overlay will stay visible until a terminal status is reached
       } catch (err) {
         console.error('Failed to continue fill run:', err);
-        setJobStatus('failed');
+        setJobStatus('idle');
         if (err?.response?.status === 403 || err?.status === 403) {
-          setJobMessage('Monthly template fill limit reached. Contact support to increase your limit.');
+          setContinueError('Monthly fill limit reached. Contact support to increase your limit.');
         } else {
-          setJobMessage('Failed to continue fill run');
+          setContinueError('Failed to start filling. Please try again.');
         }
       }
     } else {
@@ -527,6 +495,20 @@ export default function TemplateFillPage() {
       setIsRetrying(false);
     }
   }
+
+  // Must be before early returns to satisfy Rules of Hooks.
+  const omStructure = fillRun?.extracted_data?.om_structure ?? null;
+  const structureChipCounts = useMemo(() => {
+    if (!omStructure?.effective) return null;
+    const { column_map = {}, section_presence = {} } = omStructure.effective;
+    const counts = { high: 0, mid: 0, low: 0, total: 0 };
+    for (const e of [...Object.values(column_map), ...Object.values(section_presence)]) {
+      if (!e || e.present !== true || e.confidence == null) continue;
+      counts[tierForConfidence(e.confidence)]++;
+      counts.total++;
+    }
+    return counts;
+  }, [omStructure]);
 
   if (isLoading) {
     return (
@@ -595,6 +577,11 @@ export default function TemplateFillPage() {
     <div className="flex items-center gap-2 shrink-0">
       {fillRun.status === 'completed' && fillRun.artifact ? (
         <>
+          {downloadError && (
+            <span className="text-[10px] text-destructive max-w-[160px] truncate" title={downloadError}>
+              {downloadError}
+            </span>
+          )}
           <Button
             size="sm"
             variant="default"
@@ -620,10 +607,17 @@ export default function TemplateFillPage() {
           />
         </>
       ) : fillRun.status === 'awaiting_review' ? (
-        <Button size="sm" onClick={handleContinue} className="bg-blue-600 hover:bg-blue-700 text-white h-7 rounded-lg px-2.5 text-[11px] tracking-[0.04px]">
-          <CheckCircle2 className="h-3.5 w-3.5 mr-1" />
-          Approve &amp; Fill
-        </Button>
+        <>
+          {continueError && (
+            <span className="text-[10px] text-destructive max-w-[180px] truncate" title={continueError}>
+              {continueError}
+            </span>
+          )}
+          <Button size="sm" onClick={handleContinue} className="bg-blue-600 hover:bg-blue-700 text-white h-7 rounded-lg px-2.5 text-[11px] tracking-[0.04px]">
+            <CheckCircle2 className="h-3.5 w-3.5 mr-1" />
+            Approve &amp; Fill
+          </Button>
+        </>
       ) : fillRun.status === 'filling' ? (
         <Button size="sm" disabled className="bg-muted h-7 rounded-lg px-2.5 text-[11px] tracking-[0.04px]">
           <Loader2 className="h-3.5 w-3.5 mr-1 animate-spin" />
@@ -643,6 +637,8 @@ export default function TemplateFillPage() {
     compact: true,
   };
   const contextBudgetWarning = fillRun.field_mapping?.context_budget?.user_warning;
+  const showLargeDocumentContextWarning = shouldShowLargeDocumentContextWarning(fillRun);
+  const omStructureSummary = fillRun.field_mapping?.om_structure_summary ?? null;
 
   return (
     <AppLayout lockViewport pageHeader={pageHeader}>
@@ -712,7 +708,7 @@ export default function TemplateFillPage() {
         )}
         </div>
 
-        {contextBudgetWarning && (
+        {showLargeDocumentContextWarning && (
           <div className="px-6 pt-4">
             <Alert className="border-amber-200 bg-amber-50 text-amber-950">
               <AlertCircle className="h-4 w-4 text-amber-600" />
@@ -721,6 +717,17 @@ export default function TemplateFillPage() {
                 {contextBudgetWarning}
               </AlertDescription>
             </Alert>
+          </div>
+        )}
+        {omStructureSummary && (
+          omStructureSummary.low_confidence_keys?.length > 0 ||
+          (omStructureSummary.min_confidence != null && omStructureSummary.min_confidence < STRUCTURE_LOW_CONFIDENCE)
+        ) && (
+          <div className="px-6 pt-3">
+            <SourceMapWarningBanner
+              summary={omStructureSummary}
+              onReview={() => setActiveTab('structure')}
+            />
           </div>
         )}
 
@@ -835,24 +842,45 @@ export default function TemplateFillPage() {
                         {fillRun.total_fields_mapped || 0}/{fillRun.total_template_fields || 0}
                       </span>
                     </button>
-                    <button
-                      onClick={() => setActiveTab('fields')}
-                      className={cn(
-                        'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium tracking-[0.08px] transition-all duration-150',
-                        activeTab === 'fields'
-                          ? 'bg-background shadow-sm text-foreground'
-                          : 'text-muted-foreground hover:text-foreground',
-                      )}
-                    >
-                      <List className="h-3.5 w-3.5" />
-                      Fields
-                      <span className={cn(
-                        'ml-0.5 tabular-nums text-[10px] tracking-[0.07px]',
-                        activeTab === 'fields' ? 'text-muted-foreground' : 'text-muted-foreground/60',
-                      )}>
-                        {fillRun.field_mapping?.pdf_fields?.length || 0}
-                      </span>
-                    </button>
+                    {omStructure && (
+                      <button
+                        onClick={() => setActiveTab('structure')}
+                        className={cn(
+                          'flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-medium tracking-[0.08px] transition-all duration-150',
+                          activeTab === 'structure'
+                            ? 'bg-background shadow-sm text-foreground'
+                            : 'text-muted-foreground hover:text-foreground',
+                        )}
+                      >
+                        <Layers className="h-3.5 w-3.5" />
+                        Structure
+                        {structureChipCounts && (
+                          <span className="ml-0.5 flex items-center gap-0.5 text-[10px] tabular-nums">
+                            {structureChipCounts.high > 0 && (
+                              <span className={activeTab === 'structure' ? 'text-success' : 'text-success/60'}>
+                                {structureChipCounts.high} ok
+                              </span>
+                            )}
+                            {structureChipCounts.mid > 0 && (
+                              <>
+                                {structureChipCounts.high > 0 && <span className="text-muted-foreground/40">·</span>}
+                                <span className={activeTab === 'structure' ? 'text-warning' : 'text-warning/60'}>
+                                  {structureChipCounts.mid} review
+                                </span>
+                              </>
+                            )}
+                            {structureChipCounts.low > 0 && (
+                              <>
+                                {(structureChipCounts.high > 0 || structureChipCounts.mid > 0) && <span className="text-muted-foreground/40">·</span>}
+                                <span className={activeTab === 'structure' ? 'text-destructive' : 'text-destructive/60'}>
+                                  {structureChipCounts.low} low
+                                </span>
+                              </>
+                            )}
+                          </span>
+                        )}
+                      </button>
+                    )}
                   </div>
 {activeTab === 'excel' && (
                     <Button
@@ -878,16 +906,15 @@ export default function TemplateFillPage() {
               </div>
 
 
-              <TabsContent value="fields" className="flex-1 min-h-0 overflow-auto m-0">
-                <FieldsList
-                  fillRunId={fillRunId}
-                  extractedData={fillRun.extracted_data}
-                  fieldMapping={fillRun.field_mapping}
+              <TabsContent value="structure" className="flex-1 min-h-0 overflow-auto m-0">
+                <SourceMapView
+                  omStructure={omStructure}
+                  cellStatus={fillRun.field_mapping?.yaml_cell_status}
                   citationContext={fillRun.citation_context}
-                  selectedText={selectedText}
                   onCitationClick={handleCitationClick}
                 />
               </TabsContent>
+
 
               <TabsContent value="excel" className="flex-1 min-h-0 overflow-auto m-0">
                 {jobStatus === 'processing' ? (

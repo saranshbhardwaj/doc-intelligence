@@ -7,6 +7,12 @@ from typing import Any, Dict, List, Optional
 import yaml
 
 from app.utils.logging import logger
+from app.verticals.real_estate.template_filling.source_map import (
+    FILL_WHEN_VALUES,
+    SOURCE_BASIS_VALUES,
+    SOURCE_PERIOD_VALUES,
+    as_list,
+)
 
 
 def _normalize_field_name(name: str) -> str:
@@ -25,6 +31,68 @@ def _normalize_field_name(name: str) -> str:
     # Collapse multiple whitespace to single space
     n = re.sub(r'\s+', ' ', n).strip()
     return n
+
+
+CONTRACT_METADATA_KEYS = ("source_period", "source_basis", "fill_when", "requires_structure")
+
+
+def _can_use_static_contract_default(target: Dict[str, Any]) -> bool:
+    """Only truly static, unruled fields get the legacy always/property default."""
+    sheet = str(target.get("sheet") or "")
+    return (
+        not target.get("extraction_rule")
+        and not target.get("columns")
+        and sheet not in {"Actuals&UnitMix", "P&L", "Napkin"}
+    )
+
+
+def _apply_contract_defaults_or_raise(target: Dict[str, Any], target_type: str) -> None:
+    target_id = target.get("id") or "<unknown>"
+    missing = [key for key in CONTRACT_METADATA_KEYS if key not in target]
+    if not missing:
+        return
+
+    has_any_contract_key = any(key in target for key in CONTRACT_METADATA_KEYS)
+    if not has_any_contract_key and _can_use_static_contract_default(target):
+        target["source_period"] = "static"
+        target["source_basis"] = "om_property_summary"
+        target["fill_when"] = ["always"]
+        target["requires_structure"] = []
+        return
+
+    raise ValueError(
+        f"{target_type} '{target_id}' missing contract metadata: {', '.join(missing)}"
+    )
+
+
+def _validate_contract_metadata(targets: List[Dict[str, Any]], target_type: str) -> None:
+    for target in targets or []:
+        _apply_contract_defaults_or_raise(target, target_type)
+        target_id = target.get("id") or "<unknown>"
+
+        source_period = target.get("source_period")
+        if source_period not in SOURCE_PERIOD_VALUES:
+            raise ValueError(
+                f"{target_type} '{target_id}' has invalid source_period '{source_period}'"
+            )
+
+        source_basis = target.get("source_basis")
+        if source_basis not in SOURCE_BASIS_VALUES:
+            raise ValueError(
+                f"{target_type} '{target_id}' has invalid source_basis '{source_basis}'"
+            )
+
+        fill_when_values = as_list(target.get("fill_when"))
+        if not fill_when_values:
+            raise ValueError(f"{target_type} '{target_id}' must define fill_when")
+        invalid_fill_when = [value for value in fill_when_values if value not in FILL_WHEN_VALUES]
+        if invalid_fill_when:
+            raise ValueError(
+                f"{target_type} '{target_id}' has invalid fill_when {invalid_fill_when}"
+            )
+        target["fill_when"] = fill_when_values
+
+        target["requires_structure"] = as_list(target.get("requires_structure"))
 
 
 class TemplateSchema:
@@ -175,6 +243,9 @@ class SchemaLoader:
                 if key not in schema_data:
                     raise ValueError(f"Schema missing required field: {key}")
 
+            _validate_contract_metadata(schema_data.get("fields", []), "field")
+            _validate_contract_metadata(schema_data.get("tables", []), "table")
+
             # Create schema object
             schema = TemplateSchema(schema_data)
 
@@ -188,6 +259,9 @@ class SchemaLoader:
 
             return schema
 
+        except ValueError:
+            logger.error(f"Invalid schema '{schema_id}'", exc_info=True)
+            raise
         except Exception as e:
             logger.error(f"Failed to load schema '{schema_id}': {e}", exc_info=True)
             return None

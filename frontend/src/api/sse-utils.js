@@ -37,7 +37,7 @@ const _activeStreams = new Map(); // jobId -> { eventSource, callbacks }
  *
  * Progress event structure:
  * {
- *   status: "queued" | "running" | "completed" | "failed",
+ *   status: string, // job-specific lifecycle status, e.g. queued, mapping, awaiting_review, running, completed, failed
  *   progress_percent: 0-100,
  *   message: "User-friendly status message",
  *   current_stage: "processing",
@@ -70,7 +70,7 @@ export async function streamJobProgress(
     autoReconnect = true,
     fetchInitialState = false,
     getJobStatus = null,
-    timeoutMs = 9000000, // 15 minutes default timeout
+    timeoutMs = 900000, // 15 minutes default timeout
   }
 ) {
   const baseURL = api.defaults.baseURL || "";

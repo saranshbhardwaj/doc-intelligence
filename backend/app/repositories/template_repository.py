@@ -1,7 +1,7 @@
 """Repository for Excel template and template fill run operations."""
 
 import uuid
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
 from sqlalchemy import desc, func
@@ -15,6 +15,12 @@ from app.utils.logging import logger
 
 
 TERMINAL_TEMPLATE_FILL_RUN_STATUSES = {"completed", "failed"}
+
+
+def _merge_extracted_data(existing: Dict | None, patch: Dict | None) -> Dict:
+    """Return a shallow JSON merge for fill_run_data.extracted_data."""
+    existing_data = existing if isinstance(existing, dict) else {}
+    return {**existing_data, **(patch or {})}
 
 
 class TemplateRepository:
@@ -202,7 +208,7 @@ class TemplateRepository:
             return None
 
         template.usage_count += 1
-        template.last_used_at = datetime.utcnow()
+        template.last_used_at = datetime.now(timezone.utc)
 
         self.db.commit()
         self.db.refresh(template)
@@ -456,6 +462,38 @@ class TemplateRepository:
             if field in allowed:
                 setattr(data_row, field, value)
                 flag_modified(data_row, field)
+
+        self.db.commit()
+        self.db.refresh(data_row)
+        return data_row
+
+    def merge_fill_run_extracted_data(
+        self,
+        fill_run_id: str,
+        extracted_data_patch: Dict,
+    ) -> Optional[FillRunData]:
+        """Transactionally merge keys into fill_run_data.extracted_data."""
+        from sqlalchemy.orm.attributes import flag_modified
+
+        data_row = (
+            self.db.query(FillRunData)
+            .filter(FillRunData.fill_run_id == fill_run_id)
+            .with_for_update()
+            .first()
+        )
+
+        if not data_row:
+            logger.warning(
+                f"merge_fill_run_extracted_data: fill_run_data row not found for {fill_run_id}, creating it"
+            )
+            data_row = FillRunData(fill_run_id=fill_run_id)
+            self.db.add(data_row)
+
+        data_row.extracted_data = _merge_extracted_data(
+            data_row.extracted_data,
+            extracted_data_patch,
+        )
+        flag_modified(data_row, "extracted_data")
 
         self.db.commit()
         self.db.refresh(data_row)

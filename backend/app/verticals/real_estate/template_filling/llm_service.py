@@ -17,11 +17,11 @@ from anthropic import Anthropic
 from app.config import settings
 from app.core.redis_client import get_redis_client_for_cache
 from app.utils.logging import logger
-from app.utils.token_utils import count_tokens
 from app.utils.metrics import LLM_TOKEN_USAGE, LLM_CACHE_HITS, LLM_CACHE_MISSES, LLM_REQUESTS_TOTAL, LLM_COST_USD
 from app.utils.costs import compute_llm_cost
 from app.verticals.real_estate.template_filling.prompts import (
     get_prompt_set,
+    OMStructureDetectionResult,
     SchemaTableExtractionResult,
 )
 
@@ -122,6 +122,7 @@ def _resolve_column_map(
 # LLM Service
 # ============================================================================
 
+
 class TemplateFillLLMService:
     """LLM service for intelligent template filling operations with guaranteed valid JSON."""
 
@@ -150,6 +151,23 @@ class TemplateFillLLMService:
             self._io_log_repo = IOLogRepository()
         else:
             self._io_log_repo = None
+
+    def _build_cached_context_system_arg(
+        self,
+        context_json: str,
+        task_system_prompt: str,
+    ) -> List[Dict[str, Any]]:
+        """Build a reusable cached context block plus task-specific instructions."""
+        system_arg: List[Dict[str, Any]] = [
+            {
+                "type": "text",
+                "text": self.prompts.build_azure_di_context_block(context_json),
+                "cache_control": {"type": "ephemeral"},
+            }
+        ]
+        if task_system_prompt:
+            system_arg.append({"type": "text", "text": task_system_prompt})
+        return system_arg
 
     def _record_llm_metrics(
         self,
@@ -254,10 +272,163 @@ class TemplateFillLLMService:
             logger.error(f"Error detecting PDF fields: {e}", exc_info=True)
             raise
 
+    def _build_structural_inventory(self, pdf_fields: List[Dict[str, Any]]) -> str:
+        """Build a human-readable structural inventory for LLM consumption."""
+        table_lines: List[str] = []
+        kv_lines: List[str] = []
+        heading_lines: List[str] = []
+
+        table_idx = 1
+        kv_idx = 1
+        heading_idx = 1
+
+        for field in pdf_fields:
+            source = field.get("source")
+            citations = field.get("citations") or []
+            citation_str = citations[0] if citations else ""
+
+            if source == "table_block":
+                page = field.get("page_number") or ""
+                name = field.get("table_name") or field.get("name") or ""
+                columns = field.get("table_columns") or []
+                rows = field.get("table_rows") or []
+                col_str = " / ".join(str(c) for c in columns[:8]) if columns else "(no columns)"
+                sample_rows = rows[:3]
+                sample_str = ""
+                for row in sample_rows:
+                    vals = list(row.values()) if isinstance(row, dict) else list(row)
+                    sample_str += f"\n      row: {[str(v) for v in vals[:8]]}"
+                page_str = f"page {page}" if page else "page ?"
+                name_str = f'"{name}"' if name else "no name"
+                table_lines.append(
+                    f"  T{table_idx} ({page_str}, {name_str}):\n"
+                    f"    columns: {col_str}"
+                    f"{sample_str}\n"
+                    f"    citation: {citation_str}"
+                )
+                table_idx += 1
+
+            elif source == "key_value_pairs":
+                page_raw = (field.get("bbox") or {}).get("page") or field.get("page_number") or ""
+                name = field.get("name") or ""
+                value = field.get("extracted_value") or ""
+                if name or value:
+                    kv_lines.append(
+                        f"  K{kv_idx} (page {page_raw}): {name!r} → {str(value)[:80]!r}"
+                    )
+                    kv_idx += 1
+
+            elif source == "narrative_block":
+                page = field.get("page_number") or ""
+                section = field.get("section") or ""
+                full_text = (field.get("full_text") or "")[:120]
+                if section:
+                    heading_lines.append(f"  N{heading_idx} (page {page}): {section!r}")
+                    heading_idx += 1
+                elif full_text:
+                    heading_lines.append(f"  N{heading_idx} (page {page}): {full_text!r}")
+                    heading_idx += 1
+
+        parts: List[str] = []
+        if table_lines:
+            parts.append("TABLE BLOCKS:\n" + "\n".join(table_lines))
+        if kv_lines:
+            parts.append("KEY-VALUE PAIRS:\n" + "\n".join(kv_lines))
+        if heading_lines:
+            parts.append("SECTION HEADINGS:\n" + "\n".join(heading_lines))
+
+        return "\n\n".join(parts) if parts else "(no structured content found)"
+
+    async def detect_om_structure(self, pdf_fields: List[Dict[str, Any]]) -> Dict[str, Any]:
+        """Detect OM column map and section presence before cell extraction.
+
+        Uses messages.parse (structured output) so Pydantic schema enforcement is
+        handled by the API — all 13 keys are guaranteed to be present in the response.
+        """
+        if not pdf_fields:
+            return {}
+
+        inventory_text = self._build_structural_inventory(pdf_fields)
+        pair = self.prompts.build_detect_om_structure()
+
+        system_arg: List[Dict[str, Any]] = [
+            {
+                "type": "text",
+                "text": inventory_text,
+                "cache_control": {"type": "ephemeral"},
+            }
+        ]
+        if pair.system_prompt:
+            system_arg.append({"type": "text", "text": pair.system_prompt})
+
+        t0 = time.time()
+        try:
+            message = await asyncio.to_thread(
+                self.client.messages.parse,
+                model=self.model,
+                max_tokens=self.max_tokens,
+                temperature=0.0,
+                timeout=settings.synthesis_llm_timeout_seconds,
+                system=system_arg,
+                messages=[{"role": "user", "content": pair.user_message}],
+                output_format=OMStructureDetectionResult,
+            )
+        except Exception as e:
+            logger.warning(
+                f"detect_om_structure: LLM call failed — structure detection skipped, "
+                f"all section-gated fields will be extracted without gating. Error: {e}",
+                exc_info=True,
+            )
+            return {}
+        duration_ms = int((time.time() - t0) * 1000)
+
+        usage = getattr(message, "usage", None)
+        cache_creation = cache_read = input_tokens = output_tokens = 0
+        if usage is not None:
+            cache_creation = getattr(usage, "cache_creation_input_tokens", 0) or 0
+            cache_read = getattr(usage, "cache_read_input_tokens", 0) or 0
+            input_tokens = getattr(usage, "input_tokens", 0) or 0
+            output_tokens = getattr(usage, "output_tokens", 0) or 0
+        self._record_llm_metrics(input_tokens, output_tokens, cache_read, cache_creation)
+
+        parsed = message.parsed_output
+        if parsed is None:
+            logger.warning(
+                "detect_om_structure: parsed_output is None — structure detection skipped, "
+                "all section-gated fields will be extracted without gating."
+            )
+            return {}
+
+        result = parsed.model_dump()
+        logger.info(
+            f"detect_om_structure: complete — "
+            f"column_map detected={sum(1 for v in result.get('column_map', {}).values() if v.get('present'))} "
+            f"section_presence detected={sum(1 for v in result.get('section_presence', {}).values() if v.get('present'))}"
+        )
+
+        if self.capture_io_log and self._io_log_repo:
+            self._io_log_repo.save_io_log(
+                source_type="template_fill",
+                source_id=self.fill_run_id,
+                stage="detect_om_structure",
+                prompt_version=self.prompts.version,
+                system_prompt=pair.system_prompt,
+                user_message=pair.user_message,
+                output=result,
+                input_tokens=input_tokens,
+                output_tokens=output_tokens,
+                cache_creation_tokens=cache_creation,
+                cache_read_tokens=cache_read,
+                duration_ms=duration_ms,
+            )
+
+        return result
+
     async def extract_schema_field_values(
         self,
         unmapped_fields: List[Dict[str, Any]],
         pdf_fields: List[Dict[str, Any]],
+        om_structure: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         Stage 2: Targeted extraction of specific YAML schema fields from Azure DI output.
@@ -283,33 +454,48 @@ class TemplateFillLLMService:
             f"from {len(pdf_fields)} Azure DI fields"
         )
 
-        # Split into KV, table_block, and narrative_block fields for LLM context.
-        # Per-column table fields (source="table") are excluded — they are redundant
-        # because table_block fields already contain the full table with all rows.
-        kv_fields = [f for f in pdf_fields if f.get("source") == "key_value_pairs"]
-        table_block_fields = [f for f in pdf_fields if f.get("source") == "table_block"]
-        narrative_block_fields = [f for f in pdf_fields if f.get("source") == "narrative_block"]
-        # Fall back to all fields if no table_block fields exist (backward compat)
-        fields_for_llm = kv_fields + table_block_fields + narrative_block_fields if table_block_fields else pdf_fields
+        # Build LLM context from KV and table_block fields.
+        # Narrative blocks are normally excluded (inflate tokens, rarely improve KV accuracy).
+        # Exception: include cover-page narrative blocks (page <= 2) when property-summary fields
+        # are being extracted — property name and address often appear only in cover-page prose.
+        needs_property_summary = any(
+            f.get("source_basis") == "om_property_summary" for f in unmapped_fields
+        )
+        kv_fields, table_block_fields, narrative_fields, narrative_count = [], [], [], 0
+        for f in pdf_fields:
+            src = f.get("source")
+            if src == "key_value_pairs":
+                kv_fields.append(f)
+            elif src == "table_block":
+                table_block_fields.append(f)
+            elif src == "narrative_block":
+                narrative_count += 1
+                if needs_property_summary and (f.get("page_number") or 99) <= 2:
+                    narrative_fields.append(f)
+
+        fields_for_llm = (kv_fields + table_block_fields + narrative_fields) if (kv_fields or table_block_fields) else pdf_fields
         stripped_pdf_fields = [self._strip_pdf_field(f) for f in fields_for_llm]
         pdf_fields_json = json.dumps(stripped_pdf_fields, separators=(",", ":"), ensure_ascii=False)
 
         logger.info(
-            f"🎯 Stage 2 LLM context: {len(kv_fields)} KV fields + {len(table_block_fields)} table blocks + {len(narrative_block_fields)} narrative blocks"
+            f"🎯 Stage 2 LLM context: {len(kv_fields)} KV fields + {len(table_block_fields)} table blocks"
+            f" + {len(narrative_fields)} cover-page narrative blocks"
+            f" ({narrative_count - len(narrative_fields)} narrative blocks excluded)"
         )
 
         # Build prompt pair from versioned prompt set
-        pair = self.prompts.build_extract_schema_fields(pdf_fields_json, unmapped_fields)
+        pair = self.prompts.build_extract_schema_fields(
+            pdf_fields_json,
+            unmapped_fields,
+            om_structure=om_structure,
+        )
         system_prompt = pair.system_prompt
         user_message = pair.user_message
 
-        system_arg = [
-            {
-                "type": "text",
-                "text": system_prompt,
-                "cache_control": {"type": "ephemeral"},
-            }
-        ]
+        system_arg = self._build_cached_context_system_arg(
+            pdf_fields_json,
+            system_prompt,
+        )
 
         t0 = time.time()
         message = await asyncio.to_thread(
@@ -383,146 +569,6 @@ class TemplateFillLLMService:
 
         return result_by_field
 
-    # async def extract_schema_field_values(
-    #     self,
-    #     unmapped_fields: List[Dict[str, Any]],
-    #     pdf_fields: List[Dict[str, Any]],
-    # ) -> Dict[str, Any]:
-    #     if not unmapped_fields or not pdf_fields:
-    #         return {}
-
-    #     logger.info(
-    #         f"🎯 Stage 2 targeted extraction: {len(unmapped_fields)} unmapped schema fields "
-    #         f"from {len(pdf_fields)} Azure DI fields"
-    #     )
-
-    #     kv_fields = [f for f in pdf_fields if f.get("source") == "key_value_pairs"]
-    #     table_block_fields = [f for f in pdf_fields if f.get("source") == "table_block"]
-    #     narrative_block_fields = [f for f in pdf_fields if f.get("source") == "narrative_block"]
-    #     fields_for_llm = kv_fields + table_block_fields + narrative_block_fields if table_block_fields else pdf_fields
-    #     stripped_pdf_fields = [self._strip_pdf_field(f) for f in fields_for_llm]
-    #     pdf_fields_json = json.dumps(stripped_pdf_fields, separators=(",", ":"), ensure_ascii=False)
-
-    #     logger.info(
-    #         f"🎯 Stage 2 LLM context: {len(kv_fields)} KV fields + "
-    #         f"{len(table_block_fields)} table blocks + {len(narrative_block_fields)} narrative blocks"
-    #     )
-
-    #     system_prompt = f"""You are extracting values from a real estate PDF for specific named schema fields.
-
-    # Below is the complete list of key-value pairs, full tables, and market context (narratives) extracted by Azure Document Intelligence:
-    # ```json
-    # {pdf_fields_json}
-    # ```
-
-    # For each requested schema field, find its value from the Azure DI data above.
-    # Match by the field's aliases and semantic meaning. For example:
-    # - A field with aliases ["City", "Location City"] might appear as "City:", "Location:", "Property City", etc.
-    # - A field with aliases ["Asking Price", "Purchase Price"] might appear as "List Price", "Sale Price", etc.
-
-    # Be aggressive in matching — if a value is semantically equivalent to an alias, extract it.
-    # Return null only if the value genuinely cannot be found anywhere in the PDF data."""
-
-    #     fields_for_request = [
-    #         {
-    #             "id": f["id"],
-    #             "aliases": f.get("pdf_aliases", []),
-    #             "data_type": f.get("data_type", "text"),
-    #         }
-    #         for f in unmapped_fields
-    #     ]
-
-    #     user_message = (
-    #         f"Find values for these {len(fields_for_request)} schema fields from the Azure DI data "
-    #         f"in the system prompt.\n\n"
-    #         f"Fields to extract:\n```json\n"
-    #         f"{json.dumps(fields_for_request, indent=2)}\n```\n\n"
-    #         f"IMPORTANT - Data Type Validation Rules:\n"
-    #         f"- currency: Must be numeric with $ sign (e.g., '$450,000'). Return null for non-numeric text.\n"
-    #         f"- number: Must be numeric (e.g., '100', '3.14'). Return null for non-numeric text.\n"
-    #         f"- percentage: Must include % (e.g., '65%', '8.11%'). Return null if not a percentage.\n"
-    #         f"- date: Must be a date (e.g., '2026-03-10', 'March 10, 2026'). Return null for non-dates.\n"
-    #         f"- text: Any text value is acceptable.\n\n"
-    #         f"CRITICAL: You MUST attempt to find a value for every single field. "
-    #         f"Do not skip fields. If a field has multiple possible aliases, try all of them. "
-    #         f"Only return null if the value is truly absent from the PDF data.\n\n"
-    #         f"Return ONLY a JSON object matching this exact structure, no markdown:\n"
-    #         "{\n"
-    #         '  "results": [\n'
-    #         "    {\n"
-    #         '      "field_id": "field_id_here",\n'
-    #         '      "value": "extracted value or null",\n'
-    #         '      "confidence": 0.95,\n'
-    #         '      "citations": ["[S1:p3]"],\n'
-    #         '      "reasoning": "Found as currency: $2,500,000 in KV pair Listing Price"\n'
-    #         "    }\n"
-    #         "  ],\n"
-    #         f'  "total_found": 10,\n'
-    #         f'  "total_not_found": 2\n'
-    #         "}\n"
-    #     )
-
-    #     system_arg = [
-    #         {
-    #             "type": "text",
-    #             "text": system_prompt,
-    #             "cache_control": {"type": "ephemeral"},
-    #         }
-    #     ]
-
-    #     response = await asyncio.to_thread(
-    #         self.client.messages.create,
-    #         model=self.model,
-    #         max_tokens=self.max_tokens,
-    #         temperature=0.0,
-    #         timeout=settings.synthesis_llm_timeout_seconds,
-    #         system=system_arg,
-    #         messages=[{"role": "user", "content": user_message}],
-    #     )
-
-    #     # Log token usage
-    #     usage = getattr(response, "usage", None)
-    #     if usage is not None:
-    #         cache_creation = getattr(usage, "cache_creation_input_tokens", 0) or 0
-    #         cache_read = getattr(usage, "cache_read_input_tokens", 0) or 0
-    #         input_tokens = getattr(usage, "input_tokens", 0) or 0
-    #         output_tokens = getattr(usage, "output_tokens", 0) or 0
-    #         logger.info(
-    #             f"🎯 Stage 2 tokens: input={input_tokens:,}, output={output_tokens:,}, "
-    #             f"cache_creation={cache_creation:,}, cache_read={cache_read:,}"
-    #         )
-
-    #     raw_text = response.content[0].text.strip()
-    #     if raw_text.startswith("```"):
-    #         raw_text = re.sub(r"^```(?:json)?\n?", "", raw_text)
-    #         raw_text = re.sub(r"\n?```$", "", raw_text)
-
-    #     try:
-    #         raw_result = json.loads(raw_text)
-    #         parsed = SchemaFieldExtractionResult(**raw_result)
-    #     except (json.JSONDecodeError, ValidationError) as e:
-    #         logger.error(f"Failed to parse field extraction response: {e}\nRaw: {raw_text[:500]}")
-    #         return {}
-
-    #     result_by_field: Dict[str, Any] = {}
-    #     for item in parsed.results:
-    #         if item.value:
-    #             result_by_field[item.field_id] = {
-    #                 "value": item.value,
-    #                 "confidence": item.confidence,
-    #                 "citations": item.citations,
-    #                 "reasoning": item.reasoning,
-    #             }
-
-    #     found_count = len(result_by_field)
-    #     not_found_count = len(unmapped_fields) - found_count
-    #     logger.info(
-    #         f"✅ Stage 2 complete: {found_count}/{len(unmapped_fields)} fields found "
-    #         f"({not_found_count} not present in this PDF)"
-    #     )
-
-    #     return result_by_field
-
     async def extract_schema_table_values(
         self,
         schema_tables: List[Dict[str, Any]],
@@ -552,8 +598,7 @@ class TemplateFillLLMService:
 
         kv_fields = [f for f in pdf_fields if f.get("source") == "key_value_pairs"]
         table_block_fields = [f for f in pdf_fields if f.get("source") == "table_block"]
-        narrative_block_fields = [f for f in pdf_fields if f.get("source") == "narrative_block"]
-        fields_for_llm = kv_fields + table_block_fields + narrative_block_fields if table_block_fields else pdf_fields
+        fields_for_llm = kv_fields + table_block_fields if (kv_fields or table_block_fields) else pdf_fields
 
         if not table_block_fields:
             logger.warning("Stage 2 table extraction skipped: no table_block fields found in pdf_fields")
@@ -777,6 +822,7 @@ For each requested schema table:
         schema_table: Dict[str, Any],
         context_chunks: List[Dict[str, Any]],
         row_labels: Optional[List[str]] = None,
+        om_structure: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         RAG-based targeted extraction for a single schema table using retrieved chunks.
@@ -812,15 +858,16 @@ For each requested schema table:
             "columns": columns,
         }
 
-        pair = self.prompts.build_extract_table_values_rag_single(context_json, table_request)
+        pair = self.prompts.build_extract_table_values_rag_single(
+            context_json,
+            table_request,
+            om_structure=om_structure,
+        )
 
-        system_arg = [
-            {
-                "type": "text",
-                "text": pair.system_prompt,
-                "cache_control": {"type": "ephemeral"},
-            }
-        ]
+        system_arg = self._build_cached_context_system_arg(
+            context_json,
+            pair.system_prompt,
+        )
 
         t0 = time.time()
         response = await asyncio.to_thread(
@@ -849,6 +896,7 @@ For each requested schema table:
         result_dict: Dict[str, Any] = {}
         results = raw_result.get("results") if isinstance(raw_result, dict) else None
         if isinstance(results, list):
+            self._repair_table_result_citations(raw_result, context_payload)
             for table_result in results:
                 if table_result.get("table_id") == table_id:
                     result_dict[table_id] = {
@@ -892,6 +940,7 @@ For each requested schema table:
         context_chunks: List[Dict[str, Any]],
         row_labels_by_table: Optional[Dict[str, List[str]]] = None,
         prebuilt_context_json: Optional[str] = None,
+        om_structure: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, Any]:
         """
         RAG-based targeted extraction for a batch of schema tables using retrieved chunks.
@@ -938,6 +987,12 @@ For each requested schema table:
                 "data_start_row": schema_table.get("data_start_row"),
                 "data_end_row": schema_table.get("data_end_row", schema_table.get("data_start_row")),
                 "row_identifier_column": schema_table.get("row_identifier_column"),
+                "description": schema_table.get("description"),
+                "extraction_rule": schema_table.get("extraction_rule"),
+                "source_period": schema_table.get("source_period"),
+                "source_basis": schema_table.get("source_basis"),
+                "fill_when": schema_table.get("fill_when"),
+                "requires_structure": schema_table.get("requires_structure", []),
                 "row_labels": row_labels,
                 "columns": columns,
             })
@@ -947,18 +1002,18 @@ For each requested schema table:
 
         # Build prompt pair from versioned prompt set
         pair = self.prompts.build_extract_table_values_rag(
-            context_json, table_requests, TABLE_HEADER_EQUIVALENTS
+            context_json,
+            table_requests,
+            TABLE_HEADER_EQUIVALENTS,
+            om_structure=om_structure,
         )
         system_prompt = pair.system_prompt
         user_message = pair.user_message
 
-        system_arg = [
-            {
-                "type": "text",
-                "text": system_prompt,
-                "cache_control": {"type": "ephemeral"},
-            }
-        ]
+        system_arg = self._build_cached_context_system_arg(
+            context_json,
+            system_prompt,
+        )
 
         # USE messages.create instead of messages.parse (table extraction)
         t0 = time.time()
@@ -988,6 +1043,15 @@ For each requested schema table:
         except (json.JSONDecodeError, Exception) as e:
             logger.error(f"Failed to parse table extraction response: {e}\nRaw: {raw_text[:500]}")
             return {}
+
+        context_payload_for_citations: List[Dict[str, Any]]
+        try:
+            context_payload_for_citations = json.loads(context_json)
+            if not isinstance(context_payload_for_citations, list):
+                context_payload_for_citations = []
+        except Exception:
+            context_payload_for_citations = []
+        self._repair_table_result_citations(result, context_payload_for_citations)
 
         # Token usage
         usage = getattr(response, "usage", None)
@@ -1025,6 +1089,169 @@ For each requested schema table:
             }
 
         return result_dict
+
+    def _strip_pdf_field(self, field: Dict[str, Any]) -> Dict[str, Any]:
+        """
+        Remove unnecessary fields from PDF field to reduce prompt tokens.
+
+        Keeps the values needed by the LLM for extraction and citation support.
+        """
+        stripped = {
+            "id": field.get("id"),
+            "name": field.get("name"),
+            "type": field.get("type"),
+            "extracted_value": field.get("extracted_value"),
+            "confidence": field.get("confidence"),
+            "citations": field.get("citations", []),
+        }
+        if field.get("type") == "table":
+            if field.get("table_name"):
+                stripped["table_name"] = field.get("table_name")
+            if field.get("table_columns"):
+                stripped["table_columns"] = field.get("table_columns")
+            if field.get("table_rows"):
+                stripped["table_rows"] = field.get("table_rows")
+        elif field.get("type") == "narrative":
+            if field.get("full_text"):
+                stripped["full_text"] = field.get("full_text")
+            if field.get("section"):
+                stripped["section"] = field.get("section")
+        return stripped
+
+    def _build_table_context_from_pdf_fields(self, pdf_fields: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Build table extraction context from Azure DI pdf_fields."""
+        context = []
+        for field in pdf_fields:
+            source = field.get("source")
+            if source not in ("key_value_pairs", "table_block", "narrative_block"):
+                continue
+            if source == "table_block":
+                page_number = field.get("page_number")
+                columns = field.get("table_columns", [])
+                rows = field.get("table_rows", [])
+                text = field.get("name", "") + "\n" + " | ".join(str(c) for c in columns) + "\n"
+                formatted_rows = []
+                for row in rows:
+                    values = row.values() if isinstance(row, dict) else row
+                    formatted_rows.append(" | ".join(str(v) for v in values))
+                text += "\n".join(formatted_rows)
+            elif source == "narrative_block":
+                page_number = field.get("page_number")
+                text = field.get("full_text") or field.get("extracted_value") or ""
+            else:
+                page_number = (field.get("bbox", {}) or {}).get("page") or field.get("page_number")
+                text = f"{field.get('name', '')}: {field.get('extracted_value', '')}"
+            context.append({
+                "text": text,
+                "page_number": page_number,
+                "section_type": source,
+                "citations": field.get("citations", []),
+            })
+            if field.get("citations"):
+                citation_hint = ", ".join(str(c) for c in field.get("citations", []))
+                context[-1]["text"] = f"Use citation {citation_hint} for this source.\n{context[-1]['text']}"
+        return context
+
+    def _build_table_rag_text_context(self, chunks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        """Build text-only table extraction context from retrieved document chunks."""
+        context: List[Dict[str, Any]] = []
+        for chunk in chunks:
+            metadata = chunk.get("chunk_metadata") or {}
+            if isinstance(metadata, str):
+                try:
+                    metadata = json.loads(metadata)
+                except Exception:
+                    metadata = {}
+
+            page_range = metadata.get("page_range")
+            bbox_page = (metadata.get("bbox", {}) or {}).get("page")
+            if bbox_page:
+                page_number = bbox_page
+            elif isinstance(page_range, list) and len(page_range) >= 2 and page_range[0] != page_range[-1]:
+                page_number = None
+            else:
+                page_number = chunk.get("page_number") or metadata.get("page_number")
+
+            context.append({
+                "text": chunk.get("text") or "",
+                "page_number": page_number,
+                "section_type": chunk.get("section_type") or metadata.get("chunk_type"),
+                "citations": chunk.get("citations", []),
+            })
+        return context
+
+    def _repair_table_result_citations(
+        self,
+        table_result: Dict[str, Any],
+        context_payload: List[Dict[str, Any]],
+    ) -> None:
+        """Replace local/mismatched table citations with global citations from the same page.
+
+        Table prompts use a compact routed context. If the LLM emits a local-looking
+        token like [S1:p15], the source index can point to an unrelated global PDF
+        field. Prefer a context citation whose page matches the token page.
+        """
+        page_to_citations: Dict[int, List[str]] = {}
+        valid_citation_pages: Dict[int, int] = {}
+
+        for entry in context_payload or []:
+            entry_page = entry.get("page_number")
+            if isinstance(entry_page, str) and entry_page.isdigit():
+                entry_page = int(entry_page)
+            citations = entry.get("citations") or []
+            if isinstance(citations, str):
+                citations = [citations]
+            for citation in citations:
+                citation_text = str(citation)
+                citation_page = self._parse_citation_page(citation_text) or entry_page
+                source_index = self._parse_citation_source_index(citation_text)
+                if isinstance(citation_page, int) and citation_page > 0:
+                    page_to_citations.setdefault(citation_page, []).append(citation_text)
+                    if source_index is not None:
+                        valid_citation_pages[source_index] = citation_page
+
+        if not page_to_citations:
+            return
+
+        results = table_result.get("results") if isinstance(table_result, dict) else None
+        if not isinstance(results, list):
+            return
+
+        for table in results:
+            rows = table.get("rows") if isinstance(table, dict) else None
+            if not isinstance(rows, list):
+                continue
+            for row in rows:
+                citations = row.get("citations") or []
+                if isinstance(citations, str):
+                    citations = [citations]
+                repaired: List[str] = []
+                for citation in citations:
+                    citation_text = str(citation)
+                    citation_page = self._parse_citation_page(citation_text)
+                    source_index = self._parse_citation_source_index(citation_text)
+                    source_page = valid_citation_pages.get(source_index) if source_index is not None else None
+                    if citation_page and source_page == citation_page:
+                        repaired.append(citation_text)
+                    elif citation_page and page_to_citations.get(citation_page):
+                        repaired.append(page_to_citations[citation_page][0])
+                    else:
+                        repaired.append(citation_text)
+                row["citations"] = list(dict.fromkeys(repaired))
+
+    @staticmethod
+    def _parse_citation_page(citation: str) -> Optional[int]:
+        match = re.search(r":\s*p(\d+)\]", str(citation), flags=re.IGNORECASE)
+        if not match:
+            return None
+        return int(match.group(1))
+
+    @staticmethod
+    def _parse_citation_source_index(citation: str) -> Optional[int]:
+        match = re.search(r"\[(?:S|D)(\d+):", str(citation), flags=re.IGNORECASE)
+        if not match:
+            return None
+        return int(match.group(1))
 
     def _format_chunks_with_citations(self, chunks: List[Dict[str, Any]]) -> str:
         """Format chunks with citation tokens for LLM consumption."""
@@ -1095,433 +1322,4 @@ For each requested schema table:
             return int(fallback_page)
 
         return 0
-
-    async def auto_map_fields(
-        self,
-        pdf_fields: List[Dict[str, Any]],
-        excel_schema: Dict[str, Any],
-        on_batch_complete=None,
-        use_cache: bool = True,
-    ) -> Dict[str, Any]:
-        """
-        Automatically map PDF fields to Excel cells using sheet batching.
-
-        Uses Anthropic's Structured Outputs to GUARANTEE valid JSON response.
-
-        **Optimized Sheet Batching Strategy (fixes 200k token overflow):**
-        - System prompt: Instructions + ALL PDF fields (cached once, ~12k tokens)
-        - Batches Excel sheets into groups of 4 sheets
-        - User message: Compressed sheet batch (~9k tokens per batch)
-        - Total per call: ~12k (cached) + ~9k (user) = ~21k tokens
-        - Total calls: ~6 calls for 21 sheets (vs 9 calls with old PDF batching)
-
-        **Token Efficiency:**
-        - PDF fields cached once, reused across all sheet batches
-        - Each sheet batch creates unique user message
-        - Avoids 200k+ token overflow from sending full schema
-
-        Args:
-            pdf_fields: List of detected PDF fields (from Azure DI)
-            excel_schema: Excel template schema (all sheets)
-            on_batch_complete: Optional callback(batch_num, total_batches, batch_mappings)
-            use_cache: Enable prompt caching (default: True)
-
-        Returns:
-            {
-                "mappings": [...],
-                "total_mapped": 38,
-                "high_confidence_count": 25,
-                ...
-            }
-        """
-        logger.info(
-            f"🔄 Auto-mapping {len(pdf_fields)} PDF fields across "
-            f"{len(excel_schema.get('sheets', []))} sheets (sheet batching strategy)"
-        )
-
-        if not pdf_fields or not excel_schema.get("sheets"):
-            return {"mappings": [], "total_mapped": 0, "total_unmapped": 0, "high_confidence_count": 0}
-
-        # Batch sheets (not PDF fields) to stay under token limits
-        SHEETS_PER_BATCH = 4
-
-        try:
-            all_mappings = []
-            total_high_confidence = 0
-
-            # Track aggregated token usage across all batches
-            total_input_tokens = 0
-            total_output_tokens = 0
-            total_cache_creation_tokens = 0
-            total_cache_read_tokens = 0
-
-            # Step 1: Compress full Excel schema
-            compressed_schema = self._compress_excel_schema(excel_schema)
-            sheets = compressed_schema.get("sheets", [])
-            total_sheets = len(sheets)
-            total_batches = (total_sheets + SHEETS_PER_BATCH - 1) // SHEETS_PER_BATCH
-
-            logger.info(
-                f"📊 Batching strategy: {total_sheets} sheets / {SHEETS_PER_BATCH} per batch = "
-                f"{total_batches} LLM calls"
-            )
-
-            # Step 2: Build system prompt with ALL PDF fields (cached once, reused)
-            stripped_fields = [self._strip_pdf_field(field) for field in pdf_fields]
-            pdf_fields_json = json.dumps(stripped_fields, separators=(",", ":"), ensure_ascii=False)
-            system_prompt = self.prompts.build_auto_map_system(pdf_fields_json)
-
-            # Estimate and log token counts
-            system_tokens = count_tokens(system_prompt)
-            logger.info(
-                f"📝 System prompt (PDF fields): ~{system_tokens:,} tokens "
-                f"({len(stripped_fields)} fields, will be cached)"
-            )
-
-            # Step 3: Process Excel sheets in batches
-            for i in range(0, total_sheets, SHEETS_PER_BATCH):
-                sheet_batch = sheets[i:i + SHEETS_PER_BATCH]
-                batch_num = (i // SHEETS_PER_BATCH) + 1
-                sheet_names = [s.get("name", f"Sheet{idx}") for idx, s in enumerate(sheet_batch, start=i)]
-
-                logger.info(
-                    f"\n📋 Batch {batch_num}/{total_batches}: Processing {len(sheet_batch)} sheets: "
-                    f"{', '.join(sheet_names[:3])}{'...' if len(sheet_names) > 3 else ''}"
-                )
-
-                # Build sheet batch schema
-                sheet_batch_schema = self._extract_sheet_batch_schema(compressed_schema, sheet_batch)
-                user_message = self.prompts.build_auto_map_user(sheet_batch_schema)
-
-                # Estimate and log token counts for this batch
-                user_tokens = count_tokens(user_message)
-                total_tokens = system_tokens + user_tokens
-                logger.info(
-                    f"   📊 Tokens: system ~{system_tokens:,} (cached) + "
-                    f"user ~{user_tokens:,} = ~{total_tokens:,} total"
-                )
-
-                # Warn if approaching limit
-                if total_tokens > 150000:
-                    logger.warning(
-                        f"⚠️  Batch {batch_num} approaching token limit: {total_tokens:,} tokens "
-                        f"(max 200k). Consider reducing SHEETS_PER_BATCH."
-                    )
-
-                # Build cached system prompt
-                system_arg: Any
-                if use_cache:
-                    system_arg = [
-                        {
-                            "type": "text",
-                            "text": system_prompt,
-                            "cache_control": {"type": "ephemeral"},
-                        }
-                    ]
-                else:
-                    system_arg = system_prompt
-
-                # Use Anthropic Structured Outputs
-                t0 = time.time()
-                message = await asyncio.to_thread(
-                    self.client.messages.parse,
-                    model=self.model,
-                    max_tokens=settings.synthesis_llm_max_tokens,
-                    temperature=0.0,
-                    timeout=settings.synthesis_llm_timeout_seconds,
-                    system=system_arg,
-                    messages=[{"role": "user", "content": user_message}],
-                    output_format=self.prompts.get_auto_map_response_model(),
-                )
-                batch_duration_ms = int((time.time() - t0) * 1000)
-
-                # Log actual cache usage from Anthropic and accumulate totals
-                usage = getattr(message, "usage", None)
-                if usage is not None:
-                    cache_creation = getattr(usage, "cache_creation_input_tokens", None) or 0
-                    cache_read = getattr(usage, "cache_read_input_tokens", None) or 0
-                    input_tokens = getattr(usage, "input_tokens", None) or 0
-                    output_tokens = getattr(usage, "output_tokens", None) or 0
-
-                    # Record metrics for this batch
-                    self._record_llm_metrics(input_tokens, output_tokens, cache_read, cache_creation)
-
-                    # Accumulate token totals across all batches
-                    total_input_tokens += input_tokens
-                    total_output_tokens += output_tokens
-                    total_cache_creation_tokens += cache_creation
-                    total_cache_read_tokens += cache_read
-
-                    if cache_creation > 0 or cache_read > 0:
-                        logger.info(
-                            f"   💾 Cache stats: creation={cache_creation:,}, read={cache_read:,}, "
-                            f"input={input_tokens:,}, output={output_tokens:,}"
-                        )
-
-                parsed_output = message.parsed_output
-                batch_result = parsed_output.model_dump()
-
-                # Collect mappings from this batch
-                batch_mappings = batch_result.get("mappings", [])
-                all_mappings.extend(batch_mappings)
-                total_high_confidence += batch_result.get("high_confidence_count", 0)
-
-                logger.info(
-                    f"   ✅ Batch {batch_num}/{total_batches} complete: "
-                    f"{len(batch_mappings)} mappings, "
-                    f"{batch_result.get('high_confidence_count', 0)} high confidence"
-                )
-
-                if self.capture_io_log and self._io_log_repo:
-                    self._io_log_repo.save_io_log(
-                        source_type="template_fill",
-                        source_id=self.fill_run_id,
-                        stage=f"auto_map_fields_batch_{batch_num}",
-                        prompt_version=self.prompts.version,
-                        user_message=user_message,
-                        output=batch_result,
-                        input_tokens=input_tokens if usage else 0,
-                        output_tokens=output_tokens if usage else 0,
-                        cache_creation_tokens=cache_creation if usage else 0,
-                        cache_read_tokens=cache_read if usage else 0,
-                        duration_ms=batch_duration_ms,
-                    )
-
-                # Call progress callback if provided
-                if on_batch_complete:
-                    on_batch_complete(batch_num, total_batches, batch_mappings)
-
-            # Aggregate results
-            result = {
-                "mappings": all_mappings,
-                "total_mapped": len(all_mappings),
-                "total_unmapped": len(pdf_fields) - len(all_mappings),
-                "high_confidence_count": total_high_confidence,
-                # Token usage data for observability
-                "usage": {
-                    "input_tokens": total_input_tokens,
-                    "output_tokens": total_output_tokens,
-                    "cache_creation_input_tokens": total_cache_creation_tokens,
-                    "cache_read_input_tokens": total_cache_read_tokens,
-                    "total_batches": total_batches,
-                    "model": self.model,
-                }
-            }
-
-            # Add status to all mappings
-            for mapping in result.get("mappings", []):
-                if "status" not in mapping:
-                    mapping["status"] = "auto_mapped"
-
-            logger.info(
-                f"\n✅ Auto-mapping complete: {result.get('total_mapped', 0)} total mappings across "
-                f"{total_sheets} sheets ({result.get('high_confidence_count', 0)} high confidence, "
-                f"{result.get('total_unmapped', 0)} unmapped) | "
-                f"Tokens: input={total_input_tokens:,}, output={total_output_tokens:,}, "
-                f"cache_read={total_cache_read_tokens:,}"
-            )
-
-            return result
-
-        except Exception as e:
-            logger.error(f"❌ Error auto-mapping fields: {e}", exc_info=True)
-            raise
-
-    def _compress_excel_schema(self, excel_schema: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Compress Excel schema to reduce token usage by ~70-80%.
-
-        Removes verbose metadata while keeping essential mapping information:
-        - Limits fillable_cells to max 20 samples per table
-        - Removes: column_headers_detailed, current_value, is_merged, data_rows
-        - Keeps: cell, label, type, col_header, row_label, sheet name
-
-        This allows large templates (1200+ fields, 30+ tables) to fit within token limits.
-        """
-        compressed = {
-            "total_key_value_fields": excel_schema.get("total_key_value_fields", 0),
-            "total_tables": excel_schema.get("total_tables", 0),
-            "has_formulas": excel_schema.get("has_formulas", False),
-            "sheets": []
-        }
-
-        for sheet in excel_schema.get("sheets", []):
-            compressed_sheet = {
-                "name": sheet.get("name"),
-                "index": sheet.get("index"),
-            }
-
-            # Compress key-value fields (remove current_value, is_merged)
-            kv_fields = sheet.get("key_value_fields", [])
-            compressed_sheet["key_value_fields"] = [
-                {
-                    "cell": kv.get("cell"),
-                    "label": kv.get("label"),
-                    "type": kv.get("type"),
-                    "row": kv.get("row"),
-                    "col": kv.get("col"),
-                }
-                for kv in kv_fields
-            ]
-
-            # Compress tables (limit fillable_cells to 20, remove verbose metadata)
-            tables = sheet.get("tables", [])
-            compressed_tables = []
-            for table in tables:
-                # Limit fillable_cells to max 20 samples (instead of 100)
-                fillable_cells = table.get("fillable_cells", [])[:20]
-
-                compressed_table = {
-                    "table_name": table.get("table_name"),
-                    "start_row": table.get("start_row"),
-                    "start_col": table.get("start_col"),
-                    "end_col": table.get("end_col"),
-                    "column_headers": table.get("column_headers", []),  # Keep hierarchical headers
-                    "total_fillable_cells": table.get("total_fillable_cells", 0),
-                    # Simplified fillable_cells (remove col_letter, keep essentials)
-                    "fillable_cells": [
-                        {
-                            "cell": cell.get("cell"),
-                            "row": cell.get("row"),
-                            "col": cell.get("col"),
-                            "row_label": cell.get("row_label"),
-                            "col_header": cell.get("col_header"),
-                            "type": cell.get("type"),
-                        }
-                        for cell in fillable_cells
-                    ]
-                }
-                compressed_tables.append(compressed_table)
-
-            compressed_sheet["tables"] = compressed_tables
-            compressed["sheets"].append(compressed_sheet)
-
-        logger.info(
-            f"Compressed Excel schema: {len(excel_schema.get('sheets', []))} sheets, "
-            f"{compressed['total_key_value_fields']} KV fields, {compressed['total_tables']} tables"
-        )
-
-        return compressed
-
-    def _strip_pdf_field(self, field: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        Remove unnecessary fields from PDF field to reduce tokens (~26% reduction).
-
-        Removes: description, source (not used by mapping logic)
-        Keeps: id, name, type, extracted_value, confidence, citations (all required)
-        For table_block fields: also keeps table_name, table_columns, table_rows (full context)
-        For narrative_block fields: also keeps full_text and section (rich context for LLM)
-        """
-        stripped = {
-            "id": field.get("id"),
-            "name": field.get("name"),
-            "type": field.get("type"),
-            "extracted_value": field.get("extracted_value"),
-            "confidence": field.get("confidence"),
-            "citations": field.get("citations", []),
-        }
-        # Preserve full table structure for table_block fields
-        if field.get("type") == "table":
-            if field.get("table_name"):
-                stripped["table_name"] = field.get("table_name")
-            if field.get("table_columns"):
-                stripped["table_columns"] = field.get("table_columns")
-            if field.get("table_rows"):
-                stripped["table_rows"] = field.get("table_rows")
-        # Preserve full narrative text for narrative_block fields
-        elif field.get("type") == "narrative":
-            if field.get("full_text"):
-                stripped["full_text"] = field.get("full_text")
-            if field.get("section"):
-                stripped["section"] = field.get("section")
-        return stripped
-
-    def _build_table_context_from_pdf_fields(self, pdf_fields: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """Build table extraction context from pdf_fields (detect_fields_task output).
-
-        Uses the same structured data Stage 1.5 (extract_schema_field_values) already sends to the LLM.
-        Passing the same pdf_fields across all table batch calls means the system prompt is identical
-        each time — enabling Anthropic prompt cache hits (~10x cheaper after the first call).
-        """
-        context = []
-        for f in pdf_fields:
-            source = f.get("source")
-            if source not in ("key_value_pairs", "table_block", "narrative_block"):
-                continue
-            if source == "table_block":
-                page_number = f.get("page_number")
-                cols = f.get("table_columns", [])
-                rows = f.get("table_rows", [])
-                text = f.get("name", "") + "\n" + " | ".join(str(c) for c in cols) + "\n"
-                text += "\n".join(" | ".join(str(v) for v in row) for row in rows)
-            elif source == "narrative_block":
-                page_number = f.get("page_number")
-                text = f.get("full_text") or f.get("extracted_value") or ""
-            else:  # key_value_pairs — bbox.page is exact (Azure DI per-pair bounding_regions)
-                page_number = (f.get("bbox", {}) or {}).get("page") or f.get("page_number")
-                text = f"{f.get('name', '')}: {f.get('extracted_value', '')}"
-            context.append({"text": text, "page_number": page_number, "section_type": source})
-        return context
-
-    def _build_table_rag_text_context(self, chunks: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-        """
-        Build text-only RAG context from retrieved chunks for table extraction.
-        Uses DocumentChunk.text + page metadata only.
-        """
-        context: List[Dict[str, Any]] = []
-        for chunk in chunks:
-            metadata = chunk.get("chunk_metadata") or {}
-            if isinstance(metadata, str):
-                try:
-                    metadata = json.loads(metadata)
-                except Exception:
-                    metadata = {}
-
-            page_range = metadata.get("page_range")
-            bbox_page = (metadata.get("bbox", {}) or {}).get("page")
-            if bbox_page:
-                # Table chunks — bbox.page is the exact page
-                page_number = bbox_page
-            elif isinstance(page_range, list) and len(page_range) >= 2 and page_range[0] != page_range[-1]:
-                # Multi-page KV chunk — chunk.page_number is only the start, not reliable
-                page_number = None
-            else:
-                page_number = chunk.get("page_number") or metadata.get("page_number")
-
-            context.append({
-                "text": chunk.get("text") or "",
-                "page_number": page_number,
-                "section_type": chunk.get("section_type") or metadata.get("chunk_type"),
-            })
-
-        return context
-
-    def _extract_sheet_batch_schema(
-        self,
-        full_schema: Dict[str, Any],
-        sheet_batch: List[Dict[str, Any]]
-    ) -> Dict[str, Any]:
-        """
-        Extract a subset of sheets from the full compressed schema.
-
-        Args:
-            full_schema: Full compressed Excel schema
-            sheet_batch: List of sheet dicts to extract
-
-        Returns:
-            Schema with only the specified sheets
-        """
-        return {
-            "total_key_value_fields": sum(
-                len(s.get("key_value_fields", [])) for s in sheet_batch
-            ),
-            "total_tables": sum(
-                len(s.get("tables", [])) for s in sheet_batch
-            ),
-            "has_formulas": full_schema.get("has_formulas", False),
-            "sheets": sheet_batch
-        }
-
-    # _build_system_prompt_with_pdf_fields and _build_sheet_batch_user_message
-    # moved to prompts/v1.py (build_auto_map_system / build_auto_map_user)
 

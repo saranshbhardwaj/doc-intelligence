@@ -91,6 +91,13 @@ class Settings(BaseSettings):
     template_fill_max_llm_context_chars: int = 80_000
     template_fill_max_table_rows_per_block: int = 200
     template_fill_max_narrative_chars_per_block: int = 2_500
+    # Per-user rate limiting: max fill run starts per minute (sliding window)
+    template_fill_rate_limit_per_minute: int = 5
+    # Per-user concurrency: max simultaneously active (non-terminal) fill runs
+    template_fill_max_concurrent_per_user: int = 3
+    # Stuck run timeout: fill runs older than this are excluded from the concurrency count.
+    # Covers the case where a Celery worker crashes before marking the run as failed.
+    template_fill_stuck_run_timeout_hours: int = 2
     
     # LLM Settings - Expensive Model (Structured Extraction)
     llm_model: str = "claude-sonnet-4-5-20250929"
@@ -307,6 +314,12 @@ class Settings(BaseSettings):
     # Low confidence means QU is uncertain (e.g. timeout) — reranking on a weak query signal is noisy.
     # 0.4 preserves reranking for most real queries (confidence usually 0.7+) but skips timed-out/ambiguous cases.
     rag_reranker_skip_confidence_threshold: float = 0.4
+
+    # Maximum number of BM25 keyword+structured (table/key_value) chunks that bypass
+    # the reranker. The MS MARCO cross-encoder under-scores financial table text, so
+    # BM25-matched structured chunks are passed directly to the LLM. Cap prevents
+    # edge cases where many tables match a broad query from crowding out reranker results.
+    rag_reranker_bypass_max_structured: int = 3
 
     # Score inheritance factors for expanded chunks (0.0-1.0)
     # Lower = expanded chunks rank below original chunks
