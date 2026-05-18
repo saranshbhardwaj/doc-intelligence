@@ -39,7 +39,6 @@ export default function RequireAuth() {
   // Auto-provisioning state (for users with no org)
   const [provisioning, setProvisioning] = useState(false);
   const [provisionError, setProvisionError] = useState(null);
-  const [provisionDone, setProvisionDone] = useState(false);
   const [provisionedOrgId, setProvisionedOrgId] = useState(null);
   const [tokenOrgId, setTokenOrgId] = useState(null);
   const [authCheckError, setAuthCheckError] = useState(null);
@@ -66,7 +65,7 @@ export default function RequireAuth() {
   // Auto-provision org when user has no org yet
   useEffect(() => {
     if (!isLoaded || !userId || effectiveOrgId || devBypassAuth) return;
-    if (provisioning || provisionDone || provisionError) return;
+    if (provisioning || provisionedOrgId || provisionError) return;
 
     const run = async () => {
       setProvisioning(true);
@@ -120,7 +119,7 @@ export default function RequireAuth() {
     };
 
     run();
-  }, [isLoaded, userId, effectiveOrgId, devBypassAuth, getToken, provisioning, provisionDone, provisionError]);
+  }, [isLoaded, userId, effectiveOrgId, devBypassAuth, getToken, provisioning, provisionedOrgId, provisionError, signIn]);
 
   useEffect(() => {
     if (devBypassAuth) {
@@ -130,6 +129,7 @@ export default function RequireAuth() {
     }
 
     if (!isLoaded || !userId) return;
+    if (!effectiveOrgId && !provisionedOrgId) return;
 
     // Cancel any in-flight request from a previous run of this effect.
     if (controllerRef.current) {
@@ -196,9 +196,7 @@ export default function RequireAuth() {
             signIn({ organizationId: provisionedOrgId });
             return;
           }
-          setTokenOrgId(null);
-          setProvisionDone(true);
-          setAuthCheckError("Please continue sign-in to refresh your workspace access.");
+          signIn();
           return;
         }
 
@@ -225,7 +223,7 @@ export default function RequireAuth() {
       controller.abort();
       clearTimeout(timer);
     };
-  }, [isLoaded, userId, tokenOrgId, authCheckRetry]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [isLoaded, userId, effectiveOrgId, provisionedOrgId, tokenOrgId, authCheckRetry]); // eslint-disable-line react-hooks/exhaustive-deps
 
   if (!isLoaded) return null;
 
@@ -256,28 +254,6 @@ export default function RequireAuth() {
       );
     }
 
-    // Provisioning done — show re-auth prompt
-    if (provisionDone) {
-      return (
-        <div className="min-h-screen w-full flex items-center justify-center bg-background">
-          <div className="rounded-lg border border-border bg-card p-6 shadow-sm max-w-sm w-full mx-4">
-            <h2 className="mb-2 text-lg font-semibold text-foreground">
-              Workspace ready!
-            </h2>
-            <p className="mb-4 text-sm text-muted-foreground">
-              Your workspace has been created. Sign in again to continue.
-            </p>
-            <button
-              onClick={() => signIn({ organizationId: provisionedOrgId })}
-              className="w-full inline-flex items-center justify-center gap-2 px-4 py-2 text-sm font-medium text-white bg-primary hover:bg-primary/90 rounded-md transition-colors"
-            >
-              Continue
-            </button>
-          </div>
-        </div>
-      );
-    }
-
     // Error during provisioning
     if (provisionError) {
       return (
@@ -295,7 +271,6 @@ export default function RequireAuth() {
                 onClick={() => {
                   setProvisionError(null);
                   setProvisioning(false);
-                  setProvisionDone(false);
                 }}
                 className="flex-1 px-3 py-2 text-sm font-medium text-foreground border border-border rounded-md hover:bg-muted transition-colors"
               >
