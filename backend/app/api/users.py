@@ -312,7 +312,7 @@ def provision_org(request: Request):
     """
     Auto-create a WorkOS organization for a new user who has no org yet.
     Called by frontend when JWT is valid but contains no org_id.
-    After this endpoint succeeds, user must re-authenticate to get a new JWT with org_id.
+    After this endpoint succeeds, the frontend re-authenticates to get a new JWT with org_id.
 
     Returns:
         org_id: ID of the newly created organization
@@ -370,10 +370,10 @@ def provision_org(request: Request):
                 extra={"user_id": user_id, "org_id": org.id},
             )
         else:
-            # Create organization with idempotency + external_id.
+            # Create organization with external_id. This WorkOS SDK version does not
+            # accept an idempotency_key argument; external_id provides stable dedupe.
             org = _workos.organizations.create_organization(
                 name=org_name,
-                idempotency_key=f"provision-org:{user_id}",
                 external_id=external_id,
             )
             created_org_id = org.id
