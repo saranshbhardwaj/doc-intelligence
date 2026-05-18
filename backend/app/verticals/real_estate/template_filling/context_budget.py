@@ -7,7 +7,7 @@ from app.config import settings
 
 
 LARGE_DOCUMENT_CONTEXT_WARNING = (
-    "Large document: Basilfy used the most relevant extracted fields and tables for this template. "
+    "Large document: LatticeBlu used the most relevant extracted fields and tables for this template. "
     "Review unmapped cells manually."
 )
 TABLE_CONTEXT_TRIM_WARNING = (

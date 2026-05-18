@@ -28,7 +28,7 @@ export default function PrivacyPage() {
           onClick={() => navigate("/")}
           className="text-xl font-extrabold tracking-tight bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent"
         >
-          Basilfy
+          LatticeBlu
         </button>
       </div>
 
@@ -76,7 +76,7 @@ export default function PrivacyPage() {
 
         <Section title="Third-Party Services">
           <p>
-            Basilfy uses the following third-party services to operate:
+            LatticeBlu uses the following third-party services to operate:
           </p>
           <ul className="list-disc list-inside space-y-1">
             <li>Anthropic (AI inference for document analysis, documents sent for processing only)</li>
@@ -113,7 +113,7 @@ export default function PrivacyPage() {
         <Section title="Changes to This Policy">
           <p>
             We may update this policy as the product evolves. Significant changes will
-            be communicated via email. Continued use of Basilfy after changes
+            be communicated via email. Continued use of LatticeBlu after changes
             constitutes acceptance of the updated policy.
           </p>
         </Section>
@@ -129,7 +129,7 @@ export default function PrivacyPage() {
       </main>
 
       <footer className="border-t border-border py-4 text-center text-sm text-muted-foreground">
-        <p>&copy; 2026 Basilfy. All rights reserved.</p>
+        <p>&copy; 2026 LatticeBlu. All rights reserved.</p>
       </footer>
     </div>
   );

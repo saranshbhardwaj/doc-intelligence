@@ -555,7 +555,7 @@ export default function ActiveChat({
               placeholder={
                 sessionDocIds.length === 0
                   ? "Add documents to start chatting..."
-                  : "Ask Basilfy anything about your documents..."
+                  : "Ask LatticeBlu anything about your documents..."
               }
               disabled={isStreaming || sessionDocIds.length === 0}
               rows={1}
@@ -595,7 +595,7 @@ export default function ActiveChat({
             </div>
           </div>
           <p className="text-center text-[10px] text-muted-foreground mt-3 tracking-wide opacity-70">
-            Basilfy can make mistakes. Verify important information.
+            LatticeBlu can make mistakes. Verify important information.
           </p>
         </div>
       </div>

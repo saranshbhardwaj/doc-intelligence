@@ -150,15 +150,15 @@ export default function UploadPage() {
                 onClick={() => navigate(isSignedIn ? "/app/dashboard" : "/")}
                 className="flex items-center gap-3 hover:opacity-80 transition-opacity"
               >
-                <span className="relative h-8 w-8 shrink-0 overflow-hidden rounded-md">
+                <span className="relative h-8 w-8 shrink-0 overflow-hidden rounded-none">
                   <img
-                    src="/Freara%20ai%20logo.png"
-                    alt="Basilfy"
-                    className="absolute inset-0 h-full w-full scale-[1.78] object-cover"
+                    src="/LB.png"
+                    alt="LatticeBlu"
+                    className="absolute inset-0 h-full w-full object-contain"
                   />
                 </span>
                 <span className="text-xl font-extrabold tracking-tight bg-gradient-to-r from-blue-600 to-purple-600 bg-clip-text text-transparent">
-                  Basilfy
+                  LatticeBlu
                 </span>
               </button>
 
@@ -269,7 +269,7 @@ export default function UploadPage() {
                 analysis.
               </p>
               <p className="text-base text-muted-foreground dark:text-muted-foreground">
-                Explore the sample output below to see what Basilfy can
+                Explore the sample output below to see what LatticeBlu can
                 extract from your documents.
               </p>
             </div>

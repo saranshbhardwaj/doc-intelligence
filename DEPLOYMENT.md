@@ -8,7 +8,7 @@ Production stack: **Vercel** (frontend) + **Railway** (API + workers) + **Supaba
 
 | Service | Platform | URL |
 |---------|----------|-----|
-| Frontend | Vercel | `https://www.basilfy.com` |
+| Frontend | Vercel | `https://www.LatticeBlu.com` |
 | Backend API | Railway (`api` service) | Railway-generated URL |
 | Celery Workers | Railway (`worker1`, `worker2`, `worker3`) | — |
 | Database | Supabase PostgreSQL | — |
@@ -39,7 +39,7 @@ Production stack: **Vercel** (frontend) + **Railway** (API + workers) + **Supaba
 | `GMAIL_SENDER` | e.g. `saranshbhardwaj@gmail.com` |
 | `GMAIL_APP_PASSWORD` | Gmail app password (not account password) |
 | `ADMIN_NOTIFICATION_EMAIL` | Where sign-up alerts go |
-| `CORS_ORIGINS` | `https://www.basilfy.com,https://basilfy.com` |
+| `CORS_ORIGINS` | `https://www.LatticeBlu.com,https://LatticeBlu.com` |
 | `PORT` | `8000` |
 
 ### Railway — Worker services (`worker1`, `worker2`, `worker3`)
@@ -55,20 +55,20 @@ Same as API, plus:
 | Variable | Notes |
 |----------|-------|
 | `VITE_WORKOS_CLIENT_ID` | Same `client_01...` value as Railway `WORKOS_CLIENT_ID` |
-| `VITE_API_BASE_URL` | Railway API public URL (e.g. `https://api.basilfy.com`) |
+| `VITE_API_BASE_URL` | Railway API public URL (e.g. `https://api.LatticeBlu.com`) |
 
 ---
 
 ## WorkOS Configuration
 
 1. **Redirect URIs** (Authentication → Redirects):
-   - `https://www.basilfy.com/callback`
-   - `https://basilfy.com/callback`
+   - `https://www.LatticeBlu.com/callback`
+   - `https://LatticeBlu.com/callback`
    - `http://localhost:5174/callback` (local dev)
 
 2. **CORS Allowed Origins** (Authentication → Sessions):
-   - `https://www.basilfy.com`
-   - `https://basilfy.com`
+   - `https://www.LatticeBlu.com`
+   - `https://LatticeBlu.com`
    - `http://localhost:5174`
 
 3. **JWT Template** (Authentication → Sessions → JWT template):
@@ -159,7 +159,7 @@ Admin tier bypasses all `require_vertical()` checks in the backend.
 - Must explicitly set `PORT=8000` in Railway service variables
 
 ### WorkOS — both www and non-www
-- Add **both** `www.basilfy.com` and `basilfy.com` to WorkOS redirect URIs and CORS origins
+- Add **both** `www.LatticeBlu.com` and `LatticeBlu.com` to WorkOS redirect URIs and CORS origins
 - Vercel serves on `www` but redirects from bare domain — WorkOS sees the original domain
 
 ### Stale user rows (Clerk migration)
@@ -170,7 +170,7 @@ Admin tier bypasses all `require_vertical()` checks in the backend.
 ### WorkOS — session persistence on page refresh (`devMode={true}`)
 - Without a custom auth domain, WorkOS stores the refresh token **in memory only** in production. Memory is wiped on every page refresh → users get logged out.
 - Fix: `devMode={true}` on `AuthKitProvider` in [frontend/src/main.jsx](frontend/src/main.jsx) — this stores the refresh token in `localStorage` instead, surviving refreshes.
-- The proper long-term fix is a custom auth domain (`auth.basilfy.com`) so WorkOS can set an httpOnly cookie on `.basilfy.com`. WorkOS charges $99/month for custom domains — not worth it for early beta.
+- The proper long-term fix is a custom auth domain (`auth.LatticeBlu.com`) so WorkOS can set an httpOnly cookie on `.LatticeBlu.com`. WorkOS charges $99/month for custom domains — not worth it for early beta.
 - `devMode={true}` is explicitly documented by WorkOS as the recommended approach without a custom domain.
 
 ### Gmail SMTP

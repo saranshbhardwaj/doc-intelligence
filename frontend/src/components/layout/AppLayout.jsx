@@ -248,12 +248,12 @@ export default function AppLayout({
             >
               <span className="app-brand-mark">
                 <img
-                  src="/Freara%20ai%20logo.png"
-                  alt="Basilfy"
-                  className="absolute inset-0 h-full w-full scale-[1.78] object-cover"
+                  src="/LB.png"
+                  alt="LatticeBlu"
+                  className="absolute inset-0 h-full w-full object-contain"
                 />
               </span>
-              <span className="app-brand-wordmark">Basilfy</span>
+              <span className="app-brand-wordmark">LatticeBlu</span>
             </Link>
 
             {/* Navigation */}

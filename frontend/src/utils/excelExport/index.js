@@ -28,7 +28,7 @@ import {
 export async function exportToExcel(data, metadata) {
   const workbook = new ExcelJS.Workbook();
 
-  workbook.creator = "Basilfy Document Intelligence";
+  workbook.creator = "LatticeBlu Document Intelligence";
   workbook.created = new Date();
   workbook.modified = new Date();
 

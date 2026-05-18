@@ -28,7 +28,7 @@ export default function TermsPage() {
           onClick={() => navigate("/")}
           className="text-xl font-extrabold tracking-tight bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent"
         >
-          Basilfy
+          LatticeBlu
         </button>
       </div>
 
@@ -40,21 +40,21 @@ export default function TermsPage() {
 
         <Section title="Acceptance of Terms">
           <p>
-            By accessing or using Basilfy, you agree to be bound by these Terms of
+            By accessing or using LatticeBlu, you agree to be bound by these Terms of
             Service. If you do not agree, do not use the service.
           </p>
         </Section>
 
         <Section title="Description of Service">
           <p>
-            Basilfy is an AI-powered document intelligence platform that extracts
+            LatticeBlu is an AI-powered document intelligence platform that extracts
             structured data from real estate documents and populates Excel templates.
             The service is currently in closed beta and provided as-is.
           </p>
         </Section>
 
         <Section title="Acceptable Use">
-          <p>You agree to use Basilfy only for lawful purposes. You may not:</p>
+          <p>You agree to use LatticeBlu only for lawful purposes. You may not:</p>
           <ul className="list-disc list-inside space-y-1">
             <li>Upload documents you do not have the right to process</li>
             <li>Attempt to reverse-engineer, scrape, or abuse the service</li>
@@ -66,7 +66,7 @@ export default function TermsPage() {
         <Section title="Your Content">
           <p>
             You retain ownership of all documents you upload. By uploading documents,
-            you grant Basilfy a limited license to process them solely for the purpose
+            you grant LatticeBlu a limited license to process them solely for the purpose
             of providing the service to you.
           </p>
           <p>
@@ -77,7 +77,7 @@ export default function TermsPage() {
 
         <Section title="No Warranties">
           <p>
-            Basilfy is provided &quot;as is&quot; without warranties of any kind,
+            LatticeBlu is provided &quot;as is&quot; without warranties of any kind,
             express or implied. We do not warrant that the service will be uninterrupted,
             error-free, or that extracted data will be 100% accurate. Always review
             AI-extracted data before using it in financial decisions.
@@ -86,7 +86,7 @@ export default function TermsPage() {
 
         <Section title="Limitation of Liability">
           <p>
-            To the maximum extent permitted by law, Basilfy and its operators shall
+            To the maximum extent permitted by law, LatticeBlu and its operators shall
             not be liable for any indirect, incidental, special, or consequential
             damages arising from your use of the service, including but not limited
             to losses from reliance on extracted data.
@@ -95,7 +95,7 @@ export default function TermsPage() {
 
         <Section title="Beta Service">
           <p>
-            Basilfy is currently in closed beta. Features may change, data may be
+            LatticeBlu is currently in closed beta. Features may change, data may be
             reset, and the service may be interrupted without notice. We appreciate
             your feedback and patience during this phase.
           </p>
@@ -126,7 +126,7 @@ export default function TermsPage() {
       </main>
 
       <footer className="border-t border-border py-4 text-center text-sm text-muted-foreground">
-        <p>&copy; 2026 Basilfy. All rights reserved.</p>
+        <p>&copy; 2026 LatticeBlu. All rights reserved.</p>
       </footer>
     </div>
   );

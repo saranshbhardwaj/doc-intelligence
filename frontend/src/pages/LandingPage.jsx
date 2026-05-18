@@ -36,15 +36,15 @@ export default function LandingPage() {
         <div className="glass-card rounded-full px-5 py-2.5 shadow-lg flex items-center justify-between">
           {/* Logo */}
           <div className="flex items-center gap-2.5">
-            <span className="relative h-8 w-8 shrink-0 overflow-hidden rounded-md">
+            <span className="relative h-8 w-8 shrink-0 overflow-hidden rounded-none">
               <img
-                src="/Freara%20ai%20logo.png"
-                alt="Basilfy"
-                className="absolute inset-0 h-full w-full scale-[1.78] object-cover"
+                src="/LB.png"
+                alt="LatticeBlu"
+                className="absolute inset-0 h-full w-full object-contain"
               />
             </span>
             <span className="text-xl font-extrabold tracking-tight bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
-              Basilfy
+              LatticeBlu
             </span>
           </div>
 
@@ -219,7 +219,7 @@ export default function LandingPage() {
           <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
             <div>
               <span className="text-2xl font-extrabold tracking-tight bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent">
-                Basilfy
+                LatticeBlu
               </span>
               <p className="text-sm mt-3">
                 AI-powered document intelligence for real estate professionals.
@@ -252,7 +252,7 @@ export default function LandingPage() {
           </div>
 
           <div className="border-t border-border mt-12 pt-8 flex flex-col md:flex-row items-center justify-between gap-4 text-sm">
-            <p>&copy; 2026 Basilfy. All rights reserved.</p>
+            <p>&copy; 2026 LatticeBlu. All rights reserved.</p>
             <p className="text-xs text-muted-foreground/60">Built for real estate professionals.</p>
           </div>
         </div>

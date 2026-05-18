@@ -1,7 +1,7 @@
 # Doc Intelligence
 
-AI-powered document intelligence for Private Equity and Real Estate.
-Extract structured data, run AI workflows, and generate deal documents — in minutes.
+AI-powered CRE underwriting for real estate teams.
+Extract deal data, analyze assumptions, and generate underwriting outputs in minutes.
 
 ## Features
 

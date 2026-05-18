@@ -464,7 +464,7 @@
   }
 
   .app-brand-mark {
-    @apply relative h-8 w-8 shrink-0 overflow-hidden rounded-[0.95rem] ring-1 ring-primary/20;
+    @apply relative h-8 w-8 shrink-0 overflow-hidden rounded-none ring-1 ring-primary/20;
     background: linear-gradient(180deg, hsl(var(--card)), hsl(var(--surface-soft)));
     box-shadow:
       inset 0 1px 0 hsl(var(--background) / 0.65),
