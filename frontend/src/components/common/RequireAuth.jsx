@@ -87,7 +87,6 @@ export default function RequireAuth() {
           // Auth token already carries org context; no provisioning needed.
           setTokenOrgId(claimOrgId);
           setProvisioning(false);
-          setProvisionDone(false);
           return;
         }
 
