@@ -296,7 +296,7 @@ async def upload_template(
                 detail=(
                     "This file doesn't match the supported RE Investment Model template. "
                     "Please upload the correct master template file. "
-                    "Contact your admin if you need a different template type."
+                    "Contact your admin at saranshbhardwaj@gmail.com if you need a different template type."
                 ),
             )
 
