@@ -7,14 +7,14 @@ export default function FAQ() {
 
   const faqs = [
     {
-      question: "What document types does Basilfy support?",
+      question: "What document types does LatticeBlu support?",
       answer:
-        "Basilfy supports offering memoranda, rent rolls, operating statements, and property appraisals in PDF and Word (.docx) format. For template fill, we support .xlsx Excel files.",
+        "LatticeBlu supports offering memoranda, rent rolls, operating statements, and property appraisals in PDF and Word (.docx) format. For template fill, we support .xlsx Excel files.",
     },
     {
       question: "How does template fill work?",
       answer:
-        "Upload your PDF and pick your Excel template. Basilfy goes through the document and fills in the cells: cap rate, NOI, occupancy, asking price, debt service. You review each value with its source citation, fix anything off, and download.",
+        "Upload your PDF and pick your Excel template. LatticeBlu goes through the document and fills in the cells: cap rate, NOI, occupancy, asking price, debt service. You review each value with its source citation, fix anything off, and download.",
     },
     {
       question: "How accurate is the extraction?",
@@ -34,7 +34,7 @@ export default function FAQ() {
     {
       question: "What Excel templates are supported?",
       answer:
-        "Any standard .xlsx template works. You define which cells map to which fields (cap rate, NOI, etc.) in the template schema, and Basilfy fills them automatically. Contact us to help set up your template.",
+        "Any standard .xlsx template works. You define which cells map to which fields (cap rate, NOI, etc.) in the template schema, and LatticeBlu fills them automatically. Contact us to help set up your template.",
     },
     {
       question: "What if the extraction has errors?",
@@ -59,7 +59,7 @@ export default function FAQ() {
             </span>
           </h2>
           <p className="text-xl text-muted-foreground">
-            Everything you need to know about Basilfy
+            Everything you need to know about LatticeBlu
           </p>
         </div>
 

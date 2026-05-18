@@ -42,7 +42,7 @@ export default function Features() {
               </div>
               <h3 className="text-2xl font-bold text-foreground">Smart Extraction</h3>
               <p className="text-muted-foreground leading-relaxed">
-                Upload your offering memorandum. Basilfy reads every page and extracts cap rate, NOI,
+                Upload your offering memorandum. LatticeBlu reads every page and extracts cap rate, NOI,
                 asking price, occupancy, and debt service. It maps the values directly into your Excel template.
               </p>
               <ul className="space-y-1.5 text-sm text-muted-foreground">
@@ -204,7 +204,7 @@ export default function Features() {
                 {
                   num: "2",
                   Icon: BrainCircuit,
-                  title: "Basilfy Extracts Key Metrics",
+                  title: "LatticeBlu Extracts Key Metrics",
                   desc: "Reads every page and pulls cap rate, NOI, occupancy, asking price, debt service, and more.",
                   color: "bg-accent/10 text-accent",
                   circleColor: "bg-accent text-accent-foreground",
@@ -247,7 +247,7 @@ export default function Features() {
               <Clock className="w-8 h-8 text-accent flex-shrink-0" />
               <div>
                 <div className="font-semibold text-foreground">10x Faster</div>
-                <div className="text-sm text-muted-foreground">What takes 3 hours manually takes 5 minutes with Basilfy</div>
+                <div className="text-sm text-muted-foreground">What takes 3 hours manually takes 5 minutes with LatticeBlu</div>
               </div>
             </div>
             <div className="flex items-center gap-4">

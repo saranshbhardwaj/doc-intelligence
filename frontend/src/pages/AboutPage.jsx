@@ -19,7 +19,7 @@ export default function AboutPage() {
           onClick={() => navigate("/")}
           className="text-xl font-extrabold tracking-tight bg-gradient-to-r from-primary to-accent bg-clip-text text-transparent"
         >
-          Basilfy
+          LatticeBlu
         </button>
       </div>
 
@@ -39,8 +39,8 @@ export default function AboutPage() {
         <section>
           <h2 className="text-sm font-bold uppercase tracking-widest text-primary mb-4">What We Built</h2>
           <p className="text-lg text-muted-foreground leading-relaxed mb-4">
-            Basilfy reads your offering memorandum and fills your Excel template
-            automatically. Upload the OM, select your template, and Basilfy extracts
+            LatticeBlu reads your offering memorandum and fills your Excel template
+            automatically. Upload the OM, select your template, and LatticeBlu extracts
             the key metrics: asking price, cap rate, NOI, occupancy, and debt service.
             It maps them directly into your cells.
           </p>
@@ -54,7 +54,7 @@ export default function AboutPage() {
         <section>
           <h2 className="text-sm font-bold uppercase tracking-widest text-primary mb-4">Who We Are</h2>
           <p className="text-lg text-muted-foreground leading-relaxed mb-6">
-            Basilfy is founder-led and built specifically for real estate professionals.
+            LatticeBlu is founder-led and built specifically for real estate professionals.
             We&apos;re in closed beta with a small group of RE analysts. If you have
             feedback, questions, or want to share what&apos;s not working, reach out directly.
           </p>
@@ -69,7 +69,7 @@ export default function AboutPage() {
       </main>
 
       <footer className="border-t border-border py-4 text-center text-sm text-muted-foreground">
-        <p>&copy; 2026 Basilfy. All rights reserved.</p>
+        <p>&copy; 2026 LatticeBlu. All rights reserved.</p>
       </footer>
     </div>
   );

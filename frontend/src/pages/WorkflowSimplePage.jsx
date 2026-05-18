@@ -2,7 +2,7 @@
  * Simplified Workflow Page - Single Screen Experience
  *
  * Layout: 3-panel side-by-side (documents, workflow grid, results)
- * UX: Professional, clean, inspired by Basilfy mock-up
+ * UX: Professional, clean, inspired by LatticeBlu mock-up
  */
 
 import { useState, useEffect, useRef } from "react";

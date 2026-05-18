@@ -151,7 +151,7 @@ class ExtractionExporter(BaseExporter):
         # Footer
         self.add_divider()
         self.add_footer_text("This is a confidential document prepared for investment evaluation purposes.")
-        self.add_footer_text("Generated using AI-powered document intelligence from Basilfy.")
+        self.add_footer_text("Generated using AI-powered document intelligence from LatticeBlu.")
 
         if metadata.get('processing_time_ms'):
             self.add_footer_text(f"Processing Time: {metadata['processing_time_ms']}ms")

@@ -77,7 +77,7 @@ export default function Hero({ onGetStarted }) {
 
           {/* Subheading */}
           <p className="text-xl sm:text-2xl text-muted-foreground mb-10 max-w-3xl mx-auto leading-relaxed">
-            Upload your OM or rent roll. Basilfy extracts cap rates, NOI, occupancy,
+            Upload your OM or rent roll. LatticeBlu extracts cap rates, NOI, occupancy,
             and asking price. It fills your Excel template automatically.
             Review, fix anything off, and move on.
           </p>
