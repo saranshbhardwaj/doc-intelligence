@@ -113,7 +113,23 @@ export default function RequireAuth() {
       } catch (error) {
         console.error("❌ [RequireAuth] Org provisioning failed:", error);
         setProvisioning(false);
-        setProvisionError(error.response?.data?.detail || "Failed to set up workspace");
+
+        // Distinguish network/backend-down from a real backend error response so
+        // users see an actionable message during outages instead of "Setup failed".
+        const status = error.response?.status;
+        const detail = error.response?.data?.detail;
+
+        let message;
+        if (!error.response) {
+          // No response at all → backend unreachable (Railway down, DNS, CORS, offline, etc.)
+          message = "Our service is temporarily unavailable. Please try again in a few minutes.";
+        } else if (status >= 500 && status <= 599) {
+          message = "Our service is having trouble right now. Please try again in a few minutes.";
+        } else {
+          message = detail || "Failed to set up workspace";
+        }
+
+        setProvisionError(message);
       }
     };
 
