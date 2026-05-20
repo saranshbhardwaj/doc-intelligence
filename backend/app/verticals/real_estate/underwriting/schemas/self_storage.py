@@ -666,3 +666,50 @@ class LeaseRecord(BaseModel):
         description='ISO date string, e.g. "2026-09-30".',
     )
     sqft: Optional[float] = None
+
+
+class MaxLoanResult(BaseModel):
+    """Result of a max-loan-sizing calculation given lender constraints."""
+
+    model_config = ConfigDict(populate_by_name=True)
+
+    max_loan: float = Field(
+        description="Maximum supportable loan = min of the three constraints (skipping any that are unavailable)."
+    )
+    max_loan_by_dscr: Optional[float] = Field(
+        default=None,
+        description="Loan amount whose annual debt service equals NOI / DSCR floor. None when rate or amortization is missing.",
+    )
+    max_loan_by_ltv: Optional[float] = Field(
+        default=None,
+        description="purchase_price * max_ltv. None when purchase_price is missing or non-positive.",
+    )
+    max_loan_by_debt_yield: Optional[float] = Field(
+        default=None,
+        description="NOI / debt_yield_floor. None when debt_yield_floor is 0 or NOI is missing.",
+    )
+    binding_constraint: Literal[
+        "dscr", "ltv", "debt_yield",
+        "noi_unavailable", "rate_or_amort_missing", "none",
+    ] = Field(description="Which constraint produced max_loan, or a sentinel when no real constraint applied.")
+    implied_monthly_payment: Optional[float] = Field(
+        default=None,
+        description="Monthly P+I implied by max_loan at the deal's rate/amort. Only set when DSCR sizing produced max_loan.",
+    )
+    implied_annual_debt_service: Optional[float] = Field(
+        default=None,
+        description="Annual debt service implied by max_loan. Only set when DSCR sizing produced max_loan.",
+    )
+    equity_required: float = Field(
+        description="max(0, purchase_price - max_loan). Excludes closing costs and capex reserve."
+    )
+    current_loan: float = Field(
+        description="Loan amount in the persisted run (purchase_price * financing.ltv_pct)."
+    )
+    delta_vs_current: float = Field(
+        description="max_loan - current_loan. Negative means the deal is overlevered against the supplied constraints."
+    )
+    notes: list[str] = Field(
+        default_factory=list,
+        description="Human-readable explanations for skipped constraints, fallbacks, or mode (e.g. OM-stated NOI).",
+    )

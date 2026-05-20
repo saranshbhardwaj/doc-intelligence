@@ -44,6 +44,7 @@ import {
   EvidenceSection,
   MarketSection,
   MaxBidPanel,
+  MaxLoanPanel,
   ModelBasisPanel,
   OperationsSection,
   ReturnsSection,
@@ -1105,6 +1106,13 @@ export default function UnderwritingResult() {
                       runSensitivityAnalysis={runSensitivityAnalysis}
                       purchasePriceCitation={sourceCitations.purchase_price}
                       onOpenSource={handleOpenSource}
+                    />
+                  </div>
+                  <div className="mt-5">
+                    <MaxLoanPanel
+                      runId={runId}
+                      getToken={getToken}
+                      persistedInputs={persistedInputs}
                     />
                   </div>
 

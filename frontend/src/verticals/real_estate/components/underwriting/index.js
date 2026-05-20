@@ -19,6 +19,7 @@ export { default as OccupancyBadge } from './OccupancyBadge';
 export { default as SourceSupportActions } from './SourceSupportActions';
 export { default as ScenarioPanel } from './ScenarioPanel';
 export { default as MaxBidPanel } from './MaxBidPanel';
+export { default as MaxLoanPanel } from './MaxLoanPanel';
 export { default as ModelBasisPanel } from './ModelBasisPanel';
 export { default as TrustPanel } from './TrustPanel';
 export { default as ReturnsSection } from './ReturnsSection';

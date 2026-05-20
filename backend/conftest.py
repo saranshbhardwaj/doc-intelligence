@@ -5,8 +5,11 @@ from sqlalchemy import create_engine, text
 from sqlalchemy.orm import sessionmaker
 
 # Set test environment variables before importing app modules
-# Use PostgreSQL test database (separate from main DB)
-os.environ["DATABASE_URL"] = "postgresql+psycopg://docint:docint@localhost:5432/docint_test"
+# Use PostgreSQL test database (separate from main DB).
+# When running inside Docker (via `docker compose exec api`), Postgres is reachable as
+# the service name "db". Allow an env override so both local and container runs work.
+_db_host = os.environ.get("TEST_DB_HOST", "localhost")
+os.environ["DATABASE_URL"] = f"postgresql+psycopg://docint:docint@{_db_host}:5432/docint_test"
 os.environ["REDIS_URL"] = "redis://localhost:6379/15"  # Use separate test DB
 os.environ["USE_REDIS_CACHE"] = "false"  # Disable Redis for tests
 os.environ["ANTHROPIC_API_KEY"] = "test-api-key"
@@ -37,7 +40,7 @@ def test_engine():
     Note: This assumes PostgreSQL is running and docint_test database exists.
     If the database doesn't exist, run: CREATE DATABASE docint_test;
     """
-    test_db_url = "postgresql+psycopg://docint:docint@localhost:5432/docint_test"
+    test_db_url = f"postgresql+psycopg://docint:docint@{_db_host}:5432/docint_test"
     engine = create_engine(test_db_url, echo=False)
 
     # Import all models to register them with Base

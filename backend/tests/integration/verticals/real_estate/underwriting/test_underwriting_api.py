@@ -368,3 +368,104 @@ class TestInputValidation:
         assert "message" in detail
         assert "pydantic" not in str(detail).lower()
         assert "int_parsing" not in str(detail)
+
+
+class TestMaxLoanEndpoint:
+    """POST /runs/{id}/max-loan — stateless max-loan sizing."""
+
+    def _seed_run(self, api_client):
+        """Helper: create a run, attach inputs sufficient for sizing, return run_id."""
+        from app.verticals.real_estate.api.underwriting import start_re_underwriting_chain  # noqa: F401
+
+        create_resp = api_client.post(
+            "/api/v1/re/underwriting/runs",
+            json={"name": "Sizing Test", "asset_type": "self_storage", "address": None, "documents": []},
+        )
+        assert create_resp.status_code == 200
+        run_id = create_resp.json()["run_id"]
+
+        inputs = {
+            "project": {"name": "Sizing Test", "asset_type": "self_storage", "num_units": 400, "rentable_sqft": 50_000},
+            "acquisition": {"purchase_price": 5_000_000.0, "closing_cost_pct": 0.02, "capex_reserve_per_unit": 0.0},
+            "operational": {
+                "gross_potential_rent_annual": 800_000.0,
+                "vacancy_credit_loss_pct": 0.10,
+                "other_income_annual": 0.0,
+                "rent_growth_pct": 0.03,
+                "insurance_annual": 0.0,
+                "mgmt_fee_pct": 0.06,
+                "opex_growth_pct": 0.02,
+                "noi_year_one_stated": 400_000.0,
+            },
+            "financing": {"ltv_pct": 0.65, "interest_rate_pct": 0.065, "amortization_years": 25, "loan_term_years": 10},
+            "exit": {"hold_period_years": 10, "exit_cap_rate": 0.065, "selling_cost_pct": 0.03},
+            "criteria": {
+                "target_irr": 0.15,
+                "target_cash_on_cash": 0.08,
+                "target_equity_multiple": 2.0,
+                "max_ltv": 0.65,
+                "dscr_year_one_floor": 1.25,
+            },
+            "unit_mix": [],
+            "rent_comps": [],
+        }
+        patch_resp = api_client.patch(
+            f"/api/v1/re/underwriting/runs/{run_id}/inputs",
+            json={"inputs": inputs},
+        )
+        assert patch_resp.status_code == 200, patch_resp.text
+        return run_id
+
+    def test_happy_path_returns_max_loan_result(self, api_client):
+        run_id = self._seed_run(api_client)
+        resp = api_client.post(f"/api/v1/re/underwriting/runs/{run_id}/max-loan", json={})
+        assert resp.status_code == 200, resp.text
+        data = resp.json()
+        for key in (
+            "max_loan",
+            "max_loan_by_dscr",
+            "max_loan_by_ltv",
+            "max_loan_by_debt_yield",
+            "binding_constraint",
+            "equity_required",
+            "current_loan",
+            "delta_vs_current",
+            "notes",
+        ):
+            assert key in data, f"missing {key} in response: {data}"
+        assert data["binding_constraint"] in {"dscr", "ltv", "debt_yield", "none"}
+        assert isinstance(data["notes"], list)
+
+    def test_empty_body_falls_back_to_criteria(self, api_client):
+        run_id = self._seed_run(api_client)
+        resp = api_client.post(f"/api/v1/re/underwriting/runs/{run_id}/max-loan", json={})
+        assert resp.status_code == 200
+        # LTV should be 0.65 (criteria) x 5M = 3.25M.
+        assert resp.json()["max_loan_by_ltv"] == pytest.approx(3_250_000.0, rel=1e-9)
+
+    def test_override_constraints_in_body(self, api_client):
+        run_id = self._seed_run(api_client)
+        resp = api_client.post(
+            f"/api/v1/re/underwriting/runs/{run_id}/max-loan",
+            json={"max_ltv": 0.50, "dscr_floor": 1.40, "debt_yield_floor": 0.10},
+        )
+        assert resp.status_code == 200, resp.text
+        data = resp.json()
+        assert data["max_loan_by_ltv"] == pytest.approx(2_500_000.0, rel=1e-9)
+        # NOI from the calculator (EGI - opex) is 676_800. At debt_yield_floor=0.10:
+        # max_loan_by_debt_yield = 676_800 / 0.10 = 6_768_000
+        assert data["max_loan_by_debt_yield"] == pytest.approx(6_768_000.0, rel=1e-9)
+
+    def test_unknown_run_returns_404(self, api_client):
+        bogus = str(uuid4())
+        resp = api_client.post(f"/api/v1/re/underwriting/runs/{bogus}/max-loan", json={})
+        assert resp.status_code == 404
+
+    def test_run_with_no_inputs_returns_400(self, api_client):
+        create_resp = api_client.post(
+            "/api/v1/re/underwriting/runs",
+            json={"name": "No Inputs", "asset_type": "self_storage", "address": None, "documents": []},
+        )
+        run_id = create_resp.json()["run_id"]
+        resp = api_client.post(f"/api/v1/re/underwriting/runs/{run_id}/max-loan", json={})
+        assert resp.status_code == 400
