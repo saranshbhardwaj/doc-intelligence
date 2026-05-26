@@ -50,6 +50,8 @@ def test_engine():
     import app.db_models_workflows
     import app.db_models_documents
     import app.db_models_templates
+    import app.db_models_re  # noqa: F401 - RE underwriting runs
+    import app.db_models_re_memos  # noqa: F401 - RE underwriting credit memos
 
     _disable_unsupported_vector_indexes_for_tests()
 

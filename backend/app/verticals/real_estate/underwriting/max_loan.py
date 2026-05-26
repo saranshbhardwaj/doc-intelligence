@@ -129,3 +129,76 @@ def calculate_max_loan(
         delta_vs_current=float(max_loan - current_loan),
         notes=notes,
     )
+
+
+def compute_max_loan_for_run(
+    run,
+    *,
+    dscr_floor: float | None = None,
+    max_ltv: float | None = None,
+    debt_yield_floor: float | None = None,
+) -> MaxLoanResult | None:
+    """Derive max-loan inputs from a saved UnderwritingRun and run the sizing.
+
+    Single canonical place that knows how to pull purchase price, NOI, financing
+    terms, and criteria defaults out of a run. Both the ``/max-loan`` API
+    endpoint and the credit-memo data assembler call this so they cannot drift.
+
+    Args:
+        run: an ``UnderwritingRun`` (or duck-typed equivalent with .inputs /
+            .result_artifact / per-column fields populated by the calculator).
+        dscr_floor, max_ltv, debt_yield_floor: optional overrides from a request
+            payload. ``None`` means "use the run's criteria default".
+
+    Returns:
+        A ``MaxLoanResult``. Returns ``None`` only when the run has no inputs at
+        all (so the API caller can map that to a 400).
+    """
+    inputs = getattr(run, "inputs", None) or {}
+    if not inputs:
+        return None
+
+    acquisition = inputs.get("acquisition") or {}
+    financing = inputs.get("financing") or {}
+    operational = inputs.get("operational") or {}
+    criteria = inputs.get("criteria") or {}
+    artifact = getattr(run, "result_artifact", None) or {}
+
+    purchase_price = acquisition.get("purchase_price")
+    interest_rate = financing.get("interest_rate_pct")
+    amortization = financing.get("amortization_years")
+    ltv_pct = financing.get("ltv_pct") or 0.0
+
+    resolved_dscr_floor = (
+        dscr_floor if dscr_floor is not None else (criteria.get("dscr_year_one_floor") or 1.25)
+    )
+    resolved_max_ltv = (
+        max_ltv if max_ltv is not None else (criteria.get("max_ltv") or 0.65)
+    )
+    resolved_dy_floor = (
+        debt_yield_floor
+        if debt_yield_floor is not None
+        else (criteria.get("debt_yield_floor") or 0.08)
+    )
+
+    # NOI hierarchy mirrors the API endpoint: calculator-modeled first, then OM
+    # stated values as fallbacks.
+    noi_year_one = (
+        getattr(run, "noi_year_one", None)
+        or artifact.get("noi_year_one")
+        or operational.get("noi_year_one_stated")
+        or operational.get("noi_current_stated")
+    )
+
+    current_loan = (purchase_price or 0.0) * (ltv_pct or 0.0)
+
+    return calculate_max_loan(
+        noi_year_one=noi_year_one,
+        purchase_price=purchase_price,
+        interest_rate_pct=interest_rate,
+        amortization_years=amortization,
+        dscr_floor=resolved_dscr_floor,
+        max_ltv=resolved_max_ltv,
+        debt_yield_floor=resolved_dy_floor,
+        current_loan=current_loan,
+    )
