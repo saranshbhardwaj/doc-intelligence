@@ -18,7 +18,6 @@ from typing import Any
 
 from .schemas import (
     MemoContext,
-    PROSE_SECTIONS,
     SECTION_EXECUTIVE_SUMMARY,
     SECTION_FINANCIAL_ANALYSIS,
     SECTION_MARKET_OVERVIEW,

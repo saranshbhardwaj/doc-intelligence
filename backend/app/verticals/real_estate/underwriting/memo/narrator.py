@@ -19,14 +19,12 @@ from typing import Any, Optional
 
 from .prompts import build_system_blocks, build_user_blocks
 from .schemas import (
-    Citation,
     MemoContext,
     PROSE_SECTIONS,
     ProseSection,
     Recommendation,
     Risk,
     RisksSection,
-    RetrievedChunk,
     SECTION_EXECUTIVE_SUMMARY,
     SECTION_FINANCIAL_ANALYSIS,
     SECTION_INVESTMENT_THESIS,

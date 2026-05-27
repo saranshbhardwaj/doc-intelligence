@@ -14,7 +14,6 @@ from docx.enum.text import WD_PARAGRAPH_ALIGNMENT
 from docx.shared import Pt, Inches, RGBColor
 
 from .schemas import (
-    Citation,
     MemoContext,
     ProseSection,
     Recommendation,
