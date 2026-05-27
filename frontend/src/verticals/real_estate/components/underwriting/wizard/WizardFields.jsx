@@ -10,6 +10,9 @@ function humanizeFieldName(field) {
 
 function citationTier(citation) {
   if (!citation) return null;
+  if (citation.is_manual || citation.doc_type === 'manual') {
+    return { label: 'Manual', tone: 'manual', title: citation.selection_note ?? 'Analyst manually updated this field.' };
+  }
   if (citation.is_default) {
     return { label: 'Default', tone: 'default', title: 'System default; review before relying on this assumption.' };
   }
@@ -70,6 +73,7 @@ function citationTier(citation) {
 }
 
 function confidenceTone(citation) {
+  if (citation?.is_manual || citation?.doc_type === 'manual') return 'manual';
   const confidence = Number(citation?.confidence);
   if (!Number.isFinite(confidence)) return 'neutral';
   if (confidence >= 0.9) return 'high';
@@ -83,13 +87,28 @@ function confidenceLabel(citation) {
   return `${Math.round(confidence * 100)}%`;
 }
 
+function formatOriginalValue(value) {
+  if (value == null) return null;
+  if (typeof value === 'number') return value.toLocaleString();
+  if (typeof value === 'string') return value;
+  if (Array.isArray(value)) return `${value.length} row${value.length === 1 ? '' : 's'}`;
+  return 'Previous value';
+}
+
 function CitationTooltipContent({ citation, tier, canOpen }) {
-  const token = citation?.citations?.[0];
-  const sourceText = citation?.source_text;
+  const originalCitation = citation?.is_manual && citation?.original_citation
+    ? citation.original_citation
+    : null;
+  const originalTier = citationTier(originalCitation);
+  const sourceCitation = originalCitation || citation;
+  const token = sourceCitation?.citations?.[0];
+  const sourceText = sourceCitation?.source_text;
   const formula = citation?.formula;
   const isComputed = citation?.is_computed || citation?.is_derived;
   const confidence = confidenceLabel(citation);
+  const originalConfidence = confidenceLabel(originalCitation);
   const confidenceClass = `uw-confidence-dot-${confidenceTone(citation)}`;
+  const originalConfidenceClass = `uw-confidence-dot-${confidenceTone(originalCitation)}`;
   const selectionNote = citation?.selection_note;
   const sourceField = humanizeFieldName(citation?.source_field);
   const preferredSources = Array.isArray(citation?.preferred_sources_missing)
@@ -98,6 +117,8 @@ function CitationTooltipContent({ citation, tier, canOpen }) {
   const annualizedFromMonths = citation?.annualized_from_months;
   const annualizationFactor = Number(citation?.annualization_factor);
   const originalValue = citation?.original_value;
+  const originalSourceField = humanizeFieldName(originalCitation?.source_field);
+  const originalFormula = originalCitation?.formula;
 
   return (
     <div className="w-[320px] overflow-hidden rounded-2xl border border-border/70 bg-popover p-0 text-popover-foreground shadow-2xl shadow-foreground/10">
@@ -147,7 +168,40 @@ function CitationTooltipContent({ citation, tier, canOpen }) {
           </div>
         ) : null}
 
-        {sourceField || annualizedFromMonths || originalValue != null || preferredSources.length ? (
+        {citation?.is_manual && citation.original_value != null ? (
+          <div className="rounded-xl border border-border/60 bg-background/70 p-3 text-xs leading-5 text-foreground">
+            <p><span className="font-semibold text-muted-foreground">Original source value:</span> {formatOriginalValue(citation.original_value)}</p>
+          </div>
+        ) : null}
+
+        {originalCitation ? (
+          <div className="rounded-xl border border-border/60 bg-background/70 p-3 text-xs leading-5 text-foreground">
+            <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+              <span className="text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+                Original source
+              </span>
+              {originalTier ? (
+                <span className={`cite-tier-badge cite-tier-${originalTier.tone}`}>
+                  {originalTier.label}
+                </span>
+              ) : null}
+            </div>
+            {originalConfidence ? (
+              <p className="mb-1 inline-flex items-center gap-2">
+                <span className={`uw-confidence-dot ${originalConfidenceClass}`} />
+                <span className="font-semibold text-muted-foreground">AI confidence:</span> {originalConfidence}
+              </p>
+            ) : null}
+            {originalSourceField ? (
+              <p><span className="font-semibold text-muted-foreground">Selected field:</span> {originalSourceField}</p>
+            ) : null}
+            {originalFormula ? (
+              <p className="mt-1 font-mono text-[12px] leading-5">{originalFormula}</p>
+            ) : null}
+          </div>
+        ) : null}
+
+        {sourceField || annualizedFromMonths || (!citation?.is_manual && originalValue != null) || preferredSources.length ? (
           <div className="rounded-xl border border-border/60 bg-background/70 p-3 text-xs leading-5 text-foreground">
             {sourceField ? (
               <p><span className="font-semibold text-muted-foreground">Selected field:</span> {sourceField}</p>
@@ -158,7 +212,7 @@ function CitationTooltipContent({ citation, tier, canOpen }) {
                 {Number.isFinite(annualizationFactor) ? ` scaled by ×${annualizationFactor.toFixed(2)}` : ''}
               </p>
             ) : null}
-            {originalValue != null ? (
+            {!citation?.is_manual && originalValue != null ? (
               <p><span className="font-semibold text-muted-foreground">Original value:</span> ${Number(originalValue).toLocaleString()}</p>
             ) : null}
             {preferredSources.length ? (
@@ -200,16 +254,19 @@ function CitationControl({ citation, onOpenSource }) {
   if (!tier) return null;
 
   const className = `cite-tier-badge cite-tier-${tier.tone}`;
-  const canOpen = Boolean(citation
-    && citation.citations?.length
-    && !citation.is_default
-    && !citation.is_derived
-    && !citation.is_uncited_extraction);
+  const sourceCitation = citation?.is_manual && citation?.original_citation
+    ? citation.original_citation
+    : citation;
+  const canOpen = Boolean(sourceCitation
+    && sourceCitation.citations?.length
+    && !sourceCitation.is_default
+    && !sourceCitation.is_derived
+    && !sourceCitation.is_uncited_extraction);
   const trigger = canOpen ? (
     <button
       type="button"
       className={`${className} as-button`}
-      onClick={() => onOpenSource?.(citation)}
+      onClick={() => onOpenSource?.(sourceCitation)}
     >
       {tier.label}
     </button>
@@ -282,16 +339,20 @@ export function NumericField({
     setRaw(String(value ?? '').replace(/,/g, ''));
   };
 
-  const handleBlur = () => {
-    if (disabled) return;
-    setFocused(false);
-    const normalized = raw.replace(/,/g, '').trim();
+  const commitRawValue = (nextRaw) => {
+    const normalized = nextRaw.replace(/,/g, '').trim();
     if (normalized === '') {
       onChange('');
       return;
     }
     const n = parseFloat(normalized);
     if (!Number.isNaN(n)) onChange(n);
+  };
+
+  const handleBlur = () => {
+    if (disabled) return;
+    setFocused(false);
+    commitRawValue(raw);
   };
 
   return (
@@ -311,7 +372,10 @@ export function NumericField({
           inputMode="decimal"
           value={display}
           placeholder={placeholder ?? '—'}
-          onChange={(e) => setRaw(e.target.value)}
+          onChange={(e) => {
+            setRaw(e.target.value);
+            commitRawValue(e.target.value);
+          }}
           onFocus={handleFocus}
           onBlur={handleBlur}
           disabled={disabled}

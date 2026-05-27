@@ -81,6 +81,9 @@
     --cite-tier-extracted-fg: 192 85% 34%;
     --cite-tier-extracted-bg: var(--surface-soft);
     --cite-tier-extracted-border: var(--primary);
+    --cite-tier-manual-fg: 216 70% 38%;
+    --cite-tier-manual-bg: 216 95% 94%;
+    --cite-tier-manual-border: 216 70% 56%;
 
     /* Document type badge tokens (bg + foreground text) */
     --dt-spa: 214 95% 93%;        --dt-spa-fg: 214 89% 35%;
@@ -174,6 +177,9 @@
     --cite-tier-extracted-fg: 191 82% 72%;
     --cite-tier-extracted-bg: var(--surface-soft);
     --cite-tier-extracted-border: var(--primary);
+    --cite-tier-manual-fg: 216 78% 76%;
+    --cite-tier-manual-bg: 216 42% 18%;
+    --cite-tier-manual-border: 216 70% 56%;
 
     /* Comparison document colors - dark mode */
     --doc-a: 191 82% 54%;
@@ -1728,6 +1734,12 @@
     box-shadow: inset 3px 0 0 hsl(var(--uw-danger));
   }
 
+  .field-input-row.cited.confidence-manual {
+    border-color: hsl(var(--cite-tier-manual-border) / 0.45);
+    background: hsl(var(--cite-tier-manual-bg) / 0.76);
+    box-shadow: inset 3px 0 0 hsl(var(--cite-tier-manual-border));
+  }
+
   .field-affix {
     padding: 0 10px;
     font-size: 12px;
@@ -1849,6 +1861,12 @@
     color: hsl(var(--cite-tier-extracted-fg));
     border-color: hsl(var(--cite-tier-extracted-border) / 0.4);
     background: hsl(var(--cite-tier-extracted-bg) / 0.65);
+  }
+
+  .cite-tier-manual {
+    color: hsl(var(--cite-tier-manual-fg));
+    border-color: hsl(var(--cite-tier-manual-border) / 0.42);
+    background: hsl(var(--cite-tier-manual-bg) / 0.8);
   }
 
   .field-section {
@@ -2110,6 +2128,10 @@
 
   .uw-confidence-dot-neutral {
     background: hsl(var(--muted-foreground) / 0.45);
+  }
+
+  .uw-confidence-dot-manual {
+    background: hsl(var(--cite-tier-manual-border));
   }
 
   @media (max-width: 1024px) {

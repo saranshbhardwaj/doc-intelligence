@@ -54,7 +54,12 @@ class StorageBackend(ABC):
         pass
 
     @abstractmethod
-    def generate_presigned_url(self, storage_key: str, expiry_seconds: int = 3600) -> str:
+    def generate_presigned_url(
+        self,
+        storage_key: str,
+        expiry_seconds: int = 3600,
+        filename: Optional[str] = None,
+    ) -> str:
         """
         Generate a time-limited URL for accessing a file.
 
@@ -177,13 +182,18 @@ class R2StorageBackend(StorageBackend):
             logger.error(f"Failed to download from R2: {storage_key}", exc_info=True)
             raise
 
-    def generate_presigned_url(self, storage_key: str, expiry_seconds: int = 3600) -> str:
+    def generate_presigned_url(
+        self,
+        storage_key: str,
+        expiry_seconds: int = 3600,
+        filename: Optional[str] = None,
+    ) -> str:
         """Generate presigned URL for R2 object."""
         try:
             if not self.exists(storage_key):
                 raise FileNotFoundError(f"File not found in R2: {storage_key}")
 
-            url = self.r2.generate_url(storage_key)
+            url = self.r2.generate_url(storage_key, filename=filename)
             logger.info(f"Generated presigned URL for: {storage_key}")
             return url
 
@@ -267,7 +277,12 @@ class LocalFilesystemBackend(StorageBackend):
             logger.error(f"Failed to download from local storage: {storage_key}", exc_info=True)
             raise
 
-    def generate_presigned_url(self, storage_key: str, expiry_seconds: int = 3600) -> str:
+    def generate_presigned_url(
+        self,
+        storage_key: str,
+        expiry_seconds: int = 3600,
+        filename: Optional[str] = None,
+    ) -> str:
         """
         Return local file path (no presigned URLs for local storage).
 

@@ -115,7 +115,7 @@ class OMExtraction(BaseModel):
     avg_market_rent_per_unit_monthly:    Optional[float] = Field(default=None, description="average monthly market rent per unit",          json_schema_extra={"cite": True})
     vacancy_pct_projected:               Optional[float] = Field(default=None, description="decimal e.g. 0.1278 — Year 1 economic vacancy", json_schema_extra={"cite": True})
     other_income_annual:                 Optional[float] = Field(default=None, description="annual total of all non-rental income Year 1",  json_schema_extra={"cite": True})
-    rent_growth_pct:                     Optional[float] = Field(default=None, description="decimal e.g. 0.03",                             json_schema_extra={"cite": True})
+    rent_growth_pct:                     Optional[float] = Field(default=None, description="Recurring annual rent growth assumption as decimal. Do not infer from Year-2, Pro Forma, Stabilized, or before/after GPR differences.", json_schema_extra={"cite": True})
 
     # Individual other-income components — fallback aggregation when other_income_annual is missed
     other_income_admin_fees_annual:  Optional[float] = Field(default=None, description="Administrative Fees Year 1",                json_schema_extra={"cite": True})
@@ -164,8 +164,8 @@ class OMExtraction(BaseModel):
     interest_rate_pct:   Optional[float] = Field(default=None, description="decimal e.g. 0.065",     json_schema_extra={"cite": True})
     amortization_years:  Optional[int]   = Field(default=None, description="loan amortization years", json_schema_extra={"cite": True})
     loan_term_years:     Optional[int]   = Field(default=None, description="loan term years",         json_schema_extra={"cite": True})
-    exit_cap_rate:       Optional[float] = Field(default=None, description="decimal e.g. 0.065",      json_schema_extra={"cite": True})
-    market_cap_rate_sale: Optional[float] = Field(default=None, description="decimal e.g. 0.0675",   json_schema_extra={"cite": True})
+    exit_cap_rate:       Optional[float] = Field(default=None, description="Explicit sale/disposition exit, terminal, or going-out cap rate as decimal. Do not use pro forma, stabilized, current, or year-one cap rates.", json_schema_extra={"cite": True})
+    market_cap_rate_sale: Optional[float] = Field(default=None, description="Market sale cap rate benchmark as decimal, only when explicitly stated for sale/exit basis. Do not use pro forma or stabilized cap rates.", json_schema_extra={"cite": True})
     hold_period_years:   Optional[int]   = Field(default=None, description="investment hold period",  json_schema_extra={"cite": True})
     selling_cost_pct:    Optional[float] = Field(default=None, description="decimal e.g. 0.03",       json_schema_extra={"cite": True})
 

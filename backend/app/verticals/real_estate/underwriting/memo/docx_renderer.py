@@ -6,6 +6,7 @@ the design reviewable in code and removes any binary artifact from the repo.
 from __future__ import annotations
 
 import io
+import re
 from typing import Any, Optional
 
 from docx import Document
@@ -84,7 +85,24 @@ def _add_kv_table(doc, rows: list[tuple[str, str]]) -> None:
         table.rows[i].cells[1].text = value
 
 
-def _render_prose_or_placeholder(doc, section_obj: Optional[Any]) -> None:
+def _display_citation_text(text: str, ctx: MemoContext | None = None) -> str:
+    if not ctx or not getattr(ctx, "citation_doc_labels", None):
+        return text
+
+    def repl(match: re.Match) -> str:
+        doc_id = match.group("doc_id")
+        page = match.group("page")
+        label = _appendix_source_label(ctx, doc_id)
+        return f"[{label}:p{page}]"
+
+    return re.sub(
+        r"\[(?P<doc_id>[0-9a-fA-F-]{36}|[A-Za-z0-9_.:-]+):p(?P<page>\d+)\]",
+        repl,
+        text,
+    )
+
+
+def _render_prose_or_placeholder(doc, section_obj: Optional[Any], ctx: MemoContext | None = None) -> None:
     if section_obj is None:
         p = doc.add_paragraph()
         run = p.add_run("[Section unavailable — please draft manually.]")
@@ -93,7 +111,7 @@ def _render_prose_or_placeholder(doc, section_obj: Optional[Any]) -> None:
         return
     if isinstance(section_obj, ProseSection):
         for para in section_obj.paragraphs:
-            _para(doc, para)
+            _para(doc, _display_citation_text(para, ctx))
 
 
 # ── Cover page ───────────────────────────────────────────────────────────────
@@ -150,6 +168,7 @@ def _render_noi_buildup(doc, ctx: MemoContext) -> None:
     _add_kv_table(doc, [
         ("Gross Potential Rent", _fmt_money(n.get("gpr"))),
         ("Less: Vacancy / Credit Loss", _fmt_money(n.get("vacancy_loss"))),
+        ("Other Income", _fmt_money(n.get("other_income"))),
         ("Effective Gross Income", _fmt_money(n.get("egi"))),
         ("Operating Expenses", _fmt_money(n.get("opex"))),
         ("Net Operating Income", _fmt_money(n.get("noi"))),
@@ -188,14 +207,14 @@ def _render_loan_sizing(doc, ctx: MemoContext) -> None:
 
 # ── Risks ────────────────────────────────────────────────────────────────────
 
-def _render_risks(doc, section_obj: Optional[Any]) -> None:
+def _render_risks(doc, section_obj: Optional[Any], ctx: MemoContext | None = None) -> None:
     if section_obj is None or not isinstance(section_obj, RisksSection):
-        _render_prose_or_placeholder(doc, None)
+        _render_prose_or_placeholder(doc, None, ctx)
         return
     for i, risk in enumerate(section_obj.risks, start=1):
         p = doc.add_paragraph()
         p.add_run(f"{i}. RISK ({risk.severity}): ").bold = True
-        p.add_run(risk.title)
+        p.add_run(_display_citation_text(risk.title, ctx))
         mit = doc.add_paragraph()
         mit.paragraph_format.left_indent = Inches(0.3)
         mit.add_run("MITIGANT: ").bold = True
@@ -206,7 +225,7 @@ def _render_risks(doc, section_obj: Optional[Any]) -> None:
 
 def _render_recommendation(doc, section_obj: Optional[Any], ctx: MemoContext = None) -> None:
     if section_obj is None or not isinstance(section_obj, Recommendation):
-        _render_prose_or_placeholder(doc, None)
+        _render_prose_or_placeholder(doc, None, ctx)
         return
 
     # Classification line. If analyst overrode the calculator, show the audit trail.
@@ -281,16 +300,21 @@ def _render_unit_mix(doc, ctx: MemoContext) -> None:
         if not isinstance(u, dict):
             continue
         occ = u.get("occupancy_pct") or u.get("occupancy")
+        category = str(u.get("unit_category") or "").strip()
+        climate = str(u.get("climate_type") or u.get("climate") or "").strip()
+        type_label = climate or "—"
+        if category and category.lower() != "storage":
+            type_label = category.replace("_", " ").title()
         body.append([
             str(u.get("size") or "—"),
-            str(u.get("climate_type") or u.get("climate") or "—"),
+            type_label,
             _fmt_int(u.get("num_units")),
             _fmt_pct(occ) if occ is not None else "—",
             _fmt_money(u.get("current_rent")),
         ])
     if not body:
         return
-    _table_with_header(doc, ["Size", "Climate", "Units", "Occupancy", "Current Rent"], body)
+    _table_with_header(doc, ["Size", "Type", "Units", "Occupancy", "Current Rent"], body)
 
 
 def _render_noi_bridge(doc, ctx: MemoContext) -> None:
@@ -384,7 +408,14 @@ def _render_rent_position_grid(doc, ctx: MemoContext) -> None:
     for rp in rows:
         if not isinstance(rp, dict):
             continue
+        rp = dict(rp)
         ratio = rp.get("current_vs_comp_ratio")
+        bucket = rp.get("bucket")
+        size = rp.get("size")
+        bucket_label = f"{str(bucket).title()} bucket" if bucket else str(size or "—")
+        if bucket and size:
+            bucket_label += f" (e.g. {size})"
+        rp["size"] = bucket_label
         delta_vs_comp = _fmt_pct(ratio - 1.0) if ratio is not None else "—"
         body.append([
             str(rp.get("size") or "—"),
@@ -398,9 +429,14 @@ def _render_rent_position_grid(doc, ctx: MemoContext) -> None:
     if not body:
         return
     _h2(doc, "Rent Position by Size Bucket")
+    _para(
+        doc,
+        "Rows are bucket-level weighted averages, not exact-size rent conclusions. "
+        "Use unmatched exact sizes as diligence items before relying on rent-position upside or downside.",
+    )
     _table_with_header(
         doc,
-        ["Size", "Climate", "Subject (Current)", "Subject (Market)", "Comp Avg", "Current vs Comp", "Comps"],
+        ["Bucket / Example Size", "Climate", "Subject (Current)", "Subject (Market)", "Comp Avg", "Current vs Comp", "Comps"],
         body,
     )
 
@@ -420,14 +456,72 @@ def _collect_citations(sections: dict[str, Any]) -> dict[str, set[int]]:
     return by_doc
 
 
-def _render_appendix(doc, sections: dict[str, Any]) -> None:
+_UUID_RE = re.compile(
+    r"^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$",
+    re.IGNORECASE,
+)
+
+
+def _appendix_source_label(ctx: MemoContext, doc_id: str) -> str:
+    labels = ctx.citation_doc_labels or {}
+    label = labels.get(doc_id)
+    if label:
+        return label
+    if doc_id in (ctx.document_ids or []):
+        return "Offering Memorandum" if len(ctx.document_ids) == 1 else "Source Document"
+    if _UUID_RE.match(str(doc_id or "")):
+        return "Source Document"
+    return doc_id or "Source Document"
+
+
+def _render_source_support(doc, ctx: MemoContext) -> None:
+    rows = ctx.source_support or []
+    if not rows:
+        return
+    _h2(doc, "Key Input Source Support")
+    _para(
+        doc,
+        "Source support below is taken from the underwriting run's saved field provenance. "
+        "Manual and default assumptions may not have a current source page; where available, "
+        "manual rows show the original source citation.",
+    )
+    body = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        body.append([
+            str(row.get("group") or "-"),
+            str(row.get("label") or row.get("field_key") or "-"),
+            str(row.get("value") or "-"),
+            str(row.get("source_basis") or "-"),
+            str(row.get("citations") or "-"),
+            str(row.get("confidence") or "-"),
+            str(row.get("notes") or ""),
+        ])
+    if not body:
+        return
+    _table_with_header(
+        doc,
+        ["Group", "Input", "Value Used", "Source Basis", "Citation / Page", "Confidence", "Notes"],
+        body,
+    )
+
+
+def _render_appendix(doc, sections: dict[str, Any], ctx: MemoContext) -> None:
     by_doc = _collect_citations(sections)
     if not by_doc:
         _para(doc, "No source citations were used in this memo.")
-        return
-    for doc_id, pages in sorted(by_doc.items()):
-        page_list = ", ".join(str(p) for p in sorted(pages))
-        _para(doc, f"{doc_id}: pages {page_list}")
+    else:
+        _h2(doc, "Narrative Citations")
+        seen_labels: dict[str, int] = {}
+        for doc_id, pages in sorted(by_doc.items()):
+            base_label = _appendix_source_label(ctx, doc_id)
+            count = seen_labels.get(base_label, 0) + 1
+            seen_labels[base_label] = count
+            label = base_label if count == 1 else f"{base_label} {count}"
+            page_list = ", ".join(str(p) for p in sorted(pages))
+            _para(doc, f"{label}: pages {page_list}")
+    _render_source_support(doc, ctx)
 
 
 # ── Main entry point ────────────────────────────────────────────────────────
@@ -441,34 +535,35 @@ def render_memo_docx(ctx: MemoContext, sections: dict[str, Any]) -> bytes:
 
     # 1. Executive Summary
     _h1(doc, "1. Executive Summary")
-    _render_prose_or_placeholder(doc, sections.get(SECTION_EXECUTIVE_SUMMARY))
+    _render_prose_or_placeholder(doc, sections.get(SECTION_EXECUTIVE_SUMMARY), ctx)
 
     # 2. Investment Thesis
     _h1(doc, "2. Investment Thesis")
-    _render_prose_or_placeholder(doc, sections.get(SECTION_INVESTMENT_THESIS))
+    _render_prose_or_placeholder(doc, sections.get(SECTION_INVESTMENT_THESIS), ctx)
 
     # 3. Transaction Overview
     _h1(doc, "3. Transaction Overview")
+    price_unit_label = "Price / Storage Unit" if ctx.non_storage_unit_count else "Price / Unit"
     _add_kv_table(doc, [
         ("Purchase Price", _fmt_money(ctx.purchase_price)),
-        ("Price / Unit", _fmt_money(ctx.price_per_unit)),
-        ("Price / Sqft", _fmt_money(ctx.price_per_sqft)),
+        (price_unit_label, _fmt_money(ctx.price_per_unit)),
+        ("Price / Rentable Sqft", _fmt_money(ctx.price_per_sqft)),
         ("Going-in Cap Rate", _fmt_pct(ctx.cap_rate_at_cost)),
     ])
-    _render_prose_or_placeholder(doc, sections.get(SECTION_TRANSACTION_OVERVIEW))
+    _render_prose_or_placeholder(doc, sections.get(SECTION_TRANSACTION_OVERVIEW), ctx)
 
     # 4. Property Description
     _h1(doc, "4. Property Description")
     _render_unit_mix(doc, ctx)
-    _render_prose_or_placeholder(doc, sections.get(SECTION_PROPERTY_DESCRIPTION))
+    _render_prose_or_placeholder(doc, sections.get(SECTION_PROPERTY_DESCRIPTION), ctx)
 
     # 5. Market Overview
     _h1(doc, "5. Market Overview")
-    _render_prose_or_placeholder(doc, sections.get(SECTION_MARKET_OVERVIEW))
+    _render_prose_or_placeholder(doc, sections.get(SECTION_MARKET_OVERVIEW), ctx)
 
     # 6. Sponsor / Borrower
     _h1(doc, "6. Sponsor / Borrower")
-    _render_prose_or_placeholder(doc, sections.get(SECTION_SPONSOR))
+    _render_prose_or_placeholder(doc, sections.get(SECTION_SPONSOR), ctx)
 
     # 7. Financial Analysis
     _h1(doc, "7. Financial Analysis")
@@ -479,11 +574,11 @@ def render_memo_docx(ctx: MemoContext, sections: dict[str, Any]) -> bytes:
     _render_noi_bridge(doc, ctx)
     _render_stress_tests(doc, ctx)
     _render_cash_flow_projection(doc, ctx)
-    _render_prose_or_placeholder(doc, sections.get(SECTION_FINANCIAL_ANALYSIS))
+    _render_prose_or_placeholder(doc, sections.get(SECTION_FINANCIAL_ANALYSIS), ctx)
 
     # 8. Rent Position
     _h1(doc, "8. Rent Position")
-    _render_prose_or_placeholder(doc, sections.get(SECTION_RENT_POSITION))
+    _render_prose_or_placeholder(doc, sections.get(SECTION_RENT_POSITION), ctx)
     _render_rent_position_grid(doc, ctx)
 
     # 9. Loan Sizing & Structure
@@ -493,7 +588,7 @@ def render_memo_docx(ctx: MemoContext, sections: dict[str, Any]) -> bytes:
 
     # 10. Risks & Mitigants
     _h1(doc, "10. Risks & Mitigants")
-    _render_risks(doc, sections.get(SECTION_RISKS))
+    _render_risks(doc, sections.get(SECTION_RISKS), ctx)
 
     # 11. Recommendation
     _h1(doc, "11. Recommendation")
@@ -501,7 +596,7 @@ def render_memo_docx(ctx: MemoContext, sections: dict[str, Any]) -> bytes:
 
     # 12. Appendix
     _h1(doc, "12. Appendix: Source Citations")
-    _render_appendix(doc, sections)
+    _render_appendix(doc, sections, ctx)
 
     buf = io.BytesIO()
     doc.save(buf)

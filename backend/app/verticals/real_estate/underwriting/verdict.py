@@ -369,6 +369,12 @@ def _build_warnings(
     warnings: list[VerdictWarning] = []
     expense_basis = getattr(result, "expense_basis", None)
     om_noi_mode = expense_basis is not None and expense_basis.source == "om_noi"
+    if income_statement_period_months is None and inputs is not None:
+        income_statement_period_months = getattr(
+            getattr(inputs, "operational", None),
+            "income_basis_months",
+            None,
+        )
 
     if om_noi_mode:
         warnings.append(
@@ -584,13 +590,13 @@ def _build_mixed_revenue_warning(result: SelfStorageResult) -> VerdictWarning | 
 
     if non_storage_units > 0 and total_units > 0:
         detail = (
-            f"{non_storage_units} of {total_units} units/spaces ({unit_share:.0%}) "
+            f"{non_storage_units} of {total_units} units/spaces ({unit_share:.0%} of unit count) "
             "appear to be parking or residential"
         )
     else:
         detail = "parking or residential rows appear in the extracted unit mix"
     if rent_share is not None:
-        detail += f", representing approximately {rent_share:.0%} of unit-mix scheduled rent"
+        detail += f", representing approximately {rent_share:.0%} of scheduled rent"
 
     material_note = (
         " This is a material non-storage exposure."

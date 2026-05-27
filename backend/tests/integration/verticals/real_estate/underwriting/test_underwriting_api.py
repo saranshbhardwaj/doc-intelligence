@@ -157,6 +157,74 @@ class TestCRUDOperations:
         assert saved_inputs["criteria"]["target_irr"] == new_inputs["criteria"]["target_irr"]
         assert response.json()["result_artifact"]["verdict"]
 
+    def test_patch_inputs_persists_manual_field_citations(self, api_client, run_factory, db_session):
+        """PATCH /runs/{id}/inputs persists UI-provided manual override metadata."""
+        original_inputs = {
+            "project": {"name": "Manual Override Test", "asset_type": "self_storage", "num_units": 205},
+            "acquisition": {"purchase_price": 5000000, "closing_cost_pct": 0.02, "capex_reserve_per_unit": 0},
+            "operational": {
+                "gross_potential_rent_annual": 600000,
+                "vacancy_credit_loss_pct": 0.10,
+                "other_income_annual": 0,
+                "rent_growth_pct": 0.03,
+                "property_tax_annual": 30000,
+                "insurance_annual": 15000,
+                "mgmt_fee_pct": 0.08,
+                "payroll_annual": 40000,
+                "repairs_maintenance_annual": 20000,
+                "utilities_annual": 12000,
+                "marketing_annual": 5000,
+                "other_opex_annual": 10000,
+                "opex_growth_pct": 0.02
+            },
+            "financing": {"ltv_pct": 0.70, "interest_rate_pct": 0.065, "amortization_years": 25, "loan_term_years": 10},
+            "exit": {"hold_period_years": 10, "exit_cap_rate": 0.065, "selling_cost_pct": 0.03},
+            "criteria": {"target_irr": 0.15, "target_cash_on_cash": 0.08, "target_equity_multiple": 2.0, "max_ltv": 0.80},
+            "lease_records": [],
+            "unit_mix": []
+        }
+        run = run_factory(name="Manual Override Test", status="completed", inputs=original_inputs)
+        run.field_citations = {
+            "num_units": {
+                "doc_type": "om",
+                "confidence": 0.95,
+                "citations": ["om:1:abc"],
+                "source_text": "205 units",
+            }
+        }
+        db_session.commit()
+
+        updated_inputs = {
+            **original_inputs,
+            "project": {**original_inputs["project"], "num_units": 133},
+        }
+        response = api_client.patch(
+            f"/api/v1/re/underwriting/runs/{run.id}/inputs",
+            json={
+                "inputs": updated_inputs,
+                "field_citations": {
+                    "num_units": {
+                        "doc_type": "manual",
+                        "source": "manual",
+                        "is_manual": True,
+                        "manual_override": True,
+                        "original_value": 205,
+                        "original_citation": run.field_citations["num_units"],
+                        "selection_note": "Analyst manually updated this field.",
+                    }
+                },
+            },
+        )
+
+        assert response.status_code == 200
+        saved = api_client.get(f"/api/v1/re/underwriting/runs/{run.id}").json()
+        assert saved["inputs"]["project"]["num_units"] == 133
+        assert saved["field_citations"]["num_units"]["is_manual"] is True
+        assert saved["field_citations"]["num_units"]["doc_type"] == "manual"
+        assert saved["field_citations"]["num_units"]["source"] == "manual"
+        assert saved["field_citations"]["num_units"]["original_value"] == 205
+        assert saved["field_citations"]["num_units"]["original_citation"]["doc_type"] == "om"
+
     def test_delete_run(self, api_client, run_factory):
         """DELETE /runs/{id} → run deleted, subsequent GET returns 404."""
         run = run_factory(name="Delete Test")

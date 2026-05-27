@@ -25,6 +25,7 @@ from app.utils.metrics import (
 from .adapters import AnthropicMemoLLM, RagRetriever
 from .data_assembler import build_memo_context
 from .docx_renderer import render_memo_docx
+from .filenames import build_memo_filename
 from .narrator import narrate_all_sections, collect_section_warnings
 
 logger = logging.getLogger(__name__)
@@ -209,9 +210,11 @@ def generate_credit_memo_task(self, memo_id: str, run_id: str, user_id: str) -> 
             progress_percent=90,
             message="Preparing download…",
         )
-        r2_key = (
-            f"re-underwriting-memos/{user_id}/{run_id}/{memo_id}_v{memo.version}.docx"
+        memo_filename = build_memo_filename(
+            (memo.cover_data or {}).get("deal_name") or ctx.deal_name,
+            memo.version,
         )
+        r2_key = f"re-underwriting-memos/{user_id}/{run_id}/{memo_filename}"
         _store_in_r2(
             r2_key,
             docx_bytes,

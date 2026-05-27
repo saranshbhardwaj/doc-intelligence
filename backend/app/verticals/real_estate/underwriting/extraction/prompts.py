@@ -126,7 +126,9 @@ EXTRACT (as JSON):
         - other_income_late_fees_annual: "Late, Lien, NSF Fees" (or "Late Fees") Year 1
         - other_income_insurance_annual: "Tenant Insurance Net Commissions" Year 1
         - other_income_misc_annual: "Miscellaneous Income" Year 1
-    - rent_growth_pct: annual rent growth assumption if stated
+    - rent_growth_pct: recurring annual rent growth assumption only when explicitly stated as an
+      annual growth/escalation rate. Do not infer it from Year-2, Pro Forma, Stabilized, or
+      before/after GPR differences.
 - Expenses (extract from the operating statement table when present):
     Use year1_column_label for all line items. Never use "Pro Forma" column values.
     Extract each line item as an annual dollar amount (remove $ and commas):
@@ -202,7 +204,8 @@ EXTRACT (as JSON):
 - Map Rent/Unit into asking_rent and Rent/Sq.Ft. into rent_per_sqft whenever those columns are present.
 - Distinguish cap-rate labels carefully:
     - "Current Cap Rate", "In-Place Cap Rate", "Going-In Cap Rate", and cap rate stated at the asking or purchase basis map to market_cap_rate_purchase.
-    - "Pro Forma Cap Rate", "Stabilized Cap Rate", "Exit Cap Rate", "Going-Out Cap Rate", and "Terminal Cap Rate" map to exit_cap_rate.
+    - "Exit Cap Rate", "Going-Out Cap Rate", and "Terminal Cap Rate" map to exit_cap_rate only when they describe the sale/disposition cap rate.
+    - "Pro Forma Cap Rate" and "Stabilized Cap Rate" describe the broker's stabilized operating basis; do not map them to exit_cap_rate or market_cap_rate_sale unless the document explicitly says they are sale, disposition, terminal, or going-out cap rates.
     - Never map "Current Cap Rate" into exit_cap_rate.
 - Distinguish property-tax mechanics carefully:
     - "Mill Rate", "Mill Levy", "millage", or "$X per $1,000 assessed value" map to property_tax_millage_rate.
@@ -253,7 +256,9 @@ SUMMARY SCALARS:
   Do not average market rents into this field.
 - avg_market_rent_per_unit_monthly: average market/street/asking monthly rent when a market-rate
   column exists. Omit when no market-rate column or aggregate exists.
-- rent_growth_pct: annual rent growth or rent increase as a decimal only if explicitly stated.
+- rent_growth_pct: recurring annual rent growth or rent increase as a decimal only if explicitly
+  stated as annual. Do not infer it from Year-2, Pro Forma, Stabilized, or before/after GPR
+  differences.
 
 UNIT MIX:
 When a unit-type summary, occupancy-by-size table, or row-level unit list is present, extract one
@@ -567,7 +572,8 @@ _OM_PHASE2_RULES = """OM MAPPING RULES:
 - "purchase price", "asking price", "listing price" -> purchase_price
 - "current cap rate", "in-place cap rate", "going-in cap rate", and cap rate stated at the asking or purchase basis -> market_cap_rate_purchase. Also set market_cap_rate_purchase_basis_period to "current" for Current/In-Place labels and "going_in" for Going-In labels; this field records the basis period.
 - "year 1 cap rate", "year-one cap rate", or first-year cap rate -> market_cap_rate_purchase only when it is clearly the acquisition/year-one basis. Set market_cap_rate_purchase_basis_period to "year1".
-- "pro forma cap rate", "stabilized cap rate", "exit cap", "going-out cap", "terminal cap" -> exit_cap_rate. Do not map stabilized or pro forma cap rates into market_cap_rate_purchase unless the document explicitly says it is the acquisition basis.
+- "exit cap", "going-out cap", "terminal cap" -> exit_cap_rate only when the label clearly describes the sale/disposition cap rate.
+- "pro forma cap rate" and "stabilized cap rate" are broker stabilized operating metrics. Do not map them to exit_cap_rate or market_cap_rate_sale unless the document explicitly says they are sale, disposition, terminal, or going-out cap rates. Do not map them into market_cap_rate_purchase unless the document explicitly says it is the acquisition basis.
 - "mill rate", "mill levy", "millage", and "$X per $1,000 assessed value" -> property_tax_millage_rate
 - "current tax rate", "tax rate", and "$X per assessed dollar" -> property_tax_rate_per_assessed_dollar only when the unit is clear
 - Property-tax assumptions and footnotes can support explicit tax mechanics. Example: "Y2 has been calculated using the current tax rate ($0.11161)" -> property_tax_rate_per_assessed_dollar = 0.11161
@@ -642,7 +648,9 @@ _RENT_ROLL_PHASE2_RULES = """RENT ROLL MAPPING RULES:
 - "Average Rent", "Avg In-Place Rent", "Avg Monthly Rent Per Unit", current occupied rent aggregate -> avg_in_place_rent_per_unit_monthly
 - Do not average market or street rents into avg_in_place_rent_per_unit_monthly.
 - "Market Rent", "Street Rate", "Asking Rate", "Avg Market Rate" -> avg_market_rent_per_unit_monthly only when market-rate data exists.
-- "Rent Growth", "Annual Rent Increase" -> rent_growth_pct as a decimal only when explicitly stated.
+- "Rent Growth", "Annual Rent Increase" -> rent_growth_pct as a decimal only when explicitly
+  stated as recurring annual growth. Do not infer it from Year-2, Pro Forma, Stabilized, or
+  before/after GPR differences.
 - Unit mix: preserve one row per size/type bucket. Use climate_type "CC" for climate/interior/temperature-controlled/heated/humidity-controlled; "NC" for non-climate/drive-up/outdoor/unconditioned; "UNKNOWN" when unclear.
 - Unit category: "storage" for standard storage, "parking" for vehicle/RV/boat/parking rows, "residential" for apartments/dwellings, "office" for offices, "other" otherwise.
 - Size must contain exactly one size bucket, e.g. "5 x 10". Do not collapse multiple sizes into one row.

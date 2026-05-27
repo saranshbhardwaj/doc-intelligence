@@ -152,7 +152,8 @@ class OperationalInputs(BaseModel):
         description="Annual corrections / collections adjustments when stated.",
     )
     rent_growth_pct: float = Field(
-        default=0.03, description="Annual rent growth rate."
+        default=0.03,
+        description="Recurring annual rent growth rate; not a one-time pro forma step-up.",
     )
 
     # Expenses (annual)
@@ -214,14 +215,15 @@ class ExitInputs(BaseModel):
     model_config = ConfigDict(populate_by_name=True)
 
     hold_period_years: int = Field(
-        default=10, description="Investment hold period in years."
+        default=5, description="Investment hold period in years."
     )
     market_cap_rate_sale: Optional[float] = Field(
         default=None,
-        description="Market cap rate benchmark for sale / exit basis.",
+        description="Market cap rate benchmark for sale / exit basis; not a broker pro forma cap rate.",
     )
     exit_cap_rate: float = Field(
-        default=0.065, description="Cap rate applied at sale."
+        default=0.08,
+        description="Terminal cap rate applied at sale; not a broker pro forma cap rate.",
     )
     selling_cost_pct: float = Field(
         default=0.03,

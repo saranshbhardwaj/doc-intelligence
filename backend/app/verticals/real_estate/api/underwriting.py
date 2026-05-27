@@ -38,6 +38,7 @@ class CreateUnderwritingRunRequest(BaseModel):
 
 class UpdateInputsRequest(BaseModel):
     inputs: dict
+    field_citations: Optional[dict] = None
 
 
 class UpdateRunMetadataRequest(BaseModel):
@@ -304,13 +305,15 @@ def update_underwriting_inputs(run_id: str, payload: UpdateInputsRequest, user: 
     # This freezes dscr_year_one_floor / stress_dscr_floor / rollover_risk_pct per-deal at first save.
     snapshotted = _snapshot_thresholds_into_criteria(validated_inputs.model_dump(), user.id)
     validated_inputs = SelfStorageInputs(**snapshotted)
+    inputs_to_save = validated_inputs.model_dump()
+    field_citations = payload.field_citations if payload.field_citations is not None else run.field_citations
 
-    success = repo.update_inputs(run_id, user.id, validated_inputs.model_dump())
+    success = repo.update_inputs(run_id, user.id, inputs_to_save, field_citations=field_citations)
     if not success:
         raise HTTPException(status_code=400, detail="Failed to update inputs")
 
     try:
-        _calculate_and_store_result(repo, run_id, validated_inputs.model_dump())
+        _calculate_and_store_result(repo, run_id, inputs_to_save)
     except ValueError as e:
         logger.warning(f"Underwriting calculation validation failed for run {run_id}: {e}")
         raise HTTPException(status_code=400, detail=str(e))
@@ -319,7 +322,7 @@ def update_underwriting_inputs(run_id: str, payload: UpdateInputsRequest, user: 
         raise HTTPException(status_code=400, detail="Failed to calculate underwriting result")
 
     logger.info(f"Updated and recalculated inputs for run: {run_id}", extra={"user_id": user.id})
-    return {"status": "completed", "run_id": run_id}
+    return {"status": "completed", "run_id": run_id, "inputs": inputs_to_save, "field_citations": field_citations}
 
 @router.post("/runs/{run_id}/sensitivity", response_model=dict)
 def sensitivity_analysis(run_id: str, payload: SensitivityRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)):

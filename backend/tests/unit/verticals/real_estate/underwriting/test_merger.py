@@ -129,6 +129,58 @@ def test_max_ltv_default_carries_default_citation():
 
 # ── Rent Roll wins for unit count ────────────────────────────────────────────
 
+def test_default_fallback_selection_note_names_default_assumption():
+    results = [_om_result(purchase_price=1_000_000.0)]
+
+    merged, citations = merge_extractions(results)
+
+    assert merged["exit"]["exit_cap_rate"] == 0.08
+    assert citations["exit_cap_rate"]["is_default"] is True
+    assert citations["exit_cap_rate"]["selection_note"] == (
+        "Used default exit cap rate assumption because OM exit cap rate was unavailable."
+    )
+
+
+def test_default_exit_cap_uses_purchase_cap_plus_spread_when_available():
+    results = [_om_result(purchase_price=1_000_000.0, market_cap_rate_purchase=0.0811)]
+
+    merged, citations = merge_extractions(results)
+
+    assert merged["exit"]["hold_period_years"] == 5
+    assert merged["exit"]["exit_cap_rate"] == pytest.approx(0.0861)
+    assert citations["exit_cap_rate"]["is_default"] is True
+    assert citations["exit_cap_rate"]["formula"] == "8.11% purchase cap rate + 0.50% spread"
+    assert citations["exit_cap_rate"]["default_basis"] == "purchase_cap_plus_50bps"
+
+
+def test_pro_forma_cap_rate_source_is_not_used_as_exit_cap():
+    results = [
+        ExtractedDocResult(
+            run_id="r1",
+            job_id="j1",
+            doc_type="om",
+            om=OMExtraction(
+                purchase_price=1_000_000.0,
+                market_cap_rate_purchase=0.0811,
+                exit_cap_rate=0.0987,
+            ),
+            field_citations={
+                "exit_cap_rate": {
+                    "source_text": "PRO FORMA Cap Rate: 9.87%",
+                    "confidence": 0.95,
+                    "citations": ["S1:p6"],
+                }
+            },
+        )
+    ]
+
+    merged, citations = merge_extractions(results)
+
+    assert merged["exit"]["exit_cap_rate"] == pytest.approx(0.0861)
+    assert citations["exit_cap_rate"]["is_default"] is True
+    assert citations["exit_cap_rate"]["default_basis"] == "purchase_cap_plus_50bps"
+
+
 def test_rent_roll_num_units_beats_om():
     results = [
         _om_result(purchase_price=1_000_000.0, num_units=200),

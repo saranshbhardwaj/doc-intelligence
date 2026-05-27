@@ -8,7 +8,7 @@ import pytest
 from app.verticals.real_estate.underwriting.memo.data_assembler import build_memo_context
 
 
-def _run(inputs_overrides=None, artifact_overrides=None, document_ids=None):
+def _run(inputs_overrides=None, artifact_overrides=None, document_ids=None, citation_context=None, field_citations=None):
     """Build a minimal Run-like object with sensible defaults."""
     inputs = {
         "project": {
@@ -139,6 +139,8 @@ def _run(inputs_overrides=None, artifact_overrides=None, document_ids=None):
         inputs=inputs,
         result_artifact=artifact,
         document_ids=document_ids or ["doc-om-1"],
+        citation_context=citation_context,
+        field_citations=field_citations or {},
         # Run-level columns populated by the calculator
         irr=0.18,
         cash_on_cash=0.09,
@@ -337,6 +339,105 @@ class TestBuildMemoContext:
         ctx = build_memo_context(run, _memo())
         assert ctx.document_ids == ["doc-a", "doc-b"]
 
+    def test_source_labels_prefer_citation_context_filename(self):
+        run = _run(
+            document_ids=[{"document_id": "doc-om-1", "doc_type": "om"}],
+            citation_context={
+                "S1:p10": {
+                    "document_id": "doc-om-1",
+                    "filename": "Tulsa Storage OM.pdf",
+                    "page": 10,
+                }
+            },
+        )
+        ctx = build_memo_context(run, _memo())
+        assert ctx.citation_doc_labels["doc-om-1"] == "Tulsa Storage OM.pdf"
+
+    def test_source_labels_fallback_to_doc_type_not_uuid(self):
+        run = _run(document_ids=[{"document_id": "doc-om-1", "doc_type": "om"}])
+        ctx = build_memo_context(run, _memo())
+        assert ctx.citation_doc_labels["doc-om-1"] == "Offering Memorandum"
+
+    def test_builds_key_input_source_support_from_field_citations(self):
+        run = _run(
+            document_ids=[{"document_id": "doc-om-1", "doc_type": "om"}],
+            citation_context={
+                "S1:p6": {
+                    "document_id": "doc-om-1",
+                    "filename": "Tulsa Storage OM.pdf",
+                    "page": 6,
+                }
+            },
+            field_citations={
+                "purchase_price": {
+                    "doc_type": "om",
+                    "confidence": 0.95,
+                    "citations": ["S1:p6"],
+                    "source_text": "Purchase Price: $5,000,000",
+                },
+                "num_units": {
+                    "doc_type": "manual",
+                    "is_manual": True,
+                    "manual_override": True,
+                    "original_value": 205,
+                    "original_citation": {
+                        "doc_type": "om",
+                        "confidence": 0.95,
+                        "citations": ["S1:p6"],
+                        "source_text": "Total Units: 205",
+                    },
+                },
+                "max_ltv": {
+                    "doc_type": "om",
+                    "is_default": True,
+                    "confidence": 0,
+                    "selection_note": "Used default max LTV assumption because OM max LTV was unavailable.",
+                    "preferred_sources_missing": ["OM max LTV"],
+                },
+            },
+        )
+
+        ctx = build_memo_context(run, _memo())
+        rows = {row["field_key"]: row for row in ctx.source_support}
+
+        assert rows["purchase_price"]["source_basis"] == "OM stated"
+        assert rows["purchase_price"]["citations"] == "Tulsa Storage OM.pdf: p6"
+        assert rows["purchase_price"]["confidence"] == "95%"
+        assert rows["num_units"]["source_basis"] == "Manual override"
+        assert rows["num_units"]["citations"] == "Tulsa Storage OM.pdf: p6"
+        assert rows["num_units"]["label"] == "Underwriting Unit Count"
+        assert "original value 205" in rows["num_units"]["notes"]
+        assert rows["max_ltv"]["source_basis"] == "Model default"
+        assert "Missing preferred source" in rows["max_ltv"]["notes"]
+
+    def test_source_support_clarifies_underwriting_unit_count_when_unit_mix_differs(self):
+        run = _run(
+            inputs_overrides={
+                "project": {"num_units": 133},
+                "unit_mix": [
+                    {"size": "10 x 10", "num_units": 133, "unit_category": "storage"},
+                    {"size": "parking", "num_units": 72, "unit_category": "parking"},
+                ],
+            },
+            field_citations={
+                "num_units": {
+                    "doc_type": "manual",
+                    "is_manual": True,
+                    "manual_override": True,
+                    "original_value": 205,
+                },
+            },
+        )
+
+        ctx = build_memo_context(run, _memo())
+        row = next(row for row in ctx.source_support if row["field_key"] == "num_units")
+
+        assert row["label"] == "Underwriting Unit Count"
+        assert row["value"] == "133"
+        assert "205 total units/spaces" in row["notes"]
+        assert "133 storage" in row["notes"]
+        assert "72 non-storage" in row["notes"]
+
     def test_carries_full_projections_list(self):
         ctx = build_memo_context(_run(), _memo())
         assert len(ctx.projections) == 2
@@ -359,5 +460,106 @@ class TestBuildMemoContext:
         # Averages computed from the two bucket rows in the fixture.
         assert ctx.rent_position["matched_bucket_count"] == 2
         assert ctx.rent_position["total_bucket_count"] == 2
+        assert ctx.rent_position["current_ratio_bucket_count"] == 2
         # (0.917 + 0.978) / 2 = 0.9475
         assert ctx.rent_position["current_vs_comp_avg"] == pytest.approx(0.9475)
+
+    def test_rent_position_summary_distinguishes_comp_coverage_from_ratio_coverage(self):
+        """Comp coverage should not be collapsed into "no matched buckets" just
+        because the subject rent ratio could not be computed."""
+        run = _run(artifact_overrides={
+            "rent_position_analysis": [
+                {
+                    "size": "5 x 10",
+                    "climate_type": "NC",
+                    "subject_current_rent": None,
+                    "comp_average_rent": 75.0,
+                    "current_vs_comp_ratio": None,
+                    "market_vs_comp_ratio": None,
+                    "comp_count": 4,
+                },
+                {
+                    "size": "8 x 15",
+                    "climate_type": "NC",
+                    "subject_current_rent": 105.0,
+                    "comp_average_rent": None,
+                    "current_vs_comp_ratio": None,
+                    "market_vs_comp_ratio": None,
+                    "comp_count": 0,
+                },
+            ],
+        })
+
+        ctx = build_memo_context(run, _memo())
+
+        assert ctx.rent_position["matched_bucket_count"] == 1
+        assert ctx.rent_position["current_ratio_bucket_count"] == 0
+        assert ctx.rent_position["total_bucket_count"] == 2
+        assert ctx.rent_position["unmatched_bucket_count"] == 1
+        assert ctx.rent_position["unmatched_sizes"] == ["8 x 15"]
+
+    def test_rent_position_falls_back_to_saved_unit_mix_and_rent_comps(self):
+        """Existing runs may have rent comps and unit mix but no persisted
+        rent_position_analysis. Memo context should recompute the same derived
+        rows the result UI can show."""
+        run = _run(
+            inputs_overrides={
+                "unit_mix": [],
+                "rent_comps": [
+                    {
+                        "facility": "Comp A",
+                        "size": "10 x 10",
+                        "standard_sqft": 100,
+                        "asking_rent": 100.0,
+                        "climate_type": "NC",
+                    }
+                ],
+            },
+            artifact_overrides={
+                "unit_mix": [
+                    {
+                        "size": "10 x 10",
+                        "standard_sqft": 100,
+                        "num_units": 10,
+                        "current_rent": 90.0,
+                        "climate_type": "NC",
+                        "unit_category": "storage",
+                    }
+                ],
+                "rent_position_analysis": [],
+            },
+        )
+
+        ctx = build_memo_context(run, _memo())
+
+        assert len(ctx.rent_position_analysis) == 1
+        assert ctx.rent_position["matched_bucket_count"] == 1
+        assert ctx.rent_position["current_vs_comp_avg"] == pytest.approx(0.9)
+        assert ctx.rent_position["exact_size_matched_count"] == 1
+        assert ctx.rent_position["exact_size_total_count"] == 1
+
+    def test_rent_position_exact_size_coverage_matches_result_ui_read(self):
+        run = _run(
+            inputs_overrides={
+                "unit_mix": [
+                    {"size": "5 x 10", "num_units": 1, "unit_category": "storage"},
+                    {"size": "10 x 10", "num_units": 1, "unit_category": "storage"},
+                    {"size": "12 x 40", "num_units": 1, "unit_category": "storage"},
+                    {"size": "10 x 20", "num_units": 1, "unit_category": "parking"},
+                ],
+                "rent_comps": [
+                    {"facility": "A", "size": "5 x 10", "asking_rent": 75},
+                    {"facility": "B", "size": "10x10", "asking_rent": 110},
+                    {"facility": "Market Average (Broker)", "size": "10 x 10", "asking_rent": 100, "is_broker_market_average": True},
+                ],
+            },
+            artifact_overrides={"rent_position_analysis": []},
+        )
+
+        ctx = build_memo_context(run, _memo())
+
+        assert ctx.rent_position["exact_size_matched_count"] == 2
+        assert ctx.rent_position["exact_size_total_count"] == 3
+        assert ctx.rent_position["exact_size_unmatched_sizes"] == ["12 x 40"]
+        assert ctx.rent_position["facility_comp_row_count"] == 2
+        assert ctx.rent_position["broker_benchmark_row_count"] == 1

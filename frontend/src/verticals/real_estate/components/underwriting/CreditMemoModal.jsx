@@ -21,6 +21,7 @@ import {
 } from '@/components/ui/dialog';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { generateMemo, getMemoReadiness } from '../../../../api/re-memos';
+import MemoPreflightPanel from './MemoPreflightPanel';
 
 const MIN_COVER_TEXT_LEN = 3;
 
@@ -100,6 +101,12 @@ export default function CreditMemoModal({
   runId,
   getToken,
   persistedInputs,
+  artifact,
+  currentRun,
+  sourceCitations,
+  unitMixSummary,
+  stressTests,
+  prioritizedWarnings,
   currentUser,
   prefill,
   onSubmitted,
@@ -264,6 +271,16 @@ export default function CreditMemoModal({
             </div>
           </DialogHeader>
         </div>
+
+        <MemoPreflightPanel
+          persistedInputs={persistedInputs}
+          artifact={artifact}
+          currentRun={currentRun}
+          sourceCitations={sourceCitations}
+          unitMixSummary={unitMixSummary}
+          stressTests={stressTests}
+          prioritizedWarnings={prioritizedWarnings}
+        />
 
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4 sm:px-6">
           {readiness?.warnings?.length ? (

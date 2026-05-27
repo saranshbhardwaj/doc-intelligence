@@ -17,6 +17,7 @@ from app.repositories.re_underwriting_repo import UnderwritingRunRepository
 from app.core.storage.storage_factory import get_storage_backend
 from app.utils.id_generator import generate_id
 from app.utils.logging import logger
+from app.verticals.real_estate.underwriting.memo.filenames import build_memo_filename
 from app.verticals.real_estate.underwriting.memo.tasks import generate_credit_memo_task
 
 router = APIRouter(prefix="/underwriting", tags=["re_underwriting_memos"])
@@ -66,6 +67,7 @@ class ListMemosResponse(BaseModel):
 
 class DownloadMemoResponse(BaseModel):
     url: str
+    filename: Optional[str] = None
 
 
 class DeleteMemoResponse(BaseModel):
@@ -89,9 +91,22 @@ class MemoReadinessResponse(BaseModel):
 # ---------------------------------------------------------------------------
 
 
-def _presign_r2(r2_key: str, expiry_seconds: int = 900) -> str:
+def _presign_r2(r2_key: str, expiry_seconds: int = 900, filename: Optional[str] = None) -> str:
     storage = get_storage_backend()
-    return storage.generate_presigned_url(r2_key, expiry_seconds=expiry_seconds)
+    return storage.generate_presigned_url(
+        r2_key,
+        expiry_seconds=expiry_seconds,
+        filename=filename,
+    )
+
+
+def _memo_download_filename(memo) -> str:
+    deal_name = None
+    if isinstance(memo.cover_data, dict):
+        deal_name = memo.cover_data.get("deal_name")
+    if not deal_name and getattr(memo, "run", None) is not None:
+        deal_name = getattr(memo.run, "name", None)
+    return build_memo_filename(deal_name or "IC_Memo", memo.version)
 
 
 # ---------------------------------------------------------------------------
@@ -258,7 +273,11 @@ def download_memo(
         )
     if not memo.r2_key:
         raise HTTPException(status_code=500, detail="Memo has no r2_key — internal error")
-    return DownloadMemoResponse(url=_presign_r2(memo.r2_key))
+    filename = _memo_download_filename(memo)
+    return DownloadMemoResponse(
+        url=_presign_r2(memo.r2_key, filename=filename),
+        filename=filename,
+    )
 
 
 @router.delete("/memos/{memo_id}", response_model=DeleteMemoResponse)

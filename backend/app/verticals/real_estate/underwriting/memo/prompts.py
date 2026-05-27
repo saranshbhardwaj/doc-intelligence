@@ -43,7 +43,8 @@ CRITICAL RULES (apply to every sentence you write):
 4. Numbers in prose must match the STRUCTURED DATA verbatim. Do not round, restate ranges loosely, or convert units. If structured data says NOI = $412,300, do not write "approximately $400K".
 5. Cite source excerpts inline as [doc_id:page] whenever a sentence draws on SOURCE EXCERPTS. Add the same citation to the `citations` field of your output. Never fabricate a citation. Never cite a doc:page that is not in SOURCE EXCERPTS.
 6. Format: 2-4 short paragraphs unless the section instructions say otherwise. No bullet lists unless requested.
-7. Do NOT echo the structured data back as a table — the document already contains the tables. Your job is interpretation."""
+7. Do NOT echo the structured data back as a table — the document already contains the tables. Your job is interpretation.
+8. Unit counts are separate concepts. total_unit_count is all units/spaces; storage_unit_count is storage units only; non_storage_unit_count is parking/residential/other non-storage. Never subtract non_storage_unit_count from storage_unit_count."""
 
 
 # ── Per-section instruction blocks ──────────────────────────────────────────
@@ -51,7 +52,7 @@ CRITICAL RULES (apply to every sentence you write):
 SECTION_INSTRUCTIONS: dict[str, str] = {
     SECTION_EXECUTIVE_SUMMARY: """SECTION: Executive Summary
 Output: 3 short paragraphs.
-Paragraph 1 — deal snapshot in 2 sentences: property name, asset type, units, purchase price, location. If STRUCTURED DATA.strategy_type is set, mention it in one phrase (e.g., "value-add acquisition", "stable-income hold").
+Paragraph 1 — deal snapshot in 2 sentences: property name, asset type, units, purchase price, location. If STRUCTURED DATA.total_unit_count differs from STRUCTURED DATA.storage_unit_count, describe the mix as "[total_unit_count] total units/spaces, including [storage_unit_count] storage units" instead of calling it a [storage_unit_count]-unit facility. If STRUCTURED DATA.strategy_type is set, mention it in one phrase (e.g., "value-add acquisition", "stable-income hold").
 Paragraph 2 — investment thesis in 1-2 sentences. If STRUCTURED DATA.thesis_text is set, paraphrase it (do not copy verbatim). Otherwise cite the single most favorable metric from STRUCTURED DATA.return_metrics or rent_position as the primary strength.
 Paragraph 3 — primary risk in 1 sentence (the most material item from STRUCTURED DATA.warnings, stress_tests, or rollover), followed by the recommendation matching STRUCTURED DATA.classification verbatim. If STRUCTURED DATA.verdict_override is set AND differs from STRUCTURED DATA.classification_calculator, append: "Note: analyst override of calculator's [calculator value] — rationale in Recommendation section."
 Do not introduce facts that are not also developed in later sections.""",
@@ -82,11 +83,11 @@ Do NOT include numbers that contradict STRUCTURED DATA.""",
 
     SECTION_TRANSACTION_OVERVIEW: """SECTION: Transaction Overview
 Output: 1 short paragraph (~3 sentences).
-Use ONLY values from STRUCTURED DATA.purchase_price, price_per_unit, price_per_sqft, cap_rate_at_cost. State the price, $/unit, and the going-in cap rate. Do NOT comment on whether the price is fair — that is the Recommendation section's job. No citations needed.""",
+Use ONLY values from STRUCTURED DATA.purchase_price, price_per_unit, price_per_sqft, cap_rate_at_cost, total_unit_count, storage_unit_count, non_storage_unit_count. State the price, $/storage unit when non_storage_unit_count is present; otherwise state $/unit. State $/rentable sqft and the going-in cap rate. If non_storage_unit_count is present, the only allowed unit-mix phrase is: "[total_unit_count] total units/spaces, including [storage_unit_count] storage units and [non_storage_unit_count] non-storage units/spaces." Do NOT invent any alternate unit count. Do NOT comment on whether the price is fair — that is the Recommendation section's job. No citations needed.""",
 
     SECTION_PROPERTY_DESCRIPTION: """SECTION: Property Description
 Output: 2-3 short paragraphs. Strictly about the PHYSICAL property.
-Paragraph 1 (structured): year built, total units, total rentable sqft, CC unit count vs NC unit count, climate-control percentage. All numbers come from STRUCTURED DATA verbatim.
+Paragraph 1 (structured): year built, total unit/space count, storage unit count, non-storage unit count when present, total rentable sqft, CC unit count vs NC unit count, climate-control percentage. All numbers come from STRUCTURED DATA verbatim. If total_unit_count differs from storage_unit_count, do not collapse them into a single "units" number. Never calculate a storage count by subtracting non_storage_unit_count from storage_unit_count.
 Paragraph 2 (narrative): construction type, on-site management, security, recent capex, drive-up vs interior access. THIS MUST come from SOURCE EXCERPTS with inline [doc:page] citations. If SOURCE EXCERPTS contains no relevant material, write ONE sentence: "No additional property description available from the offering memorandum." Do not invent.
 Paragraph 3 (optional): explicitly stated value-add or expansion opportunities — only if SOURCE EXCERPTS supports them.
 
@@ -133,6 +134,8 @@ Read STRUCTURED DATA.rent_position which has these fields:
 - current_vs_comp_avg: in-place rent / comp average across matched buckets. <1.0 means below market, >1.0 means above market.
 - market_vs_comp_avg: subject's stated market rent / comp average.
 - matched_bucket_count, total_bucket_count: how many size buckets had comp coverage.
+- current_ratio_bucket_count: how many buckets had enough subject rent data to compute a current-rent ratio.
+- unmatched_bucket_count, unmatched_sizes: subject buckets without clean comp coverage.
 
 Acceptable claims:
 - Whether overall in-place rents are above or below market (use current_vs_comp_avg).
@@ -140,7 +143,9 @@ Acceptable claims:
 - One sentence on the implication for upside / downside, only when current_vs_comp_avg is materially below 1.0 (e.g. <0.95).
 - If matched_bucket_count < total_bucket_count, note coverage limitation in one phrase.
 
-If rent_position is empty or matched_bucket_count is 0, write ONE sentence: "Rent position cannot be assessed — no matched comp buckets in this submission." Do not speculate.""",
+If rent_position is empty, write ONE sentence: "Rent position cannot be assessed because no subject-to-comp matching data is available."
+If matched_bucket_count > 0 but current_vs_comp_avg is null, write ONE sentence explaining that comp coverage exists but rent position cannot be quantified because current-rent ratios are incomplete.
+Only write "no matched comp buckets" when matched_bucket_count is 0. Do not speculate.""",
 
     SECTION_RISKS: """SECTION: Risks & Mitigants
 Return 3-6 risks. For each risk, the `source` field MUST be one of these enum values and the risk's content MUST be supportable by that source:
@@ -152,6 +157,7 @@ Return 3-6 risks. For each risk, the `source` field MUST be one of these enum va
 - "analyst_note"     — drawn from STRUCTURED DATA.sponsor_data.notes or STRUCTURED DATA.market_notes only
 
 Do NOT invent risks not supported by the above. Do NOT include generic risks ("interest rate risk", "market conditions") unless a specific stress test or warning in STRUCTURED DATA points to them.
+If discussing rent growth, use STRUCTURED DATA.operational.rent_growth_pct exactly. Do not infer a growth rate from projections or source excerpts when this field is present.
 
 MITIGANTS — required discipline:
 For every risk, evaluate ALL FIVE mitigant sources below in order and use the first that applies. Only set `mitigant` to null when NONE of the five yield a defensible mitigant.
@@ -168,8 +174,11 @@ If a risk has no supportable mitigant after evaluating all 5 sources, set `mitig
 
 DIMENSION-MATCH RULE: a mitigant MUST address the same risk dimension as the risk itself.
 - IRR miss → mitigant must address upside (DSCR cushion, LTV slack, conversion thesis), NOT equity multiple. EM and IRR measure different things (terminal vs annual); citing EM as offsetting IRR is incorrect.
-- Cash-on-cash miss → mitigant must address near-term cash flow (LTV cushion enabling more leverage, lower expense load), NOT 10-year equity multiple.
+- Cash-on-cash miss → mitigant must address near-term cash flow from operations or expenses, NOT DSCR cushion, NOT higher leverage, and NOT 10-year equity multiple. Additional leverage is a financing option, not a risk mitigant; DSCR is a lender coverage metric, not an equity cash-yield mitigant.
+- Equity multiple miss → mitigant must address terminal value, purchase basis, hold-period value creation, or exit support. Do NOT cite IRR as a mitigant for an equity-multiple shortfall.
 - Lease-up / non-storage concentration risk → mitigant must address the diversification or stability of that revenue stream, NOT pure occupancy snapshot (occupancy today doesn't mitigate concentration tomorrow).
+- Mixed-use / non-storage risk → mitigant must specifically address parking/residential operations or revenue durability. Generic self-storage sponsor experience is not enough.
+- Stress-case return shortfall → mitigant must address equity return downside, NOT DSCR or lender coverage.
 - Rent above market → mitigant must address sustainability (tenure data, defensible advantage), NOT generic sponsor experience.
 
 When NO defensible same-dimension mitigant exists, set `mitigant` to null. Better to flag for committee than to write a mismatched mitigant.""",
@@ -179,6 +188,7 @@ When NO defensible same-dimension mitigant exists, set `mitigant` to null. Bette
 - `rationale`: 2-3 sentences.
    • If STRUCTURED DATA.verdict_override IS NOT NULL AND differs from STRUCTURED DATA.classification_calculator: open with "Analyst override of calculator's [classification_calculator] classification." Then quote STRUCTURED DATA.verdict_override_reason verbatim or paraphrase tightly. Conclude with 1 sentence acknowledging which calculator metrics support OR contradict the override.
    • Otherwise: 2-3 sentences citing the 1-2 driving metrics from STRUCTURED DATA. Compare to STRUCTURED DATA.criteria (e.g. "DSCR 1.45x clears the 1.25x floor").
+   • If classification is "Below Screen", use "does not clear the configured screen under current assumptions" language. Do NOT write "reject", "warrant rejection", "preclude advancement", or "unattractive opportunity"; OM-only underwriting may change with T-12, rent roll, revised price, or analyst override.
 - `driving_metrics`: max 3 entries. STRICT FORMAT — each entry MUST be a single metric value vs a single threshold value, like "DSCR 1.45x vs 1.25x floor" or "IRR 14.1% vs 15.0% target". Each entry MUST contain the substring " vs " (with spaces). Each entry MUST end with a number followed by an optional unit/qualifier. Do NOT include thesis statements (no "Non-storage units 35% of mix" — that is a thesis, not a metric).
 - `conditions`: 1-5 conditions for proceeding.
    • If STRUCTURED DATA.custom_conditions has entries, those MUST appear as the FIRST entries verbatim — they are analyst-supplied and authoritative.

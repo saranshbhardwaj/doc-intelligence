@@ -11,6 +11,7 @@ def test_om_prompt_distinguishes_current_vs_exit_cap_rate_terms():
     assert "pro forma cap rate" in prompt
     assert "exit_cap_rate" in prompt
     assert 'never map "current cap rate" into exit_cap_rate'.lower() in prompt
+    assert "do not map them to exit_cap_rate" in prompt
 
 
 def test_om_prompt_maps_property_tax_mechanics_to_explicit_fields():
