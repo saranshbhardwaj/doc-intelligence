@@ -13,6 +13,7 @@ from app.utils.logging import logger
 from app.verticals.real_estate.underwriting.extraction.tasks.tasks import start_re_underwriting_chain
 from app.verticals.real_estate.underwriting.schemas.self_storage import SelfStorageInputs, UnitMixRow
 from app.verticals.real_estate.underwriting.calculator import calculate, calculate_sensitivity
+from app.verticals.real_estate.underwriting.max_loan import compute_max_loan_for_run
 from app.verticals.real_estate.underwriting.noi_bridge import build_noi_bridge
 from app.verticals.real_estate.underwriting.stress_tests import run_stress_tests
 from app.verticals.real_estate.underwriting.rollover import compute_rollover_risk
@@ -37,6 +38,7 @@ class CreateUnderwritingRunRequest(BaseModel):
 
 class UpdateInputsRequest(BaseModel):
     inputs: dict
+    field_citations: Optional[dict] = None
 
 
 class UpdateRunMetadataRequest(BaseModel):
@@ -54,6 +56,13 @@ class ScenarioOverrides(BaseModel):
     rent_growth_pct: Optional[float] = None
     interest_rate_pct: Optional[float] = None
     purchase_price: Optional[float] = None
+
+
+class MaxLoanRequest(BaseModel):
+    """Optional overrides for max-loan sizing. Missing fields fall back to inputs.criteria, then to industry defaults."""
+    dscr_floor: Optional[float] = None
+    max_ltv: Optional[float] = None
+    debt_yield_floor: Optional[float] = None
 
 
 def _normalize_empty_strings(payload: Any) -> Any:
@@ -296,13 +305,15 @@ def update_underwriting_inputs(run_id: str, payload: UpdateInputsRequest, user: 
     # This freezes dscr_year_one_floor / stress_dscr_floor / rollover_risk_pct per-deal at first save.
     snapshotted = _snapshot_thresholds_into_criteria(validated_inputs.model_dump(), user.id)
     validated_inputs = SelfStorageInputs(**snapshotted)
+    inputs_to_save = validated_inputs.model_dump()
+    field_citations = payload.field_citations if payload.field_citations is not None else run.field_citations
 
-    success = repo.update_inputs(run_id, user.id, validated_inputs.model_dump())
+    success = repo.update_inputs(run_id, user.id, inputs_to_save, field_citations=field_citations)
     if not success:
         raise HTTPException(status_code=400, detail="Failed to update inputs")
 
     try:
-        _calculate_and_store_result(repo, run_id, validated_inputs.model_dump())
+        _calculate_and_store_result(repo, run_id, inputs_to_save)
     except ValueError as e:
         logger.warning(f"Underwriting calculation validation failed for run {run_id}: {e}")
         raise HTTPException(status_code=400, detail=str(e))
@@ -311,7 +322,7 @@ def update_underwriting_inputs(run_id: str, payload: UpdateInputsRequest, user: 
         raise HTTPException(status_code=400, detail="Failed to calculate underwriting result")
 
     logger.info(f"Updated and recalculated inputs for run: {run_id}", extra={"user_id": user.id})
-    return {"status": "completed", "run_id": run_id}
+    return {"status": "completed", "run_id": run_id, "inputs": inputs_to_save, "field_citations": field_citations}
 
 @router.post("/runs/{run_id}/sensitivity", response_model=dict)
 def sensitivity_analysis(run_id: str, payload: SensitivityRequest, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
@@ -379,6 +390,46 @@ def scenario_recalculate(run_id: str, payload: ScenarioOverrides, user: User = D
     except Exception as e:
         logger.error(f"Scenario recalculate failed for run {run_id}: {e}")
         raise HTTPException(status_code=400, detail="Scenario calculation failed")
+
+
+@router.post("/runs/{run_id}/max-loan", response_model=dict)
+def max_loan_sizing(
+    run_id: str,
+    payload: MaxLoanRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    """Stateless max-loan sizing. Pulls run state, applies optional constraint overrides,
+    runs the max-loan calculator, and returns the result. No DB writes."""
+    repo = UnderwritingRunRepository(db)
+    run = repo.get(run_id, user.id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+    if not run.inputs:
+        raise HTTPException(status_code=400, detail="Run has no saved inputs")
+
+    # Validate inputs early so a malformed run returns a 400 instead of a 500.
+    try:
+        SelfStorageInputs(**run.inputs)
+    except ValidationError as exc:
+        logger.warning(f"Max-loan: run {run_id} inputs failed validation: {exc}")
+        raise HTTPException(status_code=400, detail="Run inputs are not valid")
+
+    try:
+        result = compute_max_loan_for_run(
+            run,
+            dscr_floor=payload.dscr_floor,
+            max_ltv=payload.max_ltv,
+            debt_yield_floor=payload.debt_yield_floor,
+        )
+    except Exception as e:
+        logger.error(f"Max-loan sizing failed for run {run_id}: {e}")
+        raise HTTPException(status_code=400, detail="Max-loan calculation failed")
+
+    if result is None:
+        raise HTTPException(status_code=400, detail="Run has no saved inputs")
+
+    return result.model_dump()
 
 
 @router.delete("/runs/{run_id}", response_model=dict)

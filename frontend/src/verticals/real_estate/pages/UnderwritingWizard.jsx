@@ -72,6 +72,42 @@ const EMPTY_SELECTED_DOCS = { om: null, t12: null, rent_roll: null };
 
 const SLOT_LABELS = Object.fromEntries(DOC_SLOTS.map((slot) => [slot.key, slot.label]));
 
+function valuesEqual(left, right) {
+  if ((left == null || left === '') && (right == null || right === '')) return true;
+  const leftNumber = Number(left);
+  const rightNumber = Number(right);
+  if (Number.isFinite(leftNumber) && Number.isFinite(rightNumber)) {
+    return Math.abs(leftNumber - rightNumber) < 0.0000001;
+  }
+  return left === right;
+}
+
+function citationLookup(citations, fieldKey) {
+  if (!citations) return null;
+  return citations[fieldKey]
+    ?? citations[`om.${fieldKey}`]
+    ?? citations[`t12.${fieldKey}`]
+    ?? citations[`rent_roll.${fieldKey}`]
+    ?? null;
+}
+
+function toManualCitation(existingCitation, previousValue) {
+  const existing = existingCitation && typeof existingCitation === 'object' ? existingCitation : null;
+  const originalCitation = existing?.is_manual ? existing.original_citation : existing;
+  return {
+    doc_type: 'manual',
+    source: 'manual',
+    is_manual: true,
+    manual_override: true,
+    confidence: null,
+    citations: [],
+    source_text: null,
+    original_value: existing?.is_manual ? existing.original_value : previousValue,
+    original_citation: originalCitation ?? null,
+    selection_note: 'Analyst manually updated this field.',
+  };
+}
+
 function buildSelectedDocsFromRun(run) {
   const docs = Array.isArray(run?.source_documents) && run.source_documents.length
     ? run.source_documents
@@ -115,6 +151,7 @@ export default function UnderwritingWizard() {
   const [activeTab, setActiveTab] = useState(TAB_CONFIG[0].id);
 
   const [inputs, setInputs] = useState(createDefaultInputs);
+  const [draftFieldCitations, setDraftFieldCitations] = useState(null);
   const [isExtracting, setIsExtracting] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
@@ -134,6 +171,7 @@ export default function UnderwritingWizard() {
   const resetWizardState = () => {
     setProjectData(INITIAL_PROJECT_DATA);
     setInputs(createDefaultInputs());
+    setDraftFieldCitations(null);
     setSelectedDocs(EMPTY_SELECTED_DOCS);
     setDocPickerOpen(null);
     setActiveTab(TAB_CONFIG[0].id);
@@ -299,6 +337,7 @@ export default function UnderwritingWizard() {
         rent_comps: Array.isArray(converted.rent_comps) ? converted.rent_comps : prev.rent_comps,
       };
     });
+    setDraftFieldCitations(currentRun.field_citations || null);
     const hydratedDocs = buildSelectedDocsFromRun(currentRun);
     if (Object.values(hydratedDocs).some(Boolean)) {
       setSelectedDocs(hydratedDocs);
@@ -309,6 +348,7 @@ export default function UnderwritingWizard() {
     currentRun?.id,
     currentRun?.run_id,
     currentRun?.inputs,
+    currentRun?.field_citations,
     currentRun?.updated_at,
     currentRun?.completed_at,
     currentRun?.status,
@@ -329,18 +369,14 @@ export default function UnderwritingWizard() {
     || Boolean(extractionDocuments.some((doc) => doc.doc_type === 'om'));
   const extractionDone = currentRun?.inputs != null;
 
-  const fieldCitations = currentRun?.field_citations;
+  const fieldCitations = draftFieldCitations ?? currentRun?.field_citations;
   const citCtx = currentRun?.citation_context;
 
   const citationCount = useMemo(() => countVisibleCitations(fieldCitations), [fieldCitations]);
 
   const getCitation = useMemo(() => (fieldKey) => {
     if (!fieldCitations) return null;
-    const raw = fieldCitations[fieldKey]
-      ?? fieldCitations[`om.${fieldKey}`]
-      ?? fieldCitations[`t12.${fieldKey}`]
-      ?? fieldCitations[`rent_roll.${fieldKey}`]
-      ?? null;
+    const raw = citationLookup(fieldCitations, fieldKey);
     if (!raw) return null;
     if (raw.is_default || raw.is_derived || raw.is_uncited_extraction || !raw.citations?.length) {
       return { ...raw };
@@ -455,6 +491,9 @@ export default function UnderwritingWizard() {
           name: projectData.name,
           asset_type: projectData.asset_type,
           address: projectData.address,
+          num_units: projectData.num_units,
+          rentable_sqft: projectData.rentable_sqft,
+          year_built: projectData.year_built,
           nearby_storage_count_1mi: projectData.nearby_storage_count_1mi,
           nearby_storage_count_3mi: projectData.nearby_storage_count_3mi,
           nearby_storage_count_5mi: projectData.nearby_storage_count_5mi,
@@ -465,10 +504,14 @@ export default function UnderwritingWizard() {
       });
       const existingRunId = currentRun?.run_id || currentRun?.id || runIdFromUrl;
       if (existingRunId) {
-        await Promise.all([
-          persistMeta(existingRunId, projectData.name?.trim() || "", projectData.address?.trim() || null),
-          updateUnderwritingInputs(getToken, existingRunId, inputPayload),
-        ]);
+        const nextName = projectData.name?.trim() || "";
+        const nextAddress = projectData.address?.trim() || null;
+        const metaChanged = nextName !== savedMeta.current.name
+          || (nextAddress || "") !== (savedMeta.current.address || "");
+        if (metaChanged) {
+          await persistMeta(existingRunId, nextName, nextAddress);
+        }
+        await updateUnderwritingInputs(getToken, existingRunId, inputPayload, draftFieldCitations);
         navigate(`/app/re/underwriting/${existingRunId}`);
       } else {
         const run = await createUnderwritingRun(getToken, {
@@ -477,7 +520,7 @@ export default function UnderwritingWizard() {
           address: projectData.address,
           documents: [],
         });
-        await updateUnderwritingInputs(getToken, run.run_id, inputPayload);
+        await updateUnderwritingInputs(getToken, run.run_id, inputPayload, draftFieldCitations);
         navigate(`/app/re/underwriting/${run.run_id}`);
       }
     } catch (err) {
@@ -505,31 +548,73 @@ export default function UnderwritingWizard() {
     }
   }
 
-  const createPatcher = (section) => (key, value) =>
+  const markManualCitation = (fieldKey, previousValue, nextValue) => {
+    if (valuesEqual(previousValue, nextValue)) return;
+    setDraftFieldCitations((prev) => {
+      const next = { ...(prev || {}) };
+      const existingCitation = citationLookup(next, fieldKey);
+      const originalValue = existingCitation?.is_manual
+        ? existingCitation.original_value
+        : previousValue;
+
+      if (valuesEqual(nextValue, originalValue)) {
+        if (existingCitation?.is_manual && existingCitation.original_citation) {
+          next[fieldKey] = existingCitation.original_citation;
+        } else {
+          delete next[fieldKey];
+        }
+        return next;
+      }
+
+      next[fieldKey] = toManualCitation(existingCitation, previousValue);
+      return next;
+    });
+  };
+
+  const createPatcher = (section) => (key, value) => {
+    const previousValue = inputs?.[section]?.[key];
+    markManualCitation(key, previousValue, value);
     setInputs((prev) => ({ ...prev, [section]: { ...prev[section], [key]: value } }));
+  };
   const patchAcq = createPatcher('acquisition');
   const patchOp = createPatcher('operational');
   const patchFin = createPatcher('financing');
   const patchExit = createPatcher('exit');
   const patchCrit = createPatcher('criteria');
-  const patchProject = (key, value) => setProjectData((prev) => ({ ...prev, [key]: value }));
-  const addRentComp = () => setInputs((prev) => ({
-    ...prev,
-    rent_comps: [
-      ...(prev.rent_comps || []),
-      { facility: '', size: '', asking_rent: '', rent_per_sqft: '', distance_mi: '', notes: '' },
-    ],
-  }));
-  const patchRentComp = (index, key, value) => setInputs((prev) => ({
-    ...prev,
-    rent_comps: (prev.rent_comps || []).map((row, rowIndex) => (
+  const patchProject = (key, value) => {
+    markManualCitation(key, projectData?.[key], value);
+    setProjectData((prev) => ({ ...prev, [key]: value }));
+  };
+  const addRentComp = () => {
+    markManualCitation('rent_comps', inputs.rent_comps, [...(inputs.rent_comps || []), {}]);
+    setInputs((prev) => ({
+      ...prev,
+      rent_comps: [
+        ...(prev.rent_comps || []),
+        { facility: '', size: '', asking_rent: '', rent_per_sqft: '', distance_mi: '', notes: '' },
+      ],
+    }));
+  };
+  const patchRentComp = (index, key, value) => {
+    const previousValue = inputs.rent_comps?.[index]?.[key];
+    markManualCitation(`rent_comps.${index}.${key}`, previousValue, value);
+    markManualCitation('rent_comps', inputs.rent_comps, (inputs.rent_comps || []).map((row, rowIndex) => (
       rowIndex === index ? { ...row, [key]: value } : row
-    )),
-  }));
-  const removeRentComp = (index) => setInputs((prev) => ({
-    ...prev,
-    rent_comps: (prev.rent_comps || []).filter((_, rowIndex) => rowIndex !== index),
-  }));
+    )));
+    setInputs((prev) => ({
+      ...prev,
+      rent_comps: (prev.rent_comps || []).map((row, rowIndex) => (
+        rowIndex === index ? { ...row, [key]: value } : row
+      )),
+    }));
+  };
+  const removeRentComp = (index) => {
+    markManualCitation('rent_comps', inputs.rent_comps, (inputs.rent_comps || []).filter((_, rowIndex) => rowIndex !== index));
+    setInputs((prev) => ({
+      ...prev,
+      rent_comps: (prev.rent_comps || []).filter((_, rowIndex) => rowIndex !== index),
+    }));
+  };
 
   const handleOpenSource = (citation) => {
     setActiveCitation(citation);

@@ -26,11 +26,11 @@ export async function getUnderwritingRun(getToken, runId) {
   return response.data;
 }
 
-export async function updateUnderwritingInputs(getToken, runId, inputs) {
+export async function updateUnderwritingInputs(getToken, runId, inputs, fieldCitations) {
   const api = createAuthenticatedApi(getToken);
-  const response = await api.patch(`/api/v1/re/underwriting/runs/${runId}/inputs`, {
-    inputs,
-  });
+  const payload = { inputs };
+  if (fieldCitations !== undefined) payload.field_citations = fieldCitations;
+  const response = await api.patch(`/api/v1/re/underwriting/runs/${runId}/inputs`, payload);
   return response.data;
 }
 
@@ -58,6 +58,20 @@ export async function recalculateScenario(getToken, runId, overrides) {
   const response = await api.post(
     `/api/v1/re/underwriting/runs/${runId}/recalculate`,
     overrides
+  );
+  return response.data;
+}
+
+/**
+ * Stateless max-loan sizing. All constraints optional; backend falls back to criteria, then to defaults.
+ * @param {object} constraints - { dscr_floor?, max_ltv?, debt_yield_floor? }
+ * @returns {Promise<object>} MaxLoanResult shape (see backend schemas/self_storage.py)
+ */
+export async function calculateMaxLoan(getToken, runId, constraints = {}) {
+  const api = createAuthenticatedApi(getToken);
+  const response = await api.post(
+    `/api/v1/re/underwriting/runs/${runId}/max-loan`,
+    constraints
   );
   return response.data;
 }

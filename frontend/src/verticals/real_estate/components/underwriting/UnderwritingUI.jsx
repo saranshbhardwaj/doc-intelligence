@@ -1,5 +1,6 @@
-import { HelpCircle } from 'lucide-react';
+import { ChevronDown, HelpCircle } from 'lucide-react';
 import { Tooltip, TooltipContent, TooltipPortal, TooltipProvider, TooltipTrigger } from '@/components/ui/tooltip';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import { cn } from '@/lib/utils';
 
 export function UnderwritingStatusBadge({ tone = 'neutral', className, children }) {
@@ -62,6 +63,7 @@ export function UnderwritingMetricCard({
   value,
   detail,
   formula,
+  calculationDetail = null,
   tone = 'default',
   status = null,
   className,
@@ -96,6 +98,53 @@ export function UnderwritingMetricCard({
         {status}
       </div>
       {detail ? <p className="mt-2 text-sm leading-6 text-muted-foreground">{detail}</p> : null}
+      {calculationDetail ? (
+        <Collapsible className="mt-3 border-t border-border/60 pt-3">
+          <CollapsibleTrigger className="group flex w-full items-center justify-between gap-3 text-left text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground transition-colors hover:text-foreground">
+            <span>Calculation detail</span>
+            <ChevronDown className="h-3.5 w-3.5 transition-transform group-data-[state=open]:rotate-180" />
+          </CollapsibleTrigger>
+          <CollapsibleContent className="pt-3">
+            {calculationDetail}
+          </CollapsibleContent>
+        </Collapsible>
+      ) : null}
+    </div>
+  );
+}
+
+export function MetricCalculationDetail({ sections = [], note = null }) {
+  const visibleSections = sections
+    .map((section) => ({
+      ...section,
+      rows: (section.rows || []).filter((row) => row && row.value != null && row.value !== '—' && row.value !== 'â€”'),
+    }))
+    .filter((section) => section.rows.length > 0);
+
+  if (!visibleSections.length && !note) return null;
+
+  return (
+    <div className="space-y-3">
+      {visibleSections.map((section) => (
+        <div key={section.title || section.rows.map((row) => row.label).join('-')} className="rounded-xl border border-border/60 bg-background/60 p-3">
+          {section.title ? (
+            <p className="mb-2 text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">
+              {section.title}
+            </p>
+          ) : null}
+          <div className="space-y-1.5">
+            {section.rows.map((row) => (
+              <div key={row.label} className="flex items-start justify-between gap-3 text-xs leading-5">
+                <span className="text-muted-foreground">{row.label}</span>
+                <span className={cn('text-right font-mono font-semibold text-foreground', row.className)}>
+                  {row.value}
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      ))}
+      {note ? <p className="text-xs leading-5 text-muted-foreground">{note}</p> : null}
     </div>
   );
 }

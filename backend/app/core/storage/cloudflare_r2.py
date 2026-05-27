@@ -57,12 +57,16 @@ class CloudflareR2Storage:
             logger.exception("Failed to retrieve object from R2", extra={"bucket": self.bucket, "key": key})
             raise
 
-    def generate_url(self, key: str) -> str:
+    def generate_url(self, key: str, filename: str | None = None) -> str:
         """Generate a presigned URL for an existing object."""
         try:
+            params = {'Bucket': self.bucket, 'Key': key}
+            if filename:
+                safe_filename = filename.replace("\\", "_").replace("/", "_").replace('"', "")
+                params['ResponseContentDisposition'] = f'attachment; filename="{safe_filename}"'
             url = self.client.generate_presigned_url(
                 'get_object',
-                Params={'Bucket': self.bucket, 'Key': key},
+                Params=params,
                 ExpiresIn=self.presign_expiry
             )
             logger.info("Generated presigned URL for R2 object", extra={"bucket": self.bucket, "key": key})

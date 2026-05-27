@@ -153,13 +153,21 @@ class UnderwritingRunRepository:
             logger.exception("Failed to update result for run %s", run_id)
             raise
 
-    def update_inputs(self, run_id: str, user_id: str, inputs: dict) -> bool:
+    def update_inputs(
+        self,
+        run_id: str,
+        user_id: str,
+        inputs: dict,
+        field_citations: dict | None = None,
+    ) -> bool:
         """Update wizard inputs after user edits — scoped to user for security."""
         run = self.get(run_id, user_id)
         if not run:
             return False
         try:
             run.inputs = inputs
+            if field_citations is not None:
+                run.field_citations = field_citations
             self.db.commit()
             return True
         except SQLAlchemyError:

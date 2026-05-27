@@ -257,7 +257,7 @@ class TestVerdictMixedRevenueWarning:
         verdict = evaluate(result, default_criteria)
 
         assert any(w.key == "mixed_revenue_unit_mix" for w in verdict.warnings)
-        assert "20 of 120 units/spaces" in verdict.rationale
+        assert "20 of 120 units/spaces (17% of unit count)" in verdict.rationale
 
 
 class TestVerdictEvidenceQualityWarning:
@@ -495,7 +495,7 @@ class TestVerdictMixedRevenueWarning:
         assert len(verdict.failures) == 0
         assert any(w.key == "mixed_revenue_material" for w in verdict.warnings)
         assert "Mixed revenue detected" in verdict.rationale
-        assert "70 of 203 units/spaces (34%)" in verdict.rationale
+        assert "70 of 203 units/spaces (34% of unit count)" in verdict.rationale
 
     def test_material_mixed_revenue_by_scheduled_rent_requires_review(self, passing_result, default_criteria):
         result = passing_result.model_copy()
@@ -508,7 +508,7 @@ class TestVerdictMixedRevenueWarning:
 
         warning = next(w for w in verdict.warnings if w.key == "mixed_revenue_material")
         assert verdict.status == "needs_review"
-        assert "approximately 23% of unit-mix scheduled rent" in warning.message
+        assert "approximately 23% of scheduled rent" in warning.message
 
     def test_storage_only_unit_mix_has_no_mixed_revenue_warning(self, passing_result, default_criteria):
         result = passing_result.model_copy()

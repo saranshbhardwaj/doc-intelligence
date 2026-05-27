@@ -9,10 +9,10 @@ import {
   AlertTriangle,
   CheckCircle2,
   ChevronLeft,
-  Download,
   Loader2,
   MapPin,
   SlidersHorizontal,
+  Sparkles,
   Trash2,
   Warehouse,
   XCircle,
@@ -40,10 +40,15 @@ import { useAppAuth } from '../../../hooks/useAppAuth';
 import { useUnderwriting, useUnderwritingActions } from '../../../store';
 import { deleteUnderwritingRun, recalculateScenario, runSensitivityAnalysis } from '../../../api/re-underwriting';
 import {
+  CreditMemoModal,
+  CreditMemoProgress,
   DiscrepanciesSection,
   EvidenceSection,
   MarketSection,
   MaxBidPanel,
+  MaxLoanPanel,
+  MetricCalculationDetail,
+  MemoHistorySheet,
   ModelBasisPanel,
   OperationsSection,
   ReturnsSection,
@@ -78,7 +83,7 @@ function WorkspaceMark() {
 export default function UnderwritingResult() {
   const { runId } = useParams();
   const navigate = useNavigate();
-  const { getToken } = useAppAuth();
+  const { getToken, user: currentUser } = useAppAuth();
   const { currentRun } = useUnderwriting();
   const { loadRun } = useUnderwritingActions();
 
@@ -95,6 +100,13 @@ export default function UnderwritingResult() {
   const [isScenarioLoading, setIsScenarioLoading] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const scenarioDebounceRef = useRef(null);
+
+  // Credit memo state
+  const [memoModalOpen, setMemoModalOpen] = useState(false);
+  const [memoHistoryOpen, setMemoHistoryOpen] = useState(false);
+  const [memoProgress, setMemoProgress] = useState(null); // { jobId, memoId } | null
+  const [memoRefreshKey, setMemoRefreshKey] = useState(0);
+  const [memoPrefill, setMemoPrefill] = useState(null);
 
   useEffect(() => {
     if (runId) loadRun(getToken, runId);
@@ -155,6 +167,22 @@ export default function UnderwritingResult() {
       setIsDeleting(false);
     }
   }, [getToken, isDeleting, navigate, runId]);
+
+  const handleMemoSubmitted = (resp) => {
+    setMemoProgress({ jobId: resp.job_id, memoId: resp.memo_id });
+    setMemoRefreshKey((k) => k + 1);
+  };
+
+  const handleRegenerate = (memo) => {
+    // NOTE: MemoSummary includes prior analyst inputs so regeneration can start from a previous version.
+    setMemoPrefill({
+      cover_data: memo.cover_data || {},
+      sponsor_data: memo.sponsor_data || {},
+      thesis_data: memo.thesis_data || {},
+      market_notes: memo.market_notes || null,
+    });
+    setMemoModalOpen(true);
+  };
 
   // ── Derived data ──────────────────────────────────────────────────────────
 
@@ -236,6 +264,7 @@ export default function UnderwritingResult() {
     avg_in_place_rent_per_unit_monthly: getFieldCitation(fieldCitations, citationContext, 'avg_in_place_rent_per_unit_monthly'),
     avg_market_rent_per_unit_monthly: getFieldCitation(fieldCitations, citationContext, 'avg_market_rent_per_unit_monthly'),
     vacancy_credit_loss_pct: getFieldCitation(fieldCitations, citationContext, 'vacancy_credit_loss_pct'),
+    rent_growth_pct: getFieldCitation(fieldCitations, citationContext, 'rent_growth_pct'),
     expense_ratio_t12: getFieldCitation(fieldCitations, citationContext, 'expense_ratio_t12'),
     expense_ratio_current: getFieldCitation(fieldCitations, citationContext, 'expense_ratio_current'),
     expense_ratio_year1: getFieldCitation(fieldCitations, citationContext, 'expense_ratio_year1'),
@@ -519,12 +548,145 @@ export default function UnderwritingResult() {
     CFADS: Math.round(p.cash_flow),
   }));
 
+  const holdYears = persistedInputs.exit?.hold_period_years || projections.length || null;
+  const exitCapRate = persistedInputs.exit?.exit_cap_rate ?? null;
+  const sellingCostPct = persistedInputs.exit?.selling_cost_pct ?? 0;
+  const finalProjection = holdYears && projections.length
+    ? projections[Math.min(Math.max(holdYears, 1), projections.length) - 1]
+    : projections[projections.length - 1];
+  const exitNoi = finalProjection?.noi ?? null;
+  const grossSaleEstimate = exitNoi != null && exitCapRate ? exitNoi / exitCapRate : null;
+  const netSaleEstimate = grossSaleEstimate != null ? grossSaleEstimate * (1 - sellingCostPct) : null;
+  const loanPayoffEstimate = fm.equity_multiple?.computed_values?.loan_balance_at_exit
+    ?? fm.irr?.computed_values?.loan_balance_at_exit
+    ?? null;
+  const equityFromSaleEstimate = netSaleEstimate != null && loanPayoffEstimate != null
+    ? Math.max(netSaleEstimate - loanPayoffEstimate, 0)
+    : fm.equity_multiple?.computed_values?.equity_from_sale
+      ?? fm.irr?.computed_values?.exit_proceeds
+      ?? null;
+  const totalDistributions = fm.equity_multiple?.computed_values?.total_cash_flows
+    ?? fm.irr?.computed_values?.total_distributions
+    ?? (projections.length ? projections.reduce((sum, row) => sum + (row.cash_flow || 0), 0) : null);
+  const distributionRows = projections.slice(0, Math.min(projections.length, 10)).map((row) => ({
+    label: `Y${row.year} cash flow`,
+    value: formatCompactCurrency(row.cash_flow),
+  }));
+  const totalCashOut = totalDistributions != null && equityFromSaleEstimate != null
+    ? totalDistributions + equityFromSaleEstimate
+    : currentRun?.equity_multiple && equityInvested
+      ? currentRun.equity_multiple * equityInvested
+      : null;
+  const returnsSaleRows = [
+    { label: `${holdYears ? `Y${holdYears}` : 'Exit'} NOI`, value: formatCompactCurrency(exitNoi) },
+    { label: 'Exit cap', value: formatPercent(exitCapRate) },
+    { label: 'Gross sale', value: formatCompactCurrency(grossSaleEstimate) },
+    { label: 'Selling costs', value: grossSaleEstimate != null ? `-${formatCompactCurrency(grossSaleEstimate * sellingCostPct)}` : null },
+    { label: 'Net sale', value: formatCompactCurrency(netSaleEstimate) },
+    { label: 'Loan payoff', value: loanPayoffEstimate != null ? `-${formatCompactCurrency(loanPayoffEstimate)}` : null },
+    { label: 'Equity from sale', value: formatCompactCurrency(equityFromSaleEstimate) },
+  ];
+  const irrCalculationDetail = (
+    <MetricCalculationDetail
+      sections={[
+        {
+          title: 'Cash flow timing',
+          rows: [
+            { label: 'Equity in', value: equityInvested ? `-${formatCompactCurrency(equityInvested)}` : null },
+            ...distributionRows,
+            { label: 'Total distributions', value: formatCompactCurrency(totalDistributions) },
+          ],
+        },
+        { title: 'Sale value', rows: returnsSaleRows },
+        {
+          title: 'Return bridge',
+          rows: [
+            { label: 'Total cash out', value: formatCompactCurrency(totalCashOut) },
+            { label: 'Equity multiple', value: formatMultiple(currentRun?.equity_multiple) },
+            { label: 'IRR', value: formatPercent(currentRun?.irr) },
+          ],
+        },
+      ]}
+      note="IRR uses the yearly cash-flow timing, so the same equity multiple can produce a different IRR if the hold period changes."
+    />
+  );
+  const equityMultipleCalculationDetail = (
+    <MetricCalculationDetail
+      sections={[
+        { title: 'Operating distributions', rows: [...distributionRows, { label: 'Total distributions', value: formatCompactCurrency(totalDistributions) }] },
+        { title: 'Sale proceeds', rows: returnsSaleRows },
+        {
+          title: 'Multiple',
+          rows: [
+            { label: 'Total cash out', value: formatCompactCurrency(totalCashOut) },
+            { label: 'Equity invested', value: formatCompactCurrency(equityInvested) },
+            { label: 'Total / equity', value: formatMultiple(currentRun?.equity_multiple) },
+          ],
+        },
+      ]}
+    />
+  );
+  const cashOnCashCalculationDetail = (
+    <MetricCalculationDetail
+      sections={[
+        {
+          title: 'Year 1 yield',
+          rows: [
+            { label: 'Year-1 NOI', value: formatCompactCurrency(currentRun?.noi_year_one) },
+            {
+              label: 'Debt service',
+              value: currentRun?.noi_year_one != null && currentRun?.dscr_year_one
+                ? `-${formatCompactCurrency(currentRun.noi_year_one / currentRun.dscr_year_one)}`
+                : null,
+            },
+            {
+              label: 'Cash flow after debt service',
+              value: currentRun?.cash_on_cash != null && equityInvested
+                ? formatCompactCurrency(currentRun.cash_on_cash * equityInvested)
+                : formatCompactCurrency(projections[0]?.cash_flow),
+            },
+            { label: 'Equity invested', value: formatCompactCurrency(equityInvested) },
+            { label: 'CoC', value: formatPercent(currentRun?.cash_on_cash) },
+          ],
+        },
+      ]}
+      note="Cash-on-cash is an income yield only. It excludes appreciation, sale proceeds, and principal paydown."
+    />
+  );
+  const dscrCalculationDetail = (
+    <MetricCalculationDetail
+      sections={[
+        {
+          title: 'Year 1 coverage',
+          rows: [
+            { label: 'Year-1 NOI', value: formatCompactCurrency(currentRun?.noi_year_one) },
+            {
+              label: 'Annual debt service',
+              value: currentRun?.noi_year_one != null && currentRun?.dscr_year_one
+                ? formatCompactCurrency(currentRun.noi_year_one / currentRun.dscr_year_one)
+                : formatCompactCurrency(projections[0]?.debt_service),
+            },
+            {
+              label: 'Cash cushion',
+              value: currentRun?.noi_year_one != null && currentRun?.dscr_year_one
+                ? formatCompactCurrency(currentRun.noi_year_one - (currentRun.noi_year_one / currentRun.dscr_year_one))
+                : null,
+            },
+            { label: 'DSCR', value: formatMultiple(currentRun?.dscr_year_one) },
+            { label: 'Floor', value: formatMultiple(dscrFloor) },
+          ],
+        },
+      ]}
+    />
+  );
+
   const metrics = [
     {
       label: 'IRR',
       value: formatPercent(currentRun?.irr),
       tone: failedSet.has('irr') ? 'danger' : verdictStatus === 'worth_pursuing' ? 'success' : 'default',
       detail: failedSet.has('irr') ? 'Below target threshold' : 'Projected internal rate of return',
+      calculationDetail: irrCalculationDetail,
       formula: buildTooltip('irr',
         (cv) => {
           if (cv.entry_equity == null || cv.total_distributions == null || cv.exit_proceeds == null) return null;
@@ -535,7 +697,7 @@ export default function UnderwritingResult() {
             `Distributions:      ${formatCompactCurrency(cv.total_distributions)}${cv.hold_years ? ` (${cv.hold_years} yrs)` : ''}`,
           ];
           if (cv.loan_balance_at_exit != null) {
-            lines.push(`Gross sale:         ${formatCompactCurrency(cv.exit_proceeds + cv.loan_balance_at_exit)}`);
+            lines.push(`Net sale:           ${formatCompactCurrency(cv.exit_proceeds + cv.loan_balance_at_exit)}`);
             lines.push(`  Loan payoff:     −${formatCompactCurrency(cv.loan_balance_at_exit)}`);
             lines.push(`  Equity from sale: ${formatCompactCurrency(cv.exit_proceeds)}`);
           } else {
@@ -561,6 +723,7 @@ export default function UnderwritingResult() {
       value: formatPercent(currentRun?.cash_on_cash),
       tone: failedSet.has('cash_on_cash') ? 'warning' : 'default',
       detail: 'Year-one cash yield',
+      calculationDetail: cashOnCashCalculationDetail,
       formula: buildTooltip('cash_on_cash',
         (cv) => {
           if (cv.year1_cash_flow == null || cv.total_equity == null) return null;
@@ -593,6 +756,7 @@ export default function UnderwritingResult() {
       value: formatMultiple(currentRun?.equity_multiple),
       tone: failedSet.has('equity_multiple') ? 'warning' : 'default',
       detail: 'Total return multiple',
+      calculationDetail: equityMultipleCalculationDetail,
       formula: buildTooltip('equity_multiple',
         (cv) => {
           const equityFromSale = cv.equity_from_sale ?? cv.net_sale_price;
@@ -600,7 +764,7 @@ export default function UnderwritingResult() {
           const total = cv.total_cash_flows + equityFromSale;
           const lines = [`Distributions: ${formatCompactCurrency(cv.total_cash_flows)}${cv.hold_years ? ` (${cv.hold_years} yrs)` : ''}`];
           if (cv.net_sale_price != null && cv.loan_balance_at_exit != null) {
-            lines.push(`Gross sale:     ${formatCompactCurrency(cv.net_sale_price)}`);
+            lines.push(`Net sale:       ${formatCompactCurrency(cv.net_sale_price)}`);
             lines.push(`  Loan payoff: −${formatCompactCurrency(cv.loan_balance_at_exit)}`);
             lines.push(`  Equity:       ${formatCompactCurrency(equityFromSale)}`);
           } else {
@@ -623,6 +787,7 @@ export default function UnderwritingResult() {
       value: formatMultiple(currentRun?.dscr_year_one),
       tone: currentRun?.dscr_year_one != null && currentRun.dscr_year_one < dscrFloor ? 'warning' : 'default',
       detail: currentRun?.dscr_year_one != null && currentRun.dscr_year_one < dscrFloor ? `Below ${dscrFloor.toFixed(2)}× minimum` : 'Debt coverage cushion',
+      calculationDetail: dscrCalculationDetail,
       formula: buildTooltip('dscr_year_one',
         (cv) => {
           if (cv.year1_noi == null || cv.annual_debt_service == null) return null;
@@ -873,7 +1038,7 @@ export default function UnderwritingResult() {
                             <Button
                               variant="ghost"
                               size="icon"
-                              className="h-9 w-9 rounded-full text-destructive hover:bg-destructive/10 hover:text-destructive"
+                              className="underwriting-topbar-delete h-9 w-9 rounded-full text-destructive hover:bg-destructive/10 hover:text-destructive"
                               disabled={isDeleting}
                               title="Delete this analysis"
                             >
@@ -895,10 +1060,27 @@ export default function UnderwritingResult() {
                             </AlertDialogFooter>
                           </AlertDialogContent>
                         </AlertDialog>
-                        <Button variant="outline" size="sm" disabled title="Underwriting export is not available yet.">
-                          <Download className="mr-1.5 h-4 w-4" />
-                          Export
-                        </Button>
+                        <div className="underwriting-memo-actions" aria-label="Credit memo actions">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => { setMemoPrefill(null); setMemoModalOpen(true); }}
+                            disabled={!verdict}
+                            className="underwriting-memo-primary"
+                          >
+                            <Sparkles className="h-4 w-4" />
+                            Generate IC memo
+                          </Button>
+                          <MemoHistorySheet
+                            runId={runId}
+                            getToken={getToken}
+                            refreshKey={memoRefreshKey}
+                            dealName={currentRun.name}
+                            open={memoHistoryOpen}
+                            onOpenChange={setMemoHistoryOpen}
+                            onRegenerate={handleRegenerate}
+                          />
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -1086,7 +1268,7 @@ export default function UnderwritingResult() {
                         Scenario What-If
                       </Button>
                     </div>
-                    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                    <div className="grid items-start gap-3 md:grid-cols-2 xl:grid-cols-4">
                       {metrics.map((metric) => (
                         <UnderwritingMetricCard key={metric.label} {...metric} />
                       ))}
@@ -1105,6 +1287,13 @@ export default function UnderwritingResult() {
                       runSensitivityAnalysis={runSensitivityAnalysis}
                       purchasePriceCitation={sourceCitations.purchase_price}
                       onOpenSource={handleOpenSource}
+                    />
+                  </div>
+                  <div className="mt-5">
+                    <MaxLoanPanel
+                      runId={runId}
+                      getToken={getToken}
+                      persistedInputs={persistedInputs}
                     />
                   </div>
 
@@ -1278,6 +1467,12 @@ export default function UnderwritingResult() {
                       expenseBasisFormula={expenseBasisFormula}
                       sourceCitations={sourceCitations}
                       stressTests={stressTests}
+                      stressBaseAssumptions={{
+                        vacancy_credit_loss_pct: persistedInputs.operational?.vacancy_credit_loss_pct,
+                        rent_growth_pct: persistedInputs.operational?.rent_growth_pct,
+                        exit_cap_rate: persistedInputs.exit?.exit_cap_rate,
+                        interest_rate_pct: persistedInputs.financing?.interest_rate_pct,
+                      }}
                       rolloverRisk={rolloverRisk}
                       missingExpenseFields={artifact.t12_data?.summary?.missing_expense_fields || []}
                       onOpenSource={handleOpenSource}
@@ -1331,6 +1526,29 @@ export default function UnderwritingResult() {
           </ResizablePanel>
         ) : null}
       </ResizablePanelGroup>
+      <CreditMemoModal
+        open={memoModalOpen}
+        onClose={() => setMemoModalOpen(false)}
+        runId={runId}
+        getToken={getToken}
+        persistedInputs={persistedInputs}
+        artifact={artifact}
+        currentRun={currentRun}
+        sourceCitations={sourceCitations}
+        unitMixSummary={unitMixSummary}
+        stressTests={stressTests}
+        prioritizedWarnings={prioritizedWarnings}
+        currentUser={currentUser}
+        prefill={memoPrefill}
+        onSubmitted={handleMemoSubmitted}
+      />
+      <CreditMemoProgress
+        open={Boolean(memoProgress)}
+        onClose={() => setMemoProgress(null)}
+        jobId={memoProgress?.jobId}
+        memoId={memoProgress?.memoId}
+        getToken={getToken}
+      />
     </AppLayout>
   );
 }

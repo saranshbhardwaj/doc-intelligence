@@ -107,6 +107,7 @@ export default function OperationsSection({
   expenseBasisFormula,
   sourceCitations,
   stressTests,
+  stressBaseAssumptions,
   rolloverRisk,
   missingExpenseFields,
   onOpenSource,
@@ -492,7 +493,7 @@ export default function OperationsSection({
               <div className="underwriting-panel p-4 sm:p-5">
                 <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">Operating sensitivity</p>
                 <div className="mt-4">
-                  <StressTestTable stressTests={stressTests} />
+                  <StressTestTable stressTests={stressTests} baseAssumptions={stressBaseAssumptions} />
                 </div>
               </div>
             )}
