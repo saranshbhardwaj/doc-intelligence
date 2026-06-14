@@ -1,0 +1,518 @@
+{
+  "evalId": "eval-kZ6-2026-05-28T04:58:37",
+  "results": {
+    "version": 3,
+    "timestamp": "2026-05-28T04:58:37.439Z",
+    "prompts": [
+      {
+        "id": "9aade6f7f6008ee0be3cc067aee1ce8842abaeb0e7a64dfc00d203dd9251b3e8",
+        "raw": "{{user_message}}",
+        "label": "{{user_message}}",
+        "provider": "haiku-rag-comparison",
+        "metrics": {
+          "score": 0.9772871737385134,
+          "testPassCount": 1,
+          "testFailCount": 0,
+          "testErrorCount": 0,
+          "assertPassCount": 9,
+          "assertFailCount": 0,
+          "totalLatencyMs": 1667,
+          "tokenUsage": {
+            "prompt": 0,
+            "completion": 0,
+            "cached": 3856,
+            "total": 3856,
+            "numRequests": 1,
+            "completionDetails": {
+              "reasoning": 0,
+              "acceptedPrediction": 0,
+              "rejectedPrediction": 0,
+              "cacheReadInputTokens": 0,
+              "cacheCreationInputTokens": 0
+            },
+            "assertions": {
+              "total": 24225,
+              "prompt": 0,
+              "completion": 0,
+              "cached": 24225,
+              "numRequests": 0,
+              "completionDetails": {
+                "reasoning": 0,
+                "acceptedPrediction": 0,
+                "rejectedPrediction": 0,
+                "cacheReadInputTokens": 0,
+                "cacheCreationInputTokens": 0
+              }
+            }
+          },
+          "namedScores": {
+            "comparison/multi_doc_reference": 1,
+            "comparison/structured_output": 1,
+            "golden/comparison_quality": 0.95,
+            "comparison/faithfulness": 0.9803921568627451,
+            "comparison/answer_relevance": 0.8651924067838749
+          },
+          "namedScoresCount": {
+            "comparison/multi_doc_reference": 1,
+            "comparison/structured_output": 1,
+            "golden/comparison_quality": 1,
+            "comparison/faithfulness": 1,
+            "comparison/answer_relevance": 1
+          },
+          "namedScoreWeights": {
+            "comparison/multi_doc_reference": 1,
+            "comparison/structured_output": 1,
+            "golden/comparison_quality": 1,
+            "comparison/faithfulness": 1,
+            "comparison/answer_relevance": 1
+          },
+          "cost": 0.0083222
+        }
+      }
+    ],
+    "results": [
+      {
+        "cost": 0.0083222,
+        "gradingResult": {
+          "pass": true,
+          "score": 0.9772871737385134,
+          "reason": "All assertions passed",
+          "namedScores": {
+            "comparison/multi_doc_reference": 1,
+            "comparison/structured_output": 1,
+            "golden/comparison_quality": 0.95,
+            "comparison/faithfulness": 0.9803921568627451,
+            "comparison/answer_relevance": 0.8651924067838749
+          },
+          "namedScoreWeights": {
+            "comparison/multi_doc_reference": 1,
+            "comparison/structured_output": 1,
+            "golden/comparison_quality": 1,
+            "comparison/faithfulness": 1,
+            "comparison/answer_relevance": 1
+          },
+          "tokensUsed": {
+            "total": 24225,
+            "prompt": 0,
+            "completion": 0,
+            "cached": 24225,
+            "numRequests": 0
+          },
+          "componentResults": [
+            {
+              "pass": true,
+              "score": 1,
+              "reason": "Assertion passed",
+              "assertion": {
+                "type": "cost",
+                "threshold": 0.1
+              }
+            },
+            {
+              "pass": true,
+              "score": 1,
+              "reason": "Assertion passed",
+              "assertion": {
+                "type": "latency",
+                "threshold": 60000
+              }
+            },
+            {
+              "pass": true,
+              "score": 1,
+              "reason": "Assertion passed",
+              "assertion": {
+                "type": "javascript",
+                "value": "JSON.parse(output).text.length > 100"
+              }
+            },
+            {
+              "pass": true,
+              "score": 1,
+              "reason": "Assertion passed",
+              "assertion": {
+                "type": "javascript",
+                "value": "JSON.parse(output).text.length < 30000"
+              }
+            },
+            {
+              "pass": true,
+              "score": 1,
+              "reason": "Assertion passed",
+              "assertion": {
+                "type": "javascript",
+                "value": "(() => { const t = JSON.parse(output).text; const nums = new Set((t.match(/\\[S(\\d+):p\\d+\\]/g) || []).map(m => m.match(/S(\\d+)/)[1])); return nums.size >= 2; })()",
+                "metric": "comparison/multi_doc_reference"
+              }
+            },
+            {
+              "pass": true,
+              "score": 1,
+              "reason": "Assertion passed",
+              "assertion": {
+                "type": "javascript",
+                "value": "(() => { const t = JSON.parse(output).text; return /\\||\\n-|\\n\\*|#{2,}/.test(t); })()",
+                "metric": "comparison/structured_output"
+              }
+            },
+            {
+              "assertion": {
+                "type": "context-faithfulness",
+                "threshold": 0.6,
+                "contextTransform": "JSON.parse(output).context",
+                "metric": "comparison/faithfulness"
+              },
+              "pass": true,
+              "score": 0.9803921568627451,
+              "reason": "Faithfulness 0.98 is >= 0.6",
+              "tokensUsed": {
+                "total": 11991,
+                "prompt": 0,
+                "completion": 0,
+                "cached": 11991,
+                "numRequests": 0,
+                "completionDetails": {
+                  "reasoning": 0,
+                  "acceptedPrediction": 0,
+                  "rejectedPrediction": 0
+                }
+              },
+              "metadata": {
+                "context": "### Document A: Lane Prairie OM - 2026.pdf\n- Lane Prairie Storage physical occupancy rate is 92% [S4:p6]\n- Lane Prairie Storage has 204 total units [S4:p6]\n- Lane Prairie Storage drive-up units have 88% occupancy (170 occupied of 193 total) [S1:p16]\n- Lane Prairie Storage covered units have 86% occupancy (6 occupied of 7 total) [S1:p16]\n- Lane Prairie Storage uncovered units have 100% occupancy (4 occupied of 4 total) [S1:p16]\n- Lane Prairie Storage Year One Cap Rate is 7.33% [S4:p6]\n- Lane Prairie Storage Pro Forma Cap Rate is 9.69% [S4:p6]\n- Lane Prairie Storage current NOI is $127,384 [S4:p6]\n- Lane Prairie Storage Year One NOI is $109,970 [S4:p6]\n- Lane Prairie Storage Pro Forma NOI is $145,371 [S4:p6]\n- Lane Prairie Storage Pro Forma Cash-on-Cash return is 12.22% [S4:p6]\n- Lane Prairie Storage listing price is $1,500,000 [S4:p6]\n- Lane Prairie Storage has 28,030 rentable square feet [S4:p6]\n- Lane Prairie Storage was built in 1996 [S4:p6]\n- Lane Prairie Storage lot size is approximately 4.29 acres (one parcel) [S4:p6]\n- Lane Prairie Storage price per rentable square foot is $53.51 [S4:p6]\n- Lane Prairie Storage rent per rentable square foot is $0.44 [S4:p6]\n- Lane Prairie Storage has 10 buildings [S6:p11]\n- Lane Prairie Storage is owner-operated with no management software [S6:p11]\n- Lane Prairie Storage has 11 parking spaces [S6:p11]\n- Lane Prairie Storage is 0.24 miles from TX-174 highway access [S6:p11]\n- Lane Prairie Storage has fee simple ownership [S6:p11]\n- Lane Prairie Storage is located approximately 3 miles from Amazon center [S11:p23]\n- Lane Prairie Storage is 2 miles away from Chisholm Trail Parkway [S11:p23]\n- Lane Prairie Storage is located outside Joshua city limits and its Extra-Territorial Jurisdiction (ETJ) [S11:p23]\n- Amazon center capital investment in area is $200 million with estimated 800 to 1,000 jobs upon completion [S11:p23]\n- Covington Acres - 252 multifamily units to begin leasing in late 2026, 3.90 miles from Lane Prairie Storage [S10:p8]\n- Sunset Ridge - 140 build-to-rent single-family homes approved, 3.91 miles from Lane Prairie Storage [S10:p8]\n- Fox Meadows - 42 single-family homes on approximately 30 acres approved for phase III, 4.60 miles from Lane Prairie Storage [S10:p8]\n- The Canyons - 130 single-family homes on 36 acres upon completion, 4.07 miles from Lane Prairie Storage [S10:p8]\n- Mountain Valley - 238 single-family homes upon completion, 4.25 miles from Lane Prairie Storage [S10:p8]\n- Emerson - 1,000 multifamily units on approximately 72 acres approved, 4.38 miles from Lane Prairie Storage [S10:p8]\n- Silo Mills - 840-acre master-planned community still actively being built, 4.50 miles from Lane Prairie Storage [S10:p8]\n- Rustic Elm - 37 single-family lots and 6 duplex lots approved, 4.64 miles from Lane Prairie Storage [S10:p8]\n- Elias Addition - 11 single-family lots approved on 6 acres, 4.75 miles from Lane Prairie Storage [S10:p8]\n- Bates Ridge - 375 single-family homes approved on approximately 85 acres, 5.18 miles from Lane Prairie Storage [S10:p8]\n- Lane Prairie Storage current Cap Rate is 8.49% [S4:p6]\n- Lane Prairie Storage current Cash-on-Cash return is 8.80% [S4:p6]\n- Lane Prairie Storage Year One Cash-on-Cash return is 5.48% [S4:p6]\n- Lane Prairie Storage pro forma upside shows NOI growth from $127,384 (current) to $145,371 (pro forma), representing 14.1% growth potential [S4:p6]\n- Lane Prairie Storage pro forma cap rate improvement from 8.49% (current) to 9.69% (pro forma) represents 120 basis points of upside [S4:p6]\n- Lane Prairie Storage pro forma cash-on-cash return of 12.22% represents 341 basis points improvement from current 8.80% [S4:p6]\n- 2025 Johnson County appraised value for Lane Prairie Storage is $747,190 [S20:p18]\n- 2025 tax bill for Lane Prairie Storage is $13,109 [S20:p18]\n- Lane Prairie Storage tax rate is 1.75% [S20:p18]\n\n### Document B: Tulsa Storage OM.pdf\n- Tulsa Storage total occupancy rate is 91% (178 occupied units out of 205 total units) [S24:p15]\n- Tulsa Storage has 205 total units across 10 buildings [S26:p10]\n- Tulsa Storage non-climate controlled units have 120 occupied units out of 129 total units (93% occupancy for this category) [S22:p15]\n- Tulsa Storage uncovered parking has 63 occupied units out of 68 total units (93% occupancy for this category) [S21:p15]\n- Tulsa Storage residential lease units have 2 occupied units out of 2 total units (100% occupancy for this category) [S24:p15]\n- Tulsa Storage Year 1 Net Operating Income is $177,453 [S27:p17]\n- Tulsa Storage Year 1 Gross Potential Rent represents a 6% increase in Year 2 pro forma compared to Year 1 [S27:p17]\n- Tulsa Storage weighted average rent per square foot across all units is $0.98 [S24:p15]\n- Tulsa Storage property was built in 2001 [S26:p10]\n- Tulsa Storage has 21,017 rentable square feet [S26:p10]\n- Tulsa Storage non-climate controlled 10x10 units have 57 occupied units out of 64 total units (89% occupancy for this unit type) [S22:p15]\n- Lane Prairie property information is not provided in this document [S25:p1]\n- Tulsa Storage Year 1 Effective Gross Income is $243,752 based on trailing 6-month income annualized [S27:p17]\n- Tulsa Storage Year 1 Total Operating Expenses are $66,299 (27.20% of EGI) [S27:p17]\n- Tulsa Storage Year 1 Net Cash Flow After Debt Service is $45,812 [S27:p17]"
+              }
+            },
+            {
+              "assertion": {
+                "type": "answer-relevance",
+                "threshold": 0.65,
+                "metric": "comparison/answer_relevance"
+              },
+              "pass": true,
+              "score": 0.8651924067838749,
+              "reason": "Relevance 0.87 is greater than threshold 0.65",
+              "tokensUsed": {
+                "total": 8762,
+                "prompt": 0,
+                "completion": 0,
+                "cached": 8762,
+                "numRequests": 0,
+                "completionDetails": {
+                  "reasoning": 0,
+                  "acceptedPrediction": 0,
+                  "rejectedPrediction": 0
+                }
+              },
+              "metadata": {
+                "generatedQuestions": [
+                  {
+                    "question": "How do Lane Prairie Storage and Tulsa Storage compare in terms of occupancy, NOI, rent per square foot, cap rates, and disclosed upside potential, and which property appears stronger for immediate cash flow versus value-add investment?",
+                    "similarity": 0.8651924067838749
+                  },
+                  {
+                    "question": "How do Lane Prairie Storage and Tulsa Storage compare in terms of occupancy, NOI, rent per square foot, cap rates, and disclosed upside potential, and which property appears stronger for immediate cash flow versus value-add investment?",
+                    "similarity": 0.8651924067838749
+                  },
+                  {
+                    "question": "How do Lane Prairie Storage and Tulsa Storage compare in terms of occupancy, NOI, rent per square foot, cap rates, and disclosed upside potential, and which property appears stronger for immediate cash flow versus value-add investment?",
+                    "similarity": 0.8651924067838749
+                  }
+                ],
+                "averageSimilarity": 0.8651924067838749,
+                "threshold": 0.65
+              }
+            },
+            {
+              "assertion": {
+                "type": "llm-rubric",
+                "value": "The response provides a balanced comparison across all documents provided. It addresses the user's question, covers key similarities and differences, and does not hallucinate facts not present in the context.",
+                "metric": "golden/comparison_quality"
+              },
+              "pass": true,
+              "score": 0.95,
+              "reason": "The response provides a balanced side-by-side comparison of Lane Prairie Storage and Tulsa Storage using both documents. It covers key similarities and differences including occupancy, unit count, NOI, rents, rentable square feet, year built, and disclosed upside metrics. The calculations and claims are generally supported by the provided context, and the response appropriately notes where Tulsa pro forma metrics are not disclosed rather than inventing them. Minor wording such as referring to Tulsa's Year 1 NOI as 'current-year' is slightly imprecise, but it does not materially hallucinate facts.",
+              "tokensUsed": {
+                "total": 3472,
+                "prompt": 0,
+                "completion": 0,
+                "cached": 3472,
+                "numRequests": 0,
+                "completionDetails": {
+                  "reasoning": 0,
+                  "acceptedPrediction": 0,
+                  "rejectedPrediction": 0
+                }
+              },
+              "metadata": {
+                "http": {
+                  "status": 200,
+                  "statusText": "OK",
+                  "headers": {
+                    "access-control-expose-headers": "X-Request-ID, CF-Ray, CF-Ray",
+                    "alt-svc": "h3=\":443\"; ma=86400",
+                    "cf-cache-status": "[REDACTED]",
+                    "cf-ray": "[REDACTED]",
+                    "connection": "keep-alive",
+                    "content-type": "application/json",
+                    "date": "Thu, 28 May 2026 04:56:37 GMT",
+                    "openai-organization": "[REDACTED]",
+                    "openai-processing-ms": "11335",
+                    "openai-project": "[REDACTED]",
+                    "openai-version": "[REDACTED]",
+                    "server": "cloudflare",
+                    "set-cookie": "[REDACTED]",
+                    "strict-transport-security": "max-age=31536000; includeSubDomains; preload",
+                    "transfer-encoding": "chunked",
+                    "x-content-type-options": "nosniff",
+                    "x-openai-proxy-wasm": "[REDACTED]",
+                    "x-ratelimit-limit-requests": "[REDACTED]",
+                    "x-ratelimit-limit-tokens": "[REDACTED]",
+                    "x-ratelimit-remaining-requests": "[REDACTED]",
+                    "x-ratelimit-remaining-tokens": "[REDACTED]",
+                    "x-ratelimit-reset-requests": "[REDACTED]",
+                    "x-ratelimit-reset-tokens": "[REDACTED]",
+                    "x-request-id": "[REDACTED]"
+                  }
+                },
+                "renderedGradingPrompt": "[{\"role\":\"system\",\"content\":\"You are grading output according to a user-specified rubric. If the statement in the rubric is true, then the output passes the test. You respond with a JSON object with this structure: {reason: string, pass: boolean, score: number}\\n\\nExamples:\\n\\n<Output>Hello world</Output>\\n<Rubric>Content contains a greeting</Rubric>\\n{\\\"reason\\\": \\\"the content contains the word 'Hello'\\\", \\\"pass\\\": true, \\\"score\\\": 1.0}\\n\\n<Output>Avast ye swabs, repel the invaders!</Output>\\n<Rubric>Does not speak like a pirate</Rubric>\\n{\\\"reason\\\": \\\"'avast ye' is a common pirate term\\\", \\\"pass\\\": false, \\\"score\\\": 0.0}\"},{\"role\":\"user\",\"content\":\"<Output>\\n{\\\"text\\\":\\\"| Metric | Lane Prairie Storage | Tulsa Storage | Difference |\\\\n|--------|---------------------|-----------------|------------|\\\\n| **Overall Occupancy Rate** | 92% [S4:p6] | 91% [S24:p15] | +1% |\\\\n| **Total Units** | 204 [S4:p6] | 205 [S26:p10] | −1 |\\\\n| **Current NOI** | $127,384 [S4:p6] | **Not disclosed** | Limited comparison |\\\\n| **Year 1 NOI** | $109,970 [S4:p6] | $177,453 [S27:p17] | Tulsa +$67,483 |\\\\n| **Current Cap Rate** | 8.49% [S4:p6] | **Not disclosed** | Limited comparison |\\\\n| **Year 1 Cap Rate** | 7.33% [S4:p6] | **Not disclosed** | Limited comparison |\\\\n| **Pro Forma Cap Rate** | 9.69% [S4:p6] | **Not disclosed** | Limited comparison |\\\\n| **Pro Forma NOI Growth** | $127,384 → $145,371 (+14.1%) [S4:p6] | **Not disclosed** | Limited comparison |\\\\n| **Pro Forma Cap Rate Upside** | 120 basis points (8.49% → 9.69%) [S4:p6] | **Not disclosed** | Limited comparison |\\\\n| **Rent per Sq Ft** | $0.44 [S4:p6] | $0.98 [S24:p15] | Tulsa +$0.54 (+123%) |\\\\n| **Rentable Square Feet** | 28,030 [S4:p6] | 21,017 [S26:p10] | Lane Prairie +7,013 |\\\\n| **Year Built** | 1996 [S4:p6] | 2001 [S26:p10] | Tulsa 5 years newer |\\\\n\\\\n---\\\\n\\\\n## Analysis\\\\n\\\\n**Occupancy & Current Performance:**\\\\nLane Prairie Storage holds a marginal occupancy advantage at 92% versus Tulsa Storage's 91% [S4:p6, S24:p15]—a difference of only 1 percentage point across nearly identical unit counts (204 vs. 205 units). However, the income picture diverges sharply. Tulsa Storage's Year 1 NOI of $177,453 substantially exceeds Lane Prairie's Year 1 NOI of $109,970 [S27:p17, S4:p6]—a $67,483 gap (+61%). This disparity is primarily driven by Tulsa's weighted average rent of $0.98 per square foot versus Lane Prairie's $0.44 per square foot [S24:p15, S4:p6], representing a 123% rent premium. Despite Lane Prairie's larger footprint (28,030 vs. 21,017 rentable square feet), Tulsa's superior unit economics generate significantly higher absolute NOI.\\\\n\\\\n**Upside Potential:**\\\\nLane Prairie Storage presents explicit pro forma upside metrics: NOI growth of 14.1% (from $127,384 current to $145,371 pro forma) and a 120 basis point cap rate expansion (8.49% current to 9.69% pro forma) [S4:p6]. The pro forma cash-on-cash return reaches 12.22%, representing 341 basis points of improvement from the current 8.80% [S4:p6]. In contrast, Tulsa Storage discloses only that Year 1 Gross Potential Rent represents a 6% increase in Year 2 pro forma [S27:p17]—a more limited forward-looking metric. **Tulsa Storage does not disclose pro forma cap rates, pro forma NOI, or pro forma cash-on-cash returns**, making a direct upside comparison impossible. Lane Prairie's disclosed upside pathway is substantially more transparent and quantifiable.\\\\n\\\\n**Investment Implication:**\\\\nLane Prairie offers documented upside potential with clear pro forma targets, while Tulsa Storage generates superior current-year income but provides limited visibility into future value creation. The choice depends on investment thesis: Tulsa favors immediate cash flow generation, while Lane Prairie targets value-add execution with defined growth metrics. However, the comparison is constrained by Tulsa's incomplete pro forma disclosure.\\\\n\\\\n---\\\\n\\\\n## Conclusion\\\\n\\\\n**Lane Prairie and Tulsa Storage have nearly identical occupancy rates (92% vs. 91%)**, but Tulsa Storage currently generates 61% higher Year 1 NOI due to substantially higher rents ($0.98 vs. $0.44 per sq ft). **On upside potential, Lane Prairie is the clear winner on disclosed metrics**: it shows 14.1% NOI growth and 120 basis points of cap rate expansion in pro forma, while Tulsa Storage discloses only a 6% Year 2 rent increase and no pro forma cap rate or NOI targets. **For investors prioritizing documented upside with execution clarity, Lane Prairie is the stronger choice; for those seeking immediate cash flow, Tulsa Storage's current Year 1 NOI of $177,453 is materially superior.** A complete Tulsa Storage pro forma analysis would be required to make a fully informed upside comparison.\\\",\\\"context\\\":\\\"### Document A: Lane Prairie OM - 2026.pdf\\\\n- Lane Prairie Storage physical occupancy rate is 92% [S4:p6]\\\\n- Lane Prairie Storage has 204 total units [S4:p6]\\\\n- Lane Prairie Storage drive-up units have 88% occupancy (170 occupied of 193 total) [S1:p16]\\\\n- Lane Prairie Storage covered units have 86% occupancy (6 occupied of 7 total) [S1:p16]\\\\n- Lane Prairie Storage uncovered units have 100% occupancy (4 occupied of 4 total) [S1:p16]\\\\n- Lane Prairie Storage Year One Cap Rate is 7.33% [S4:p6]\\\\n- Lane Prairie Storage Pro Forma Cap Rate is 9.69% [S4:p6]\\\\n- Lane Prairie Storage current NOI is $127,384 [S4:p6]\\\\n- Lane Prairie Storage Year One NOI is $109,970 [S4:p6]\\\\n- Lane Prairie Storage Pro Forma NOI is $145,371 [S4:p6]\\\\n- Lane Prairie Storage Pro Forma Cash-on-Cash return is 12.22% [S4:p6]\\\\n- Lane Prairie Storage listing price is $1,500,000 [S4:p6]\\\\n- Lane Prairie Storage has 28,030 rentable square feet [S4:p6]\\\\n- Lane Prairie Storage was built in 1996 [S4:p6]\\\\n- Lane Prairie Storage lot size is approximately 4.29 acres (one parcel) [S4:p6]\\\\n- Lane Prairie Storage price per rentable square foot is $53.51 [S4:p6]\\\\n- Lane Prairie Storage rent per rentable square foot is $0.44 [S4:p6]\\\\n- Lane Prairie Storage has 10 buildings [S6:p11]\\\\n- Lane Prairie Storage is owner-operated with no management software [S6:p11]\\\\n- Lane Prairie Storage has 11 parking spaces [S6:p11]\\\\n- Lane Prairie Storage is 0.24 miles from TX-174 highway access [S6:p11]\\\\n- Lane Prairie Storage has fee simple ownership [S6:p11]\\\\n- Lane Prairie Storage is located approximately 3 miles from Amazon center [S11:p23]\\\\n- Lane Prairie Storage is 2 miles away from Chisholm Trail Parkway [S11:p23]\\\\n- Lane Prairie Storage is located outside Joshua city limits and its Extra-Territorial Jurisdiction (ETJ) [S11:p23]\\\\n- Amazon center capital investment in area is $200 million with estimated 800 to 1,000 jobs upon completion [S11:p23]\\\\n- Covington Acres - 252 multifamily units to begin leasing in late 2026, 3.90 miles from Lane Prairie Storage [S10:p8]\\\\n- Sunset Ridge - 140 build-to-rent single-family homes approved, 3.91 miles from Lane Prairie Storage [S10:p8]\\\\n- Fox Meadows - 42 single-family homes on approximately 30 acres approved for phase III, 4.60 miles from Lane Prairie Storage [S10:p8]\\\\n- The Canyons - 130 single-family homes on 36 acres upon completion, 4.07 miles from Lane Prairie Storage [S10:p8]\\\\n- Mountain Valley - 238 single-family homes upon completion, 4.25 miles from Lane Prairie Storage [S10:p8]\\\\n- Emerson - 1,000 multifamily units on approximately 72 acres approved, 4.38 miles from Lane Prairie Storage [S10:p8]\\\\n- Silo Mills - 840-acre master-planned community still actively being built, 4.50 miles from Lane Prairie Storage [S10:p8]\\\\n- Rustic Elm - 37 single-family lots and 6 duplex lots approved, 4.64 miles from Lane Prairie Storage [S10:p8]\\\\n- Elias Addition - 11 single-family lots approved on 6 acres, 4.75 miles from Lane Prairie Storage [S10:p8]\\\\n- Bates Ridge - 375 single-family homes approved on approximately 85 acres, 5.18 miles from Lane Prairie Storage [S10:p8]\\\\n- Lane Prairie Storage current Cap Rate is 8.49% [S4:p6]\\\\n- Lane Prairie Storage current Cash-on-Cash return is 8.80% [S4:p6]\\\\n- Lane Prairie Storage Year One Cash-on-Cash return is 5.48% [S4:p6]\\\\n- Lane Prairie Storage pro forma upside shows NOI growth from $127,384 (current) to $145,371 (pro forma), representing 14.1% growth potential [S4:p6]\\\\n- Lane Prairie Storage pro forma cap rate improvement from 8.49% (current) to 9.69% (pro forma) represents 120 basis points of upside [S4:p6]\\\\n- Lane Prairie Storage pro forma cash-on-cash return of 12.22% represents 341 basis points improvement from current 8.80% [S4:p6]\\\\n- 2025 Johnson County appraised value for Lane Prairie Storage is $747,190 [S20:p18]\\\\n- 2025 tax bill for Lane Prairie Storage is $13,109 [S20:p18]\\\\n- Lane Prairie Storage tax rate is 1.75% [S20:p18]\\\\n\\\\n### Document B: Tulsa Storage OM.pdf\\\\n- Tulsa Storage total occupancy rate is 91% (178 occupied units out of 205 total units) [S24:p15]\\\\n- Tulsa Storage has 205 total units across 10 buildings [S26:p10]\\\\n- Tulsa Storage non-climate controlled units have 120 occupied units out of 129 total units (93% occupancy for this category) [S22:p15]\\\\n- Tulsa Storage uncovered parking has 63 occupied units out of 68 total units (93% occupancy for this category) [S21:p15]\\\\n- Tulsa Storage residential lease units have 2 occupied units out of 2 total units (100% occupancy for this category) [S24:p15]\\\\n- Tulsa Storage Year 1 Net Operating Income is $177,453 [S27:p17]\\\\n- Tulsa Storage Year 1 Gross Potential Rent represents a 6% increase in Year 2 pro forma compared to Year 1 [S27:p17]\\\\n- Tulsa Storage weighted average rent per square foot across all units is $0.98 [S24:p15]\\\\n- Tulsa Storage property was built in 2001 [S26:p10]\\\\n- Tulsa Storage has 21,017 rentable square feet [S26:p10]\\\\n- Tulsa Storage non-climate controlled 10x10 units have 57 occupied units out of 64 total units (89% occupancy for this unit type) [S22:p15]\\\\n- Lane Prairie property information is not provided in this document [S25:p1]\\\\n- Tulsa Storage Year 1 Effective Gross Income is $243,752 based on trailing 6-month income annualized [S27:p17]\\\\n- Tulsa Storage Year 1 Total Operating Expenses are $66,299 (27.20% of EGI) [S27:p17]\\\\n- Tulsa Storage Year 1 Net Cash Flow After Debt Service is $45,812 [S27:p17]\\\"}\\n</Output>\\n<Rubric>\\nThe response provides a balanced comparison across all documents provided. It addresses the user's question, covers key similarities and differences, and does not hallucinate facts not present in the context.\\n</Rubric>\"}]"
+              }
+            }
+          ]
+        },
+        "id": "8511b962-4807-45fc-ad1b-74e7cb6da514",
+        "latencyMs": 1667,
+        "namedScores": {
+          "comparison/multi_doc_reference": 1,
+          "comparison/structured_output": 1,
+          "golden/comparison_quality": 0.95,
+          "comparison/faithfulness": 0.9803921568627451,
+          "comparison/answer_relevance": 0.8651924067838749
+        },
+        "prompt": {
+          "raw": "What are the occupancy rates at Lane Prairie vs Tulsa Storage? Which has more upside?",
+          "label": "{{user_message}}",
+          "config": {
+            "transform": "output.replace(/^```(?:json)?\\s*/,'').replace(/\\s*```$/,'')"
+          }
+        },
+        "promptId": "9aade6f7f6008ee0be3cc067aee1ce8842abaeb0e7a64dfc00d203dd9251b3e8",
+        "promptIdx": 0,
+        "provider": {
+          "id": "file://providers/rag_comparison.py",
+          "label": "haiku-rag-comparison"
+        },
+        "response": {
+          "output": "{\"text\": \"| Metric | Lane Prairie Storage | Tulsa Storage | Difference |\\n|--------|---------------------|-----------------|------------|\\n| **Overall Occupancy Rate** | 92% [S4:p6] | 91% [S24:p15] | +1% |\\n| **Total Units** | 204 [S4:p6] | 205 [S26:p10] | \\u22121 |\\n| **Current NOI** | $127,384 [S4:p6] | **Not disclosed** | Limited comparison |\\n| **Year 1 NOI** | $109,970 [S4:p6] | $177,453 [S27:p17] | Tulsa +$67,483 |\\n| **Current Cap Rate** | 8.49% [S4:p6] | **Not disclosed** | Limited comparison |\\n| **Year 1 Cap Rate** | 7.33% [S4:p6] | **Not disclosed** | Limited comparison |\\n| **Pro Forma Cap Rate** | 9.69% [S4:p6] | **Not disclosed** | Limited comparison |\\n| **Pro Forma NOI Growth** | $127,384 \\u2192 $145,371 (+14.1%) [S4:p6] | **Not disclosed** | Limited comparison |\\n| **Pro Forma Cap Rate Upside** | 120 basis points (8.49% \\u2192 9.69%) [S4:p6] | **Not disclosed** | Limited comparison |\\n| **Rent per Sq Ft** | $0.44 [S4:p6] | $0.98 [S24:p15] | Tulsa +$0.54 (+123%) |\\n| **Rentable Square Feet** | 28,030 [S4:p6] | 21,017 [S26:p10] | Lane Prairie +7,013 |\\n| **Year Built** | 1996 [S4:p6] | 2001 [S26:p10] | Tulsa 5 years newer |\\n\\n---\\n\\n## Analysis\\n\\n**Occupancy & Current Performance:**\\nLane Prairie Storage holds a marginal occupancy advantage at 92% versus Tulsa Storage's 91% [S4:p6, S24:p15]\\u2014a difference of only 1 percentage point across nearly identical unit counts (204 vs. 205 units). However, the income picture diverges sharply. Tulsa Storage's Year 1 NOI of $177,453 substantially exceeds Lane Prairie's Year 1 NOI of $109,970 [S27:p17, S4:p6]\\u2014a $67,483 gap (+61%). This disparity is primarily driven by Tulsa's weighted average rent of $0.98 per square foot versus Lane Prairie's $0.44 per square foot [S24:p15, S4:p6], representing a 123% rent premium. Despite Lane Prairie's larger footprint (28,030 vs. 21,017 rentable square feet), Tulsa's superior unit economics generate significantly higher absolute NOI.\\n\\n**Upside Potential:**\\nLane Prairie Storage presents explicit pro forma upside metrics: NOI growth of 14.1% (from $127,384 current to $145,371 pro forma) and a 120 basis point cap rate expansion (8.49% current to 9.69% pro forma) [S4:p6]. The pro forma cash-on-cash return reaches 12.22%, representing 341 basis points of improvement from the current 8.80% [S4:p6]. In contrast, Tulsa Storage discloses only that Year 1 Gross Potential Rent represents a 6% increase in Year 2 pro forma [S27:p17]\\u2014a more limited forward-looking metric. **Tulsa Storage does not disclose pro forma cap rates, pro forma NOI, or pro forma cash-on-cash returns**, making a direct upside comparison impossible. Lane Prairie's disclosed upside pathway is substantially more transparent and quantifiable.\\n\\n**Investment Implication:**\\nLane Prairie offers documented upside potential with clear pro forma targets, while Tulsa Storage generates superior current-year income but provides limited visibility into future value creation. The choice depends on investment thesis: Tulsa favors immediate cash flow generation, while Lane Prairie targets value-add execution with defined growth metrics. However, the comparison is constrained by Tulsa's incomplete pro forma disclosure.\\n\\n---\\n\\n## Conclusion\\n\\n**Lane Prairie and Tulsa Storage have nearly identical occupancy rates (92% vs. 91%)**, but Tulsa Storage currently generates 61% higher Year 1 NOI due to substantially higher rents ($0.98 vs. $0.44 per sq ft). **On upside potential, Lane Prairie is the clear winner on disclosed metrics**: it shows 14.1% NOI growth and 120 basis points of cap rate expansion in pro forma, while Tulsa Storage discloses only a 6% Year 2 rent increase and no pro forma cap rate or NOI targets. **For investors prioritizing documented upside with execution clarity, Lane Prairie is the stronger choice; for those seeking immediate cash flow, Tulsa Storage's current Year 1 NOI of $177,453 is materially superior.** A complete Tulsa Storage pro forma analysis would be required to make a fully informed upside comparison.\", \"context\": \"### Document A: Lane Prairie OM - 2026.pdf\\n- Lane Prairie Storage physical occupancy rate is 92% [S4:p6]\\n- Lane Prairie Storage has 204 total units [S4:p6]\\n- Lane Prairie Storage drive-up units have 88% occupancy (170 occupied of 193 total) [S1:p16]\\n- Lane Prairie Storage covered units have 86% occupancy (6 occupied of 7 total) [S1:p16]\\n- Lane Prairie Storage uncovered units have 100% occupancy (4 occupied of 4 total) [S1:p16]\\n- Lane Prairie Storage Year One Cap Rate is 7.33% [S4:p6]\\n- Lane Prairie Storage Pro Forma Cap Rate is 9.69% [S4:p6]\\n- Lane Prairie Storage current NOI is $127,384 [S4:p6]\\n- Lane Prairie Storage Year One NOI is $109,970 [S4:p6]\\n- Lane Prairie Storage Pro Forma NOI is $145,371 [S4:p6]\\n- Lane Prairie Storage Pro Forma Cash-on-Cash return is 12.22% [S4:p6]\\n- Lane Prairie Storage listing price is $1,500,000 [S4:p6]\\n- Lane Prairie Storage has 28,030 rentable square feet [S4:p6]\\n- Lane Prairie Storage was built in 1996 [S4:p6]\\n- Lane Prairie Storage lot size is approximately 4.29 acres (one parcel) [S4:p6]\\n- Lane Prairie Storage price per rentable square foot is $53.51 [S4:p6]\\n- Lane Prairie Storage rent per rentable square foot is $0.44 [S4:p6]\\n- Lane Prairie Storage has 10 buildings [S6:p11]\\n- Lane Prairie Storage is owner-operated with no management software [S6:p11]\\n- Lane Prairie Storage has 11 parking spaces [S6:p11]\\n- Lane Prairie Storage is 0.24 miles from TX-174 highway access [S6:p11]\\n- Lane Prairie Storage has fee simple ownership [S6:p11]\\n- Lane Prairie Storage is located approximately 3 miles from Amazon center [S11:p23]\\n- Lane Prairie Storage is 2 miles away from Chisholm Trail Parkway [S11:p23]\\n- Lane Prairie Storage is located outside Joshua city limits and its Extra-Territorial Jurisdiction (ETJ) [S11:p23]\\n- Amazon center capital investment in area is $200 million with estimated 800 to 1,000 jobs upon completion [S11:p23]\\n- Covington Acres - 252 multifamily units to begin leasing in late 2026, 3.90 miles from Lane Prairie Storage [S10:p8]\\n- Sunset Ridge - 140 build-to-rent single-family homes approved, 3.91 miles from Lane Prairie Storage [S10:p8]\\n- Fox Meadows - 42 single-family homes on approximately 30 acres approved for phase III, 4.60 miles from Lane Prairie Storage [S10:p8]\\n- The Canyons - 130 single-family homes on 36 acres upon completion, 4.07 miles from Lane Prairie Storage [S10:p8]\\n- Mountain Valley - 238 single-family homes upon completion, 4.25 miles from Lane Prairie Storage [S10:p8]\\n- Emerson - 1,000 multifamily units on approximately 72 acres approved, 4.38 miles from Lane Prairie Storage [S10:p8]\\n- Silo Mills - 840-acre master-planned community still actively being built, 4.50 miles from Lane Prairie Storage [S10:p8]\\n- Rustic Elm - 37 single-family lots and 6 duplex lots approved, 4.64 miles from Lane Prairie Storage [S10:p8]\\n- Elias Addition - 11 single-family lots approved on 6 acres, 4.75 miles from Lane Prairie Storage [S10:p8]\\n- Bates Ridge - 375 single-family homes approved on approximately 85 acres, 5.18 miles from Lane Prairie Storage [S10:p8]\\n- Lane Prairie Storage current Cap Rate is 8.49% [S4:p6]\\n- Lane Prairie Storage current Cash-on-Cash return is 8.80% [S4:p6]\\n- Lane Prairie Storage Year One Cash-on-Cash return is 5.48% [S4:p6]\\n- Lane Prairie Storage pro forma upside shows NOI growth from $127,384 (current) to $145,371 (pro forma), representing 14.1% growth potential [S4:p6]\\n- Lane Prairie Storage pro forma cap rate improvement from 8.49% (current) to 9.69% (pro forma) represents 120 basis points of upside [S4:p6]\\n- Lane Prairie Storage pro forma cash-on-cash return of 12.22% represents 341 basis points improvement from current 8.80% [S4:p6]\\n- 2025 Johnson County appraised value for Lane Prairie Storage is $747,190 [S20:p18]\\n- 2025 tax bill for Lane Prairie Storage is $13,109 [S20:p18]\\n- Lane Prairie Storage tax rate is 1.75% [S20:p18]\\n\\n### Document B: Tulsa Storage OM.pdf\\n- Tulsa Storage total occupancy rate is 91% (178 occupied units out of 205 total units) [S24:p15]\\n- Tulsa Storage has 205 total units across 10 buildings [S26:p10]\\n- Tulsa Storage non-climate controlled units have 120 occupied units out of 129 total units (93% occupancy for this category) [S22:p15]\\n- Tulsa Storage uncovered parking has 63 occupied units out of 68 total units (93% occupancy for this category) [S21:p15]\\n- Tulsa Storage residential lease units have 2 occupied units out of 2 total units (100% occupancy for this category) [S24:p15]\\n- Tulsa Storage Year 1 Net Operating Income is $177,453 [S27:p17]\\n- Tulsa Storage Year 1 Gross Potential Rent represents a 6% increase in Year 2 pro forma compared to Year 1 [S27:p17]\\n- Tulsa Storage weighted average rent per square foot across all units is $0.98 [S24:p15]\\n- Tulsa Storage property was built in 2001 [S26:p10]\\n- Tulsa Storage has 21,017 rentable square feet [S26:p10]\\n- Tulsa Storage non-climate controlled 10x10 units have 57 occupied units out of 64 total units (89% occupancy for this unit type) [S22:p15]\\n- Lane Prairie property information is not provided in this document [S25:p1]\\n- Tulsa Storage Year 1 Effective Gross Income is $243,752 based on trailing 6-month income annualized [S27:p17]\\n- Tulsa Storage Year 1 Total Operating Expenses are $66,299 (27.20% of EGI) [S27:p17]\\n- Tulsa Storage Year 1 Net Cash Flow After Debt Service is $45,812 [S27:p17]\"}",
+          "tokenUsage": {
+            "cached": 3856,
+            "total": 3856,
+            "numRequests": 1
+          },
+          "cost": 0.0083222,
+          "cached": true
+        },
+        "score": 0.9772871737385134,
+        "success": true,
+        "testCase": {
+          "providers": [
+            "haiku-rag-comparison"
+          ],
+          "vars": {
+            "system_prompt": "You are a financial analyst AI assistant comparing multiple documents.\n\nTASK: Answer the user's question by comparing the documents side-by-side.\n\nOUTPUT STRUCTURE:\n1. A markdown comparison table with key metrics (aim for 4-8 rows; more if the question demands it)\n2. 2-3 paragraphs analyzing the most material differences and their implications\n3. A concise conclusion or investment recommendation where appropriate\n\nTABLE FORMAT (2 documents):\n| Metric | Document A | Document B | Difference |\n|--------|------------|------------|------------|\n| Cap Rate | 8.11% [S3:p6] | 6.50% [S11:p4] | +1.61% |\n\nTABLE FORMAT (3+ documents):\n| Metric | Document A | Document B | Document C |\n|--------|------------|------------|------------|\n| Cap Rate | 8.11% [S3:p6] | 6.50% [S11:p4] | 7.20% [S19:p9] |\n\nCITATION RULES:\n- Every number in the table must have a citation [Sn:pN] using the EXACT source numbers from the extracted facts above — do NOT renumber them sequentially (1, 2, 3...). Different documents will have different, non-consecutive Sn values.\n- If a metric is not found in a document, write **Not disclosed** in that cell — never leave it blank and never invent a value.\n- Do not use [Sn:pN] citations for general financial context.\n\nCONTENT RULES:\n- Only use property-specific data (prices, rents, NOI, cap rates, occupancy) from the provided content.\n- You MAY add brief general financial context (definitions, typical market ranges) as a clearly labeled note after the table:\n  > **General context:** <your note here>\n- Lead with the most material differences — what matters most to an investor.\n- For 3+ documents, identify the outlier and explain why it stands out.\n- Do not repeat the user's question back to them.\n\n## Documents Being Compared\n- **Document A**: Lane Prairie OM - 2026.pdf\n- **Document B**: Tulsa Storage OM.pdf\n\n## Extracted Facts by Document\n\n### Document A: Lane Prairie OM - 2026.pdf\n- Lane Prairie Storage physical occupancy rate is 92% [S4:p6]\n- Lane Prairie Storage has 204 total units [S4:p6]\n- Lane Prairie Storage drive-up units have 88% occupancy (170 occupied of 193 total) [S1:p16]\n- Lane Prairie Storage covered units have 86% occupancy (6 occupied of 7 total) [S1:p16]\n- Lane Prairie Storage uncovered units have 100% occupancy (4 occupied of 4 total) [S1:p16]\n- Lane Prairie Storage Year One Cap Rate is 7.33% [S4:p6]\n- Lane Prairie Storage Pro Forma Cap Rate is 9.69% [S4:p6]\n- Lane Prairie Storage current NOI is $127,384 [S4:p6]\n- Lane Prairie Storage Year One NOI is $109,970 [S4:p6]\n- Lane Prairie Storage Pro Forma NOI is $145,371 [S4:p6]\n- Lane Prairie Storage Pro Forma Cash-on-Cash return is 12.22% [S4:p6]\n- Lane Prairie Storage listing price is $1,500,000 [S4:p6]\n- Lane Prairie Storage has 28,030 rentable square feet [S4:p6]\n- Lane Prairie Storage was built in 1996 [S4:p6]\n- Lane Prairie Storage lot size is approximately 4.29 acres (one parcel) [S4:p6]\n- Lane Prairie Storage price per rentable square foot is $53.51 [S4:p6]\n- Lane Prairie Storage rent per rentable square foot is $0.44 [S4:p6]\n- Lane Prairie Storage has 10 buildings [S6:p11]\n- Lane Prairie Storage is owner-operated with no management software [S6:p11]\n- Lane Prairie Storage has 11 parking spaces [S6:p11]\n- Lane Prairie Storage is 0.24 miles from TX-174 highway access [S6:p11]\n- Lane Prairie Storage has fee simple ownership [S6:p11]\n- Lane Prairie Storage is located approximately 3 miles from Amazon center [S11:p23]\n- Lane Prairie Storage is 2 miles away from Chisholm Trail Parkway [S11:p23]\n- Lane Prairie Storage is located outside Joshua city limits and its Extra-Territorial Jurisdiction (ETJ) [S11:p23]\n- Amazon center capital investment in area is $200 million with estimated 800 to 1,000 jobs upon completion [S11:p23]\n- Covington Acres - 252 multifamily units to begin leasing in late 2026, 3.90 miles from Lane Prairie Storage [S10:p8]\n- Sunset Ridge - 140 build-to-rent single-family homes approved, 3.91 miles from Lane Prairie Storage [S10:p8]\n- Fox Meadows - 42 single-family homes on approximately 30 acres approved for phase III, 4.60 miles from Lane Prairie Storage [S10:p8]\n- The Canyons - 130 single-family homes on 36 acres upon completion, 4.07 miles from Lane Prairie Storage [S10:p8]\n- Mountain Valley - 238 single-family homes upon completion, 4.25 miles from Lane Prairie Storage [S10:p8]\n- Emerson - 1,000 multifamily units on approximately 72 acres approved, 4.38 miles from Lane Prairie Storage [S10:p8]\n- Silo Mills - 840-acre master-planned community still actively being built, 4.50 miles from Lane Prairie Storage [S10:p8]\n- Rustic Elm - 37 single-family lots and 6 duplex lots approved, 4.64 miles from Lane Prairie Storage [S10:p8]\n- Elias Addition - 11 single-family lots approved on 6 acres, 4.75 miles from Lane Prairie Storage [S10:p8]\n- Bates Ridge - 375 single-family homes approved on approximately 85 acres, 5.18 miles from Lane Prairie Storage [S10:p8]\n- Lane Prairie Storage current Cap Rate is 8.49% [S4:p6]\n- Lane Prairie Storage current Cash-on-Cash return is 8.80% [S4:p6]\n- Lane Prairie Storage Year One Cash-on-Cash return is 5.48% [S4:p6]\n- Lane Prairie Storage pro forma upside shows NOI growth from $127,384 (current) to $145,371 (pro forma), representing 14.1% growth potential [S4:p6]\n- Lane Prairie Storage pro forma cap rate improvement from 8.49% (current) to 9.69% (pro forma) represents 120 basis points of upside [S4:p6]\n- Lane Prairie Storage pro forma cash-on-cash return of 12.22% represents 341 basis points improvement from current 8.80% [S4:p6]\n- 2025 Johnson County appraised value for Lane Prairie Storage is $747,190 [S20:p18]\n- 2025 tax bill for Lane Prairie Storage is $13,109 [S20:p18]\n- Lane Prairie Storage tax rate is 1.75% [S20:p18]\n\n### Document B: Tulsa Storage OM.pdf\n- Tulsa Storage total occupancy rate is 91% (178 occupied units out of 205 total units) [S24:p15]\n- Tulsa Storage has 205 total units across 10 buildings [S26:p10]\n- Tulsa Storage non-climate controlled units have 120 occupied units out of 129 total units (93% occupancy for this category) [S22:p15]\n- Tulsa Storage uncovered parking has 63 occupied units out of 68 total units (93% occupancy for this category) [S21:p15]\n- Tulsa Storage residential lease units have 2 occupied units out of 2 total units (100% occupancy for this category) [S24:p15]\n- Tulsa Storage Year 1 Net Operating Income is $177,453 [S27:p17]\n- Tulsa Storage Year 1 Gross Potential Rent represents a 6% increase in Year 2 pro forma compared to Year 1 [S27:p17]\n- Tulsa Storage weighted average rent per square foot across all units is $0.98 [S24:p15]\n- Tulsa Storage property was built in 2001 [S26:p10]\n- Tulsa Storage has 21,017 rentable square feet [S26:p10]\n- Tulsa Storage non-climate controlled 10x10 units have 57 occupied units out of 64 total units (89% occupancy for this unit type) [S22:p15]\n- Lane Prairie property information is not provided in this document [S25:p1]\n- Tulsa Storage Year 1 Effective Gross Income is $243,752 based on trailing 6-month income annualized [S27:p17]\n- Tulsa Storage Year 1 Total Operating Expenses are $66,299 (27.20% of EGI) [S27:p17]\n- Tulsa Storage Year 1 Net Cash Flow After Debt Service is $45,812 [S27:p17]\n\n## Comparison Focus\nCompare the following aspects: occupancy rates, upside potential, growth opportunity\n\n================================================================================\nUSER QUESTION: What are the occupancy rates at Lane Prairie vs Tulsa Storage? Which has more upside?\n================================================================================\n\nGenerate your comparison with:\n1. A markdown comparison table with Difference column\n2. 2-3 paragraphs analyzing the key differences\n3. Clear recommendation or conclusion\n\nEvery claim must have a citation [Sn:pN] where n is the source number shown above.\n\nANSWER:\n",
+            "user_message": "What are the occupancy rates at Lane Prairie vs Tulsa Storage? Which has more upside?",
+            "query": "What are the occupancy rates at Lane Prairie vs Tulsa Storage? Which has more upside?",
+            "prompt_version": "v1",
+            "user_question": "What are the occupancy rates at Lane Prairie vs Tulsa Storage? Which has more upside?",
+            "context": "### Document A: Lane Prairie OM - 2026.pdf\n- Lane Prairie Storage physical occupancy rate is 92% [S4:p6]\n- Lane Prairie Storage has 204 total units [S4:p6]\n- Lane Prairie Storage drive-up units have 88% occupancy (170 occupied of 193 total) [S1:p16]\n- Lane Prairie Storage covered units have 86% occupancy (6 occupied of 7 total) [S1:p16]\n- Lane Prairie Storage uncovered units have 100% occupancy (4 occupied of 4 total) [S1:p16]\n- Lane Prairie Storage Year One Cap Rate is 7.33% [S4:p6]\n- Lane Prairie Storage Pro Forma Cap Rate is 9.69% [S4:p6]\n- Lane Prairie Storage current NOI is $127,384 [S4:p6]\n- Lane Prairie Storage Year One NOI is $109,970 [S4:p6]\n- Lane Prairie Storage Pro Forma NOI is $145,371 [S4:p6]\n- Lane Prairie Storage Pro Forma Cash-on-Cash return is 12.22% [S4:p6]\n- Lane Prairie Storage listing price is $1,500,000 [S4:p6]\n- Lane Prairie Storage has 28,030 rentable square feet [S4:p6]\n- Lane Prairie Storage was built in 1996 [S4:p6]\n- Lane Prairie Storage lot size is approximately 4.29 acres (one parcel) [S4:p6]\n- Lane Prairie Storage price per rentable square foot is $53.51 [S4:p6]\n- Lane Prairie Storage rent per rentable square foot is $0.44 [S4:p6]\n- Lane Prairie Storage has 10 buildings [S6:p11]\n- Lane Prairie Storage is owner-operated with no management software [S6:p11]\n- Lane Prairie Storage has 11 parking spaces [S6:p11]\n- Lane Prairie Storage is 0.24 miles from TX-174 highway access [S6:p11]\n- Lane Prairie Storage has fee simple ownership [S6:p11]\n- Lane Prairie Storage is located approximately 3 miles from Amazon center [S11:p23]\n- Lane Prairie Storage is 2 miles away from Chisholm Trail Parkway [S11:p23]\n- Lane Prairie Storage is located outside Joshua city limits and its Extra-Territorial Jurisdiction (ETJ) [S11:p23]\n- Amazon center capital investment in area is $200 million with estimated 800 to 1,000 jobs upon completion [S11:p23]\n- Covington Acres - 252 multifamily units to begin leasing in late 2026, 3.90 miles from Lane Prairie Storage [S10:p8]\n- Sunset Ridge - 140 build-to-rent single-family homes approved, 3.91 miles from Lane Prairie Storage [S10:p8]\n- Fox Meadows - 42 single-family homes on approximately 30 acres approved for phase III, 4.60 miles from Lane Prairie Storage [S10:p8]\n- The Canyons - 130 single-family homes on 36 acres upon completion, 4.07 miles from Lane Prairie Storage [S10:p8]\n- Mountain Valley - 238 single-family homes upon completion, 4.25 miles from Lane Prairie Storage [S10:p8]\n- Emerson - 1,000 multifamily units on approximately 72 acres approved, 4.38 miles from Lane Prairie Storage [S10:p8]\n- Silo Mills - 840-acre master-planned community still actively being built, 4.50 miles from Lane Prairie Storage [S10:p8]\n- Rustic Elm - 37 single-family lots and 6 duplex lots approved, 4.64 miles from Lane Prairie Storage [S10:p8]\n- Elias Addition - 11 single-family lots approved on 6 acres, 4.75 miles from Lane Prairie Storage [S10:p8]\n- Bates Ridge - 375 single-family homes approved on approximately 85 acres, 5.18 miles from Lane Prairie Storage [S10:p8]\n- Lane Prairie Storage current Cap Rate is 8.49% [S4:p6]\n- Lane Prairie Storage current Cash-on-Cash return is 8.80% [S4:p6]\n- Lane Prairie Storage Year One Cash-on-Cash return is 5.48% [S4:p6]\n- Lane Prairie Storage pro forma upside shows NOI growth from $127,384 (current) to $145,371 (pro forma), representing 14.1% growth potential [S4:p6]\n- Lane Prairie Storage pro forma cap rate improvement from 8.49% (current) to 9.69% (pro forma) represents 120 basis points of upside [S4:p6]\n- Lane Prairie Storage pro forma cash-on-cash return of 12.22% represents 341 basis points improvement from current 8.80% [S4:p6]\n- 2025 Johnson County appraised value for Lane Prairie Storage is $747,190 [S20:p18]\n- 2025 tax bill for Lane Prairie Storage is $13,109 [S20:p18]\n- Lane Prairie Storage tax rate is 1.75% [S20:p18]\n\n### Document B: Tulsa Storage OM.pdf\n- Tulsa Storage total occupancy rate is 91% (178 occupied units out of 205 total units) [S24:p15]\n- Tulsa Storage has 205 total units across 10 buildings [S26:p10]\n- Tulsa Storage non-climate controlled units have 120 occupied units out of 129 total units (93% occupancy for this category) [S22:p15]\n- Tulsa Storage uncovered parking has 63 occupied units out of 68 total units (93% occupancy for this category) [S21:p15]\n- Tulsa Storage residential lease units have 2 occupied units out of 2 total units (100% occupancy for this category) [S24:p15]\n- Tulsa Storage Year 1 Net Operating Income is $177,453 [S27:p17]\n- Tulsa Storage Year 1 Gross Potential Rent represents a 6% increase in Year 2 pro forma compared to Year 1 [S27:p17]\n- Tulsa Storage weighted average rent per square foot across all units is $0.98 [S24:p15]\n- Tulsa Storage property was built in 2001 [S26:p10]\n- Tulsa Storage has 21,017 rentable square feet [S26:p10]\n- Tulsa Storage non-climate controlled 10x10 units have 57 occupied units out of 64 total units (89% occupancy for this unit type) [S22:p15]\n- Lane Prairie property information is not provided in this document [S25:p1]\n- Tulsa Storage Year 1 Effective Gross Income is $243,752 based on trailing 6-month income annualized [S27:p17]\n- Tulsa Storage Year 1 Total Operating Expenses are $66,299 (27.20% of EGI) [S27:p17]\n- Tulsa Storage Year 1 Net Cash Flow After Debt Service is $45,812 [S27:p17]"
+          },
+          "assert": [
+            {
+              "type": "cost",
+              "threshold": 0.1
+            },
+            {
+              "type": "latency",
+              "threshold": 60000
+            },
+            {
+              "type": "javascript",
+              "value": "JSON.parse(output).text.length > 100"
+            },
+            {
+              "type": "javascript",
+              "value": "JSON.parse(output).text.length < 30000"
+            },
+            {
+              "type": "javascript",
+              "value": "(() => { const t = JSON.parse(output).text; const nums = new Set((t.match(/\\[S(\\d+):p\\d+\\]/g) || []).map(m => m.match(/S(\\d+)/)[1])); return nums.size >= 2; })()",
+              "metric": "comparison/multi_doc_reference"
+            },
+            {
+              "type": "javascript",
+              "value": "(() => { const t = JSON.parse(output).text; return /\\||\\n-|\\n\\*|#{2,}/.test(t); })()",
+              "metric": "comparison/structured_output"
+            },
+            {
+              "type": "context-faithfulness",
+              "threshold": 0.6,
+              "contextTransform": "JSON.parse(output).context",
+              "metric": "comparison/faithfulness"
+            },
+            {
+              "type": "answer-relevance",
+              "threshold": 0.65,
+              "metric": "comparison/answer_relevance"
+            },
+            {
+              "type": "llm-rubric",
+              "value": "The response provides a balanced comparison across all documents provided. It addresses the user's question, covers key similarities and differences, and does not hallucinate facts not present in the context.",
+              "metric": "golden/comparison_quality"
+            }
+          ],
+          "_metadata": {
+            "io_log_id": "5f7071ca-8019-4c34-b829-f4cee1c0cb64",
+            "source_type": "rag_chat",
+            "source_id": "(fa6f1aa2-e0ac-4335-9a6c-63aa1769474c,559be587-76db-4ea0-8964-f44f9be5d8c5)",
+            "stage": "rag_comparison",
+            "raw_stage": "rag_chat_comparison",
+            "prompt_version": "v1",
+            "reference_output": "| Metric | Lane Prairie Storage | Tulsa Storage | Difference |\n|--------|---------------------|-----------------|------------|\n| **Overall Occupancy Rate** | 92% [S4:p6] | 91% [S24:p15] | +1% |\n| **Total Units** | 204 [S4:p6] | 205 [S26:p10] | −1 |\n| **Current Cap Rate** | 8.49% [S4:p6] | **Not disclosed** | — |\n| **Year 1 Cap Rate** | 7.33% [S4:p6] | **Not disclosed** | — |\n| **Pro Forma Cap Rate** | 9.69% [S4:p6] | **Not disclosed** | — |\n| **Current NOI** | $127,384 [S4:p6] | **Not disclosed** | — |\n| **Year 1 NOI** | $109,970 [S4:p6] | $177,453 [S27:p17] | −$67,483 |\n| **Pro Forma NOI** | $145,371 [S4:p6] | **Not disclosed** | — |\n| **Pro Forma Cap Rate Upside** | 120 basis points (8.49% → 9.69%) [S4:p6] | **Not disclosed** | — |\n| **Pro Forma Cash-on-Cash Return** | 12.22% [S4:p6] | **Not disclosed** | — |\n| **Rent per Rentable Sq Ft** | $0.44 [S4:p6] | $0.98 [S24:p15] | −$0.54 |\n| **Price per Rentable Sq Ft** | $53.51 [S4:p6] | **Not disclosed** | — |\n| **Year Built** | 1996 [S4:p6] | 2001 [S26:p10] | −5 years |\n\n---\n\n## Analysis\n\n**Occupancy & Current Performance:** Both properties operate at nearly identical occupancy rates—Lane Prairie at 92% [S4:p6] and Tulsa Storage at 91% [S24:p15]—indicating comparable market positioning and tenant demand. However, Tulsa Storage generates significantly higher Year 1 NOI of $177,453 [S27:p17] versus Lane Prairie's Year 1 NOI of $109,970 [S4:p6], a difference of $67,483. This gap is primarily driven by Tulsa Storage's substantially higher rent per square foot ($0.98 [S24:p15] vs. $0.44 [S4:p6])—more than double Lane Prairie's rate. Tulsa Storage's newer construction (2001 vs. 1996 [S26:p10] and [S4:p6]) and higher-yielding unit mix contribute to this performance advantage.\n\n**Upside Potential:** Lane Prairie presents a clearer upside narrative with quantified pro forma metrics. The property shows 120 basis points of cap rate expansion (8.49% current to 9.69% pro forma [S4:p6]), NOI growth of 14.1% ($127,384 to $145,371 [S4:p6]), and a pro forma cash-on-cash return of 12.22% [S4:p6]—representing 341 basis points of improvement from the current 8.80% [S4:p6]. This upside is anchored by strong area development, including a $200 million Amazon center investment 3 miles away with 800–1,000 projected jobs [S11:p23], plus over 3,000 residential units in approved developments within 5.18 miles [S10:p8]. Tulsa Storage's offering memorandum does not disclose pro forma cap rates, NOI projections, or cash-on-cash returns, making direct upside comparison impossible. The document only notes a 6% Year 2 gross potential rent increase [S27:p17], which is modest relative to Lane Prairie's articulated growth trajectory.\n\n---\n\n## Conclusion\n\n**Lane Prairie Storage emerges as the superior upside opportunity** despite Tulsa Storage's current operational strength. While Tulsa Storage generates higher immediate NOI and rent per square foot, Lane Prairie offers transparent, quantifiable upside of 120 basis points in cap rate expansion and 14.1% NOI growth, supported by documented macro catalysts (Amazon investment, 3,000+ residential units in pipeline). Tulsa Storage's lack of pro forma metrics and limited disclosed growth guidance makes it difficult to assess its true upside potential. For investors prioritizing growth and expansion opportunity, Lane Prairie's combination of reasonable current occupancy (92% [S4:p6]), clear value-add pathway, and strong demographic tailwinds presents a more compelling risk-adjusted return profile.",
+            "input_tokens": 2443,
+            "output_tokens": 1148,
+            "duration_ms": 9974,
+            "golden": true
+          },
+          "description": "Row #1",
+          "options": {
+            "transform": "output.replace(/^```(?:json)?\\s*/,'').replace(/\\s*```$/,'')"
+          },
+          "metadata": {}
+        },
+        "testIdx": 0,
+        "vars": {
+          "system_prompt": "You are a financial analyst AI assistant comparing multiple documents.\n\nTASK: Answer the user's question by comparing the documents side-by-side.\n\nOUTPUT STRUCTURE:\n1. A markdown comparison table with key metrics (aim for 4-8 rows; more if the question demands it)\n2. 2-3 paragraphs analyzing the most material differences and their implications\n3. A concise conclusion or investment recommendation where appropriate\n\nTABLE FORMAT (2 documents):\n| Metric | Document A | Document B | Difference |\n|--------|------------|------------|------------|\n| Cap Rate | 8.11% [S3:p6] | 6.50% [S11:p4] | +1.61% |\n\nTABLE FORMAT (3+ documents):\n| Metric | Document A | Document B | Document C |\n|--------|------------|------------|------------|\n| Cap Rate | 8.11% [S3:p6] | 6.50% [S11:p4] | 7.20% [S19:p9] |\n\nCITATION RULES:\n- Every number in the table must have a citation [Sn:pN] using the EXACT source numbers from the extracted facts above — do NOT renumber them sequentially (1, 2, 3...). Different documents will have different, non-consecutive Sn values.\n- If a metric is not found in a document, write **Not disclosed** in that cell — never leave it blank and never invent a value.\n- Do not use [Sn:pN] citations for general financial context.\n\nCONTENT RULES:\n- Only use property-specific data (prices, rents, NOI, cap rates, occupancy) from the provided content.\n- You MAY add brief general financial context (definitions, typical market ranges) as a clearly labeled note after the table:\n  > **General context:** <your note here>\n- Lead with the most material differences — what matters most to an investor.\n- For 3+ documents, identify the outlier and explain why it stands out.\n- Do not repeat the user's question back to them.\n\n## Documents Being Compared\n- **Document A**: Lane Prairie OM - 2026.pdf\n- **Document B**: Tulsa Storage OM.pdf\n\n## Extracted Facts by Document\n\n### Document A: Lane Prairie OM - 2026.pdf\n- Lane Prairie Storage physical occupancy rate is 92% [S4:p6]\n- Lane Prairie Storage has 204 total units [S4:p6]\n- Lane Prairie Storage drive-up units have 88% occupancy (170 occupied of 193 total) [S1:p16]\n- Lane Prairie Storage covered units have 86% occupancy (6 occupied of 7 total) [S1:p16]\n- Lane Prairie Storage uncovered units have 100% occupancy (4 occupied of 4 total) [S1:p16]\n- Lane Prairie Storage Year One Cap Rate is 7.33% [S4:p6]\n- Lane Prairie Storage Pro Forma Cap Rate is 9.69% [S4:p6]\n- Lane Prairie Storage current NOI is $127,384 [S4:p6]\n- Lane Prairie Storage Year One NOI is $109,970 [S4:p6]\n- Lane Prairie Storage Pro Forma NOI is $145,371 [S4:p6]\n- Lane Prairie Storage Pro Forma Cash-on-Cash return is 12.22% [S4:p6]\n- Lane Prairie Storage listing price is $1,500,000 [S4:p6]\n- Lane Prairie Storage has 28,030 rentable square feet [S4:p6]\n- Lane Prairie Storage was built in 1996 [S4:p6]\n- Lane Prairie Storage lot size is approximately 4.29 acres (one parcel) [S4:p6]\n- Lane Prairie Storage price per rentable square foot is $53.51 [S4:p6]\n- Lane Prairie Storage rent per rentable square foot is $0.44 [S4:p6]\n- Lane Prairie Storage has 10 buildings [S6:p11]\n- Lane Prairie Storage is owner-operated with no management software [S6:p11]\n- Lane Prairie Storage has 11 parking spaces [S6:p11]\n- Lane Prairie Storage is 0.24 miles from TX-174 highway access [S6:p11]\n- Lane Prairie Storage has fee simple ownership [S6:p11]\n- Lane Prairie Storage is located approximately 3 miles from Amazon center [S11:p23]\n- Lane Prairie Storage is 2 miles away from Chisholm Trail Parkway [S11:p23]\n- Lane Prairie Storage is located outside Joshua city limits and its Extra-Territorial Jurisdiction (ETJ) [S11:p23]\n- Amazon center capital investment in area is $200 million with estimated 800 to 1,000 jobs upon completion [S11:p23]\n- Covington Acres - 252 multifamily units to begin leasing in late 2026, 3.90 miles from Lane Prairie Storage [S10:p8]\n- Sunset Ridge - 140 build-to-rent single-family homes approved, 3.91 miles from Lane Prairie Storage [S10:p8]\n- Fox Meadows - 42 single-family homes on approximately 30 acres approved for phase III, 4.60 miles from Lane Prairie Storage [S10:p8]\n- The Canyons - 130 single-family homes on 36 acres upon completion, 4.07 miles from Lane Prairie Storage [S10:p8]\n- Mountain Valley - 238 single-family homes upon completion, 4.25 miles from Lane Prairie Storage [S10:p8]\n- Emerson - 1,000 multifamily units on approximately 72 acres approved, 4.38 miles from Lane Prairie Storage [S10:p8]\n- Silo Mills - 840-acre master-planned community still actively being built, 4.50 miles from Lane Prairie Storage [S10:p8]\n- Rustic Elm - 37 single-family lots and 6 duplex lots approved, 4.64 miles from Lane Prairie Storage [S10:p8]\n- Elias Addition - 11 single-family lots approved on 6 acres, 4.75 miles from Lane Prairie Storage [S10:p8]\n- Bates Ridge - 375 single-family homes approved on approximately 85 acres, 5.18 miles from Lane Prairie Storage [S10:p8]\n- Lane Prairie Storage current Cap Rate is 8.49% [S4:p6]\n- Lane Prairie Storage current Cash-on-Cash return is 8.80% [S4:p6]\n- Lane Prairie Storage Year One Cash-on-Cash return is 5.48% [S4:p6]\n- Lane Prairie Storage pro forma upside shows NOI growth from $127,384 (current) to $145,371 (pro forma), representing 14.1% growth potential [S4:p6]\n- Lane Prairie Storage pro forma cap rate improvement from 8.49% (current) to 9.69% (pro forma) represents 120 basis points of upside [S4:p6]\n- Lane Prairie Storage pro forma cash-on-cash return of 12.22% represents 341 basis points improvement from current 8.80% [S4:p6]\n- 2025 Johnson County appraised value for Lane Prairie Storage is $747,190 [S20:p18]\n- 2025 tax bill for Lane Prairie Storage is $13,109 [S20:p18]\n- Lane Prairie Storage tax rate is 1.75% [S20:p18]\n\n### Document B: Tulsa Storage OM.pdf\n- Tulsa Storage total occupancy rate is 91% (178 occupied units out of 205 total units) [S24:p15]\n- Tulsa Storage has 205 total units across 10 buildings [S26:p10]\n- Tulsa Storage non-climate controlled units have 120 occupied units out of 129 total units (93% occupancy for this category) [S22:p15]\n- Tulsa Storage uncovered parking has 63 occupied units out of 68 total units (93% occupancy for this category) [S21:p15]\n- Tulsa Storage residential lease units have 2 occupied units out of 2 total units (100% occupancy for this category) [S24:p15]\n- Tulsa Storage Year 1 Net Operating Income is $177,453 [S27:p17]\n- Tulsa Storage Year 1 Gross Potential Rent represents a 6% increase in Year 2 pro forma compared to Year 1 [S27:p17]\n- Tulsa Storage weighted average rent per square foot across all units is $0.98 [S24:p15]\n- Tulsa Storage property was built in 2001 [S26:p10]\n- Tulsa Storage has 21,017 rentable square feet [S26:p10]\n- Tulsa Storage non-climate controlled 10x10 units have 57 occupied units out of 64 total units (89% occupancy for this unit type) [S22:p15]\n- Lane Prairie property information is not provided in this document [S25:p1]\n- Tulsa Storage Year 1 Effective Gross Income is $243,752 based on trailing 6-month income annualized [S27:p17]\n- Tulsa Storage Year 1 Total Operating Expenses are $66,299 (27.20% of EGI) [S27:p17]\n- Tulsa Storage Year 1 Net Cash Flow After Debt Service is $45,812 [S27:p17]\n\n## Comparison Focus\nCompare the following aspects: occupancy rates, upside potential, growth opportunity\n\n================================================================================\nUSER QUESTION: What are the occupancy rates at Lane Prairie vs Tulsa Storage? Which has more upside?\n================================================================================\n\nGenerate your comparison with:\n1. A markdown comparison table with Difference column\n2. 2-3 paragraphs analyzing the key differences\n3. Clear recommendation or conclusion\n\nEvery claim must have a citation [Sn:pN] where n is the source number shown above.\n\nANSWER:\n",
+          "user_message": "What are the occupancy rates at Lane Prairie vs Tulsa Storage? Which has more upside?",
+          "query": "What are the occupancy rates at Lane Prairie vs Tulsa Storage? Which has more upside?",
+          "prompt_version": "v1",
+          "user_question": "What are the occupancy rates at Lane Prairie vs Tulsa Storage? Which has more upside?",
+          "context": "### Document A: Lane Prairie OM - 2026.pdf\n- Lane Prairie Storage physical occupancy rate is 92% [S4:p6]\n- Lane Prairie Storage has 204 total units [S4:p6]\n- Lane Prairie Storage drive-up units have 88% occupancy (170 occupied of 193 total) [S1:p16]\n- Lane Prairie Storage covered units have 86% occupancy (6 occupied of 7 total) [S1:p16]\n- Lane Prairie Storage uncovered units have 100% occupancy (4 occupied of 4 total) [S1:p16]\n- Lane Prairie Storage Year One Cap Rate is 7.33% [S4:p6]\n- Lane Prairie Storage Pro Forma Cap Rate is 9.69% [S4:p6]\n- Lane Prairie Storage current NOI is $127,384 [S4:p6]\n- Lane Prairie Storage Year One NOI is $109,970 [S4:p6]\n- Lane Prairie Storage Pro Forma NOI is $145,371 [S4:p6]\n- Lane Prairie Storage Pro Forma Cash-on-Cash return is 12.22% [S4:p6]\n- Lane Prairie Storage listing price is $1,500,000 [S4:p6]\n- Lane Prairie Storage has 28,030 rentable square feet [S4:p6]\n- Lane Prairie Storage was built in 1996 [S4:p6]\n- Lane Prairie Storage lot size is approximately 4.29 acres (one parcel) [S4:p6]\n- Lane Prairie Storage price per rentable square foot is $53.51 [S4:p6]\n- Lane Prairie Storage rent per rentable square foot is $0.44 [S4:p6]\n- Lane Prairie Storage has 10 buildings [S6:p11]\n- Lane Prairie Storage is owner-operated with no management software [S6:p11]\n- Lane Prairie Storage has 11 parking spaces [S6:p11]\n- Lane Prairie Storage is 0.24 miles from TX-174 highway access [S6:p11]\n- Lane Prairie Storage has fee simple ownership [S6:p11]\n- Lane Prairie Storage is located approximately 3 miles from Amazon center [S11:p23]\n- Lane Prairie Storage is 2 miles away from Chisholm Trail Parkway [S11:p23]\n- Lane Prairie Storage is located outside Joshua city limits and its Extra-Territorial Jurisdiction (ETJ) [S11:p23]\n- Amazon center capital investment in area is $200 million with estimated 800 to 1,000 jobs upon completion [S11:p23]\n- Covington Acres - 252 multifamily units to begin leasing in late 2026, 3.90 miles from Lane Prairie Storage [S10:p8]\n- Sunset Ridge - 140 build-to-rent single-family homes approved, 3.91 miles from Lane Prairie Storage [S10:p8]\n- Fox Meadows - 42 single-family homes on approximately 30 acres approved for phase III, 4.60 miles from Lane Prairie Storage [S10:p8]\n- The Canyons - 130 single-family homes on 36 acres upon completion, 4.07 miles from Lane Prairie Storage [S10:p8]\n- Mountain Valley - 238 single-family homes upon completion, 4.25 miles from Lane Prairie Storage [S10:p8]\n- Emerson - 1,000 multifamily units on approximately 72 acres approved, 4.38 miles from Lane Prairie Storage [S10:p8]\n- Silo Mills - 840-acre master-planned community still actively being built, 4.50 miles from Lane Prairie Storage [S10:p8]\n- Rustic Elm - 37 single-family lots and 6 duplex lots approved, 4.64 miles from Lane Prairie Storage [S10:p8]\n- Elias Addition - 11 single-family lots approved on 6 acres, 4.75 miles from Lane Prairie Storage [S10:p8]\n- Bates Ridge - 375 single-family homes approved on approximately 85 acres, 5.18 miles from Lane Prairie Storage [S10:p8]\n- Lane Prairie Storage current Cap Rate is 8.49% [S4:p6]\n- Lane Prairie Storage current Cash-on-Cash return is 8.80% [S4:p6]\n- Lane Prairie Storage Year One Cash-on-Cash return is 5.48% [S4:p6]\n- Lane Prairie Storage pro forma upside shows NOI growth from $127,384 (current) to $145,371 (pro forma), representing 14.1% growth potential [S4:p6]\n- Lane Prairie Storage pro forma cap rate improvement from 8.49% (current) to 9.69% (pro forma) represents 120 basis points of upside [S4:p6]\n- Lane Prairie Storage pro forma cash-on-cash return of 12.22% represents 341 basis points improvement from current 8.80% [S4:p6]\n- 2025 Johnson County appraised value for Lane Prairie Storage is $747,190 [S20:p18]\n- 2025 tax bill for Lane Prairie Storage is $13,109 [S20:p18]\n- Lane Prairie Storage tax rate is 1.75% [S20:p18]\n\n### Document B: Tulsa Storage OM.pdf\n- Tulsa Storage total occupancy rate is 91% (178 occupied units out of 205 total units) [S24:p15]\n- Tulsa Storage has 205 total units across 10 buildings [S26:p10]\n- Tulsa Storage non-climate controlled units have 120 occupied units out of 129 total units (93% occupancy for this category) [S22:p15]\n- Tulsa Storage uncovered parking has 63 occupied units out of 68 total units (93% occupancy for this category) [S21:p15]\n- Tulsa Storage residential lease units have 2 occupied units out of 2 total units (100% occupancy for this category) [S24:p15]\n- Tulsa Storage Year 1 Net Operating Income is $177,453 [S27:p17]\n- Tulsa Storage Year 1 Gross Potential Rent represents a 6% increase in Year 2 pro forma compared to Year 1 [S27:p17]\n- Tulsa Storage weighted average rent per square foot across all units is $0.98 [S24:p15]\n- Tulsa Storage property was built in 2001 [S26:p10]\n- Tulsa Storage has 21,017 rentable square feet [S26:p10]\n- Tulsa Storage non-climate controlled 10x10 units have 57 occupied units out of 64 total units (89% occupancy for this unit type) [S22:p15]\n- Lane Prairie property information is not provided in this document [S25:p1]\n- Tulsa Storage Year 1 Effective Gross Income is $243,752 based on trailing 6-month income annualized [S27:p17]\n- Tulsa Storage Year 1 Total Operating Expenses are $66,299 (27.20% of EGI) [S27:p17]\n- Tulsa Storage Year 1 Net Cash Flow After Debt Service is $45,812 [S27:p17]"
+        },
+        "metadata": {
+          "_promptfooFileMetadata": {}
+        },
+        "failureReason": 0
+      }
+    ],
+    "stats": {
+      "successes": 1,
+      "failures": 0,
+      "errors": 0,
+      "tokenUsage": {
+        "prompt": 0,
+        "completion": 0,
+        "cached": 3856,
+        "total": 3856,
+        "numRequests": 1,
+        "completionDetails": {
+          "reasoning": 0,
+          "acceptedPrediction": 0,
+          "rejectedPrediction": 0,
+          "cacheReadInputTokens": 0,
+          "cacheCreationInputTokens": 0
+        },
+        "assertions": {
+          "total": 24225,
+          "prompt": 0,
+          "completion": 0,
+          "cached": 24225,
+          "numRequests": 0,
+          "completionDetails": {
+            "reasoning": 0,
+            "acceptedPrediction": 0,
+            "rejectedPrediction": 0,
+            "cacheReadInputTokens": 0,
+            "cacheCreationInputTokens": 0
+          }
+        }
+      },
+      "durationMs": 1762,
+      "evaluationDurationMs": 1762
+    }
+  },
+  "config": {
+    "description": "Doc Intelligence — LLM Eval Suite",
+    "prompts": [
+      "{{user_message}}"
+    ],
+    "providers": [
+      {
+        "id": "file://providers/extract_schema_fields.py",
+        "label": "haiku-e2e-schema"
+      },
+      {
+        "id": "file://providers/extract_table_values.py",
+        "label": "haiku-e2e-tables"
+      },
+      {
+        "id": "file://providers/rag_chat.py",
+        "label": "haiku-rag"
+      },
+      {
+        "id": "file://providers/rag_retrieval.py",
+        "label": "haiku-retrieval"
+      },
+      {
+        "id": "file://providers/rag_comparison.py",
+        "label": "haiku-rag-comparison"
+      }
+    ],
+    "tests": "datasets/golden/rag-chat/rag_comparison.jsonl",
+    "defaultTest": {
+      "options": {
+        "transform": "output.replace(/^```(?:json)?\\s*/,'').replace(/\\s*```$/,'')"
+      },
+      "assert": [
+        {
+          "type": "cost",
+          "threshold": 0.1
+        },
+        {
+          "type": "latency",
+          "threshold": 60000
+        }
+      ]
+    },
+    "outputPath": [
+      "promptfoo-comparison-case1.json"
+    ],
+    "extensions": [],
+    "evaluateOptions": {
+      "rubricModel": "anthropic:claude-haiku-4-5-20251001"
+    }
+  },
+  "shareableUrl": null,
+  "metadata": {
+    "promptfooVersion": "0.121.12",
+    "nodeVersion": "v24.16.0",
+    "platform": "win32",
+    "arch": "x64",
+    "exportedAt": "2026-05-28T04:58:39.260Z",
+    "evaluationCreatedAt": "2026-05-28T04:58:37.439Z"
+  },
+  "vars": [
+    "system_prompt",
+    "user_message",
+    "query",
+    "prompt_version",
+    "user_question",
+    "context"
+  ],
+  "runtimeOptions": {
+    "maxConcurrency": 4,
+    "showProgressBar": false,
+    "eventSource": "cli",
+    "rubricModel": "anthropic:claude-haiku-4-5-20251001",
+    "repeat": 1,
+    "filterRange": "0:1",
+    "cache": true
+  }
+}

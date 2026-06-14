@@ -1,0 +1,209 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://doc-intelligence.local/evals/annotations/rag-benchmark.schema.json",
+  "title": "RAG Benchmark Annotation Schema",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "questions"],
+  "properties": {
+    "schema_version": {
+      "type": "string",
+      "enum": ["2026-05-27", "2026-05-29"]
+    },
+    "dataset_name": {
+      "type": "string"
+    },
+    "extends": {
+      "oneOf": [
+        {
+          "type": "string"
+        },
+        {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      ]
+    },
+    "questions": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/question"
+      }
+    }
+  },
+  "$defs": {
+    "question": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["question_id", "question", "evaluation_slice", "scope_type", "table_heavy", "gold_evidence"],
+      "properties": {
+        "question_id": {
+          "type": "string"
+        },
+        "question": {
+          "type": "string"
+        },
+        "evaluation_slice": {
+          "type": "string",
+          "enum": ["table_factual", "narrative", "entity_scoped", "ambiguous_multi_doc"]
+        },
+        "scope_type": {
+          "type": "string",
+          "enum": ["unscoped", "entity_scoped", "ambiguous_multi_doc"]
+        },
+        "table_heavy": {
+          "type": "boolean"
+        },
+        "target_entities": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "target_document_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "expected_answer_substrings": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "gold_evidence": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/goldEvidence"
+          }
+        },
+        "numeric_targets": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/numericTarget"
+          }
+        },
+        "notes": {
+          "type": "string"
+        }
+      }
+    },
+    "goldEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["document_id", "evidence_type", "relevance"],
+      "allOf": [
+        {
+          "anyOf": [
+            {
+              "required": ["page"]
+            },
+            {
+              "required": ["chunk_id"]
+            }
+          ]
+        }
+      ],
+      "properties": {
+        "document_id": {
+          "type": "string"
+        },
+        "page": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "chunk_id": {
+          "type": "string"
+        },
+        "sheet_name": {
+          "type": "string"
+        },
+        "row_start": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "row_end": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "evidence_type": {
+          "type": "string",
+          "enum": ["table", "key_value", "narrative", "image", "map", "other"]
+        },
+        "table_label": {
+          "type": "string"
+        },
+        "field_label": {
+          "type": "string"
+        },
+        "relevance": {
+          "type": "integer",
+          "enum": [1, 2, 3]
+        },
+        "supports": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["retrieval", "generation", "citation", "numeric_em"]
+          }
+        },
+        "normalized_value": {
+          "$ref": "#/$defs/numericTarget"
+        }
+      }
+    },
+    "numericTarget": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["field_name", "canonical_value", "unit"],
+      "properties": {
+        "field_name": {
+          "type": "string"
+        },
+        "canonical_value": {
+          "type": "number"
+        },
+        "unit": {
+          "type": "string",
+          "enum": [
+            "usd",
+            "usd_per_month",
+            "usd_per_sqft",
+            "percent",
+            "acres",
+            "square_feet",
+            "count",
+            "ratio",
+            "year",
+            "other"
+          ]
+        },
+        "comparison": {
+          "type": "string",
+          "enum": ["exact", "abs_tol", "rel_tol"],
+          "default": "exact"
+        },
+        "tolerance_abs": {
+          "type": "number",
+          "minimum": 0
+        },
+        "tolerance_rel": {
+          "type": "number",
+          "minimum": 0
+        },
+        "accepted_surface_forms": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "raw_value": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

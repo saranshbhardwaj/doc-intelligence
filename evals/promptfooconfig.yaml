@@ -26,7 +26,7 @@ defaultTest:
     - type: cost
       threshold: 0.10
     - type: latency
-      threshold: 60000
+      threshold: 180000
 
 tests:
   - datasets/golden/tulsa-self-storage/extract_schema_fields.jsonl

@@ -1,0 +1,1009 @@
+{
+  "schema_version": "2026-05-27",
+  "dataset_name": "rag-chat-interim-benchmark-draft",
+  "questions": [
+    {
+      "question_id": "tulsa-asking-price",
+      "question": "what is the asking price for Tulsa storage unit?",
+      "evaluation_slice": "table_factual",
+      "scope_type": "entity_scoped",
+      "table_heavy": false,
+      "target_entities": ["Tulsa Storage Units & Parking"],
+      "target_document_ids": ["8754d9a2-d9cb-4330-92f9-36130a0ee489"],
+      "expected_answer_substrings": ["$2,500,000", "2,500,000"],
+      "gold_evidence": [
+        {
+          "document_id": "8754d9a2-d9cb-4330-92f9-36130a0ee489",
+          "page": 7,
+          "evidence_type": "narrative",
+          "field_label": "asking_price",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation", "numeric_em"],
+          "normalized_value": {
+            "field_name": "asking_price",
+            "canonical_value": 2500000.0,
+            "unit": "usd",
+            "comparison": "exact",
+            "accepted_surface_forms": ["$2,500,000", "2,500,000", "2500000"],
+            "raw_value": "$2,500,000"
+          }
+        }
+      ],
+      "numeric_targets": [
+        {
+          "field_name": "asking_price",
+          "canonical_value": 2500000.0,
+          "unit": "usd",
+          "comparison": "exact",
+          "accepted_surface_forms": ["$2,500,000", "2,500,000", "2500000"],
+          "raw_value": "$2,500,000"
+        }
+      ],
+      "notes": "Frozen pilot question."
+    },
+    {
+      "question_id": "tulsa-lot-size-income",
+      "question": "what is the lot size and median income for Tulsa storage unit?",
+      "evaluation_slice": "table_factual",
+      "scope_type": "entity_scoped",
+      "table_heavy": true,
+      "target_entities": ["Tulsa Storage Units & Parking"],
+      "target_document_ids": ["8754d9a2-d9cb-4330-92f9-36130a0ee489"],
+      "expected_answer_substrings": ["2.70", "59,300"],
+      "gold_evidence": [
+        {
+          "document_id": "8754d9a2-d9cb-4330-92f9-36130a0ee489",
+          "page": 10,
+          "evidence_type": "table",
+          "table_label": "site_description",
+          "field_label": "lot_size",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation", "numeric_em"],
+          "normalized_value": {
+            "field_name": "lot_size",
+            "canonical_value": 2.7,
+            "unit": "acres",
+            "comparison": "exact",
+            "accepted_surface_forms": ["2.70 acres", "2.70", "2.7 acres"],
+            "raw_value": "Apx. 2.70 Acres (One Parcel)"
+          }
+        },
+        {
+          "document_id": "8754d9a2-d9cb-4330-92f9-36130a0ee489",
+          "page": 25,
+          "evidence_type": "narrative",
+          "field_label": "median_household_income",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation", "numeric_em"],
+          "normalized_value": {
+            "field_name": "median_household_income",
+            "canonical_value": 59300.0,
+            "unit": "usd",
+            "comparison": "exact",
+            "accepted_surface_forms": ["$59,300", "59,300", "59300"],
+            "raw_value": "$59,300"
+          }
+        }
+      ],
+      "numeric_targets": [
+        {
+          "field_name": "lot_size",
+          "canonical_value": 2.7,
+          "unit": "acres",
+          "comparison": "exact",
+          "accepted_surface_forms": ["2.70 acres", "2.70", "2.7 acres"],
+          "raw_value": "Apx. 2.70 Acres (One Parcel)"
+        },
+        {
+          "field_name": "median_household_income",
+          "canonical_value": 59300.0,
+          "unit": "usd",
+          "comparison": "exact",
+          "accepted_surface_forms": ["$59,300", "59,300", "59300"],
+          "raw_value": "$59,300"
+        }
+      ],
+      "notes": "Frozen pilot question."
+    },
+    {
+      "question_id": "pb-tax-2024",
+      "question": "What is the 2024 property tax for point blank porfolio?",
+      "evaluation_slice": "table_factual",
+      "scope_type": "entity_scoped",
+      "table_heavy": true,
+      "target_entities": ["Point Blank Portfolio"],
+      "target_document_ids": ["110bce13-325a-4b56-8b2c-6d0cec61a23c"],
+      "expected_answer_substrings": ["$15,275", "15,275"],
+      "gold_evidence": [
+        {
+          "document_id": "110bce13-325a-4b56-8b2c-6d0cec61a23c",
+          "page": 18,
+          "evidence_type": "table",
+          "table_label": "operating_expenses",
+          "field_label": "property_taxes_2024",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation", "numeric_em"],
+          "normalized_value": {
+            "field_name": "property_taxes_2024",
+            "canonical_value": 15275.0,
+            "unit": "usd",
+            "comparison": "exact",
+            "accepted_surface_forms": ["$15,275", "15,275", "15275"],
+            "raw_value": "$15,275"
+          }
+        }
+      ],
+      "numeric_targets": [
+        {
+          "field_name": "property_taxes_2024",
+          "canonical_value": 15275.0,
+          "unit": "usd",
+          "comparison": "exact",
+          "accepted_surface_forms": ["$15,275", "15,275", "15275"],
+          "raw_value": "$15,275"
+        }
+      ],
+      "notes": "Frozen pilot question."
+    },
+    {
+      "question_id": "lane-address",
+      "question": "What is the address of LANE PRAIRIE STORAGE?",
+      "evaluation_slice": "entity_scoped",
+      "scope_type": "entity_scoped",
+      "table_heavy": false,
+      "target_entities": ["Lane Prairie Storage"],
+      "target_document_ids": ["195649f9-83a3-4543-a16a-42f057be7de0"],
+      "expected_answer_substrings": ["303 County Road 704", "Joshua, TX 76058"],
+      "gold_evidence": [
+        {
+          "document_id": "195649f9-83a3-4543-a16a-42f057be7de0",
+          "page": 1,
+          "evidence_type": "narrative",
+          "field_label": "property_address",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation"]
+        }
+      ],
+      "numeric_targets": [],
+      "notes": "Frozen pilot question."
+    },
+    {
+      "question_id": "lane-cap-rate",
+      "question": "What is the cap rate for LANE PRAIRIE STORAGE?",
+      "evaluation_slice": "table_factual",
+      "scope_type": "entity_scoped",
+      "table_heavy": false,
+      "target_entities": ["Lane Prairie Storage"],
+      "target_document_ids": ["195649f9-83a3-4543-a16a-42f057be7de0"],
+      "expected_answer_substrings": ["8.49", "7.33"],
+      "gold_evidence": [
+        {
+          "document_id": "195649f9-83a3-4543-a16a-42f057be7de0",
+          "page": 7,
+          "evidence_type": "narrative",
+          "field_label": "current_cap_rate",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation", "numeric_em"],
+          "normalized_value": {
+            "field_name": "current_cap_rate",
+            "canonical_value": 8.49,
+            "unit": "percent",
+            "comparison": "exact",
+            "accepted_surface_forms": ["8.49%", "8.49", "8.490"],
+            "raw_value": "8.49%"
+          }
+        },
+        {
+          "document_id": "195649f9-83a3-4543-a16a-42f057be7de0",
+          "page": 7,
+          "evidence_type": "narrative",
+          "field_label": "year_1_cap_rate",
+          "relevance": 2,
+          "supports": ["retrieval", "generation", "citation", "numeric_em"],
+          "normalized_value": {
+            "field_name": "year_1_cap_rate",
+            "canonical_value": 7.33,
+            "unit": "percent",
+            "comparison": "exact",
+            "accepted_surface_forms": ["7.33%", "7.33", "7.330"],
+            "raw_value": "7.33%"
+          }
+        }
+      ],
+      "numeric_targets": [
+        {
+          "field_name": "current_cap_rate",
+          "canonical_value": 8.49,
+          "unit": "percent",
+          "comparison": "exact",
+          "accepted_surface_forms": ["8.49%", "8.49", "8.490"],
+          "raw_value": "8.49%"
+        },
+        {
+          "field_name": "year_1_cap_rate",
+          "canonical_value": 7.33,
+          "unit": "percent",
+          "comparison": "exact",
+          "accepted_surface_forms": ["7.33%", "7.33", "7.330"],
+          "raw_value": "7.33%"
+        }
+      ],
+      "notes": "Frozen pilot question."
+    },
+    {
+      "question_id": "a4-lot-34-price-acreage",
+      "question": "what are the price and acreage for Lot 34 at Sunnybrook Business Park?",
+      "evaluation_slice": "table_factual",
+      "scope_type": "entity_scoped",
+      "table_heavy": true,
+      "target_entities": ["Sunnybrook Business Park"],
+      "target_document_ids": ["2737705c-40ff-4b2f-9159-9ea88d45e420"],
+      "expected_answer_substrings": ["$525,000", "1.66 acres", "1.66"],
+      "gold_evidence": [
+        {
+          "document_id": "2737705c-40ff-4b2f-9159-9ea88d45e420",
+          "page": 5,
+          "evidence_type": "table",
+          "table_label": "pad_sites",
+          "field_label": "lot_34_price",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation", "numeric_em"],
+          "normalized_value": {
+            "field_name": "lot_34_price",
+            "canonical_value": 525000.0,
+            "unit": "usd",
+            "comparison": "exact",
+            "accepted_surface_forms": ["$525,000", "525,000", "525000"],
+            "raw_value": "$525,000"
+          }
+        },
+        {
+          "document_id": "2737705c-40ff-4b2f-9159-9ea88d45e420",
+          "page": 5,
+          "evidence_type": "table",
+          "table_label": "pad_sites",
+          "field_label": "lot_34_acreage",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation", "numeric_em"],
+          "normalized_value": {
+            "field_name": "lot_34_acreage",
+            "canonical_value": 1.66,
+            "unit": "acres",
+            "comparison": "exact",
+            "accepted_surface_forms": ["1.66 acres", "1.66"],
+            "raw_value": "1.66 acres"
+          }
+        }
+      ],
+      "numeric_targets": [
+        {
+          "field_name": "lot_34_price",
+          "canonical_value": 525000.0,
+          "unit": "usd",
+          "comparison": "exact",
+          "accepted_surface_forms": ["$525,000", "525,000", "525000"],
+          "raw_value": "$525,000"
+        },
+        {
+          "field_name": "lot_34_acreage",
+          "canonical_value": 1.66,
+          "unit": "acres",
+          "comparison": "exact",
+          "accepted_surface_forms": ["1.66 acres", "1.66"],
+          "raw_value": "1.66 acres"
+        }
+      ],
+      "notes": "Draft expansion question from OM-A4-Land.pdf."
+    },
+    {
+      "question_id": "a4-tax-abatement-income",
+      "question": "what tax abatement and immediate area median income are highlighted for Sunnybrook Business Park?",
+      "evaluation_slice": "table_factual",
+      "scope_type": "entity_scoped",
+      "table_heavy": false,
+      "target_entities": ["Sunnybrook Business Park"],
+      "target_document_ids": ["2737705c-40ff-4b2f-9159-9ea88d45e420"],
+      "expected_answer_substrings": ["55%", "$111,000+", "111,000+"],
+      "gold_evidence": [
+        {
+          "document_id": "2737705c-40ff-4b2f-9159-9ea88d45e420",
+          "page": 6,
+          "evidence_type": "narrative",
+          "field_label": "tax_abatement",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation"]
+        },
+        {
+          "document_id": "2737705c-40ff-4b2f-9159-9ea88d45e420",
+          "page": 6,
+          "evidence_type": "narrative",
+          "field_label": "immediate_area_median_income",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation"]
+        }
+      ],
+      "numeric_targets": [],
+      "notes": "Draft expansion question from OM-A4-Land.pdf."
+    },
+    {
+      "question_id": "a4-five-mile-population",
+      "question": "how many residents are within 5 miles of Sunnybrook Business Park?",
+      "evaluation_slice": "narrative",
+      "scope_type": "entity_scoped",
+      "table_heavy": false,
+      "target_entities": ["Sunnybrook Business Park"],
+      "target_document_ids": ["2737705c-40ff-4b2f-9159-9ea88d45e420"],
+      "expected_answer_substrings": ["116,000+", "116000+"],
+      "gold_evidence": [
+        {
+          "document_id": "2737705c-40ff-4b2f-9159-9ea88d45e420",
+          "page": 6,
+          "evidence_type": "narrative",
+          "field_label": "population_within_5_miles",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation"]
+        }
+      ],
+      "numeric_targets": [],
+      "notes": "Draft expansion question from OM-A4-Land.pdf."
+    },
+    {
+      "question_id": "mobi-sale-price",
+      "question": "what is the sale price for The Mobi Building?",
+      "evaluation_slice": "table_factual",
+      "scope_type": "entity_scoped",
+      "table_heavy": false,
+      "target_entities": ["The Mobi Building"],
+      "target_document_ids": ["70fc2291-fc30-426a-a9c2-afd8d4bcbe4d"],
+      "expected_answer_substrings": ["$2,000,000", "2,000,000"],
+      "gold_evidence": [
+        {
+          "document_id": "70fc2291-fc30-426a-a9c2-afd8d4bcbe4d",
+          "page": 4,
+          "evidence_type": "table",
+          "table_label": "offering_summary",
+          "field_label": "sale_price",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation", "numeric_em"],
+          "normalized_value": {
+            "field_name": "sale_price",
+            "canonical_value": 2000000.0,
+            "unit": "usd",
+            "comparison": "exact",
+            "accepted_surface_forms": ["$2,000,000", "2,000,000", "2000000"],
+            "raw_value": "$2,000,000"
+          }
+        }
+      ],
+      "numeric_targets": [
+        {
+          "field_name": "sale_price",
+          "canonical_value": 2000000.0,
+          "unit": "usd",
+          "comparison": "exact",
+          "accepted_surface_forms": ["$2,000,000", "2,000,000", "2000000"],
+          "raw_value": "$2,000,000"
+        }
+      ],
+      "notes": "Draft expansion question from OM-Mobi_building.pdf."
+    },
+    {
+      "question_id": "mobi-occupancy-year-built",
+      "question": "what are the occupancy and year built for The Mobi Building?",
+      "evaluation_slice": "table_factual",
+      "scope_type": "entity_scoped",
+      "table_heavy": false,
+      "target_entities": ["The Mobi Building"],
+      "target_document_ids": ["70fc2291-fc30-426a-a9c2-afd8d4bcbe4d"],
+      "expected_answer_substrings": ["100.0%", "2006"],
+      "gold_evidence": [
+        {
+          "document_id": "70fc2291-fc30-426a-a9c2-afd8d4bcbe4d",
+          "page": 6,
+          "evidence_type": "table",
+          "table_label": "building_information",
+          "field_label": "occupancy_percent",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation", "numeric_em"],
+          "normalized_value": {
+            "field_name": "occupancy_percent",
+            "canonical_value": 100.0,
+            "unit": "percent",
+            "comparison": "exact",
+            "accepted_surface_forms": ["100.0%", "100%", "100.0"],
+            "raw_value": "100.0%"
+          }
+        },
+        {
+          "document_id": "70fc2291-fc30-426a-a9c2-afd8d4bcbe4d",
+          "page": 6,
+          "evidence_type": "table",
+          "table_label": "building_information",
+          "field_label": "year_built",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation", "numeric_em"],
+          "normalized_value": {
+            "field_name": "year_built",
+            "canonical_value": 2006.0,
+            "unit": "year",
+            "comparison": "exact",
+            "accepted_surface_forms": ["2006"],
+            "raw_value": "2006"
+          }
+        }
+      ],
+      "numeric_targets": [
+        {
+          "field_name": "occupancy_percent",
+          "canonical_value": 100.0,
+          "unit": "percent",
+          "comparison": "exact",
+          "accepted_surface_forms": ["100.0%", "100%", "100.0"],
+          "raw_value": "100.0%"
+        },
+        {
+          "field_name": "year_built",
+          "canonical_value": 2006.0,
+          "unit": "year",
+          "comparison": "exact",
+          "accepted_surface_forms": ["2006"],
+          "raw_value": "2006"
+        }
+      ],
+      "notes": "Draft expansion question from OM-Mobi_building.pdf."
+    },
+    {
+      "question_id": "mobi-property-taxes-insurance",
+      "question": "what were the 2012 property taxes and insurance expenses for The Mobi Building?",
+      "evaluation_slice": "table_factual",
+      "scope_type": "entity_scoped",
+      "table_heavy": true,
+      "target_entities": ["The Mobi Building"],
+      "target_document_ids": ["70fc2291-fc30-426a-a9c2-afd8d4bcbe4d"],
+      "expected_answer_substrings": ["$956,420", "$342,701", "956,420", "342,701"],
+      "gold_evidence": [
+        {
+          "document_id": "70fc2291-fc30-426a-a9c2-afd8d4bcbe4d",
+          "page": 15,
+          "evidence_type": "table",
+          "table_label": "expense_summary_2012",
+          "field_label": "property_taxes",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation", "numeric_em"],
+          "normalized_value": {
+            "field_name": "property_taxes",
+            "canonical_value": 956420.0,
+            "unit": "usd",
+            "comparison": "exact",
+            "accepted_surface_forms": ["$956,420", "956,420", "956420"],
+            "raw_value": "$956,420"
+          }
+        },
+        {
+          "document_id": "70fc2291-fc30-426a-a9c2-afd8d4bcbe4d",
+          "page": 15,
+          "evidence_type": "table",
+          "table_label": "expense_summary_2012",
+          "field_label": "insurance",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation", "numeric_em"],
+          "normalized_value": {
+            "field_name": "insurance",
+            "canonical_value": 342701.0,
+            "unit": "usd",
+            "comparison": "exact",
+            "accepted_surface_forms": ["$342,701", "342,701", "342701"],
+            "raw_value": "$342,701"
+          }
+        }
+      ],
+      "numeric_targets": [
+        {
+          "field_name": "property_taxes",
+          "canonical_value": 956420.0,
+          "unit": "usd",
+          "comparison": "exact",
+          "accepted_surface_forms": ["$956,420", "956,420", "956420"],
+          "raw_value": "$956,420"
+        },
+        {
+          "field_name": "insurance",
+          "canonical_value": 342701.0,
+          "unit": "usd",
+          "comparison": "exact",
+          "accepted_surface_forms": ["$342,701", "342,701", "342701"],
+          "raw_value": "$342,701"
+        }
+      ],
+      "notes": "Draft expansion question from OM-Mobi_building.pdf."
+    },
+    {
+      "question_id": "mobi-gross-income-2012",
+      "question": "what was the 2012 gross income for The Mobi Building?",
+      "evaluation_slice": "table_factual",
+      "scope_type": "entity_scoped",
+      "table_heavy": true,
+      "target_entities": ["The Mobi Building"],
+      "target_document_ids": ["70fc2291-fc30-426a-a9c2-afd8d4bcbe4d"],
+      "expected_answer_substrings": ["$9,207,653", "9,207,653"],
+      "gold_evidence": [
+        {
+          "document_id": "70fc2291-fc30-426a-a9c2-afd8d4bcbe4d",
+          "page": 15,
+          "evidence_type": "table",
+          "table_label": "income_summary_2012",
+          "field_label": "gross_income",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation", "numeric_em"],
+          "normalized_value": {
+            "field_name": "gross_income",
+            "canonical_value": 9207653.0,
+            "unit": "usd",
+            "comparison": "exact",
+            "accepted_surface_forms": ["$9,207,653", "9,207,653", "9207653"],
+            "raw_value": "$9,207,653"
+          }
+        }
+      ],
+      "numeric_targets": [
+        {
+          "field_name": "gross_income",
+          "canonical_value": 9207653.0,
+          "unit": "usd",
+          "comparison": "exact",
+          "accepted_surface_forms": ["$9,207,653", "9,207,653", "9207653"],
+          "raw_value": "$9,207,653"
+        }
+      ],
+      "notes": "Draft expansion question from OM-Mobi_building.pdf."
+    },
+    {
+      "question_id": "sacramento-waldorf-rent-expiration",
+      "question": "what is the scheduled monthly rent and lease expiration for Waldorf School at 3103-3107 Sacramento Street?",
+      "evaluation_slice": "table_factual",
+      "scope_type": "entity_scoped",
+      "table_heavy": true,
+      "target_entities": ["3103-3107 Sacramento St"],
+      "target_document_ids": ["9faacd4d-e810-46ff-908c-4802f7706b4d"],
+      "expected_answer_substrings": ["$8,365", "6/2026", "8,365"],
+      "gold_evidence": [
+        {
+          "document_id": "9faacd4d-e810-46ff-908c-4802f7706b4d",
+          "page": 8,
+          "evidence_type": "table",
+          "table_label": "rent_roll_detail",
+          "field_label": "waldorf_school_scheduled_rent_month",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation", "numeric_em"],
+          "normalized_value": {
+            "field_name": "waldorf_school_scheduled_rent_month",
+            "canonical_value": 8365.0,
+            "unit": "usd_per_month",
+            "comparison": "exact",
+            "accepted_surface_forms": ["$8,365", "8,365", "8365"],
+            "raw_value": "$8,365"
+          }
+        },
+        {
+          "document_id": "9faacd4d-e810-46ff-908c-4802f7706b4d",
+          "page": 8,
+          "evidence_type": "table",
+          "table_label": "rent_roll_detail",
+          "field_label": "waldorf_school_lease_expiration",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation"]
+        }
+      ],
+      "numeric_targets": [
+        {
+          "field_name": "waldorf_school_scheduled_rent_month",
+          "canonical_value": 8365.0,
+          "unit": "usd_per_month",
+          "comparison": "exact",
+          "accepted_surface_forms": ["$8,365", "8,365", "8365"],
+          "raw_value": "$8,365"
+        }
+      ],
+      "notes": "Draft expansion question from OM-Sacramento-St.pdf."
+    },
+    {
+      "question_id": "sacramento-noi-current-proforma",
+      "question": "what are the current and pro forma net operating income for 3103-3107 Sacramento Street?",
+      "evaluation_slice": "table_factual",
+      "scope_type": "entity_scoped",
+      "table_heavy": true,
+      "target_entities": ["3103-3107 Sacramento St"],
+      "target_document_ids": ["9faacd4d-e810-46ff-908c-4802f7706b4d"],
+      "expected_answer_substrings": ["$93,059", "$108,275", "93,059", "108,275"],
+      "gold_evidence": [
+        {
+          "document_id": "9faacd4d-e810-46ff-908c-4802f7706b4d",
+          "page": 9,
+          "evidence_type": "table",
+          "table_label": "income_expense_summary",
+          "field_label": "current_noi",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation", "numeric_em"],
+          "normalized_value": {
+            "field_name": "current_noi",
+            "canonical_value": 93059.0,
+            "unit": "usd",
+            "comparison": "exact",
+            "accepted_surface_forms": ["$93,059", "93,059", "93059"],
+            "raw_value": "$93,059"
+          }
+        },
+        {
+          "document_id": "9faacd4d-e810-46ff-908c-4802f7706b4d",
+          "page": 9,
+          "evidence_type": "table",
+          "table_label": "income_expense_summary",
+          "field_label": "pro_forma_noi",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation", "numeric_em"],
+          "normalized_value": {
+            "field_name": "pro_forma_noi",
+            "canonical_value": 108275.0,
+            "unit": "usd",
+            "comparison": "exact",
+            "accepted_surface_forms": ["$108,275", "108,275", "108275"],
+            "raw_value": "$108,275"
+          }
+        }
+      ],
+      "numeric_targets": [
+        {
+          "field_name": "current_noi",
+          "canonical_value": 93059.0,
+          "unit": "usd",
+          "comparison": "exact",
+          "accepted_surface_forms": ["$93,059", "93,059", "93059"],
+          "raw_value": "$93,059"
+        },
+        {
+          "field_name": "pro_forma_noi",
+          "canonical_value": 108275.0,
+          "unit": "usd",
+          "comparison": "exact",
+          "accepted_surface_forms": ["$108,275", "108,275", "108275"],
+          "raw_value": "$108,275"
+        }
+      ],
+      "notes": "Draft expansion question from OM-Sacramento-St.pdf."
+    },
+    {
+      "question_id": "sacramento-price-per-unit-sqft",
+      "question": "what are the price per unit and price per square foot for 3103-3107 Sacramento Street?",
+      "evaluation_slice": "table_factual",
+      "scope_type": "entity_scoped",
+      "table_heavy": true,
+      "target_entities": ["3103-3107 Sacramento St"],
+      "target_document_ids": ["9faacd4d-e810-46ff-908c-4802f7706b4d"],
+      "expected_answer_substrings": ["$658,333", "$527.65", "658,333", "527.65"],
+      "gold_evidence": [
+        {
+          "document_id": "9faacd4d-e810-46ff-908c-4802f7706b4d",
+          "page": 10,
+          "evidence_type": "table",
+          "table_label": "pricing_detail",
+          "field_label": "price_per_unit",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation", "numeric_em"],
+          "normalized_value": {
+            "field_name": "price_per_unit",
+            "canonical_value": 658333.0,
+            "unit": "usd",
+            "comparison": "exact",
+            "accepted_surface_forms": ["$658,333", "658,333", "658333"],
+            "raw_value": "$658,333"
+          }
+        },
+        {
+          "document_id": "9faacd4d-e810-46ff-908c-4802f7706b4d",
+          "page": 10,
+          "evidence_type": "table",
+          "table_label": "pricing_detail",
+          "field_label": "price_per_sqft",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation", "numeric_em"],
+          "normalized_value": {
+            "field_name": "price_per_sqft",
+            "canonical_value": 527.65,
+            "unit": "usd_per_sqft",
+            "comparison": "exact",
+            "accepted_surface_forms": ["$527.65", "527.65"],
+            "raw_value": "$527.65"
+          }
+        }
+      ],
+      "numeric_targets": [
+        {
+          "field_name": "price_per_unit",
+          "canonical_value": 658333.0,
+          "unit": "usd",
+          "comparison": "exact",
+          "accepted_surface_forms": ["$658,333", "658,333", "658333"],
+          "raw_value": "$658,333"
+        },
+        {
+          "field_name": "price_per_sqft",
+          "canonical_value": 527.65,
+          "unit": "usd_per_sqft",
+          "comparison": "exact",
+          "accepted_surface_forms": ["$527.65", "527.65"],
+          "raw_value": "$527.65"
+        }
+      ],
+      "notes": "Draft expansion question from OM-Sacramento-St.pdf."
+    },
+    {
+      "question_id": "sacramento-lot-size-year-built",
+      "question": "what are the lot size and approximate year built for 3103-3107 Sacramento Street?",
+      "evaluation_slice": "table_factual",
+      "scope_type": "entity_scoped",
+      "table_heavy": false,
+      "target_entities": ["3103-3107 Sacramento St"],
+      "target_document_ids": ["9faacd4d-e810-46ff-908c-4802f7706b4d"],
+      "expected_answer_substrings": ["0.06 Acres", "0.06", "1910"],
+      "gold_evidence": [
+        {
+          "document_id": "9faacd4d-e810-46ff-908c-4802f7706b4d",
+          "page": 10,
+          "evidence_type": "table",
+          "table_label": "pricing_detail",
+          "field_label": "lot_size",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation", "numeric_em"],
+          "normalized_value": {
+            "field_name": "lot_size",
+            "canonical_value": 0.06,
+            "unit": "acres",
+            "comparison": "exact",
+            "accepted_surface_forms": ["0.06 Acres", "0.06"],
+            "raw_value": "0.06 Acres"
+          }
+        },
+        {
+          "document_id": "9faacd4d-e810-46ff-908c-4802f7706b4d",
+          "page": 10,
+          "evidence_type": "table",
+          "table_label": "pricing_detail",
+          "field_label": "approx_year_built",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation", "numeric_em"],
+          "normalized_value": {
+            "field_name": "approx_year_built",
+            "canonical_value": 1910.0,
+            "unit": "year",
+            "comparison": "exact",
+            "accepted_surface_forms": ["1910"],
+            "raw_value": "1910"
+          }
+        }
+      ],
+      "numeric_targets": [
+        {
+          "field_name": "lot_size",
+          "canonical_value": 0.06,
+          "unit": "acres",
+          "comparison": "exact",
+          "accepted_surface_forms": ["0.06 Acres", "0.06"],
+          "raw_value": "0.06 Acres"
+        },
+        {
+          "field_name": "approx_year_built",
+          "canonical_value": 1910.0,
+          "unit": "year",
+          "comparison": "exact",
+          "accepted_surface_forms": ["1910"],
+          "raw_value": "1910"
+        }
+      ],
+      "notes": "Draft expansion question from OM-Sacramento-St.pdf."
+    },
+    {
+      "question_id": "lund-current-proforma-noi",
+      "question": "what are the current NOI and pro forma NOI for Lund Pointe Apartments?",
+      "evaluation_slice": "table_factual",
+      "scope_type": "entity_scoped",
+      "table_heavy": true,
+      "target_entities": ["Lund Pointe Apartments"],
+      "target_document_ids": ["9ff732dc-2994-455d-bb90-1fd921989d85"],
+      "expected_answer_substrings": ["$158,410", "$173,589", "158,410", "173,589"],
+      "gold_evidence": [
+        {
+          "document_id": "9ff732dc-2994-455d-bb90-1fd921989d85",
+          "page": 4,
+          "evidence_type": "table",
+          "table_label": "property_summary",
+          "field_label": "current_noi",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation", "numeric_em"],
+          "normalized_value": {
+            "field_name": "current_noi",
+            "canonical_value": 158410.0,
+            "unit": "usd",
+            "comparison": "exact",
+            "accepted_surface_forms": ["$158,410", "158,410", "158410"],
+            "raw_value": "$158,410"
+          }
+        },
+        {
+          "document_id": "9ff732dc-2994-455d-bb90-1fd921989d85",
+          "page": 4,
+          "evidence_type": "table",
+          "table_label": "property_summary",
+          "field_label": "pro_forma_noi",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation", "numeric_em"],
+          "normalized_value": {
+            "field_name": "pro_forma_noi",
+            "canonical_value": 173589.0,
+            "unit": "usd",
+            "comparison": "exact",
+            "accepted_surface_forms": ["$173,589", "173,589", "173589"],
+            "raw_value": "$173,589"
+          }
+        }
+      ],
+      "numeric_targets": [
+        {
+          "field_name": "current_noi",
+          "canonical_value": 158410.0,
+          "unit": "usd",
+          "comparison": "exact",
+          "accepted_surface_forms": ["$158,410", "158,410", "158410"],
+          "raw_value": "$158,410"
+        },
+        {
+          "field_name": "pro_forma_noi",
+          "canonical_value": 173589.0,
+          "unit": "usd",
+          "comparison": "exact",
+          "accepted_surface_forms": ["$173,589", "173,589", "173589"],
+          "raw_value": "$173,589"
+        }
+      ],
+      "notes": "Draft expansion question from OM-Niel-Water.pdf."
+    },
+    {
+      "question_id": "lund-offering-price-acreage",
+      "question": "what are the offering price and site acreage for Lund Pointe Apartments?",
+      "evaluation_slice": "table_factual",
+      "scope_type": "entity_scoped",
+      "table_heavy": false,
+      "target_entities": ["Lund Pointe Apartments"],
+      "target_document_ids": ["9ff732dc-2994-455d-bb90-1fd921989d85"],
+      "expected_answer_substrings": ["$3,150,000", "1.55", "1.55 acres"],
+      "gold_evidence": [
+        {
+          "document_id": "9ff732dc-2994-455d-bb90-1fd921989d85",
+          "page": 4,
+          "evidence_type": "table",
+          "table_label": "property_summary",
+          "field_label": "offering_price",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation", "numeric_em"],
+          "normalized_value": {
+            "field_name": "offering_price",
+            "canonical_value": 3150000.0,
+            "unit": "usd",
+            "comparison": "exact",
+            "accepted_surface_forms": ["$3,150,000", "3,150,000", "3150000"],
+            "raw_value": "$3,150,000"
+          }
+        },
+        {
+          "document_id": "9ff732dc-2994-455d-bb90-1fd921989d85",
+          "page": 4,
+          "evidence_type": "table",
+          "table_label": "property_summary",
+          "field_label": "site_acreage",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation", "numeric_em"],
+          "normalized_value": {
+            "field_name": "site_acreage",
+            "canonical_value": 1.55,
+            "unit": "acres",
+            "comparison": "exact",
+            "accepted_surface_forms": ["1.55", "1.55 acres"],
+            "raw_value": "1.55"
+          }
+        }
+      ],
+      "numeric_targets": [
+        {
+          "field_name": "offering_price",
+          "canonical_value": 3150000.0,
+          "unit": "usd",
+          "comparison": "exact",
+          "accepted_surface_forms": ["$3,150,000", "3,150,000", "3150000"],
+          "raw_value": "$3,150,000"
+        },
+        {
+          "field_name": "site_acreage",
+          "canonical_value": 1.55,
+          "unit": "acres",
+          "comparison": "exact",
+          "accepted_surface_forms": ["1.55", "1.55 acres"],
+          "raw_value": "1.55"
+        }
+      ],
+      "notes": "Draft expansion question from OM-Niel-Water.pdf."
+    },
+    {
+      "question_id": "lund-unit-mix",
+      "question": "what is the unit mix at Lund Pointe Apartments?",
+      "evaluation_slice": "table_factual",
+      "scope_type": "entity_scoped",
+      "table_heavy": true,
+      "target_entities": ["Lund Pointe Apartments"],
+      "target_document_ids": ["9ff732dc-2994-455d-bb90-1fd921989d85"],
+      "expected_answer_substrings": ["12", "2 Bed / 1 Bath", "13", "3 Bed / 2 Bath"],
+      "gold_evidence": [
+        {
+          "document_id": "9ff732dc-2994-455d-bb90-1fd921989d85",
+          "page": 5,
+          "evidence_type": "table",
+          "table_label": "unit_mix",
+          "field_label": "two_bed_one_bath_units",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation"]
+        },
+        {
+          "document_id": "9ff732dc-2994-455d-bb90-1fd921989d85",
+          "page": 5,
+          "evidence_type": "table",
+          "table_label": "unit_mix",
+          "field_label": "three_bed_two_bath_units",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation"]
+        }
+      ],
+      "numeric_targets": [],
+      "notes": "Draft expansion question from OM-Niel-Water.pdf."
+    },
+    {
+      "question_id": "lund-comparable-average-cap-rate",
+      "question": "what is the average cap rate for the comparable multifamily sales listed for Lund Pointe Apartments?",
+      "evaluation_slice": "table_factual",
+      "scope_type": "entity_scoped",
+      "table_heavy": true,
+      "target_entities": ["Lund Pointe Apartments"],
+      "target_document_ids": ["9ff732dc-2994-455d-bb90-1fd921989d85"],
+      "expected_answer_substrings": ["5.64%", "5.64", "5.53%", "5.53"],
+      "gold_evidence": [
+        {
+          "document_id": "9ff732dc-2994-455d-bb90-1fd921989d85",
+          "page": 12,
+          "evidence_type": "table",
+          "table_label": "comparable_multifamily_sales",
+          "field_label": "average_cap_rate",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation", "numeric_em"],
+          "normalized_value": {
+            "field_name": "average_cap_rate",
+            "canonical_value": 5.53,
+            "unit": "percent",
+            "comparison": "abs_tol",
+            "tolerance_abs": 0.11,
+            "accepted_surface_forms": ["5.64%", "5.64", "5.53%", "5.53"],
+            "raw_value": "5.64%"
+          }
+        }
+      ],
+      "numeric_targets": [
+        {
+          "field_name": "average_cap_rate",
+          "canonical_value": 5.53,
+          "unit": "percent",
+          "comparison": "abs_tol",
+          "tolerance_abs": 0.11,
+          "accepted_surface_forms": ["5.64%", "5.64", "5.53%", "5.53"],
+          "raw_value": "5.64%"
+        }
+      ],
+      "notes": "Draft expansion question from OM-Niel-Water.pdf. The table prints an average of 5.64%, while the arithmetic mean of the five listed comparable cap rates is 5.53%; accept either surface form for interim evaluation."
+    }
+  ]
+}

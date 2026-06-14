@@ -17,14 +17,28 @@ def _row_to_record(headers: list[str], row: list[str]) -> dict[str, str]:
     return record
 
 
-def _format_table_text(sheet_name: str, headers: list[str], rows: list[list[str]], row_start: int, row_end: int) -> str:
+def _format_table_text(
+    sheet_name: str,
+    headers: list[str],
+    rows: list[list[str]],
+    row_start: int,
+    row_end: int,
+    context_text: str = "",
+) -> str:
     lines = [
         f"Sheet: {sheet_name}",
         f"Rows: {row_start}-{row_end}",
+    ]
+    if context_text:
+        lines.extend([
+            "Context:",
+            context_text,
+        ])
+    lines.extend([
         f"Headers: {', '.join(headers)}",
         "",
         " | ".join(headers),
-    ]
+    ])
     lines.extend(" | ".join((row + [""] * len(headers))[: len(headers)]) for row in rows)
     return "\n".join(lines).strip()
 
@@ -34,6 +48,9 @@ class SpreadsheetChunker(DocumentChunker):
 
     def __init__(self, *_args: Any, **_kwargs: Any) -> None:
         self.rows_per_chunk = max(int(settings.spreadsheet_rows_per_chunk or 200), 1)
+        self.rows_overlap = max(int(getattr(settings, "spreadsheet_rows_overlap", 0) or 0), 0)
+        if self.rows_overlap >= self.rows_per_chunk:
+            self.rows_overlap = max(self.rows_per_chunk - 1, 0)
         # OpenAI embedding models cap each input at 8192 tokens. Keep a buffer for
         # tokenizer differences and future metadata additions.
         self.max_chunk_tokens = max(int(settings.spreadsheet_max_chunk_tokens or 7000), 500)
@@ -59,11 +76,14 @@ class SpreadsheetChunker(DocumentChunker):
         window_rows: list[list[str]],
         window_original_rows: list[int],
         fallback_row_start: int,
+        context_text: str,
+        prev_chunk_id: str | None = None,
+        next_chunk_id: str | None = None,
     ) -> Chunk:
         row_start = int(window_original_rows[0]) if window_original_rows else fallback_row_start
         row_end = int(window_original_rows[-1]) if window_original_rows else fallback_row_start + len(window_rows) - 1
         chunk_id = f"spreadsheet_{sheet_index}_{window_index}"
-        text = _format_table_text(sheet_name, headers, window_rows, row_start, row_end)
+        text = _format_table_text(sheet_name, headers, window_rows, row_start, row_end, context_text)
         token_count = count_tokens(text)
         was_truncated = False
 
@@ -77,6 +97,13 @@ class SpreadsheetChunker(DocumentChunker):
             "table_id": chunk_id,
             "table_name": sheet_name,
             "sheet_name": sheet_name,
+            "spreadsheet_window_index": window_index,
+            "spreadsheet_prev_chunk_id": prev_chunk_id,
+            "spreadsheet_next_chunk_id": next_chunk_id,
+            "spreadsheet_neighbor_chunk_ids": [
+                chunk_ref for chunk_ref in (prev_chunk_id, next_chunk_id) if chunk_ref
+            ],
+            "spreadsheet_rows_overlap": self.rows_overlap,
             "row_start": row_start,
             "row_end": row_end,
             "row_count": len(window_rows),
@@ -99,12 +126,20 @@ class SpreadsheetChunker(DocumentChunker):
             "chunk_type": "table",
             "table_name": sheet_name,
             "sheet_name": sheet_name,
+            "spreadsheet_window_index": window_index,
+            "spreadsheet_prev_chunk_id": prev_chunk_id,
+            "spreadsheet_next_chunk_id": next_chunk_id,
+            "spreadsheet_neighbor_chunk_ids": [
+                chunk_ref for chunk_ref in (prev_chunk_id, next_chunk_id) if chunk_ref
+            ],
+            "spreadsheet_rows_overlap": self.rows_overlap,
             "row_start": row_start,
             "row_end": row_end,
             "row_count": len(window_rows),
             "column_count": len(headers),
             "column_headers": headers,
             "table_data": records[:2],
+            "context_text": context_text,
             "char_count": len(text),
             "token_count": token_count,
             "max_chunk_tokens": self.max_chunk_tokens,
@@ -119,6 +154,34 @@ class SpreadsheetChunker(DocumentChunker):
             metadata=chunk_metadata,
         )
 
+    def _trim_overlap_to_budget(
+        self,
+        *,
+        sheet_name: str,
+        headers: list[str],
+        candidate_rows: list[list[str]],
+        candidate_original_rows: list[int],
+        context_text: str,
+    ) -> tuple[list[list[str]], list[int]]:
+        trimmed_rows = list(candidate_rows)
+        trimmed_original_rows = list(candidate_original_rows)
+
+        while len(trimmed_rows) > 1:
+            candidate_text = _format_table_text(
+                sheet_name,
+                headers,
+                trimmed_rows,
+                int(trimmed_original_rows[0]),
+                int(trimmed_original_rows[-1]),
+                context_text,
+            )
+            if count_tokens(candidate_text) <= self.max_chunk_tokens:
+                break
+            trimmed_rows = trimmed_rows[1:]
+            trimmed_original_rows = trimmed_original_rows[1:]
+
+        return trimmed_rows, trimmed_original_rows
+
     def chunk(self, parser_output: ParserOutput) -> ChunkingOutput:
         metadata = parser_output.metadata or {}
         sheets = metadata.get("sheets") or []
@@ -129,6 +192,8 @@ class SpreadsheetChunker(DocumentChunker):
             headers = [str(h) for h in (sheet.get("headers") or [])]
             rows = sheet.get("rows") or []
             original_row_numbers = sheet.get("original_row_numbers") or []
+            context_text = str(sheet.get("context_text") or "").strip()
+            window_specs: list[dict[str, Any]] = []
 
             if not rows:
                 continue
@@ -157,40 +222,68 @@ class SpreadsheetChunker(DocumentChunker):
                     candidate_rows,
                     int(candidate_original_rows[0]),
                     int(candidate_original_rows[-1]),
+                    context_text,
                 )
                 exceeds_row_limit = len(candidate_rows) > self.rows_per_chunk
                 exceeds_token_limit = count_tokens(candidate_text) > self.max_chunk_tokens
 
                 if window_rows and (exceeds_row_limit or exceeds_token_limit):
-                    chunks.append(
-                        self._build_chunk(
-                            sheet_index=sheet_index,
-                            window_index=window_index,
-                            sheet_name=sheet_name,
-                            headers=headers,
-                            window_rows=window_rows,
-                            window_original_rows=window_original_rows,
-                            fallback_row_start=row_index + 1,
-                        )
+                    window_specs.append(
+                        {
+                            "window_index": window_index,
+                            "window_rows": list(window_rows),
+                            "window_original_rows": list(window_original_rows),
+                            "fallback_row_start": row_index + 1,
+                        }
                     )
                     window_index += 1
-                    window_rows = [row]
-                    window_original_rows = [original_row]
+                    overlap_count = min(self.rows_overlap, len(window_rows))
+                    overlap_rows = window_rows[-overlap_count:] if overlap_count else []
+                    overlap_original_rows = window_original_rows[-overlap_count:] if overlap_count else []
+                    next_rows = [*overlap_rows, row]
+                    next_original_rows = [*overlap_original_rows, original_row]
+                    window_rows, window_original_rows = self._trim_overlap_to_budget(
+                        sheet_name=sheet_name,
+                        headers=headers,
+                        candidate_rows=next_rows,
+                        candidate_original_rows=next_original_rows,
+                        context_text=context_text,
+                    )
                     continue
 
                 window_rows = candidate_rows
                 window_original_rows = candidate_original_rows
 
             if window_rows:
+                window_specs.append(
+                    {
+                        "window_index": window_index,
+                        "window_rows": list(window_rows),
+                        "window_original_rows": list(window_original_rows),
+                        "fallback_row_start": 1,
+                    }
+                )
+
+            for spec_index, spec in enumerate(window_specs):
+                prev_chunk_id = None
+                if spec_index > 0:
+                    prev_chunk_id = f"spreadsheet_{sheet_index}_{window_specs[spec_index - 1]['window_index']}"
+                next_chunk_id = None
+                if spec_index + 1 < len(window_specs):
+                    next_chunk_id = f"spreadsheet_{sheet_index}_{window_specs[spec_index + 1]['window_index']}"
+
                 chunks.append(
                     self._build_chunk(
                         sheet_index=sheet_index,
-                        window_index=window_index,
+                        window_index=spec["window_index"],
                         sheet_name=sheet_name,
                         headers=headers,
-                        window_rows=window_rows,
-                        window_original_rows=window_original_rows,
-                        fallback_row_start=1,
+                        window_rows=spec["window_rows"],
+                        window_original_rows=spec["window_original_rows"],
+                        fallback_row_start=spec["fallback_row_start"],
+                        context_text=context_text,
+                        prev_chunk_id=prev_chunk_id,
+                        next_chunk_id=next_chunk_id,
                     )
                 )
 
@@ -233,6 +326,7 @@ class SpreadsheetChunker(DocumentChunker):
                 "source_kind": "spreadsheet",
                 "sheet_count": len(sheets),
                 "rows_per_chunk": self.rows_per_chunk,
+                "rows_overlap": self.rows_overlap,
                 "max_chunk_tokens": self.max_chunk_tokens,
             },
         )

@@ -12,6 +12,8 @@ Responsibilities limited to orchestration:
 Other concerns (prompt construction, memory management, budget logic) are delegated.
 """
 from typing import List, Dict, Any, Optional, AsyncIterator, Set, Tuple
+from dataclasses import dataclass
+from enum import Enum
 from sqlalchemy.orm import Session
 from sqlalchemy import select
 from app.db_models_chat import DocumentChunk, CollectionDocument
@@ -33,6 +35,7 @@ from app.core.rag.query_understanding import (
     QueryType,
     ScopeMode,
     is_narrow_explicit_fact_lookup,
+    should_consult_history_for_query,
 )
 from app.core.rag.fact_extractor import FactExtractor
 from app.core.rag.context_expander import ContextExpander
@@ -62,6 +65,7 @@ _RETRIEVAL_SIZING = {
 _DOC_SCOPE_MATCH_THRESHOLD = 0.70
 _DATA_EXTRACTION_SCOPE_CONFIDENCE_THRESHOLD = 0.65
 _SCOPE_GUARDRAIL_MIN_CONFIDENCE = 0.55
+_SCOPE_TARGET_MATCH_THRESHOLD = 0.70
 import asyncio  # noqa: E402
 import functools  # noqa: E402
 import json  # noqa: E402
@@ -88,6 +92,124 @@ def _qu_cache_put(session_id: str, query: str, understanding) -> None:
     _qu_cache.move_to_end(key)
     while len(_qu_cache) > _QU_CACHE_MAX:
         _qu_cache.popitem(last=False)
+
+
+class RetrievalAblationId(str, Enum):
+    DENSE_BASELINE = "A0"
+    HYBRID_BASELINE = "A1"
+    HYBRID_GENERIC_RERANK = "A2"
+    PHRASE_AWARE = "A3"
+    SELECTIVE_RERANK = "A4"
+    SCOPE_AWARE = "A5"
+    FULL_SYSTEM = "A6"
+
+
+@dataclass(frozen=True)
+class RetrievalAblationConfig:
+    ablation_id: str
+    use_semantic: bool = True
+    use_keyword: bool = True
+    use_phrase_constraints: bool = True
+    use_retriever_metadata_boost: bool = True
+    use_reranker: bool = True
+    use_reranker_metadata_boost: bool = True
+    use_reranker_structured_signal: bool = True
+    use_structured_bypass: bool = True
+    use_scope_routing: bool = True
+    use_confidence_reranker_skip: bool = True
+    use_guardrail_regeneration: bool = True
+    use_ambient_decomposition: bool = True
+
+    @classmethod
+    def from_id(cls, ablation_id: Optional[str]) -> "RetrievalAblationConfig":
+        mode = (ablation_id or RetrievalAblationId.FULL_SYSTEM.value).upper()
+
+        if mode == RetrievalAblationId.DENSE_BASELINE.value:
+            return cls(
+                ablation_id=mode,
+                use_keyword=False,
+                use_phrase_constraints=False,
+                use_retriever_metadata_boost=False,
+                use_reranker=False,
+                use_reranker_metadata_boost=False,
+                use_reranker_structured_signal=False,
+                use_structured_bypass=False,
+                use_scope_routing=False,
+                use_confidence_reranker_skip=False,
+                use_guardrail_regeneration=False,
+                use_ambient_decomposition=False,
+            )
+        if mode == RetrievalAblationId.HYBRID_BASELINE.value:
+            return cls(
+                ablation_id=mode,
+                use_phrase_constraints=False,
+                use_retriever_metadata_boost=False,
+                use_reranker=False,
+                use_reranker_metadata_boost=False,
+                use_reranker_structured_signal=False,
+                use_structured_bypass=False,
+                use_scope_routing=False,
+                use_confidence_reranker_skip=False,
+                use_guardrail_regeneration=False,
+                use_ambient_decomposition=False,
+            )
+        if mode == RetrievalAblationId.HYBRID_GENERIC_RERANK.value:
+            return cls(
+                ablation_id=mode,
+                use_phrase_constraints=False,
+                use_retriever_metadata_boost=False,
+                use_reranker=True,
+                use_reranker_metadata_boost=False,
+                use_reranker_structured_signal=False,
+                use_structured_bypass=False,
+                use_scope_routing=False,
+                use_confidence_reranker_skip=False,
+                use_guardrail_regeneration=False,
+                use_ambient_decomposition=False,
+            )
+        if mode == RetrievalAblationId.PHRASE_AWARE.value:
+            return cls(
+                ablation_id=mode,
+                use_retriever_metadata_boost=False,
+                use_reranker=True,
+                use_reranker_metadata_boost=False,
+                use_reranker_structured_signal=False,
+                use_structured_bypass=False,
+                use_scope_routing=False,
+                use_confidence_reranker_skip=False,
+                use_guardrail_regeneration=False,
+                use_ambient_decomposition=False,
+            )
+        if mode == RetrievalAblationId.SELECTIVE_RERANK.value:
+            return cls(
+                ablation_id=mode,
+                use_retriever_metadata_boost=False,
+                use_reranker=True,
+                use_reranker_metadata_boost=False,
+                use_reranker_structured_signal=False,
+                use_structured_bypass=True,
+                use_scope_routing=False,
+                use_confidence_reranker_skip=False,
+                use_guardrail_regeneration=False,
+                use_ambient_decomposition=False,
+            )
+        if mode == RetrievalAblationId.SCOPE_AWARE.value:
+            return cls(
+                ablation_id=mode,
+                use_retriever_metadata_boost=False,
+                use_reranker=True,
+                use_reranker_metadata_boost=False,
+                use_reranker_structured_signal=False,
+                use_structured_bypass=True,
+                use_scope_routing=True,
+                use_confidence_reranker_skip=False,
+                use_guardrail_regeneration=False,
+                use_ambient_decomposition=True,
+            )
+        if mode == RetrievalAblationId.FULL_SYSTEM.value:
+            return cls(ablation_id=mode)
+
+        raise ValueError(f"Unknown retrieval ablation id: {ablation_id}")
 
 
 class RAGService:
@@ -195,6 +317,476 @@ class RAGService:
         self.last_citation_context = self._build_citation_context(chunks)
         return self.last_citation_context
 
+    @dataclass
+    class RetrievalScopePlan:
+        scope_mode: str
+        scope_confidence: float
+        scope_target_ids: List[str]
+        scoped_doc_ids: Optional[List[str]]
+        did_scope_to_single_doc: bool
+        already_single_doc_scope: bool
+        is_ambient: bool
+
+    def _plan_retrieval_scope(
+        self,
+        session_id: str,
+        understanding,
+        document_ids: Optional[List[str]],
+        doc_info: List[Dict[str, Any]],
+        narrow_explicit_fact_lookup: bool,
+    ) -> "RAGService.RetrievalScopePlan":
+        """Plan scope routing before retrieval so chat and eval share the same logic."""
+        scope_mode = getattr(getattr(understanding, "scope_mode", None), "value", None) or ScopeMode.AMBIGUOUS.value
+        scope_confidence = getattr(understanding, "scope_confidence", 0.0) or 0.0
+        scope_target_ids = self._match_scope_targets_to_documents(understanding, doc_info)
+
+        is_ambient = (
+            scope_mode == ScopeMode.AMBIGUOUS.value
+            and bool(document_ids)
+            and len(document_ids) > 1
+        )
+
+        scoped_doc_ids = document_ids
+        did_scope_to_single_doc = False
+        allow_data_extraction_scope = (
+            understanding.query_type == QueryType.DATA_EXTRACTION
+            and narrow_explicit_fact_lookup
+            and scope_mode not in {ScopeMode.MULTI_DOC.value, ScopeMode.GLOBAL.value}
+            and (
+                understanding.confidence is None
+                or understanding.confidence >= _DATA_EXTRACTION_SCOPE_CONFIDENCE_THRESHOLD
+            )
+        )
+        has_named_scope_targets = bool(
+            (getattr(understanding, "target_property_names", []) or [])
+            or any(
+                getattr(entity, "entity_type", "") in {"property", "deal"}
+                and getattr(entity, "name", "").strip()
+                for entity in (getattr(understanding, "entities", []) or [])
+            )
+        )
+        if (
+            document_ids
+            and len(document_ids) > 1
+            and understanding.entities
+            and (
+                understanding.query_type in (QueryType.SUMMARIZATION, QueryType.ENTITY_LOOKUP)
+                or allow_data_extraction_scope
+            )
+        ):
+            if scope_mode == ScopeMode.SINGLE_DOC.value and len(scope_target_ids) == 1:
+                scoped_doc_ids = [scope_target_ids[0]]
+                did_scope_to_single_doc = True
+                matched_filename = next((d["filename"] for d in doc_info if d["id"] == scope_target_ids[0]), None)
+                logger.info(
+                    "Document-scoped retrieval activated (scope_mode=single_doc)",
+                    extra={
+                        "session_id": session_id,
+                        "matched_doc": matched_filename,
+                        "query_type": understanding.query_type.value,
+                        "scope_confidence": scope_confidence,
+                        "narrow_explicit_fact_lookup": narrow_explicit_fact_lookup,
+                    }
+                )
+            else:
+                if has_named_scope_targets:
+                    logger.info(
+                        "Skipping generic document-entity scope fallback because named scope targets were present",
+                        extra={
+                            "session_id": session_id,
+                            "scope_target_count": len(scope_target_ids),
+                            "target_property_names": (getattr(understanding, "target_property_names", []) or [])[:3],
+                            "query_type": understanding.query_type.value,
+                        }
+                    )
+                else:
+                    matches = self.document_matcher.match_entities_with_scores(
+                        understanding.entities, doc_info
+                    )
+                    high_conf = [m for m in matches if m["score"] >= _DOC_SCOPE_MATCH_THRESHOLD]
+                    if len(high_conf) == 1:
+                        scoped_doc_ids = [high_conf[0]["id"]]
+                        did_scope_to_single_doc = True
+                        logger.info(
+                            "Document-scoped retrieval activated",
+                            extra={
+                                "session_id": session_id,
+                                "matched_doc": high_conf[0]["filename"],
+                                "score": high_conf[0]["score"],
+                                "query_type": understanding.query_type.value,
+                                "narrow_explicit_fact_lookup": narrow_explicit_fact_lookup,
+                            }
+                        )
+
+        already_single_doc_scope = bool(document_ids and len(document_ids) == 1)
+        return self.RetrievalScopePlan(
+            scope_mode=scope_mode,
+            scope_confidence=scope_confidence,
+            scope_target_ids=scope_target_ids,
+            scoped_doc_ids=scoped_doc_ids,
+            did_scope_to_single_doc=did_scope_to_single_doc,
+            already_single_doc_scope=already_single_doc_scope,
+            is_ambient=is_ambient,
+        )
+
+    async def select_retrieval_context(
+        self,
+        session_id: str,
+        collection_id: Optional[str],
+        user_message: str,
+        understanding,
+        retrieval_query: str,
+        document_ids: Optional[List[str]],
+        retrieval_candidates: int,
+        final_top_k: int,
+        narrow_explicit_fact_lookup: bool,
+        doc_info: Optional[List[Dict[str, Any]]] = None,
+        doc_filenames: Optional[List[str]] = None,
+        scope_plan: Optional["RAGService.RetrievalScopePlan"] = None,
+        ablation_config: Optional[RetrievalAblationConfig] = None,
+    ) -> Dict[str, Any]:
+        """Run the production retrieval-selection path and return final context chunks."""
+        doc_info = doc_info or []
+        doc_filenames = doc_filenames or [d["filename"] for d in doc_info]
+        ablation_config = ablation_config or RetrievalAblationConfig.from_id(None)
+        scope_plan = scope_plan or self._plan_retrieval_scope(
+            session_id=session_id,
+            understanding=understanding,
+            document_ids=document_ids,
+            doc_info=doc_info,
+            narrow_explicit_fact_lookup=narrow_explicit_fact_lookup,
+        )
+
+        if not ablation_config.use_scope_routing:
+            scope_plan = self.RetrievalScopePlan(
+                scope_mode=scope_plan.scope_mode,
+                scope_confidence=scope_plan.scope_confidence,
+                scope_target_ids=scope_plan.scope_target_ids,
+                scoped_doc_ids=document_ids,
+                did_scope_to_single_doc=False,
+                already_single_doc_scope=bool(document_ids and len(document_ids) == 1),
+                is_ambient=False,
+            )
+
+        scoped_doc_ids = scope_plan.scoped_doc_ids
+        did_scope_to_single_doc = scope_plan.did_scope_to_single_doc
+        already_single_doc_scope = scope_plan.already_single_doc_scope
+        is_ambient = scope_plan.is_ambient
+
+        stage_timings_ms: Dict[str, float] = {}
+        retrieval_start = time.monotonic()
+
+        if (did_scope_to_single_doc or already_single_doc_scope) and narrow_explicit_fact_lookup:
+            retrieval_candidates = max(
+                1,
+                min(retrieval_candidates, settings.rag_scoped_retrieval_candidates)
+            )
+            final_top_k = max(
+                1,
+                min(final_top_k, settings.rag_scoped_final_top_k)
+            )
+            logger.info(
+                "Scoped retrieval budget applied",
+                extra={
+                    "session_id": session_id,
+                    "retrieval_candidates": retrieval_candidates,
+                    "final_top_k": final_top_k,
+                    "scope_source": "matcher" if did_scope_to_single_doc else "session_single_doc",
+                }
+            )
+
+        if is_ambient and ablation_config.use_ambient_decomposition:
+            decomp_result = await decompose_and_embed(
+                query=understanding.reformulated_query or user_message,
+                query_understanding=understanding,
+                embedding_provider=self.embedder,
+                llm_client=self.llm_client,
+            )
+            effective_retrieval_query = (
+                decomp_result.sub_queries[0]
+                if decomp_result.was_decomposed and decomp_result.sub_queries
+                else (understanding.reformulated_query or user_message)
+            )
+            logger.info(
+                "Ambient mode: query decomposition complete",
+                extra={
+                    "session_id": session_id,
+                    "was_decomposed": decomp_result.was_decomposed,
+                    "sub_query_count": len(decomp_result.sub_queries),
+                }
+            )
+        else:
+            effective_retrieval_query = retrieval_query
+
+        effective_top_k = settings.ambient_top_k if is_ambient else retrieval_candidates
+        qu_confidence = understanding.confidence if understanding else 1.0
+        reranker_will_run = (
+            not is_ambient
+            and bool(self.reranker)
+            and ablation_config.use_reranker
+            and settings.rag_use_reranker_chat
+            and (
+                not ablation_config.use_confidence_reranker_skip
+                or qu_confidence >= settings.rag_reranker_skip_confidence_threshold
+            )
+        )
+        semantic_floor = (
+            settings.rag_chat_semantic_similarity_floor
+            if reranker_will_run
+            else settings.rag_chat_semantic_similarity_floor_no_reranker
+        )
+
+        if did_scope_to_single_doc or already_single_doc_scope:
+            semantic_floor = 0.0
+
+        retrieval_rq = (
+            RetrievalQuery.from_query_understanding(
+                understanding,
+                semantic_text=effective_retrieval_query,
+                doc_filenames=doc_filenames,
+            )
+            if ablation_config.use_phrase_constraints
+            else RetrievalQuery.from_text(effective_retrieval_query)
+        )
+        hybrid_results = self.hybrid_retriever.retrieve(
+            rq=retrieval_rq,
+            collection_id=collection_id,
+            top_k=effective_top_k,
+            document_ids=scoped_doc_ids,
+            query_understanding=understanding,
+            min_semantic_similarity=semantic_floor,
+            use_semantic=ablation_config.use_semantic,
+            use_keyword=ablation_config.use_keyword,
+            apply_metadata_boost=ablation_config.use_retriever_metadata_boost,
+        )
+
+        if ablation_config.use_scope_routing:
+            doc_profiles = self._build_document_profiles(doc_info)
+            self._annotate_scope_match_features(
+                chunks=hybrid_results,
+                query_understanding=understanding,
+                doc_profiles=doc_profiles,
+                collection_id=collection_id,
+                requested_doc_ids=set(scoped_doc_ids or []),
+            )
+            self._apply_scope_score_adjustment(
+                chunks=hybrid_results,
+                score_field="hybrid_score",
+                requested_doc_ids=set(scoped_doc_ids or []),
+            )
+
+        retrieval_ms = round((time.monotonic() - retrieval_start) * 1000, 2)
+        stage_timings_ms["retrieval"] = retrieval_ms
+        logger.info(
+            f"Hybrid retrieval complete: {len(hybrid_results)} candidates retrieved",
+            extra={
+                "session_id": session_id,
+                "document_count": len(document_ids) if document_ids else 0,
+                "retrieval_candidates": retrieval_candidates,
+                "query_type": understanding.query_type.value,
+                "retrieval_ms": retrieval_ms,
+                    "ablation_id": ablation_config.ablation_id,
+            }
+        )
+
+        rerank_min_candidates = max(1, settings.rag_reranker_min_candidates_chat)
+        should_rerank = reranker_will_run and len(hybrid_results) >= rerank_min_candidates
+        if (
+            not should_rerank
+            and not is_ambient
+            and bool(self.reranker)
+            and ablation_config.use_confidence_reranker_skip
+            and qu_confidence < settings.rag_reranker_skip_confidence_threshold
+        ):
+            logger.info(
+                "Skipping reranker: low QU confidence; tighter semantic floor applied",
+                extra={
+                    "session_id": session_id,
+                    "confidence": qu_confidence,
+                    "semantic_floor": semantic_floor,
+                },
+            )
+
+        bypass_chunks: List[Dict[str, Any]] = []
+        rerank_rank_map: Dict[str, int] = {}
+        if is_ambient and self.reranker and hybrid_results:
+            rerank_start = time.monotonic()
+            relevant_chunks = await asyncio.get_running_loop().run_in_executor(
+                None,
+                functools.partial(
+                    self.reranker.filter_noise,
+                    query=effective_retrieval_query,
+                    chunks=hybrid_results,
+                    threshold=settings.rag_reranker_ambient_noise_threshold,
+                )
+            )
+            rerank_ms = round((time.monotonic() - rerank_start) * 1000, 2)
+            stage_timings_ms["rerank"] = rerank_ms
+            logger.info(
+                f"Ambient noise filtering complete: {len(relevant_chunks)} chunks passed threshold",
+                extra={
+                    "session_id": session_id,
+                    "threshold": settings.rag_reranker_ambient_noise_threshold,
+                    "candidates": len(hybrid_results),
+                    "rerank_ms": rerank_ms,
+                }
+            )
+        elif is_ambient:
+            logger.warning(
+                "Ambient mode active but no reranker available — falling back to standard top-k truncation"
+            )
+            relevant_chunks = hybrid_results[:final_top_k]
+            stage_timings_ms["rerank"] = 0.0
+        elif should_rerank:
+            logger.info(
+                f"Starting re-ranking of {len(hybrid_results)} candidates",
+                extra={"session_id": session_id}
+            )
+            rerank_start = time.monotonic()
+
+            if ablation_config.use_structured_bypass:
+                bypass_chunks = [
+                    c for c in hybrid_results
+                    if c.get("is_keyword_match")
+                    and self.reranker._is_structured_chunk(c)
+                ]
+                for chunk in bypass_chunks:
+                    chunk["bypass_reranker"] = True
+                rerank_candidates = [
+                    c for c in hybrid_results
+                    if c["id"] not in {b["id"] for b in bypass_chunks}
+                ]
+            else:
+                bypass_chunks = []
+                rerank_candidates = list(hybrid_results)
+            for chunk in rerank_candidates:
+                chunk["bypass_reranker"] = False
+
+            max_bypass = settings.rag_reranker_bypass_max_structured
+            if understanding.query_type == QueryType.DATA_EXTRACTION:
+                max_bypass = max(
+                    max_bypass,
+                    settings.rag_reranker_bypass_max_structured_data_query,
+                )
+            bypass_chunks = sorted(
+                bypass_chunks, key=lambda c: c.get("raw_rank", 0), reverse=True
+            )[:max_bypass]
+            n_bypass = len(bypass_chunks)
+            n_rerank_slots = max(0, final_top_k - n_bypass)
+
+            reranked_all = await asyncio.get_running_loop().run_in_executor(
+                None,
+                functools.partial(
+                    self.reranker.rerank,
+                    query=user_message,
+                    chunks=rerank_candidates,
+                    query_understanding=understanding,
+                    top_k=None,
+                    apply_metadata_boost=ablation_config.use_reranker_metadata_boost,
+                    apply_structured_signal=ablation_config.use_reranker_structured_signal,
+                )
+            )
+            rerank_rank_map = {
+                chunk["id"]: idx + 1
+                for idx, chunk in enumerate(reranked_all)
+            }
+            reranked = reranked_all[:n_rerank_slots]
+            rerank_ms = round((time.monotonic() - rerank_start) * 1000, 2)
+            stage_timings_ms["rerank"] = rerank_ms
+            relevant_chunks = bypass_chunks + reranked
+            logger.info(
+                f"Re-ranking complete: {len(relevant_chunks)} final chunks selected",
+                extra={
+                    "session_id": session_id,
+                    "top_rerank_score": reranked[0]["rerank_score"] if reranked else 0,
+                    "rerank_ms": rerank_ms,
+                    "bypass_structured": [c["id"] for c in bypass_chunks],
+                    "rerank_candidates": len(rerank_candidates),
+                }
+            )
+        else:
+            relevant_chunks = hybrid_results[:final_top_k]
+            stage_timings_ms["rerank"] = 0.0
+            if self.reranker and hybrid_results:
+                logger.info(
+                    "Skipping re-ranking for tiny candidate pool",
+                    extra={
+                        "session_id": session_id,
+                        "candidate_count": len(hybrid_results),
+                        "min_candidates_for_rerank": rerank_min_candidates,
+                        "selected_chunks": len(relevant_chunks),
+                    }
+                )
+            else:
+                logger.info(
+                    f"Re-ranker disabled, using top {len(relevant_chunks)} hybrid results",
+                    extra={"session_id": session_id}
+                )
+
+        if ablation_config.use_scope_routing:
+            self._apply_scope_score_adjustment(
+                chunks=relevant_chunks,
+                score_field="rerank_score" if should_rerank else "hybrid_score",
+                requested_doc_ids=set(scoped_doc_ids or []),
+            )
+        if should_rerank:
+            relevant_chunks = sorted(
+                relevant_chunks,
+                key=lambda x: (
+                    not x.get("bypass_reranker", False),
+                    -x.get("rerank_score", x.get("hybrid_score", 0.0)),
+                ),
+            )[:final_top_k]
+        else:
+            relevant_chunks = sorted(
+                relevant_chunks,
+                key=lambda x: x.get("rerank_score", x.get("hybrid_score", 0.0)),
+                reverse=True,
+            )[:final_top_k]
+
+        selected_rank_map = {
+            chunk["id"]: idx + 1
+            for idx, chunk in enumerate(relevant_chunks)
+        }
+        hybrid_ranked_chunks = sorted(
+            hybrid_results,
+            key=lambda x: x.get("hybrid_score_scope_adjusted", x.get("hybrid_score", 0.0)),
+            reverse=True,
+        )
+        hybrid_rank_map = {
+            chunk["id"]: idx + 1
+            for idx, chunk in enumerate(hybrid_ranked_chunks)
+        }
+        candidate_trace = []
+        for chunk in hybrid_ranked_chunks:
+            trace_entry = serialize_chunk_for_eval(chunk)
+            trace_entry.update({
+                "is_tabular": bool(chunk.get("is_tabular", False)),
+                "is_keyword_match": bool(chunk.get("is_keyword_match", False)),
+                "is_phrase_match": bool(chunk.get("is_phrase_match", False)),
+                "bypass_reranker": bool(chunk.get("bypass_reranker", False)),
+                "raw_rank": chunk.get("raw_rank"),
+                "semantic_rank": chunk.get("semantic_rank"),
+                "keyword_rank": chunk.get("keyword_rank"),
+                "hybrid_rank": hybrid_rank_map.get(chunk["id"]),
+                "rerank_rank": rerank_rank_map.get(chunk["id"]),
+                "selected_rank": selected_rank_map.get(chunk["id"]),
+                "selected": chunk["id"] in selected_rank_map,
+            })
+            candidate_trace.append(trace_entry)
+
+        return {
+            "relevant_chunks": relevant_chunks,
+            "candidate_trace": candidate_trace,
+            "stage_timings_ms": stage_timings_ms,
+            "scope_target_ids": scope_plan.scope_target_ids,
+            "scoped_doc_ids": scoped_doc_ids,
+            "scope_mode": scope_plan.scope_mode,
+            "scope_confidence": scope_plan.scope_confidence,
+            "is_ambient": is_ambient,
+            "ablation_id": ablation_config.ablation_id,
+        }
+
     async def chat(
         self,
         session_id: str,
@@ -203,7 +795,8 @@ class RAGService:
         user_id: Optional[str] = None,
         org_id: Optional[str] = None,
         document_ids: Optional[List[str]] = None,
-        force_comparison: Optional[bool] = None  # NEW: Skip detection if set (True=force comparison, False=skip comparison)
+        force_comparison: Optional[bool] = None,  # NEW: Skip detection if set (True=force comparison, False=skip comparison)
+        ablation_config: Optional[RetrievalAblationConfig] = None,
     ) -> AsyncIterator[str]:
         """
         Generate streaming chat response using RAG with hybrid retrieval + re-ranking.
@@ -236,6 +829,7 @@ class RAGService:
         # STEP 1: History & optional summarization via memory component
         start_time = time.monotonic()
         stage_timings_ms: Dict[str, float] = {}
+        ablation_config = ablation_config or RetrievalAblationConfig.from_id(None)
         history_messages = self.memory.load_history(session_id)
 
         # Summarization happens silently — don't surface internal detail to users
@@ -275,6 +869,7 @@ class RAGService:
         # (e.g. comparison confirmation re-invokes chat() with the identical query).
         query_understanding_start = time.monotonic()
         cached_understanding = _qu_cache_get(session_id, user_message)
+        consult_history_for_understanding = should_consult_history_for_query(user_message)
         if cached_understanding is not None:
             understanding = cached_understanding
             logger.info(
@@ -285,7 +880,7 @@ class RAGService:
             understanding = await self.query_understanding.understand(
                 query=user_message,
                 document_filenames=doc_filenames,
-                recent_messages=recent_messages if recent_messages else None,
+                recent_messages=(recent_messages if consult_history_for_understanding and recent_messages else None),
             )
             _qu_cache_put(session_id, user_message, understanding)
         query_understanding_ms = round((time.monotonic() - query_understanding_start) * 1000, 2)
@@ -302,11 +897,7 @@ class RAGService:
         # Decide whether to include conversation history in the prompt.
         # Standalone questions (needs_history=False) don't benefit from history —
         # omitting it improves cache hit rate and removes irrelevant context.
-        # Always include history for the first 2 turns (session may not have warmed up yet).
-        include_history = (
-            understanding.needs_history
-            or len(history_messages) <= 2
-        )
+        include_history = understanding.needs_history
 
         # Use rewritten query for retrieval when the model produced one (follow-up rewrites).
         # Keep original user_message for the USER QUESTION section of the prompt.
@@ -322,6 +913,7 @@ class RAGService:
             extra={
                 "session_id": session_id,
                 "include_history": include_history,
+                "history_context_supplied": consult_history_for_understanding,
                 "needs_history": understanding.needs_history,
                 "has_rewritten_query": bool(understanding.rewritten_query),
                 "history_messages_count": len(history_messages),
@@ -475,14 +1067,17 @@ class RAGService:
             return  # Exit after comparison flow
 
         # ------------------------------------------------------------------
-        # STEP 5b: Document-scoped retrieval for entity-targeted queries.
-        # When the user asks about a specific named document (SUMMARIZATION /
-        # ENTITY_LOOKUP) and exactly one document matches with high confidence,
-        # restrict retrieval to that document so short/sparse docs aren't
-        # outranked by denser documents in the reranker.
-        scope_mode = getattr(getattr(understanding, "scope_mode", None), "value", None) or ScopeMode.AMBIGUOUS.value
-        scope_confidence = getattr(understanding, "scope_confidence", 0.0) or 0.0
-        scope_target_ids = self._match_scope_targets_to_documents(understanding, doc_info)
+        # STEP 5b: Scope planning before retrieval.
+        scope_plan = self._plan_retrieval_scope(
+            session_id=session_id,
+            understanding=understanding,
+            document_ids=document_ids,
+            doc_info=doc_info,
+            narrow_explicit_fact_lookup=narrow_explicit_fact_lookup,
+        )
+        scope_mode = scope_plan.scope_mode
+        scope_confidence = scope_plan.scope_confidence
+        scope_target_ids = scope_plan.scope_target_ids
 
         # If scope is ambiguous for non-comparison queries across multiple docs,
         # ask the user to select intended documents.
@@ -505,349 +1100,34 @@ class RAGService:
             yield ("comparison_selection", selection_event)
             return
 
-        # Determine if ambient mode applies:
-        # AMBIGUOUS scope + multiple session documents (and we didn't ask user to select)
-        is_ambient = (
-            scope_mode == ScopeMode.AMBIGUOUS.value
-            and bool(document_ids)
-            and len(document_ids) > 1
-        )
-
-        scoped_doc_ids = document_ids
-        did_scope_to_single_doc = False
-        allow_data_extraction_scope = (
-            understanding.query_type == QueryType.DATA_EXTRACTION
-            and narrow_explicit_fact_lookup
-            and scope_mode not in {ScopeMode.MULTI_DOC.value, ScopeMode.GLOBAL.value}
-            and (
-                understanding.confidence is None
-                or understanding.confidence >= _DATA_EXTRACTION_SCOPE_CONFIDENCE_THRESHOLD
-            )
-        )
-        if (
-            document_ids
-            and len(document_ids) > 1
-            and understanding.entities
-            and (
-                understanding.query_type in (QueryType.SUMMARIZATION, QueryType.ENTITY_LOOKUP)
-                or allow_data_extraction_scope
-            )
-        ):
-            # Scope-mode single_doc has priority when we have exactly one target match.
-            if scope_mode == ScopeMode.SINGLE_DOC.value and len(scope_target_ids) == 1:
-                scoped_doc_ids = [scope_target_ids[0]]
-                did_scope_to_single_doc = True
-                matched_filename = next((d["filename"] for d in doc_info if d["id"] == scope_target_ids[0]), None)
-                logger.info(
-                    "Document-scoped retrieval activated (scope_mode=single_doc)",
-                    extra={
-                        "session_id": session_id,
-                        "matched_doc": matched_filename,
-                        "query_type": understanding.query_type.value,
-                        "scope_confidence": scope_confidence,
-                        "narrow_explicit_fact_lookup": narrow_explicit_fact_lookup,
-                    }
-                )
-            else:
-                matches = self.document_matcher.match_entities_with_scores(
-                    understanding.entities, doc_info
-                )
-                high_conf = [m for m in matches if m["score"] >= _DOC_SCOPE_MATCH_THRESHOLD]
-                if len(high_conf) == 1:
-                    scoped_doc_ids = [high_conf[0]["id"]]
-                    did_scope_to_single_doc = True
-                    logger.info(
-                        "Document-scoped retrieval activated",
-                        extra={
-                            "session_id": session_id,
-                            "matched_doc": high_conf[0]["filename"],
-                            "score": high_conf[0]["score"],
-                            "query_type": understanding.query_type.value,
-                            "narrow_explicit_fact_lookup": narrow_explicit_fact_lookup,
-                        }
-                    )
-
-        already_single_doc_scope = bool(document_ids and len(document_ids) == 1)
-
-        if (did_scope_to_single_doc or already_single_doc_scope) and narrow_explicit_fact_lookup:
-            retrieval_candidates = max(
-                1,
-                min(retrieval_candidates, settings.rag_scoped_retrieval_candidates)
-            )
-            final_top_k = max(
-                1,
-                min(final_top_k, settings.rag_scoped_final_top_k)
-            )
-            logger.info(
-                "Scoped retrieval budget applied",
-                extra={
-                    "session_id": session_id,
-                    "retrieval_candidates": retrieval_candidates,
-                    "final_top_k": final_top_k,
-                    "scope_source": "matcher" if did_scope_to_single_doc else "session_single_doc",
-                }
-            )
-
-        # ------------------------------------------------------------------
-        # STEP 1: Hybrid retrieval (semantic + keyword search) - STANDARD FLOW
         yield ("thinking", "Finding relevant context...")
 
         logger.info(
             "Starting hybrid retrieval for user query",
             extra={"user_id": user_id, "session_id": session_id}
         )
-        retrieval_start = time.monotonic()
-
-        # Ambient mode: query decomposition before retrieval
-        if is_ambient:
-            decomp_result = await decompose_and_embed(
-                query=understanding.reformulated_query or user_message,
-                query_understanding=understanding,
-                embedding_provider=self.embedder,
-                llm_client=self.llm_client,
-            )
-            # Use first sub-query as retrieval string (v1 — merged embedding injection is a future upgrade)
-            effective_retrieval_query = (
-                decomp_result.sub_queries[0]
-                if decomp_result.was_decomposed and decomp_result.sub_queries
-                else (understanding.reformulated_query or user_message)
-            )
-            logger.info(
-                "Ambient mode: query decomposition complete",
-                extra={
-                    "session_id": session_id,
-                    "was_decomposed": decomp_result.was_decomposed,
-                    "sub_query_count": len(decomp_result.sub_queries),
-                }
-            )
-        else:
-            effective_retrieval_query = retrieval_query
-
-        # Use wider top_k for ambient mode (broader retrieval window across all docs)
-        effective_top_k = settings.ambient_top_k if is_ambient else retrieval_candidates
-
-        # Compute QU confidence early so we can choose the right semantic floor before retrieval.
-        qu_confidence = understanding.confidence if understanding else 1.0
-        # When the reranker will be skipped (low QU confidence or ambient), use a tighter semantic
-        # floor to reject weak candidates before they reach the LLM — the reranker normally does
-        # this cleanup, so without it we need the floor to compensate.
-        reranker_will_run = (
-            not is_ambient
-            and bool(self.reranker)
-            and settings.rag_use_reranker_chat
-            and qu_confidence >= settings.rag_reranker_skip_confidence_threshold
-        )
-        semantic_floor = (
-            settings.rag_chat_semantic_similarity_floor
-            if reranker_will_run
-            else settings.rag_chat_semantic_similarity_floor_no_reranker
-        )
-
-        # Single-doc scope: disable the semantic floor entirely.
-        # The floor suppresses irrelevant chunks across documents, but when retrieval
-        # is already scoped to one document that concern is gone — retrieve all
-        # available chunks and let the reranker / top-k truncation handle quality.
-        if did_scope_to_single_doc or already_single_doc_scope:
-            semantic_floor = 0.0
-
-        # Build structured retrieval query — separates semantic embedding text from
-        # lexical phrase constraints so BM25 can't be diluted by doc-name tokens.
-        retrieval_rq = RetrievalQuery.from_query_understanding(
-            understanding,
-            semantic_text=effective_retrieval_query,
+        selection_result = await self.select_retrieval_context(
+            session_id=session_id,
+            collection_id=collection_id,
+            user_message=user_message,
+            understanding=understanding,
+            retrieval_query=retrieval_query,
+            document_ids=document_ids,
+            retrieval_candidates=retrieval_candidates,
+            final_top_k=final_top_k,
+            narrow_explicit_fact_lookup=narrow_explicit_fact_lookup,
+            doc_info=doc_info,
             doc_filenames=doc_filenames,
+            scope_plan=scope_plan,
+            ablation_config=ablation_config,
         )
-
-        # Use hybrid retriever (combines semantic + keyword search)
-        hybrid_results = self.hybrid_retriever.retrieve(
-            rq=retrieval_rq,
-            collection_id=collection_id,
-            top_k=effective_top_k,
-            document_ids=scoped_doc_ids,
-            query_understanding=understanding,
-            min_semantic_similarity=semantic_floor
-        )
-
-        doc_profiles = self._build_document_profiles(doc_info)
-        self._annotate_scope_match_features(
-            chunks=hybrid_results,
-            query_understanding=understanding,
-            doc_profiles=doc_profiles,
-            collection_id=collection_id,
-            requested_doc_ids=set(scoped_doc_ids or []),
-        )
-        self._apply_scope_score_adjustment(
-            chunks=hybrid_results,
-            score_field="hybrid_score",
-            requested_doc_ids=set(scoped_doc_ids or []),
-        )
-
-        retrieval_ms = round((time.monotonic() - retrieval_start) * 1000, 2)
-        stage_timings_ms["retrieval"] = retrieval_ms
-
-        logger.info(
-            f"Hybrid retrieval complete: {len(hybrid_results)} candidates retrieved",
-            extra={
-                "user_id": user_id,
-                "session_id": session_id,
-                "document_count": len(document_ids) if document_ids else 0,
-                "retrieval_candidates": retrieval_candidates,
-                "query_type": understanding.query_type.value,
-                "retrieval_ms": retrieval_ms
-            }
-        )
-
-        # ------------------------------------------------------------------
-        # STEP 2: Re-ranking (optional, cross-encoder based)
-        rerank_min_candidates = max(1, settings.rag_reranker_min_candidates_chat)
-        # Ambient mode uses filter_noise instead of rerank; exclude it from the standard path.
-        # Also skip when QU confidence is low — reranking on an uncertain query signal degrades ranking.
-        # (qu_confidence computed above before retrieval to pick the right semantic floor)
-        should_rerank = (
-            reranker_will_run
-            and len(hybrid_results) >= rerank_min_candidates
-        )
-        if (
-            not should_rerank
-            and not is_ambient
-            and bool(self.reranker)
-            and qu_confidence < settings.rag_reranker_skip_confidence_threshold
-        ):
-            logger.info(
-                "Skipping reranker: low QU confidence; tighter semantic floor applied",
-                extra={
-                    "session_id": session_id,
-                    "confidence": qu_confidence,
-                    "semantic_floor": semantic_floor,
-                },
-            )
-        if is_ambient and self.reranker and hybrid_results:
-            # Ambient mode: noise filtering instead of top-N reranking.
-            # Keep all chunks that score above the noise threshold so every
-            # document in the session has a chance to contribute context.
-            rerank_start = time.monotonic()
-            relevant_chunks = await asyncio.get_running_loop().run_in_executor(
-                None,
-                functools.partial(
-                    self.reranker.filter_noise,
-                    query=effective_retrieval_query,
-                    chunks=hybrid_results,
-                    threshold=settings.rag_reranker_ambient_noise_threshold,
-                )
-            )
-            rerank_ms = round((time.monotonic() - rerank_start) * 1000, 2)
-            stage_timings_ms["rerank"] = rerank_ms
-            logger.info(
-                f"Ambient noise filtering complete: {len(relevant_chunks)} chunks passed threshold",
-                extra={
-                    "session_id": session_id,
-                    "threshold": settings.rag_reranker_ambient_noise_threshold,
-                    "candidates": len(hybrid_results),
-                    "rerank_ms": rerank_ms,
-                }
-            )
-        elif is_ambient:
-            logger.warning(
-                "Ambient mode active but no reranker available — falling back to standard top-k truncation"
-            )
-            # execution falls through to standard top-k truncation below
-        elif should_rerank:
-            logger.info(
-                f"Starting re-ranking of {len(hybrid_results)} candidates",
-                extra={"session_id": session_id}
-            )
-            rerank_start = time.monotonic()
-
-            # Split hybrid candidates into two tracks before reranking.
-            #
-            # BYPASS track: BM25 keyword matches that are table or key-value chunks.
-            # The MS MARCO cross-encoder (trained on web-search paragraphs) gives extreme
-            # negative scores to structured financial table text, making it an unreliable
-            # judge for this content type. BM25 already proved keyword relevance, so the
-            # reranker signal is noise here — bypass it entirely.
-            #
-            # RERANK track: everything else — narrative text, semantic-only results.
-            # The cross-encoder handles these well.
-            _STRUCTURED_TYPES = {"table", "key_value_pairs"}
-            bypass_chunks = [
-                c for c in hybrid_results
-                if c.get("is_keyword_match")
-                and c.get("section_type") in _STRUCTURED_TYPES
-            ]
-            rerank_candidates = [
-                c for c in hybrid_results
-                if c["id"] not in {b["id"] for b in bypass_chunks}
-            ]
-
-            # Cap bypass slots to avoid crowding out all reranker results.
-            # In practice keyword+table matches are few (1-3), but guard against edge cases.
-            max_bypass = settings.rag_reranker_bypass_max_structured
-            bypass_chunks = sorted(
-                bypass_chunks, key=lambda c: c.get("raw_rank", 0), reverse=True
-            )[:max_bypass]
-
-            n_bypass = len(bypass_chunks)
-            n_rerank_slots = max(0, final_top_k - n_bypass)
-
-            reranked = await asyncio.get_running_loop().run_in_executor(
-                None,
-                functools.partial(
-                    self.reranker.rerank,
-                    query=user_message,
-                    chunks=rerank_candidates,
-                    query_understanding=understanding,
-                    top_k=n_rerank_slots,
-                )
-            )
-            rerank_ms = round((time.monotonic() - rerank_start) * 1000, 2)
-            stage_timings_ms["rerank"] = rerank_ms
-
-            # Bypass chunks go first (LLM attends to early context more strongly)
-            relevant_chunks = bypass_chunks + reranked
-
-            logger.info(
-                f"Re-ranking complete: {len(relevant_chunks)} final chunks selected",
-                extra={
-                    "session_id": session_id,
-                    "top_rerank_score": reranked[0]["rerank_score"] if reranked else 0,
-                    "rerank_ms": rerank_ms,
-                    "bypass_structured": [c["id"] for c in bypass_chunks],
-                    "rerank_candidates": len(rerank_candidates),
-                }
-            )
-
-        else:
-            # No re-ranker: use hybrid results directly
-            relevant_chunks = hybrid_results[:final_top_k]
-            stage_timings_ms["rerank"] = 0.0
-            if self.reranker and hybrid_results:
-                logger.info(
-                    "Skipping re-ranking for tiny candidate pool",
-                    extra={
-                        "session_id": session_id,
-                        "candidate_count": len(hybrid_results),
-                        "min_candidates_for_rerank": rerank_min_candidates,
-                        "selected_chunks": len(relevant_chunks)
-                    }
-                )
-            else:
-                logger.info(
-                    f"Re-ranker disabled, using top {len(relevant_chunks)} hybrid results",
-                    extra={"session_id": session_id}
-                )
-
-        # Scope features already annotated on hybrid_results (pre-rerank); surviving chunks
-        # carry those annotations. Only re-apply score adjustment for the rerank_score field.
-        self._apply_scope_score_adjustment(
-            chunks=relevant_chunks,
-            score_field="rerank_score" if should_rerank else "hybrid_score",
-            requested_doc_ids=set(scoped_doc_ids or []),
-        )
-        relevant_chunks = sorted(
-            relevant_chunks,
-            key=lambda x: x.get("rerank_score", x.get("hybrid_score", 0.0)),
-            reverse=True,
-        )[:final_top_k]
+        relevant_chunks = selection_result["relevant_chunks"]
+        scoped_doc_ids = selection_result["scoped_doc_ids"]
+        scope_target_ids = selection_result["scope_target_ids"]
+        scope_mode = selection_result["scope_mode"]
+        scope_confidence = selection_result["scope_confidence"]
+        is_ambient = selection_result["is_ambient"]
+        stage_timings_ms.update(selection_result["stage_timings_ms"])
 
         # Edge case: no relevant chunks found — short-circuit without calling the LLM.
         # An LLM call here is wasteful: the answer is always the same shape ("nothing found"),
@@ -1052,6 +1332,7 @@ class RAGService:
         llm_start = time.monotonic()
         use_scope_guardrail = (
             settings.rag_scope_guardrail_regenerate_enabled
+            and ablation_config.use_guardrail_regeneration
             and bool(document_ids and len(document_ids) > 1)
             and bool(scope_target_ids or scoped_doc_ids)
             and scope_confidence >= _SCOPE_GUARDRAIL_MIN_CONFIDENCE
@@ -1297,38 +1578,95 @@ class RAGService:
         if not documents or not query_understanding:
             return []
 
-        targets: List[str] = []
-        targets.extend([name for name in (getattr(query_understanding, "target_property_names", []) or []) if isinstance(name, str)])
+        data_field_norms = {
+            self._normalize_scope_text(field)
+            for field in (getattr(query_understanding, "data_fields", []) or [])
+            if isinstance(field, str) and self._normalize_scope_text(field)
+        }
+
+        def _is_scope_like_target(target: str) -> bool:
+            normalized = self._normalize_scope_text(target)
+            if not normalized or len(normalized) < 4:
+                return False
+            if normalized in data_field_norms:
+                return False
+            if any(
+                normalized == field
+                or normalized in field
+                or field in normalized
+                for field in data_field_norms
+            ):
+                return False
+            return True
+
+        primary_targets: List[str] = []
+        primary_targets.extend([
+            name
+            for name in (getattr(query_understanding, "target_property_names", []) or [])
+            if isinstance(name, str) and _is_scope_like_target(name)
+        ])
+
+        secondary_targets: List[str] = []
 
         for entity in (getattr(query_understanding, "entities", []) or []):
             entity_type = getattr(entity, "entity_type", "")
-            if entity_type in {"document", "property", "deal", "organization", "other"}:
-                name = getattr(entity, "name", "")
-                if name:
-                    targets.append(name)
+            name = getattr(entity, "name", "")
+            if not name:
+                continue
+            if entity_type in {"property", "deal"}:
+                if _is_scope_like_target(name):
+                    primary_targets.append(name)
+            elif entity_type == "document":
+                if _is_scope_like_target(name):
+                    secondary_targets.append(name)
 
         # Geo hints can map to filename tokens in many OM naming conventions.
         city = getattr(query_understanding, "target_geo_city", None)
         state = getattr(query_understanding, "target_geo_state", None)
         if city:
-            targets.append(city)
+            secondary_targets.append(city)
         if state:
-            targets.append(state)
+            secondary_targets.append(state)
 
-        deduped_targets = []
-        seen = set()
-        for target in targets:
-            norm = re.sub(r"\s+", " ", (target or "").strip().lower())
-            if len(norm) < 3 or norm in seen:
-                continue
-            seen.add(norm)
-            deduped_targets.append(target)
+        def _dedupe_targets(targets: List[str]) -> List[str]:
+            deduped_targets: List[str] = []
+            seen = set()
+            for target in targets:
+                norm = self._normalize_scope_text(target)
+                if not norm or norm in seen:
+                    continue
+                seen.add(norm)
+                deduped_targets.append(target)
+            return deduped_targets
 
-        matched_ids: List[str] = []
-        for target in deduped_targets[:12]:
-            match = self.document_matcher.fuzzy_match_document(target, documents, threshold=0.5)
-            if match and match["id"] not in matched_ids:
-                matched_ids.append(match["id"])
+        def _resolve_targets(targets: List[str]) -> List[str]:
+            matched_ids: List[str] = []
+            for target in _dedupe_targets(targets)[:12]:
+                score = 0.0
+                match = None
+                for doc in documents:
+                    doc_score = self.document_matcher._score_document_match(target.lower().strip(), doc)
+                    if doc_score > score:
+                        score = doc_score
+                        match = doc
+
+                if match and score >= _SCOPE_TARGET_MATCH_THRESHOLD and match["id"] not in matched_ids:
+                    matched_ids.append(match["id"])
+                    logger.debug(
+                        "Scope target matched to document",
+                        extra={
+                            "scope_target": target,
+                            "matched_doc": match.get("filename"),
+                            "score": round(score, 3),
+                        }
+                    )
+            return matched_ids
+
+        primary_matches = _resolve_targets(primary_targets)
+        if primary_matches:
+            return primary_matches
+
+        matched_ids = _resolve_targets(secondary_targets)
 
         return matched_ids
 
@@ -1354,14 +1692,20 @@ class RAGService:
             stem = re.sub(r"\.[A-Za-z0-9]+$", "", filename)
             normalized_stem = self._normalize_scope_text(stem)
             alias_tokens = {normalized_stem}
+            scope_text = self._normalize_scope_text(doc.get("scope_text", "") or "")
             for token in re.split(r"[_\-\s]+", stem):
                 norm_token = self._normalize_scope_text(token)
                 if len(norm_token) >= 3:
                     alias_tokens.add(norm_token)
+            for alias in (doc.get("aliases", []) or []):
+                norm_alias = self._normalize_scope_text(alias)
+                if len(norm_alias) >= 3:
+                    alias_tokens.add(norm_alias)
             profiles[doc_id] = {
                 "filename": filename,
                 "normalized_stem": normalized_stem,
                 "aliases": alias_tokens,
+                "scope_text": scope_text,
             }
         return profiles
 
@@ -1392,6 +1736,7 @@ class RAGService:
                     target == profile.get("normalized_stem")
                     or target in aliases
                     or target in profile.get("normalized_stem", "")
+                    or target in profile.get("scope_text", "")
                 )
                 for target in target_names
             )
@@ -1550,6 +1895,13 @@ class RAGService:
         # Build citation entries with sequential source indices
         citations = []
 
+        def _coerce_citation_page(page_value: Any, default: int = 1) -> int:
+            try:
+                page = int(page_value)
+            except (TypeError, ValueError):
+                return default
+            return page if page > 0 else default
+
         for source_idx, chunk in enumerate(chunks, 1):
             chunk_id = str(chunk.get('id', ''))
             if not chunk_id:
@@ -1601,7 +1953,9 @@ class RAGService:
             else:
                 # Single-page chunk (tables, KV pairs, or single-page narratives)
                 bbox = metadata.get('bbox', {})
-                page = bbox.get('page') if isinstance(bbox, dict) and bbox else chunk.get('page_number', 1)
+                page = _coerce_citation_page(
+                    (bbox.get('page') if isinstance(bbox, dict) and bbox else None) or chunk.get('page_number')
+                )
                 citations.append({
                     **base_entry,
                     "page": page,

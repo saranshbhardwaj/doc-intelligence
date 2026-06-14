@@ -19,6 +19,7 @@ export const createChatSessionActions = (set, get) => ({
           currentSession: session,
           messages: [],
           chatError: null,
+          sessionWarning: null,
         },
       }));
 
@@ -59,6 +60,7 @@ export const createChatSessionActions = (set, get) => ({
           currentSession: session,
           messages: historyData.messages,
           chatError: null,
+          sessionWarning: null,
           comparison: comparisonContext
             ? {
                 isActive: true,
@@ -241,6 +243,10 @@ export const createChatSessionActions = (set, get) => ({
             state.chat.currentSession?.id === sessionId
               ? []
               : state.chat.messages,
+          sessionWarning:
+            state.chat.currentSession?.id === sessionId
+              ? null
+              : state.chat.sessionWarning,
         },
       }));
     } catch (error) {
@@ -268,6 +274,7 @@ export const createChatSessionActions = (set, get) => ({
         isStreaming: false,
         streamingMessage: "",
         chatError: null,
+        sessionWarning: null,
       },
     }));
   },

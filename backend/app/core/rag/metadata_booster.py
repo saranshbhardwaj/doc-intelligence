@@ -25,6 +25,9 @@ class MetadataBooster:
     - Narrative queries: boost narrative, keep tables neutral
     """
 
+    _TABLE_CHUNK_TYPES = {"table", "table_block"}
+    _KEY_VALUE_CHUNK_TYPES = {"key_value_pairs", "key_value"}
+
     def __init__(
         self,
         table_boost_data_query: float = 1.2,
@@ -117,8 +120,8 @@ class MetadataBooster:
                 if isinstance(metadata, dict):
                     chunk_type = metadata.get("chunk_type")
 
-            is_key_value = chunk_type in ("key_value_pairs", "key_value")
-            is_table = chunk.get("is_tabular") or chunk_type == "table"
+            is_key_value = chunk_type in self._KEY_VALUE_CHUNK_TYPES
+            is_table = chunk.get("is_tabular") or chunk_type in self._TABLE_CHUNK_TYPES
 
             # 1. Content type boost (query-adaptive)
             if is_key_value:

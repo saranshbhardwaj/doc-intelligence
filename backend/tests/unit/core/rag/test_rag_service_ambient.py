@@ -697,7 +697,7 @@ class TestRAGServiceAmbientBranchWiring:
                 ):
                     pass
 
-        asyncio.get_event_loop().run_until_complete(run())
+        asyncio.run(run())
 
     def test_ambient_uses_filter_noise_not_rerank(self, two_doc_chunks):
         """
@@ -732,6 +732,24 @@ class TestRAGServiceAmbientBranchWiring:
         svc.prompt_builder.build_ambient_split.assert_called_once()
         svc.prompt_builder.build_split.assert_not_called()
 
+    def test_build_citation_context_coerces_missing_page_to_one(self):
+        svc = _make_rag_service_stub()
+        svc.document_repo.get_doc_info_by_ids = MagicMock(return_value=[
+            {"id": "doc-1", "filename": "Florida_Institutional_T12.xlsx"}
+        ])
+
+        context = svc._build_citation_context([
+            {
+                "id": "chunk-1",
+                "document_id": "doc-1",
+                "page_number": None,
+                "chunk_metadata": {"section_heading": "T12 Operating Statement"},
+            }
+        ])
+
+        assert context["citations"][0]["page"] == 1
+        assert context["citations"][0]["filename"] == "Florida_Institutional_T12.xlsx"
+
     def test_single_doc_ambient_scope_does_not_use_filter_noise(self):
         """
         Single-doc session with AMBIGUOUS scope must NOT trigger ambient path.
@@ -750,3 +768,195 @@ class TestRAGServiceAmbientBranchWiring:
         self._run_chat(svc, document_ids=["doc1"])  # single doc → NOT ambient
 
         reranker.filter_noise.assert_not_called()
+
+
+class TestSharedRetrievalSelectionHelpers:
+    def test_plan_retrieval_scope_scopes_single_doc_target(self):
+        import types
+        import app.core.rag.rag_service as rag_service_module
+
+        svc = _make_rag_service_stub(reranker=MagicMock())
+        understanding = _make_query_understanding_result()
+        understanding.scope_mode = types.SimpleNamespace(
+            value=rag_service_module.ScopeMode.SINGLE_DOC.value
+        )
+        understanding.entities = [MagicMock(entity_type="document")]
+        understanding.query_type = rag_service_module.QueryType.SUMMARIZATION
+        svc._match_scope_targets_to_documents = MagicMock(return_value=["doc-2"])
+
+        plan = svc._plan_retrieval_scope(
+            session_id="sess-1",
+            understanding=understanding,
+            document_ids=["doc-1", "doc-2"],
+            doc_info=[
+                {"id": "doc-1", "filename": "Doc One.pdf"},
+                {"id": "doc-2", "filename": "Doc Two.pdf"},
+            ],
+            narrow_explicit_fact_lookup=False,
+        )
+
+        assert plan.scope_target_ids == ["doc-2"]
+        assert plan.scoped_doc_ids == ["doc-2"]
+        assert plan.did_scope_to_single_doc is True
+        assert plan.is_ambient is False
+
+    def test_select_retrieval_context_preserves_structured_bypass(self):
+        reranker = MagicMock()
+        structured_chunk = _make_chunk("doc1", "asking price table")
+        structured_chunk["id"] = "table-1"
+        structured_chunk["section_type"] = "table"
+        structured_chunk["is_keyword_match"] = True
+        structured_chunk["raw_rank"] = 9
+        structured_chunk["hybrid_score"] = 0.8
+
+        narrative_chunk = _make_chunk("doc1", "narrative chunk")
+        narrative_chunk["id"] = "narr-1"
+        narrative_chunk["section_type"] = "narrative"
+        narrative_chunk["is_keyword_match"] = False
+        narrative_chunk["hybrid_score"] = 0.5
+        narrative_chunk["rerank_score"] = 0.7
+
+        reranker.rerank.return_value = [narrative_chunk]
+        svc = _make_rag_service_stub(reranker=reranker)
+        svc._build_document_profiles = MagicMock(return_value={})
+        svc._annotate_scope_match_features = MagicMock()
+        svc._apply_scope_score_adjustment = MagicMock()
+        svc.hybrid_retriever.retrieve = MagicMock(return_value=[structured_chunk, narrative_chunk])
+
+        understanding = _make_query_understanding_result()
+        understanding.confidence = 0.9
+        settings = _make_settings_mock()
+        settings.rag_reranker_skip_confidence_threshold = 0.4
+        settings.rag_chat_semantic_similarity_floor = 0.12
+        settings.rag_chat_semantic_similarity_floor_no_reranker = 0.25
+        settings.rag_reranker_bypass_max_structured = 3
+        settings.rag_reranker_min_candidates_chat = 1
+
+        scope_plan = type(svc).RetrievalScopePlan(
+            scope_mode="single_doc",
+            scope_confidence=0.9,
+            scope_target_ids=["doc1"],
+            scoped_doc_ids=["doc1"],
+            did_scope_to_single_doc=True,
+            already_single_doc_scope=False,
+            is_ambient=False,
+        )
+
+        async def run_test():
+            with patch("app.core.rag.rag_service.settings", new=settings):
+                return await svc.select_retrieval_context(
+                    session_id="sess-1",
+                    collection_id=None,
+                    user_message="what is the asking price?",
+                    understanding=understanding,
+                    retrieval_query="asking price",
+                    document_ids=["doc1"],
+                    retrieval_candidates=15,
+                    final_top_k=8,
+                    narrow_explicit_fact_lookup=True,
+                    doc_info=[{"id": "doc1", "filename": "Doc One.pdf"}],
+                    doc_filenames=["Doc One.pdf"],
+                    scope_plan=scope_plan,
+                )
+
+        result = asyncio.run(run_test())
+
+        reranker.rerank.assert_called_once()
+        rerank_chunks = reranker.rerank.call_args.kwargs["chunks"]
+        assert [chunk["id"] for chunk in rerank_chunks] == ["narr-1"]
+        assert [chunk["id"] for chunk in result["relevant_chunks"][:2]] == ["table-1", "narr-1"]
+
+    def test_select_retrieval_context_a0_uses_semantic_only_dense_baseline(self):
+        import app.core.rag.rag_service as rag_service_module
+
+        reranker = MagicMock()
+        chunk = _make_chunk("doc1", "dense baseline chunk")
+        svc = _make_rag_service_stub(reranker=reranker)
+        svc._build_document_profiles = MagicMock(return_value={})
+        svc._annotate_scope_match_features = MagicMock()
+        svc._apply_scope_score_adjustment = MagicMock()
+        svc.hybrid_retriever.retrieve = MagicMock(return_value=[chunk])
+
+        understanding = _make_query_understanding_result()
+        understanding.confidence = 0.2
+        settings = _make_settings_mock()
+
+        async def run_test():
+            with patch("app.core.rag.rag_service.settings", new=settings):
+                return await svc.select_retrieval_context(
+                    session_id="sess-a0",
+                    collection_id=None,
+                    user_message="what is the asking price?",
+                    understanding=understanding,
+                    retrieval_query="asking price",
+                    document_ids=["doc1", "doc2"],
+                    retrieval_candidates=15,
+                    final_top_k=8,
+                    narrow_explicit_fact_lookup=True,
+                    doc_info=[{"id": "doc1", "filename": "Doc One.pdf"}],
+                    doc_filenames=["Doc One.pdf"],
+                    ablation_config=rag_service_module.RetrievalAblationConfig.from_id("A0"),
+                )
+
+        result = asyncio.run(run_test())
+
+        retrieve_kwargs = svc.hybrid_retriever.retrieve.call_args.kwargs
+        assert retrieve_kwargs["use_semantic"] is True
+        assert retrieve_kwargs["use_keyword"] is False
+        assert retrieve_kwargs["apply_metadata_boost"] is False
+        assert reranker.rerank.call_count == 0
+        svc._annotate_scope_match_features.assert_not_called()
+        svc._apply_scope_score_adjustment.assert_not_called()
+        assert result["ablation_id"] == "A0"
+        assert result["is_ambient"] is False
+
+    def test_select_retrieval_context_a2_disables_phrase_constraints_and_domain_rerank_helpers(self):
+        import app.core.rag.rag_service as rag_service_module
+
+        reranker = MagicMock()
+        chunk = _make_chunk("doc1", "generic rerank chunk")
+        chunk["id"] = "generic-1"
+        reranker.rerank.return_value = [chunk]
+
+        svc = _make_rag_service_stub(reranker=reranker)
+        svc._build_document_profiles = MagicMock(return_value={})
+        svc._annotate_scope_match_features = MagicMock()
+        svc._apply_scope_score_adjustment = MagicMock()
+        svc.hybrid_retriever.retrieve = MagicMock(return_value=[chunk])
+
+        understanding = _make_query_understanding_result()
+        understanding.confidence = 0.9
+        understanding.data_fields = ["asking price"]
+        understanding.data_field_synonyms = ["asking price", "offering price"]
+        settings = _make_settings_mock()
+        settings.rag_reranker_min_candidates_chat = 1
+
+        async def run_test():
+            with patch("app.core.rag.rag_service.settings", new=settings):
+                return await svc.select_retrieval_context(
+                    session_id="sess-a2",
+                    collection_id=None,
+                    user_message="what is the asking price?",
+                    understanding=understanding,
+                    retrieval_query="asking price",
+                    document_ids=["doc1"],
+                    retrieval_candidates=15,
+                    final_top_k=8,
+                    narrow_explicit_fact_lookup=True,
+                    doc_info=[{"id": "doc1", "filename": "Doc One.pdf"}],
+                    doc_filenames=["Doc One.pdf"],
+                    ablation_config=rag_service_module.RetrievalAblationConfig.from_id("A2"),
+                )
+
+        result = asyncio.run(run_test())
+
+        retrieve_kwargs = svc.hybrid_retriever.retrieve.call_args.kwargs
+        assert retrieve_kwargs["rq"].lexical_required == []
+        assert retrieve_kwargs["rq"].lexical_optional == []
+        assert retrieve_kwargs["use_keyword"] is True
+        assert retrieve_kwargs["apply_metadata_boost"] is False
+
+        rerank_kwargs = reranker.rerank.call_args.kwargs
+        assert rerank_kwargs["apply_metadata_boost"] is False
+        assert rerank_kwargs["apply_structured_signal"] is False
+        assert result["ablation_id"] == "A2"

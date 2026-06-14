@@ -23,6 +23,14 @@ class PromptBuilder:
         from app.core.rag.prompts import get_rag_prompt_set
         self._prompts = get_rag_prompt_set(prompt_version)
 
+    @staticmethod
+    def _coerce_citation_page(page_value: Any, default: int = 1) -> int:
+        try:
+            page = int(page_value)
+        except (TypeError, ValueError):
+            return default
+        return page if page > 0 else default
+
     def format_conversation(self, recent_messages: List[Dict[str, Any]], summary_text: Optional[str]) -> str:
         sections: List[str] = []
         if summary_text:
@@ -76,11 +84,15 @@ class PromptBuilder:
                     page_label = f"{first_page}-{last_page}"
                     citation_page = first_page
                 else:
-                    citation_page = kv_page_values[0] if kv_page_values else chunk.get('page_number', 1)
+                    citation_page = self._coerce_citation_page(
+                        kv_page_values[0] if kv_page_values else chunk.get('page_number')
+                    )
                     page_label = str(citation_page)
             else:
                 bbox = metadata.get('bbox', {})
-                citation_page = (bbox.get('page') if isinstance(bbox, dict) and bbox else None) or chunk.get('page_number', 1)
+                citation_page = self._coerce_citation_page(
+                    (bbox.get('page') if isinstance(bbox, dict) and bbox else None) or chunk.get('page_number')
+                )
                 page_label = str(citation_page)
 
             # Source index is the chunk's position (1-based)
@@ -282,13 +294,13 @@ class PromptBuilder:
                 prompt_parts.append(f"\n### Comparison Point {i}: {pair.topic}\n")
 
                 # Document A chunk
-                page_a = pair.chunk_a.get('page_number', '?')
+                page_a = self._coerce_citation_page(pair.chunk_a.get('page_number'))
                 prompt_parts.append(f"**From {docs[0].filename} (Page {page_a}) [S{source_counter}:p{page_a}]:**\n")
                 prompt_parts.append(f"{pair.chunk_a.get('text', '')}\n")
                 source_counter += 1
 
                 # Document B chunk
-                page_b = pair.chunk_b.get('page_number', '?')
+                page_b = self._coerce_citation_page(pair.chunk_b.get('page_number'))
                 prompt_parts.append(f"**From {docs[1].filename} (Page {page_b}) [S{source_counter}:p{page_b}]:**\n")
                 prompt_parts.append(f"{pair.chunk_b.get('text', '')}\n")
                 source_counter += 1
@@ -305,7 +317,7 @@ class PromptBuilder:
                     chunk = cluster.chunks.get(doc.id)
 
                     if chunk:
-                        page = chunk.get('page_number', '?')
+                        page = self._coerce_citation_page(chunk.get('page_number'))
                         prompt_parts.append(f"**From {doc.filename} (Page {page}) [S{source_counter}:p{page}]:**\n")
                         prompt_parts.append(f"{chunk.get('text', '')}\n")
                         source_counter += 1

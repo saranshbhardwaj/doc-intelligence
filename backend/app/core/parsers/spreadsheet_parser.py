@@ -51,6 +51,74 @@ def _headers_for_rows(rows: list[list[str]]) -> list[str]:
     return headers
 
 
+def _rows_to_context_text(rows: list[list[str]], limit: int = 6) -> str:
+    context_lines = []
+    for row in rows[:limit]:
+        non_empty = [cell for cell in row if str(cell).strip()]
+        if non_empty:
+            context_lines.append(" | ".join(non_empty))
+    return "\n".join(context_lines)
+
+
+def _count_non_empty_cells(row: list[str]) -> int:
+    return sum(1 for cell in row if str(cell).strip())
+
+
+def _select_header_row_index(rows: list[list[str]]) -> int:
+    """Pick the most likely header row, skipping title/meta rows above the table."""
+    if not rows:
+        return 0
+
+    header_cues = {
+        "account", "description", "date", "current", "year", "pro forma", "total",
+        "jan", "feb", "mar", "apr", "may", "jun", "jul", "aug", "sep", "sept", "oct", "nov", "dec",
+    }
+
+    best_index = 0
+    best_score = -1
+    for idx, row in enumerate(rows[:25]):
+        non_empty = _count_non_empty_cells(row)
+        if non_empty == 0:
+            continue
+
+        normalized_cells = [str(cell).strip().lower() for cell in row if str(cell).strip()]
+        cue_score = sum(1 for cell in normalized_cells if any(cue in cell for cue in header_cues))
+        multi_col_bonus = min(non_empty, 8)
+        early_row_bonus = max(0, 5 - idx)
+        score = (cue_score * 10) + (multi_col_bonus * 2) + early_row_bonus
+
+        if score > best_score:
+            best_score = score
+            best_index = idx
+
+    return best_index
+
+
+def _normalize_sheet_rows(
+    rows: list[list[str]],
+    original_row_numbers: list[int],
+) -> tuple[list[list[str]], list[int], list[str], list[list[str]], list[int], str]:
+    """Rebase rows so the detected table header becomes row 0 for chunking."""
+    if not rows:
+        return rows, original_row_numbers, [], [], [], ""
+
+    header_idx = _select_header_row_index(rows)
+    leading_rows = rows[:header_idx]
+    leading_row_numbers = original_row_numbers[:header_idx] if original_row_numbers else []
+    normalized_rows = rows[header_idx:]
+    normalized_row_numbers = original_row_numbers[header_idx:] if original_row_numbers else original_row_numbers
+
+    if not normalized_rows:
+        normalized_rows = rows
+        normalized_row_numbers = original_row_numbers
+        leading_rows = []
+        leading_row_numbers = []
+
+    headers = _headers_for_rows(normalized_rows)
+    context_text = _rows_to_context_text(leading_rows)
+    return normalized_rows, normalized_row_numbers, headers, leading_rows, leading_row_numbers, context_text
+
+
 def _rows_to_preview(headers: list[str], rows: list[list[str]], limit: int = 5) -> str:
     preview_rows = rows[:limit]
     if not preview_rows:
@@ -136,12 +204,15 @@ class SpreadsheetParser(DocumentParser):
                         raise ValueError(SPREADSHEET_TOO_LARGE_MESSAGE)
 
                 if rows:
-                    headers = _headers_for_rows(rows)
+                    rows, original_row_numbers, headers, context_rows, context_row_numbers, context_text = _normalize_sheet_rows(rows, original_row_numbers)
                     sheets.append({
                         "name": worksheet.title,
                         "headers": headers,
                         "rows": rows,
                         "original_row_numbers": original_row_numbers,
+                        "context_rows": context_rows,
+                        "context_row_numbers": context_row_numbers,
+                        "context_text": context_text,
                         "row_count": len(rows),
                         "column_count": max((len(row) for row in rows), default=0),
                     })
@@ -159,11 +230,16 @@ class SpreadsheetParser(DocumentParser):
         if not rows:
             return []
 
+        rows, original_row_numbers, headers, context_rows, context_row_numbers, context_text = _normalize_sheet_rows(rows, original_row_numbers)
+
         return [{
             "name": "CSV",
-            "headers": _headers_for_rows(rows),
+            "headers": headers,
             "rows": rows,
             "original_row_numbers": original_row_numbers,
+            "context_rows": context_rows,
+            "context_row_numbers": context_row_numbers,
+            "context_text": context_text,
             "row_count": len(rows),
             "column_count": max((len(row) for row in rows), default=0),
         }]

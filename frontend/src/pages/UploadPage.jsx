@@ -15,6 +15,7 @@ import ResultsView from "../components/results/ResultViews";
 import DarkModeToggle from "../components/common/DarkModeToggle";
 import { useDarkMode } from "../hooks/useDarkMode";
 import { UploadPageSkeleton } from "../components/skeletons/PageSkeletons";
+import { getUsageLimitHint, getUsageLimitTitle, isUsageLimitError } from "../utils/apiErrorHandler";
 
 export default function UploadPage() {
   const { isDark, toggle } = useDarkMode();
@@ -137,6 +138,11 @@ export default function UploadPage() {
   if (isInitializing) {
     return <UploadPageSkeleton />;
   }
+
+  const isLimitError = isUsageLimitError(error);
+  const errorTitle = isLimitError ? getUsageLimitTitle(error) : "⚠️ Processing Error";
+  const errorMessage = typeof error === "string" ? error : error?.message;
+  const errorHint = isLimitError ? getUsageLimitHint(error) : null;
 
   return (
     <div className="min-h-screen bg-background dark:bg-[#1a1a1a] transition-colors duration-200">
@@ -285,38 +291,57 @@ export default function UploadPage() {
           {/* Error */}
           {error && (
             <div
-              className="bg-red-50 dark:bg-red-950/30 border-l-4 border-red-400 dark:border-red-500 p-6 mb-8 rounded-r-lg backdrop-blur-sm"
+              className={isLimitError
+                ? "bg-amber-50 dark:bg-amber-950/20 border-l-4 border-amber-400 dark:border-amber-500 p-6 mb-8 rounded-r-lg backdrop-blur-sm"
+                : "bg-red-50 dark:bg-red-950/30 border-l-4 border-red-400 dark:border-red-500 p-6 mb-8 rounded-r-lg backdrop-blur-sm"}
               role="alert"
             >
-              <h3 className="text-sm font-medium text-red-800 dark:text-red-300 mb-2">
-                ⚠️ Processing Error
+              <h3 className={isLimitError
+                ? "text-sm font-medium text-amber-900 dark:text-amber-200 mb-2"
+                : "text-sm font-medium text-red-800 dark:text-red-300 mb-2"}>
+                {errorTitle}
               </h3>
-              <p className="text-sm text-red-700 dark:text-red-200 mb-3">
-                {typeof error === "string" ? error : error.message}
+              <p className={isLimitError
+                ? "text-sm text-amber-800 dark:text-amber-100 mb-3"
+                : "text-sm text-red-700 dark:text-red-200 mb-3"}>
+                {errorMessage}
               </p>
 
               {/* Show error details if available */}
               {typeof error === "object" && (error.stage || error.type) && (
-                <div className="text-xs text-red-600 dark:text-red-300 mb-3 font-mono">
+                <div className={isLimitError
+                  ? "text-xs text-amber-700 dark:text-amber-300 mb-3 font-mono"
+                  : "text-xs text-red-600 dark:text-red-300 mb-3 font-mono"}>
                   {error.stage && <span>Stage: {error.stage}</span>}
                   {error.stage && error.type && <span className="mx-2">•</span>}
                   {error.type && <span>Type: {error.type}</span>}
                 </div>
               )}
 
-              <div className="mt-4 pt-4 border-t border-red-200 dark:border-red-800">
-                <p className="text-sm font-semibold text-red-800 dark:text-red-300 mb-2">
+              <div className={isLimitError
+                ? "mt-4 pt-4 border-t border-amber-200 dark:border-amber-800"
+                : "mt-4 pt-4 border-t border-red-200 dark:border-red-800"}>
+                <p className={isLimitError
+                  ? "text-sm font-semibold text-amber-900 dark:text-amber-200 mb-2"
+                  : "text-sm font-semibold text-red-800 dark:text-red-300 mb-2"}>
                   💡 What to try:
                 </p>
-                <ul className="text-sm text-red-700 dark:text-red-200 space-y-1 list-disc list-inside">
-                  <li>
-                    <strong>Try a different CIM document</strong> - Each
-                    document has unique formatting
-                  </li>
-                  <li>
-                    Check file size is under 5MB and has fewer than 60 pages
-                  </li>
-                </ul>
+                {isLimitError ? (
+                  <ul className="text-sm text-amber-800 dark:text-amber-100 space-y-1 list-disc list-inside">
+                    <li>{errorHint}</li>
+                    <li>Review the usage meter above before retrying this document.</li>
+                  </ul>
+                ) : (
+                  <ul className="text-sm text-red-700 dark:text-red-200 space-y-1 list-disc list-inside">
+                    <li>
+                      <strong>Try a different CIM document</strong> - Each
+                      document has unique formatting
+                    </li>
+                    <li>
+                      Check file size is under 5MB and has fewer than 60 pages
+                    </li>
+                  </ul>
+                )}
               </div>
             </div>
           )}

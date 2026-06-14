@@ -18,10 +18,75 @@ export const ErrorTypes = {
   HTTP: 'http_error',
   TIMEOUT: 'timeout_error',
   AUTH: 'auth_error',
+  LIMIT: 'limit_error',
+  FORBIDDEN: 'forbidden_error',
   VALIDATION: 'validation_error',
   SERVER: 'server_error',
   UNKNOWN: 'unknown_error',
 };
+
+function getErrorDetail(error) {
+  return error.response?.data?.detail;
+}
+
+function getStructuredErrorCode(error) {
+  const detail = getErrorDetail(error);
+  return detail && typeof detail === 'object' ? detail.error : null;
+}
+
+function isLimitErrorCode(errorCode) {
+  return typeof errorCode === 'string' && errorCode.endsWith('_limit_exceeded');
+}
+
+function isLimitError(error) {
+  return isLimitErrorCode(getStructuredErrorCode(error));
+}
+
+export function getErrorCode(error) {
+  return error?.errorCode || getStructuredErrorCode(error);
+}
+
+export function isUsageLimitError(error) {
+  if (!error) return false;
+  if (error.limitError === true || error.type === ErrorTypes.LIMIT) {
+    return true;
+  }
+  return isLimitErrorCode(getErrorCode(error));
+}
+
+export function getUsageLimitTitle(error) {
+  switch (getErrorCode(error)) {
+    case 'page_limit_exceeded':
+      return 'Page limit reached';
+    case 'extraction_limit_exceeded':
+      return 'Extraction limit reached';
+    case 'workflow_limit_exceeded':
+      return 'Workflow run limit reached';
+    case 'template_fill_limit_exceeded':
+      return 'Template fill limit reached';
+    case 'chat_message_limit_exceeded':
+      return 'Chat limit reached';
+    default:
+      return 'Usage limit reached';
+  }
+}
+
+export function getUsageLimitHint(error) {
+  switch (getErrorCode(error)) {
+    case 'page_limit_exceeded':
+      return 'Remove pages from this run or ask for a higher page allowance.';
+    case 'extraction_limit_exceeded':
+      return 'Retry after your extraction allowance resets or request a higher limit.';
+    case 'workflow_limit_exceeded':
+      return 'Retry after your workflow allowance resets or request a higher limit.';
+    case 'template_fill_limit_exceeded':
+      return 'Retry after your monthly template-fill allowance resets or request a higher limit.';
+    case 'chat_message_limit_exceeded':
+      return 'Retry after your daily chat allowance resets or request a higher limit.';
+    default:
+      return 'Retry after your allowance resets or request a higher limit.';
+  }
+}
 
 export function isCanceledRequest(error) {
   return (
@@ -54,6 +119,12 @@ function extractErrorMessage(error) {
     // FastAPI error: { detail: "..." }
     if (typeof data.detail === 'string') {
       return data.detail;
+    }
+
+    // FastAPI structured error: { detail: { message: "...", ... } }
+    if (data.detail && typeof data.detail === 'object') {
+      if (typeof data.detail.message === 'string') return data.detail.message;
+      if (typeof data.detail.error === 'string') return data.detail.error;
     }
 
     // Generic error formats
@@ -94,8 +165,15 @@ function determineErrorType(error) {
   // HTTP status-based classification
   const status = error.response.status;
 
-  if (status === 401 || status === 403) {
+  if (status === 401) {
     return ErrorTypes.AUTH;
+  }
+
+  if (status === 403) {
+    if (isLimitError(error)) {
+      return ErrorTypes.LIMIT;
+    }
+    return ErrorTypes.FORBIDDEN;
   }
 
   if (status === 422 || status === 400) {
@@ -125,6 +203,10 @@ function isRetryable(error, errorType) {
 
   // Auth errors are not retryable (need re-login)
   if (errorType === ErrorTypes.AUTH) {
+    return false;
+  }
+
+  if (errorType === ErrorTypes.LIMIT || errorType === ErrorTypes.FORBIDDEN) {
     return false;
   }
 
@@ -170,6 +252,12 @@ function getUserFriendlyMessage(error, errorType, extractedMessage) {
         return 'Your session has expired. Please sign in again.';
       }
       return 'You don\'t have permission to perform this action.';
+
+    case ErrorTypes.LIMIT:
+      return extractedMessage || 'Usage limit reached for this account.';
+
+    case ErrorTypes.FORBIDDEN:
+      return extractedMessage || 'You don\'t have permission to perform this action.';
 
     case ErrorTypes.VALIDATION:
       return extractedMessage || 'Invalid input. Please check your data and try again.';
@@ -219,6 +307,7 @@ export function handleApiError(error) {
     type: errorType,
     isRetryable: retryable,
     status: error.response?.status,
+    detail: error.response?.data?.detail,
     originalError: error,
   };
 
@@ -231,6 +320,11 @@ export function handleApiError(error) {
 
   if (errorType === ErrorTypes.AUTH) {
     normalizedError.authError = true;
+  }
+
+  if (errorType === ErrorTypes.LIMIT) {
+    normalizedError.limitError = true;
+    normalizedError.errorCode = getStructuredErrorCode(error);
   }
 
   return normalizedError;

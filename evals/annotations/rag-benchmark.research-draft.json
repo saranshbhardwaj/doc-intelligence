@@ -1,0 +1,1615 @@
+{
+  "schema_version": "2026-05-29",
+  "dataset_name": "rag-chat-research-benchmark-draft",
+  "extends": "rag-benchmark.interim-draft.json",
+  "questions": [
+    {
+      "question_id": "wildcat-location-units",
+      "question": "Where is The Residences at Wildcat Creek located and how many units does it contain?",
+      "evaluation_slice": "narrative",
+      "scope_type": "entity_scoped",
+      "table_heavy": false,
+      "target_entities": ["The Residences at Wildcat Creek"],
+      "target_document_ids": ["a721bf4b-5cde-422a-9bb5-92d8f6f894dc"],
+      "expected_answer_substrings": ["Kokomo, Indiana", "70-unit", "70 units"],
+      "gold_evidence": [
+        {
+          "document_id": "a721bf4b-5cde-422a-9bb5-92d8f6f894dc",
+          "page": 8,
+          "evidence_type": "narrative",
+          "field_label": "location_and_unit_count",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation"]
+        }
+      ],
+      "notes": "Research expansion question from OM-DUPLEX-COMMUNITY.pdf."
+    },
+    {
+      "question_id": "wildcat-buildings-expansion",
+      "question": "How many buildings currently make up The Residences at Wildcat Creek, and how many additional buildings could vacant ground support?",
+      "evaluation_slice": "entity_scoped",
+      "scope_type": "entity_scoped",
+      "table_heavy": false,
+      "target_entities": ["The Residences at Wildcat Creek"],
+      "target_document_ids": ["a721bf4b-5cde-422a-9bb5-92d8f6f894dc"],
+      "expected_answer_substrings": ["35 buildings", "4-5 additional buildings"],
+      "gold_evidence": [
+        {
+          "document_id": "a721bf4b-5cde-422a-9bb5-92d8f6f894dc",
+          "page": 8,
+          "evidence_type": "narrative",
+          "field_label": "building_count_and_expansion_capacity",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation"]
+        }
+      ],
+      "notes": "Research expansion question from OM-DUPLEX-COMMUNITY.pdf."
+    },
+    {
+      "question_id": "wildcat-unit-mix",
+      "question": "What is the unit mix at The Residences at Wildcat Creek?",
+      "evaluation_slice": "table_factual",
+      "scope_type": "entity_scoped",
+      "table_heavy": false,
+      "target_entities": ["The Residences at Wildcat Creek"],
+      "target_document_ids": ["a721bf4b-5cde-422a-9bb5-92d8f6f894dc"],
+      "expected_answer_substrings": ["38 one-bedroom units", "32 two-bedroom units"],
+      "gold_evidence": [
+        {
+          "document_id": "a721bf4b-5cde-422a-9bb5-92d8f6f894dc",
+          "page": 8,
+          "evidence_type": "narrative",
+          "field_label": "unit_mix",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation"]
+        }
+      ],
+      "notes": "Research expansion question from OM-DUPLEX-COMMUNITY.pdf."
+    },
+    {
+      "question_id": "wildcat-noi-bid-basis",
+      "question": "On what 2019 NOI are investors requested to bid for The Residences at Wildcat Creek?",
+      "evaluation_slice": "narrative",
+      "scope_type": "entity_scoped",
+      "table_heavy": false,
+      "target_entities": ["The Residences at Wildcat Creek"],
+      "target_document_ids": ["a721bf4b-5cde-422a-9bb5-92d8f6f894dc"],
+      "expected_answer_substrings": ["$406,891", "406,891"],
+      "gold_evidence": [
+        {
+          "document_id": "a721bf4b-5cde-422a-9bb5-92d8f6f894dc",
+          "page": 14,
+          "evidence_type": "narrative",
+          "field_label": "bid_basis_noi_2019",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation"]
+        }
+      ],
+      "notes": "Research expansion question from OM-DUPLEX-COMMUNITY.pdf."
+    },
+    {
+      "question_id": "wildcat-location-amenities",
+      "question": "What nearby trails, parks, and downtown access features are highlighted for The Residences at Wildcat Creek?",
+      "evaluation_slice": "narrative",
+      "scope_type": "entity_scoped",
+      "table_heavy": false,
+      "target_entities": ["The Residences at Wildcat Creek"],
+      "target_document_ids": ["a721bf4b-5cde-422a-9bb5-92d8f6f894dc"],
+      "expected_answer_substrings": ["UCT Park", "Walk of Excellence Trail", "downtown Kokomo", "Mehlig Dog Park"],
+      "gold_evidence": [
+        {
+          "document_id": "a721bf4b-5cde-422a-9bb5-92d8f6f894dc",
+          "page": 8,
+          "evidence_type": "narrative",
+          "field_label": "nearby_amenities",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation"]
+        }
+      ],
+      "notes": "Research expansion question from OM-DUPLEX-COMMUNITY.pdf."
+    },
+    {
+      "question_id": "wildcat-private-space-design",
+      "question": "What private-space design features are highlighted for each unit at The Residences at Wildcat Creek?",
+      "evaluation_slice": "narrative",
+      "scope_type": "entity_scoped",
+      "table_heavy": false,
+      "target_entities": ["The Residences at Wildcat Creek"],
+      "target_document_ids": ["a721bf4b-5cde-422a-9bb5-92d8f6f894dc"],
+      "expected_answer_substrings": ["private entry", "private driveway", "private patio", "private outdoor space"],
+      "gold_evidence": [
+        {
+          "document_id": "a721bf4b-5cde-422a-9bb5-92d8f6f894dc",
+          "page": 8,
+          "evidence_type": "narrative",
+          "field_label": "private_space_features",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation"]
+        }
+      ],
+      "notes": "Research expansion question from OM-DUPLEX-COMMUNITY.pdf."
+    },
+
+    {
+      "question_id": "la905-asset-profile",
+      "question": "What is the property type, unit count, and building square footage for 905 2nd St in Santa Monica?",
+      "evaluation_slice": "entity_scoped",
+      "scope_type": "entity_scoped",
+      "table_heavy": false,
+      "target_entities": ["905 2nd St"],
+      "target_document_ids": ["9decb0a0-cda1-4537-9094-7e0b8eaf5cc8"],
+      "expected_answer_substrings": ["Multi-Family Residence", "20", "12,571"],
+      "gold_evidence": [
+        {
+          "document_id": "9decb0a0-cda1-4537-9094-7e0b8eaf5cc8",
+          "page": 1,
+          "evidence_type": "key_value",
+          "field_label": "asset_profile",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation"]
+        }
+      ],
+      "notes": "Research tax-assessment question from LA_Assessment_prop-3.pdf."
+    },
+    {
+      "question_id": "la905-land-usable-sqft",
+      "question": "What is the usable square footage for 905 2nd St, Santa Monica?",
+      "evaluation_slice": "table_factual",
+      "scope_type": "entity_scoped",
+      "table_heavy": false,
+      "target_entities": ["905 2nd St"],
+      "target_document_ids": ["9decb0a0-cda1-4537-9094-7e0b8eaf5cc8"],
+      "expected_answer_substrings": ["9,997", "9997"],
+      "gold_evidence": [
+        {
+          "document_id": "9decb0a0-cda1-4537-9094-7e0b8eaf5cc8",
+          "page": 3,
+          "evidence_type": "key_value",
+          "field_label": "usable_square_feet",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation"]
+        }
+      ],
+      "notes": "Research tax-assessment question from LA_Assessment_prop-3.pdf."
+    },
+    {
+      "question_id": "la905-year-built-quality",
+      "question": "What year was the building built, and what quality class is listed for 905 2nd St?",
+      "evaluation_slice": "entity_scoped",
+      "scope_type": "entity_scoped",
+      "table_heavy": false,
+      "target_entities": ["905 2nd St"],
+      "target_document_ids": ["9decb0a0-cda1-4537-9094-7e0b8eaf5cc8"],
+      "expected_answer_substrings": ["1923", "D55"],
+      "gold_evidence": [
+        {
+          "document_id": "9decb0a0-cda1-4537-9094-7e0b8eaf5cc8",
+          "page": 1,
+          "evidence_type": "key_value",
+          "field_label": "year_built_and_quality_class",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation"]
+        }
+      ],
+      "notes": "Research tax-assessment question from LA_Assessment_prop-3.pdf."
+    },
+    {
+      "question_id": "la905-sale-2023-record",
+      "question": "What recorded amount appears in the 08/02/2023 transfer row for 905 2nd St?",
+      "evaluation_slice": "table_factual",
+      "scope_type": "entity_scoped",
+      "table_heavy": true,
+      "target_entities": ["905 2nd St"],
+      "target_document_ids": ["9decb0a0-cda1-4537-9094-7e0b8eaf5cc8"],
+      "expected_answer_substrings": ["$6,191,400", "6,191,400"],
+      "gold_evidence": [
+        {
+          "document_id": "9decb0a0-cda1-4537-9094-7e0b8eaf5cc8",
+          "page": 4,
+          "evidence_type": "table",
+          "field_label": "recorded_amount_2023_08_02",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation"]
+        }
+      ],
+      "notes": "Research tax-assessment question from LA_Assessment_prop-3.pdf."
+    },
+
+    {
+      "question_id": "la200vermont-roll-total",
+      "question": "What is the 2025 current roll total value for 200 N Vermont Ave in Los Angeles?",
+      "evaluation_slice": "table_factual",
+      "scope_type": "entity_scoped",
+      "table_heavy": true,
+      "target_entities": ["200 N Vermont Ave"],
+      "target_document_ids": ["e6fa605c-4471-4a1d-8a72-29ca6da4ac61"],
+      "expected_answer_substrings": ["$107,848,222", "107,848,222"],
+      "gold_evidence": [
+        {
+          "document_id": "e6fa605c-4471-4a1d-8a72-29ca6da4ac61",
+          "page": 1,
+          "evidence_type": "table",
+          "field_label": "current_roll_total_2025",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation"]
+        }
+      ],
+      "notes": "Research tax-assessment question from LA_Assessment_prop-2.pdf."
+    },
+    {
+      "question_id": "la200vermont-land-improvements",
+      "question": "What are the 2025 current roll land and improvement values for 200 N Vermont Ave?",
+      "evaluation_slice": "table_factual",
+      "scope_type": "entity_scoped",
+      "table_heavy": true,
+      "target_entities": ["200 N Vermont Ave"],
+      "target_document_ids": ["e6fa605c-4471-4a1d-8a72-29ca6da4ac61"],
+      "expected_answer_substrings": ["$1,699,222", "$106,149,000", "1,699,222", "106,149,000"],
+      "gold_evidence": [
+        {
+          "document_id": "e6fa605c-4471-4a1d-8a72-29ca6da4ac61",
+          "page": 1,
+          "evidence_type": "table",
+          "field_label": "current_roll_land_and_improvements_2025",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation"]
+        }
+      ],
+      "notes": "Research tax-assessment question from LA_Assessment_prop-2.pdf."
+    },
+    {
+      "question_id": "la200vermont-base-year-value",
+      "question": "What base year and base total value are shown for 200 N Vermont Ave?",
+      "evaluation_slice": "table_factual",
+      "scope_type": "entity_scoped",
+      "table_heavy": true,
+      "target_entities": ["200 N Vermont Ave"],
+      "target_document_ids": ["e6fa605c-4471-4a1d-8a72-29ca6da4ac61"],
+      "expected_answer_substrings": ["2020", "$107,702,724", "107,702,724"],
+      "gold_evidence": [
+        {
+          "document_id": "e6fa605c-4471-4a1d-8a72-29ca6da4ac61",
+          "page": 1,
+          "evidence_type": "table",
+          "field_label": "base_year_and_base_total_value",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation"]
+        }
+      ],
+      "notes": "Research tax-assessment question from LA_Assessment_prop-2.pdf."
+    },
+    {
+      "question_id": "la200vermont-situs-address",
+      "question": "What situs address is listed for the parcel described as POR LOT 2 MALTMAN'S FIRST ST ADDITION?",
+      "evaluation_slice": "entity_scoped",
+      "scope_type": "entity_scoped",
+      "table_heavy": false,
+      "target_entities": ["200 N Vermont Ave"],
+      "target_document_ids": ["e6fa605c-4471-4a1d-8a72-29ca6da4ac61"],
+      "expected_answer_substrings": ["200 N VERMONT AVE", "LOS ANGELES CA 90004-4899"],
+      "gold_evidence": [
+        {
+          "document_id": "e6fa605c-4471-4a1d-8a72-29ca6da4ac61",
+          "page": 3,
+          "evidence_type": "narrative",
+          "field_label": "situs_address",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation"]
+        }
+      ],
+      "notes": "Research tax-assessment question from LA_Assessment_prop-2.pdf."
+    },
+
+    {
+      "question_id": "la427e5th-roll-total",
+      "question": "What is the 2025 current roll total value for 427 E 5th St in Los Angeles?",
+      "evaluation_slice": "table_factual",
+      "scope_type": "entity_scoped",
+      "table_heavy": true,
+      "target_entities": ["427 E 5th St"],
+      "target_document_ids": ["869c6d41-24b1-4171-8ccd-44961ed17b73"],
+      "expected_answer_substrings": ["$1,556,944", "1,556,944"],
+      "gold_evidence": [
+        {
+          "document_id": "869c6d41-24b1-4171-8ccd-44961ed17b73",
+          "page": 1,
+          "evidence_type": "table",
+          "field_label": "current_roll_total_2025",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation"]
+        }
+      ],
+      "notes": "Research tax-assessment question from LA_Assessment_prop.pdf."
+    },
+    {
+      "question_id": "la427e5th-lot-shape",
+      "question": "What are the usable square footage, lot dimensions, and corner-lot status for 427 E 5th St?",
+      "evaluation_slice": "entity_scoped",
+      "scope_type": "entity_scoped",
+      "table_heavy": false,
+      "target_entities": ["427 E 5th St"],
+      "target_document_ids": ["869c6d41-24b1-4171-8ccd-44961ed17b73"],
+      "expected_answer_substrings": ["9,023", "100 x 90", "Corner Lot: Yes"],
+      "gold_evidence": [
+        {
+          "document_id": "869c6d41-24b1-4171-8ccd-44961ed17b73",
+          "page": 3,
+          "evidence_type": "narrative",
+          "field_label": "lot_shape_and_corner_lot_status",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation"]
+        }
+      ],
+      "notes": "Research tax-assessment question from LA_Assessment_prop.pdf."
+    },
+    {
+      "question_id": "la427e5th-land-improvements",
+      "question": "What are the 2025 current roll land and improvement values for 427 E 5th St?",
+      "evaluation_slice": "table_factual",
+      "scope_type": "entity_scoped",
+      "table_heavy": true,
+      "target_entities": ["427 E 5th St"],
+      "target_document_ids": ["869c6d41-24b1-4171-8ccd-44961ed17b73"],
+      "expected_answer_substrings": ["$941,412", "$615,532", "941,412", "615,532"],
+      "gold_evidence": [
+        {
+          "document_id": "869c6d41-24b1-4171-8ccd-44961ed17b73",
+          "page": 1,
+          "evidence_type": "table",
+          "field_label": "current_roll_land_and_improvements_2025",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation"]
+        }
+      ],
+      "notes": "Research tax-assessment question from LA_Assessment_prop.pdf."
+    },
+    {
+      "question_id": "la427e5th-use-code-address",
+      "question": "What use code and situs address are listed for 427 E 5th St?",
+      "evaluation_slice": "entity_scoped",
+      "scope_type": "entity_scoped",
+      "table_heavy": false,
+      "target_entities": ["427 E 5th St"],
+      "target_document_ids": ["869c6d41-24b1-4171-8ccd-44961ed17b73"],
+      "expected_answer_substrings": ["1800", "Commercial", "427 E 5TH ST LOS ANGELES CA 90013-2145"],
+      "gold_evidence": [
+        {
+          "document_id": "869c6d41-24b1-4171-8ccd-44961ed17b73",
+          "page": 3,
+          "evidence_type": "narrative",
+          "field_label": "use_code_and_situs_address",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation"]
+        }
+      ],
+      "notes": "Research tax-assessment question from LA_Assessment_prop.pdf."
+    },
+
+    {
+      "question_id": "riverside-sycamore-address-lot",
+      "question": "What is the property address and approximate lot size for PIN/APN 263030090?",
+      "evaluation_slice": "entity_scoped",
+      "scope_type": "entity_scoped",
+      "table_heavy": false,
+      "target_entities": ["5946 Sycamore Canyon Blvd"],
+      "target_document_ids": ["f198ef78-cc4c-4d81-87dc-7fee1b96fb2c"],
+      "expected_answer_substrings": ["5946 SYCAMORE CANYON BLVD", "446,490 SqFt", "10.250 acres"],
+      "gold_evidence": [
+        {
+          "document_id": "f198ef78-cc4c-4d81-87dc-7fee1b96fb2c",
+          "page": 2,
+          "evidence_type": "narrative",
+          "field_label": "property_address_and_lot_size",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation"]
+        }
+      ],
+      "notes": "Research Riverside assessment question from R_ Assessment _ Real-Property.pdf."
+    },
+    {
+      "question_id": "riverside-sycamore-2025-value",
+      "question": "What are the 2025 land value, improvement value, and total value for 5946 Sycamore Canyon Blvd?",
+      "evaluation_slice": "table_factual",
+      "scope_type": "entity_scoped",
+      "table_heavy": true,
+      "target_entities": ["5946 Sycamore Canyon Blvd"],
+      "target_document_ids": ["f198ef78-cc4c-4d81-87dc-7fee1b96fb2c"],
+      "expected_answer_substrings": ["$10,612,080", "$100,814,760", "$111,426,840", "10,612,080", "100,814,760", "111,426,840"],
+      "gold_evidence": [
+        {
+          "document_id": "f198ef78-cc4c-4d81-87dc-7fee1b96fb2c",
+          "page": 3,
+          "evidence_type": "table",
+          "field_label": "value_history_2025",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation"]
+        }
+      ],
+      "notes": "Research Riverside assessment question from R_ Assessment _ Real-Property.pdf."
+    },
+    {
+      "question_id": "riverside-sycamore-type-tra",
+      "question": "What property type and tax rate area are listed for 5946 Sycamore Canyon Blvd?",
+      "evaluation_slice": "entity_scoped",
+      "scope_type": "entity_scoped",
+      "table_heavy": false,
+      "target_entities": ["5946 Sycamore Canyon Blvd"],
+      "target_document_ids": ["f198ef78-cc4c-4d81-87dc-7fee1b96fb2c"],
+      "expected_answer_substrings": ["Apartment Over 100 Units", "009-077 RIVERSIDE"],
+      "gold_evidence": [
+        {
+          "document_id": "f198ef78-cc4c-4d81-87dc-7fee1b96fb2c",
+          "page": 2,
+          "evidence_type": "narrative",
+          "field_label": "property_type_and_tra",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation"]
+        }
+      ],
+      "notes": "Research Riverside assessment question from R_ Assessment _ Real-Property.pdf."
+    },
+    {
+      "question_id": "riverside-sycamore-2021-total",
+      "question": "What was the total value in 2021 for 5946 Sycamore Canyon Blvd?",
+      "evaluation_slice": "table_factual",
+      "scope_type": "entity_scoped",
+      "table_heavy": true,
+      "target_entities": ["5946 Sycamore Canyon Blvd"],
+      "target_document_ids": ["f198ef78-cc4c-4d81-87dc-7fee1b96fb2c"],
+      "expected_answer_substrings": ["$73,731,193", "73,731,193"],
+      "gold_evidence": [
+        {
+          "document_id": "f198ef78-cc4c-4d81-87dc-7fee1b96fb2c",
+          "page": 3,
+          "evidence_type": "table",
+          "field_label": "value_history_2021_total",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation"]
+        }
+      ],
+      "notes": "Research Riverside assessment question from R_ Assessment _ Real-Property.pdf."
+    },
+
+    {
+      "question_id": "riverside-5200-asset-profile",
+      "question": "What is the property type and approximate lot size for 5200 Chicago Ave?",
+      "evaluation_slice": "entity_scoped",
+      "scope_type": "entity_scoped",
+      "table_heavy": false,
+      "target_entities": ["5200 Chicago Ave"],
+      "target_document_ids": ["351d02ed-86ba-4540-a8ba-d3bd055ac39b"],
+      "expected_answer_substrings": ["Apartment 5 - 10 Units", "243,936 SqFt", "5.600 acres"],
+      "gold_evidence": [
+        {
+          "document_id": "351d02ed-86ba-4540-a8ba-d3bd055ac39b",
+          "page": 2,
+          "evidence_type": "narrative",
+          "field_label": "property_type_and_lot_size",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation"]
+        }
+      ],
+      "notes": "Research Riverside assessment question from R_ Assessment _ 5200.pdf."
+    },
+    {
+      "question_id": "riverside-5200-2025-value",
+      "question": "What are the 2025 land, improvement, and total values for 5200 Chicago Ave?",
+      "evaluation_slice": "table_factual",
+      "scope_type": "entity_scoped",
+      "table_heavy": true,
+      "target_entities": ["5200 Chicago Ave"],
+      "target_document_ids": ["351d02ed-86ba-4540-a8ba-d3bd055ac39b"],
+      "expected_answer_substrings": ["$2,172,364", "$4,244,342", "$6,416,706", "2,172,364", "4,244,342", "6,416,706"],
+      "gold_evidence": [
+        {
+          "document_id": "351d02ed-86ba-4540-a8ba-d3bd055ac39b",
+          "page": 3,
+          "evidence_type": "table",
+          "field_label": "value_history_2025",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation"]
+        }
+      ],
+      "notes": "Research Riverside assessment question from R_ Assessment _ 5200.pdf."
+    },
+    {
+      "question_id": "riverside-5200-type-tra",
+      "question": "What property type and tax rate area are listed for 5200 Chicago Ave?",
+      "evaluation_slice": "entity_scoped",
+      "scope_type": "entity_scoped",
+      "table_heavy": false,
+      "target_entities": ["5200 Chicago Ave"],
+      "target_document_ids": ["351d02ed-86ba-4540-a8ba-d3bd055ac39b"],
+      "expected_answer_substrings": ["Apartment 5 - 10 Units", "009-009 RIVERSIDE"],
+      "gold_evidence": [
+        {
+          "document_id": "351d02ed-86ba-4540-a8ba-d3bd055ac39b",
+          "page": 2,
+          "evidence_type": "narrative",
+          "field_label": "property_type_and_tra",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation"]
+        }
+      ],
+      "notes": "Research Riverside assessment question from R_ Assessment _ 5200.pdf."
+    },
+    {
+      "question_id": "riverside-5200-2021-total",
+      "question": "What was the total value in 2021 for 5200 Chicago Ave?",
+      "evaluation_slice": "table_factual",
+      "scope_type": "entity_scoped",
+      "table_heavy": true,
+      "target_entities": ["5200 Chicago Ave"],
+      "target_document_ids": ["351d02ed-86ba-4540-a8ba-d3bd055ac39b"],
+      "expected_answer_substrings": ["$5,928,048", "5,928,048"],
+      "gold_evidence": [
+        {
+          "document_id": "351d02ed-86ba-4540-a8ba-d3bd055ac39b",
+          "page": 3,
+          "evidence_type": "table",
+          "field_label": "value_history_2021_total",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation"]
+        }
+      ],
+      "notes": "Research Riverside assessment question from R_ Assessment _ 5200.pdf."
+    },
+
+    {
+      "question_id": "lochmoor-address-lot",
+      "question": "What is the property address and approximate lot size for PIN/APN 263030061?",
+      "evaluation_slice": "entity_scoped",
+      "scope_type": "entity_scoped",
+      "table_heavy": false,
+      "target_entities": ["5880 Lochmoor Dr"],
+      "target_document_ids": ["09d697bf-8b58-4386-8dc9-31cac7f809d6"],
+      "expected_answer_substrings": ["5880 LOCHMOOR DR", "348,044 SqFt", "7.990 acres"],
+      "gold_evidence": [
+        {
+          "document_id": "09d697bf-8b58-4386-8dc9-31cac7f809d6",
+          "page": 2,
+          "evidence_type": "narrative",
+          "field_label": "property_address_and_lot_size",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation"]
+        }
+      ],
+      "notes": "Research Riverside assessment question from R-Assessment _ Real Property_Loch.pdf."
+    },
+    {
+      "question_id": "lochmoor-2025-value",
+      "question": "What are the 2025 land, improvement, and total values for 5880 Lochmoor Dr?",
+      "evaluation_slice": "table_factual",
+      "scope_type": "entity_scoped",
+      "table_heavy": true,
+      "target_entities": ["5880 Lochmoor Dr"],
+      "target_document_ids": ["09d697bf-8b58-4386-8dc9-31cac7f809d6"],
+      "expected_answer_substrings": ["$8,000,000", "$41,800,000", "$50,697,935", "8,000,000", "41,800,000", "50,697,935"],
+      "gold_evidence": [
+        {
+          "document_id": "09d697bf-8b58-4386-8dc9-31cac7f809d6",
+          "page": 3,
+          "evidence_type": "table",
+          "field_label": "value_history_2025",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation"]
+        }
+      ],
+      "notes": "Research Riverside assessment question from R-Assessment _ Real Property_Loch.pdf."
+    },
+    {
+      "question_id": "lochmoor-type-tra",
+      "question": "What property type and tax rate area are listed for 5880 Lochmoor Dr?",
+      "evaluation_slice": "entity_scoped",
+      "scope_type": "entity_scoped",
+      "table_heavy": false,
+      "target_entities": ["5880 Lochmoor Dr"],
+      "target_document_ids": ["09d697bf-8b58-4386-8dc9-31cac7f809d6"],
+      "expected_answer_substrings": ["Apartment Over 100 Units", "009-108 RIVERSIDE"],
+      "gold_evidence": [
+        {
+          "document_id": "09d697bf-8b58-4386-8dc9-31cac7f809d6",
+          "page": 2,
+          "evidence_type": "narrative",
+          "field_label": "property_type_and_tra",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation"]
+        }
+      ],
+      "notes": "Research Riverside assessment question from R-Assessment _ Real Property_Loch.pdf."
+    },
+    {
+      "question_id": "lochmoor-2024-total",
+      "question": "What was the total value in 2024 for 5880 Lochmoor Dr?",
+      "evaluation_slice": "table_factual",
+      "scope_type": "entity_scoped",
+      "table_heavy": true,
+      "target_entities": ["5880 Lochmoor Dr"],
+      "target_document_ids": ["09d697bf-8b58-4386-8dc9-31cac7f809d6"],
+      "expected_answer_substrings": ["$36,406,580", "36,406,580"],
+      "gold_evidence": [
+        {
+          "document_id": "09d697bf-8b58-4386-8dc9-31cac7f809d6",
+          "page": 3,
+          "evidence_type": "table",
+          "field_label": "value_history_2024_total",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation"]
+        }
+      ],
+      "notes": "Research Riverside assessment question from R-Assessment _ Real Property_Loch.pdf."
+    },
+
+    {
+      "question_id": "palmvista-nov-noi",
+      "question": "What was Palm Vista Apartments' net operating income in Nov-25?",
+      "evaluation_slice": "table_factual",
+      "scope_type": "entity_scoped",
+      "table_heavy": true,
+      "target_entities": ["Palm Vista Apartments"],
+      "target_document_ids": ["f06b1834-0534-4204-ac56-40e1b42710ea"],
+      "expected_answer_substrings": ["441197", "441,197"],
+      "gold_evidence": [
+        {
+          "document_id": "f06b1834-0534-4204-ac56-40e1b42710ea",
+          "chunk_id": "spreadsheet_1_1",
+          "evidence_type": "table",
+          "field_label": "net_operating_income_nov_25",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation"]
+        }
+      ],
+      "notes": "Research T-12 question from Florida_Institutional_T12.xlsx. Current spreadsheet chunking uses chunk anchor spreadsheet_1_1."
+    },
+    {
+      "question_id": "palmvista-oct-egi-expenses",
+      "question": "What were Palm Vista Apartments' effective gross income and total operating expenses in Oct-25?",
+      "evaluation_slice": "table_factual",
+      "scope_type": "entity_scoped",
+      "table_heavy": true,
+      "target_entities": ["Palm Vista Apartments"],
+      "target_document_ids": ["f06b1834-0534-4204-ac56-40e1b42710ea"],
+      "expected_answer_substrings": ["596700", "596,700", "160801", "160,801"],
+      "gold_evidence": [
+        {
+          "document_id": "f06b1834-0534-4204-ac56-40e1b42710ea",
+          "chunk_id": "spreadsheet_1_1",
+          "evidence_type": "table",
+          "field_label": "effective_gross_income_and_expenses_oct_25",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation"]
+        }
+      ],
+      "notes": "Research T-12 question from Florida_Institutional_T12.xlsx."
+    },
+    {
+      "question_id": "palmvista-real-estate-taxes",
+      "question": "What are the monthly real estate taxes shown in the Palm Vista Apartments T-12?",
+      "evaluation_slice": "table_factual",
+      "scope_type": "entity_scoped",
+      "table_heavy": true,
+      "target_entities": ["Palm Vista Apartments"],
+      "target_document_ids": ["f06b1834-0534-4204-ac56-40e1b42710ea"],
+      "expected_answer_substrings": ["52000", "52,000"],
+      "gold_evidence": [
+        {
+          "document_id": "f06b1834-0534-4204-ac56-40e1b42710ea",
+          "chunk_id": "spreadsheet_1_1",
+          "evidence_type": "table",
+          "field_label": "real_estate_taxes_monthly",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation"]
+        }
+      ],
+      "notes": "Research T-12 question from Florida_Institutional_T12.xlsx."
+    },
+    {
+      "question_id": "palmvista-jun-gpr",
+      "question": "What was gross potential rent in Jun-25 for Palm Vista Apartments?",
+      "evaluation_slice": "table_factual",
+      "scope_type": "entity_scoped",
+      "table_heavy": true,
+      "target_entities": ["Palm Vista Apartments"],
+      "target_document_ids": ["f06b1834-0534-4204-ac56-40e1b42710ea"],
+      "expected_answer_substrings": ["615000", "615,000"],
+      "gold_evidence": [
+        {
+          "document_id": "f06b1834-0534-4204-ac56-40e1b42710ea",
+          "chunk_id": "spreadsheet_1_1",
+          "evidence_type": "table",
+          "field_label": "gross_potential_rent_jun_25",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation"]
+        }
+      ],
+      "notes": "Research T-12 question from Florida_Institutional_T12.xlsx."
+    },
+
+    {
+      "question_id": "hudsonsquare-jul-noi",
+      "question": "What was Hudson Square Apartments' net operating income in Jul-25?",
+      "evaluation_slice": "table_factual",
+      "scope_type": "entity_scoped",
+      "table_heavy": true,
+      "target_entities": ["Hudson Square Apartments"],
+      "target_document_ids": ["bfb1f175-182b-4656-b0c5-ce094fae1a6a"],
+      "expected_answer_substrings": ["380620", "380,620"],
+      "gold_evidence": [
+        {
+          "document_id": "bfb1f175-182b-4656-b0c5-ce094fae1a6a",
+          "chunk_id": "spreadsheet_1_1",
+          "evidence_type": "table",
+          "field_label": "net_operating_income_jul_25",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation"]
+        }
+      ],
+      "notes": "Research T-12 question from New_York_Institutional_T12.xlsx."
+    },
+    {
+      "question_id": "hudsonsquare-aug-management-expenses",
+      "question": "What were the management fee and total operating expenses for Hudson Square Apartments in Aug-25?",
+      "evaluation_slice": "table_factual",
+      "scope_type": "entity_scoped",
+      "table_heavy": true,
+      "target_entities": ["Hudson Square Apartments"],
+      "target_document_ids": ["bfb1f175-182b-4656-b0c5-ce094fae1a6a"],
+      "expected_answer_substrings": ["16215", "16,215", "161515", "161,515"],
+      "gold_evidence": [
+        {
+          "document_id": "bfb1f175-182b-4656-b0c5-ce094fae1a6a",
+          "chunk_id": "spreadsheet_1_1",
+          "evidence_type": "table",
+          "field_label": "management_fee_and_total_expenses_aug_25",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation"]
+        }
+      ],
+      "notes": "Research T-12 question from New_York_Institutional_T12.xlsx."
+    },
+    {
+      "question_id": "hudsonsquare-real-estate-taxes",
+      "question": "What are the monthly real estate taxes shown in the Hudson Square Apartments T-12?",
+      "evaluation_slice": "table_factual",
+      "scope_type": "entity_scoped",
+      "table_heavy": true,
+      "target_entities": ["Hudson Square Apartments"],
+      "target_document_ids": ["bfb1f175-182b-4656-b0c5-ce094fae1a6a"],
+      "expected_answer_substrings": ["52000", "52,000"],
+      "gold_evidence": [
+        {
+          "document_id": "bfb1f175-182b-4656-b0c5-ce094fae1a6a",
+          "chunk_id": "spreadsheet_1_1",
+          "evidence_type": "table",
+          "field_label": "real_estate_taxes_monthly",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation"]
+        }
+      ],
+      "notes": "Research T-12 question from New_York_Institutional_T12.xlsx."
+    },
+    {
+      "question_id": "hudsonsquare-jun-egi",
+      "question": "What was effective gross income in Jun-25 for Hudson Square Apartments?",
+      "evaluation_slice": "table_factual",
+      "scope_type": "entity_scoped",
+      "table_heavy": true,
+      "target_entities": ["Hudson Square Apartments"],
+      "target_document_ids": ["bfb1f175-182b-4656-b0c5-ce094fae1a6a"],
+      "expected_answer_substrings": ["529500", "529,500"],
+      "gold_evidence": [
+        {
+          "document_id": "bfb1f175-182b-4656-b0c5-ce094fae1a6a",
+          "chunk_id": "spreadsheet_1_1",
+          "evidence_type": "table",
+          "field_label": "effective_gross_income_jun_25",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation"]
+        }
+      ],
+      "notes": "Research T-12 question from New_York_Institutional_T12.xlsx."
+    },
+
+    {
+      "question_id": "classbplus-dec-gpr",
+      "question": "What was the gross potential rent in Dec for N_ClassBplus_T12?",
+      "evaluation_slice": "table_factual",
+      "scope_type": "entity_scoped",
+      "table_heavy": true,
+      "target_entities": ["N_ClassBplus_T12"],
+      "target_document_ids": ["a18e22d4-d8c1-43e8-b62c-dc5f8e2a6836"],
+      "expected_answer_substrings": ["$302,000", "302,000", "302000"],
+      "gold_evidence": [
+        {
+          "document_id": "a18e22d4-d8c1-43e8-b62c-dc5f8e2a6836",
+          "chunk_id": "spreadsheet_1_1",
+          "evidence_type": "table",
+          "field_label": "gross_potential_rent_dec",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation"]
+        }
+      ],
+      "notes": "Research T-12 question from N_ClassBplus_T12.xlsx."
+    },
+    {
+      "question_id": "classbplus-sep-repairs",
+      "question": "What were repairs and maintenance in Sep for N_ClassBplus_T12?",
+      "evaluation_slice": "table_factual",
+      "scope_type": "entity_scoped",
+      "table_heavy": true,
+      "target_entities": ["N_ClassBplus_T12"],
+      "target_document_ids": ["a18e22d4-d8c1-43e8-b62c-dc5f8e2a6836"],
+      "expected_answer_substrings": ["$12,000", "12,000", "12000"],
+      "gold_evidence": [
+        {
+          "document_id": "a18e22d4-d8c1-43e8-b62c-dc5f8e2a6836",
+          "chunk_id": "spreadsheet_1_1",
+          "evidence_type": "table",
+          "field_label": "repairs_and_maintenance_sep",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation"]
+        }
+      ],
+      "notes": "Research T-12 question from N_ClassBplus_T12.xlsx."
+    },
+    {
+      "question_id": "classbplus-property-taxes",
+      "question": "What are the monthly property taxes shown in N_ClassBplus_T12?",
+      "evaluation_slice": "table_factual",
+      "scope_type": "entity_scoped",
+      "table_heavy": true,
+      "target_entities": ["N_ClassBplus_T12"],
+      "target_document_ids": ["a18e22d4-d8c1-43e8-b62c-dc5f8e2a6836"],
+      "expected_answer_substrings": ["$19,000", "19,000", "19000"],
+      "gold_evidence": [
+        {
+          "document_id": "a18e22d4-d8c1-43e8-b62c-dc5f8e2a6836",
+          "chunk_id": "spreadsheet_1_1",
+          "evidence_type": "table",
+          "field_label": "property_taxes_monthly",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation"]
+        }
+      ],
+      "notes": "Research T-12 question from N_ClassBplus_T12.xlsx."
+    },
+    {
+      "question_id": "classbplus-dec-other-income",
+      "question": "What was other income in Dec for N_ClassBplus_T12?",
+      "evaluation_slice": "table_factual",
+      "scope_type": "entity_scoped",
+      "table_heavy": true,
+      "target_entities": ["N_ClassBplus_T12"],
+      "target_document_ids": ["a18e22d4-d8c1-43e8-b62c-dc5f8e2a6836"],
+      "expected_answer_substrings": ["$15,800", "15,800", "15800"],
+      "gold_evidence": [
+        {
+          "document_id": "a18e22d4-d8c1-43e8-b62c-dc5f8e2a6836",
+          "chunk_id": "spreadsheet_1_1",
+          "evidence_type": "table",
+          "field_label": "other_income_dec",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation"]
+        }
+      ],
+      "notes": "Research T-12 question from N_ClassBplus_T12.xlsx."
+    },
+
+    {
+      "question_id": "tclassb-jul-gpr",
+      "question": "What was the gross potential rent in Jul for T_ClassB_T12?",
+      "evaluation_slice": "table_factual",
+      "scope_type": "entity_scoped",
+      "table_heavy": true,
+      "target_entities": ["T_ClassB_T12"],
+      "target_document_ids": ["7de984d9-34e8-4204-b1d1-2e6815e276a8"],
+      "expected_answer_substrings": ["$376,000", "376,000", "376000"],
+      "gold_evidence": [
+        {
+          "document_id": "7de984d9-34e8-4204-b1d1-2e6815e276a8",
+          "chunk_id": "spreadsheet_1_1",
+          "evidence_type": "table",
+          "field_label": "gross_potential_rent_jul",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation"]
+        }
+      ],
+      "notes": "Research T-12 question from T_ClassB_T12.xlsx."
+    },
+    {
+      "question_id": "tclassb-mar-repairs",
+      "question": "What were repairs and maintenance in Mar for T_ClassB_T12?",
+      "evaluation_slice": "table_factual",
+      "scope_type": "entity_scoped",
+      "table_heavy": true,
+      "target_entities": ["T_ClassB_T12"],
+      "target_document_ids": ["7de984d9-34e8-4204-b1d1-2e6815e276a8"],
+      "expected_answer_substrings": ["$15,000", "15,000", "15000"],
+      "gold_evidence": [
+        {
+          "document_id": "7de984d9-34e8-4204-b1d1-2e6815e276a8",
+          "chunk_id": "spreadsheet_1_1",
+          "evidence_type": "table",
+          "field_label": "repairs_and_maintenance_mar",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation"]
+        }
+      ],
+      "notes": "Research T-12 question from T_ClassB_T12.xlsx."
+    },
+    {
+      "question_id": "tclassb-property-taxes",
+      "question": "What are the monthly property taxes shown in T_ClassB_T12?",
+      "evaluation_slice": "table_factual",
+      "scope_type": "entity_scoped",
+      "table_heavy": true,
+      "target_entities": ["T_ClassB_T12"],
+      "target_document_ids": ["7de984d9-34e8-4204-b1d1-2e6815e276a8"],
+      "expected_answer_substrings": ["$28,000", "28,000", "28000"],
+      "gold_evidence": [
+        {
+          "document_id": "7de984d9-34e8-4204-b1d1-2e6815e276a8",
+          "chunk_id": "spreadsheet_1_1",
+          "evidence_type": "table",
+          "field_label": "property_taxes_monthly",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation"]
+        }
+      ],
+      "notes": "Research T-12 question from T_ClassB_T12.xlsx."
+    },
+    {
+      "question_id": "tclassb-jun-utilities",
+      "question": "What were utilities in Jun for T_ClassB_T12?",
+      "evaluation_slice": "table_factual",
+      "scope_type": "entity_scoped",
+      "table_heavy": true,
+      "target_entities": ["T_ClassB_T12"],
+      "target_document_ids": ["7de984d9-34e8-4204-b1d1-2e6815e276a8"],
+      "expected_answer_substrings": ["$13,200", "13,200", "13200"],
+      "gold_evidence": [
+        {
+          "document_id": "7de984d9-34e8-4204-b1d1-2e6815e276a8",
+          "chunk_id": "spreadsheet_1_1",
+          "evidence_type": "table",
+          "field_label": "utilities_jun",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation"]
+        }
+      ],
+      "notes": "Research T-12 question from T_ClassB_T12.xlsx."
+    },
+
+    {
+      "question_id": "coastalheights-sep-gpr",
+      "question": "What was the gross potential rent in Sep for Coastal Heights Apartments?",
+      "evaluation_slice": "table_factual",
+      "scope_type": "entity_scoped",
+      "table_heavy": true,
+      "target_entities": ["Coastal Heights Apartments"],
+      "target_document_ids": ["7495507d-366b-4da9-9041-93d879d23a20"],
+      "expected_answer_substrings": ["$872,000", "872,000", "872000"],
+      "gold_evidence": [
+        {
+          "document_id": "7495507d-366b-4da9-9041-93d879d23a20",
+          "chunk_id": "spreadsheet_1_1",
+          "evidence_type": "table",
+          "field_label": "gross_potential_rent_sep",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation"]
+        }
+      ],
+      "notes": "Research T-12 question from C_ClassA_T12.xlsx."
+    },
+    {
+      "question_id": "coastalheights-jul-other-income",
+      "question": "What was other income in Jul for Coastal Heights Apartments?",
+      "evaluation_slice": "table_factual",
+      "scope_type": "entity_scoped",
+      "table_heavy": true,
+      "target_entities": ["Coastal Heights Apartments"],
+      "target_document_ids": ["7495507d-366b-4da9-9041-93d879d23a20"],
+      "expected_answer_substrings": ["$44,500", "44,500", "44500"],
+      "gold_evidence": [
+        {
+          "document_id": "7495507d-366b-4da9-9041-93d879d23a20",
+          "chunk_id": "spreadsheet_1_1",
+          "evidence_type": "table",
+          "field_label": "other_income_jul",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation"]
+        }
+      ],
+      "notes": "Research T-12 question from C_ClassA_T12.xlsx."
+    },
+    {
+      "question_id": "coastalheights-jun-vacancy-loss",
+      "question": "What was vacancy loss in Jun for Coastal Heights Apartments?",
+      "evaluation_slice": "table_factual",
+      "scope_type": "entity_scoped",
+      "table_heavy": true,
+      "target_entities": ["Coastal Heights Apartments"],
+      "target_document_ids": ["7495507d-366b-4da9-9041-93d879d23a20"],
+      "expected_answer_substrings": ["-$38,790", "38,790", "38790"],
+      "gold_evidence": [
+        {
+          "document_id": "7495507d-366b-4da9-9041-93d879d23a20",
+          "chunk_id": "spreadsheet_1_1",
+          "evidence_type": "table",
+          "field_label": "vacancy_loss_jun",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation"]
+        }
+      ],
+      "notes": "Research T-12 question from C_ClassA_T12.xlsx. The property-taxes question for this workbook remains pending because the supplied source excerpt did not include the expense rows."
+    },
+
+    {
+      "question_id": "silvermesa-unit104-status-charge",
+      "question": "For unit 104 at Silver Mesa Apartments, what are the status and total monthly charges?",
+      "evaluation_slice": "table_factual",
+      "scope_type": "entity_scoped",
+      "table_heavy": true,
+      "target_entities": ["Silver Mesa Apartments"],
+      "target_document_ids": ["7e676aab-4641-4d06-b2a3-8f1ab4fa5aee"],
+      "expected_answer_substrings": ["Notice", "2293"],
+      "gold_evidence": [
+        {
+          "document_id": "7e676aab-4641-4d06-b2a3-8f1ab4fa5aee",
+          "chunk_id": "spreadsheet_1_1",
+          "evidence_type": "table",
+          "field_label": "unit_104_status_and_total_monthly_charges",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation"]
+        }
+      ],
+      "notes": "Research rent-roll question from Nevada_Institutional_Rent_Roll.xlsx."
+    },
+    {
+      "question_id": "silvermesa-unit102-rent-gap",
+      "question": "For unit 102 at Silver Mesa Apartments, what are the market rent and contract rent?",
+      "evaluation_slice": "table_factual",
+      "scope_type": "entity_scoped",
+      "table_heavy": true,
+      "target_entities": ["Silver Mesa Apartments"],
+      "target_document_ids": ["7e676aab-4641-4d06-b2a3-8f1ab4fa5aee"],
+      "expected_answer_substrings": ["1825", "1796"],
+      "gold_evidence": [
+        {
+          "document_id": "7e676aab-4641-4d06-b2a3-8f1ab4fa5aee",
+          "chunk_id": "spreadsheet_1_1",
+          "evidence_type": "table",
+          "field_label": "unit_102_market_and_contract_rent",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation"]
+        }
+      ],
+      "notes": "Research rent-roll question from Nevada_Institutional_Rent_Roll.xlsx."
+    },
+    {
+      "question_id": "illinois-110-studio-charge",
+      "question": "For unit 110 in Illinois_Institutional_Rent_Roll, what is the floor plan and total monthly charge?",
+      "evaluation_slice": "table_factual",
+      "scope_type": "entity_scoped",
+      "table_heavy": true,
+      "target_entities": ["Fox River Landing Apartments"],
+      "target_document_ids": ["3d8192d7-05e8-4f55-a341-f8b741cdf728"],
+      "expected_answer_substrings": ["Studio", "1648"],
+      "gold_evidence": [
+        {
+          "document_id": "3d8192d7-05e8-4f55-a341-f8b741cdf728",
+          "chunk_id": "spreadsheet_1_1",
+          "evidence_type": "table",
+          "field_label": "unit_110_floor_plan_and_total_monthly_charge",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation"]
+        }
+      ],
+      "notes": "Research rent-roll question from Illinois_Institutional_Rent_Roll.xlsx."
+    },
+    {
+      "question_id": "illinois-105-lease-balance",
+      "question": "For unit 105 in Illinois_Institutional_Rent_Roll, what is the lease term and balance due?",
+      "evaluation_slice": "table_factual",
+      "scope_type": "entity_scoped",
+      "table_heavy": true,
+      "target_entities": ["Fox River Landing Apartments"],
+      "target_document_ids": ["3d8192d7-05e8-4f55-a341-f8b741cdf728"],
+      "expected_answer_substrings": ["24", "240"],
+      "gold_evidence": [
+        {
+          "document_id": "3d8192d7-05e8-4f55-a341-f8b741cdf728",
+          "chunk_id": "spreadsheet_1_1",
+          "evidence_type": "table",
+          "field_label": "unit_105_lease_term_and_balance_due",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation"]
+        }
+      ],
+      "notes": "Research rent-roll question from Illinois_Institutional_Rent_Roll.xlsx."
+    },
+    {
+      "question_id": "nroll-unit105-mtm-charge",
+      "question": "For unit 1-05 in N_Institutional_Rent_Roll, what is the status and total monthly charge?",
+      "evaluation_slice": "table_factual",
+      "scope_type": "entity_scoped",
+      "table_heavy": true,
+      "target_entities": ["Carolina Oaks Apartments"],
+      "target_document_ids": ["204010c8-1165-4f18-bf32-76be1e841da7"],
+      "expected_answer_substrings": ["MTM", "2331"],
+      "gold_evidence": [
+        {
+          "document_id": "204010c8-1165-4f18-bf32-76be1e841da7",
+          "chunk_id": "spreadsheet_1_1",
+          "evidence_type": "table",
+          "field_label": "unit_1_05_status_and_total_monthly_charge",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation"]
+        }
+      ],
+      "notes": "Research rent-roll question from N_Institutional_Rent_Roll.xlsx."
+    },
+    {
+      "question_id": "nroll-unit103-market-actual",
+      "question": "For unit 1-03 in N_Institutional_Rent_Roll, what are the market rent and actual rent?",
+      "evaluation_slice": "table_factual",
+      "scope_type": "entity_scoped",
+      "table_heavy": true,
+      "target_entities": ["Carolina Oaks Apartments"],
+      "target_document_ids": ["204010c8-1165-4f18-bf32-76be1e841da7"],
+      "expected_answer_substrings": ["2153", "2028"],
+      "gold_evidence": [
+        {
+          "document_id": "204010c8-1165-4f18-bf32-76be1e841da7",
+          "chunk_id": "spreadsheet_1_1",
+          "evidence_type": "table",
+          "field_label": "unit_1_03_market_and_actual_rent",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation"]
+        }
+      ],
+      "notes": "Research rent-roll question from N_Institutional_Rent_Roll.xlsx."
+    },
+    {
+      "question_id": "legacyranch-unit102-status-charge",
+      "question": "For unit 1-02 at Legacy Ranch Apartments, what are the status and total monthly charge?",
+      "evaluation_slice": "table_factual",
+      "scope_type": "entity_scoped",
+      "table_heavy": true,
+      "target_entities": ["Legacy Ranch Apartments"],
+      "target_document_ids": ["115da2c9-c4cc-4afe-91c2-e026a64df131"],
+      "expected_answer_substrings": ["MTM", "2070"],
+      "gold_evidence": [
+        {
+          "document_id": "115da2c9-c4cc-4afe-91c2-e026a64df131",
+          "chunk_id": "spreadsheet_1_1",
+          "evidence_type": "table",
+          "field_label": "unit_1_02_status_and_total_monthly_charge",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation"]
+        }
+      ],
+      "notes": "Research rent-roll question from T_Institutional_Rent_Roll.xlsx. Current indexed row range for spreadsheet_1_1 covers these early units."
+    },
+    {
+      "question_id": "legacyranch-unit101-market-actual",
+      "question": "For unit 1-01 at Legacy Ranch Apartments, what are the market rent and actual rent?",
+      "evaluation_slice": "table_factual",
+      "scope_type": "entity_scoped",
+      "table_heavy": true,
+      "target_entities": ["Legacy Ranch Apartments"],
+      "target_document_ids": ["115da2c9-c4cc-4afe-91c2-e026a64df131"],
+      "expected_answer_substrings": ["1583", "1458"],
+      "gold_evidence": [
+        {
+          "document_id": "115da2c9-c4cc-4afe-91c2-e026a64df131",
+          "chunk_id": "spreadsheet_1_1",
+          "evidence_type": "table",
+          "field_label": "unit_1_01_market_and_actual_rent",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation"]
+        }
+      ],
+      "notes": "Research rent-roll question from T_Institutional_Rent_Roll.xlsx."
+    },
+    {
+      "question_id": "pacificcrest-unit104-status-charge",
+      "question": "For unit 1-04 at Pacific Crest Apartments, what are the status and total monthly charge?",
+      "evaluation_slice": "table_factual",
+      "scope_type": "entity_scoped",
+      "table_heavy": true,
+      "target_entities": ["Pacific Crest Apartments"],
+      "target_document_ids": ["af2799d8-e88b-4f92-9dff-5701858c471d"],
+      "expected_answer_substrings": ["MTM", "3384"],
+      "gold_evidence": [
+        {
+          "document_id": "af2799d8-e88b-4f92-9dff-5701858c471d",
+          "chunk_id": "spreadsheet_1_1",
+          "evidence_type": "table",
+          "field_label": "unit_1_04_status_and_total_monthly_charge",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation"]
+        }
+      ],
+      "notes": "Research rent-roll question from C_Institutional_Rent_Roll.xlsx."
+    },
+    {
+      "question_id": "pacificcrest-unit102-floorplan-charge",
+      "question": "For unit 1-02 at Pacific Crest Apartments, what is the floor plan and total monthly charge?",
+      "evaluation_slice": "table_factual",
+      "scope_type": "entity_scoped",
+      "table_heavy": true,
+      "target_entities": ["Pacific Crest Apartments"],
+      "target_document_ids": ["af2799d8-e88b-4f92-9dff-5701858c471d"],
+      "expected_answer_substrings": ["C1", "3283"],
+      "gold_evidence": [
+        {
+          "document_id": "af2799d8-e88b-4f92-9dff-5701858c471d",
+          "chunk_id": "spreadsheet_1_1",
+          "evidence_type": "table",
+          "field_label": "unit_1_02_floor_plan_and_total_monthly_charge",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation"]
+        }
+      ],
+      "notes": "Research rent-roll question from C_Institutional_Rent_Roll.xlsx."
+    },
+    {
+      "question_id": "tulsa-unit-mix-parking",
+      "question": "What mix of units and parking does Tulsa Storage Units & Parking include?",
+      "evaluation_slice": "entity_scoped",
+      "scope_type": "entity_scoped",
+      "table_heavy": false,
+      "target_entities": ["Tulsa Storage Units & Parking"],
+      "target_document_ids": ["87e95b12-e205-4194-af54-da114c04ca9d"],
+      "expected_answer_substrings": ["133 non-climate-controlled units", "2 covered parking spaces", "68 uncovered parking spaces", "2 leased residential spaces"],
+      "gold_evidence": [
+        {
+          "document_id": "87e95b12-e205-4194-af54-da114c04ca9d",
+          "page": 7,
+          "evidence_type": "narrative",
+          "field_label": "unit_mix_and_parking",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation"]
+        }
+      ],
+      "notes": "Research narrative question from Tulsa Storage OM.pdf."
+    },
+    {
+      "question_id": "tulsa-below-street-rate-variance",
+      "question": "What share of Tulsa Storage tenants are below current street rate, and what monthly and annual variance does that create?",
+      "evaluation_slice": "table_factual",
+      "scope_type": "entity_scoped",
+      "table_heavy": true,
+      "target_entities": ["Tulsa Storage Units & Parking"],
+      "target_document_ids": ["87e95b12-e205-4194-af54-da114c04ca9d"],
+      "expected_answer_substrings": ["36%", "$868 monthly", "$10,410 annually", "10,410 annually"],
+      "gold_evidence": [
+        {
+          "document_id": "87e95b12-e205-4194-af54-da114c04ca9d",
+          "page": 7,
+          "evidence_type": "table",
+          "field_label": "below_street_rate_variance",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation"]
+        }
+      ],
+      "notes": "Research table question from Tulsa Storage OM.pdf."
+    },
+    {
+      "question_id": "tulsa-expansion-income-upside",
+      "question": "What projected monthly and annual rental-income upside is described from converting the 56 uncovered parking spaces at Tulsa Storage?",
+      "evaluation_slice": "narrative",
+      "scope_type": "entity_scoped",
+      "table_heavy": false,
+      "target_entities": ["Tulsa Storage Units & Parking"],
+      "target_document_ids": ["87e95b12-e205-4194-af54-da114c04ca9d"],
+      "expected_answer_substrings": ["$10,200 monthly", "$122,400 annually", "122,400 annually"],
+      "gold_evidence": [
+        {
+          "document_id": "87e95b12-e205-4194-af54-da114c04ca9d",
+          "page": 7,
+          "evidence_type": "narrative",
+          "field_label": "parking_conversion_income_upside",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation"]
+        }
+      ],
+      "notes": "Research narrative question from Tulsa Storage OM.pdf."
+    },
+    {
+      "question_id": "tulsa-tax-bill-appraised-value",
+      "question": "What 2024 appraised value and tax bill are cited in the Tulsa Storage operating-statement notes?",
+      "evaluation_slice": "table_factual",
+      "scope_type": "entity_scoped",
+      "table_heavy": true,
+      "target_entities": ["Tulsa Storage Units & Parking"],
+      "target_document_ids": ["87e95b12-e205-4194-af54-da114c04ca9d"],
+      "expected_answer_substrings": ["$1.25 million", "$15,346", "15,346 tax bill"],
+      "gold_evidence": [
+        {
+          "document_id": "87e95b12-e205-4194-af54-da114c04ca9d",
+          "page": 17,
+          "evidence_type": "table",
+          "field_label": "appraised_value_and_tax_bill_2024",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation"]
+        }
+      ],
+      "notes": "Research operating-statement question from Tulsa Storage OM.pdf."
+    },
+    {
+      "question_id": "lane-size-raw-land",
+      "question": "How many rentable square feet and how much raw land does Lane Prairie Storage include?",
+      "evaluation_slice": "table_factual",
+      "scope_type": "entity_scoped",
+      "table_heavy": true,
+      "target_entities": ["Lane Prairie Storage"],
+      "target_document_ids": ["7e539174-1e2a-4bf8-b835-cafffa8a4070"],
+      "expected_answer_substrings": ["28,030 rentable square feet", "1.90 acres of raw land", "28030", "1.90 acres"],
+      "gold_evidence": [
+        {
+          "document_id": "7e539174-1e2a-4bf8-b835-cafffa8a4070",
+          "page": 7,
+          "evidence_type": "narrative",
+          "field_label": "rentable_square_feet_and_raw_land",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation"]
+        }
+      ],
+      "notes": "Research narrative question from Lane Prairie OM - 2026.pdf."
+    },
+    {
+      "question_id": "lane-cell-tower-income",
+      "question": "What cell-tower lease income is included with the Lane Prairie Storage purchase, and when does it begin?",
+      "evaluation_slice": "narrative",
+      "scope_type": "entity_scoped",
+      "table_heavy": false,
+      "target_entities": ["Lane Prairie Storage"],
+      "target_document_ids": ["7e539174-1e2a-4bf8-b835-cafffa8a4070"],
+      "expected_answer_substrings": ["$1,500 per month", "April 2026", "1500 in monthly income"],
+      "gold_evidence": [
+        {
+          "document_id": "7e539174-1e2a-4bf8-b835-cafffa8a4070",
+          "page": 7,
+          "evidence_type": "narrative",
+          "field_label": "cell_tower_lease_income",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation"]
+        }
+      ],
+      "notes": "Research narrative question from Lane Prairie OM - 2026.pdf."
+    },
+    {
+      "question_id": "lane-tax-bill-appraised-value",
+      "question": "What 2025 appraised value and tax bill are listed in the Lane Prairie operating-statement notes?",
+      "evaluation_slice": "table_factual",
+      "scope_type": "entity_scoped",
+      "table_heavy": true,
+      "target_entities": ["Lane Prairie Storage"],
+      "target_document_ids": ["7e539174-1e2a-4bf8-b835-cafffa8a4070"],
+      "expected_answer_substrings": ["$747,190", "$13,109", "13,109 tax bill"],
+      "gold_evidence": [
+        {
+          "document_id": "7e539174-1e2a-4bf8-b835-cafffa8a4070",
+          "page": 18,
+          "evidence_type": "table",
+          "field_label": "appraised_value_and_tax_bill_2025",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation"]
+        }
+      ],
+      "notes": "Research operating-statement question from Lane Prairie OM - 2026.pdf."
+    },
+    {
+      "question_id": "lane-five-mile-population",
+      "question": "What is the 2025 estimated total population within 5 miles of Lane Prairie Storage?",
+      "evaluation_slice": "table_factual",
+      "scope_type": "entity_scoped",
+      "table_heavy": true,
+      "target_entities": ["Lane Prairie Storage"],
+      "target_document_ids": ["7e539174-1e2a-4bf8-b835-cafffa8a4070"],
+      "expected_answer_substrings": ["42,262", "42262"],
+      "gold_evidence": [
+        {
+          "document_id": "7e539174-1e2a-4bf8-b835-cafffa8a4070",
+          "page": 28,
+          "evidence_type": "table",
+          "field_label": "population_within_five_miles_2025",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation"]
+        }
+      ],
+      "notes": "Research demographic table question from Lane Prairie OM - 2026.pdf."
+    },
+    {
+      "question_id": "lane-5x10-rent",
+      "question": "What rent and rent per square foot are listed for a 5 x 10 unit at Lane Prairie Storage?",
+      "evaluation_slice": "table_factual",
+      "scope_type": "entity_scoped",
+      "table_heavy": true,
+      "target_entities": ["Lane Prairie Storage"],
+      "target_document_ids": ["7e539174-1e2a-4bf8-b835-cafffa8a4070"],
+      "expected_answer_substrings": ["$43", "$0.86", "0.86"],
+      "gold_evidence": [
+        {
+          "document_id": "7e539174-1e2a-4bf8-b835-cafffa8a4070",
+          "page": 23,
+          "evidence_type": "table",
+          "field_label": "five_by_ten_rent_and_rent_per_sqft",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation"]
+        }
+      ],
+      "notes": "Research pricing-table question from Lane Prairie OM - 2026.pdf. Uses the indexed 5 x 10 row showing Lane Prairie Storage at $43 and $0.86 per square foot."
+    },
+    {
+      "question_id": "coastalheights-property-taxes",
+      "question": "What are the monthly property taxes shown in Coastal Heights Apartments' T-12?",
+      "evaluation_slice": "table_factual",
+      "scope_type": "entity_scoped",
+      "table_heavy": true,
+      "target_entities": ["Coastal Heights Apartments"],
+      "target_document_ids": ["7495507d-366b-4da9-9041-93d879d23a20"],
+      "expected_answer_substrings": ["52,000", "52000"],
+      "gold_evidence": [
+        {
+          "document_id": "7495507d-366b-4da9-9041-93d879d23a20",
+          "chunk_id": "spreadsheet_1_1",
+          "evidence_type": "table",
+          "field_label": "property_taxes_monthly",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation"]
+        }
+      ],
+      "notes": "Research T-12 spreadsheet question from C_ClassA_T12.xlsx. Current indexed chunk spreadsheet_1_1 includes the monthly Property Taxes row with 52,000 in each month."
+    },
+    {
+      "question_id": "bullard-tyler-growth",
+      "question": "How many people and households is the Tyler metro expected to add through 2026?",
+      "evaluation_slice": "narrative",
+      "scope_type": "entity_scoped",
+      "table_heavy": false,
+      "target_entities": ["Bullard Heights Storage"],
+      "target_document_ids": ["a85639c1-e7be-4f62-9a9b-7f51348f4225"],
+      "expected_answer_substrings": ["8,000 people", "3,500 households", "8000", "3500"],
+      "gold_evidence": [
+        {
+          "document_id": "a85639c1-e7be-4f62-9a9b-7f51348f4225",
+          "page": 7,
+          "evidence_type": "narrative",
+          "field_label": "tyler_growth_projection",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation"]
+        }
+      ],
+      "notes": "Research narrative question from Bullard Heights Storage.pdf."
+    },
+    {
+      "question_id": "bullard-tyler-population",
+      "question": "In Bullard Heights Storage About how many residents does the city of Tyler have?",
+      "evaluation_slice": "narrative",
+      "scope_type": "entity_scoped",
+      "table_heavy": false,
+      "target_entities": ["Bullard Heights Storage"],
+      "target_document_ids": ["a85639c1-e7be-4f62-9a9b-7f51348f4225"],
+      "expected_answer_substrings": ["108,000 residents", "108000 residents", "108,000"],
+      "gold_evidence": [
+        {
+          "document_id": "a85639c1-e7be-4f62-9a9b-7f51348f4225",
+          "page": 7,
+          "evidence_type": "narrative",
+          "field_label": "tyler_population",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation"]
+        }
+      ],
+      "notes": "Research narrative question from Bullard Heights Storage.pdf. Question wording intentionally matches the research question bank and captured chat phrasing."
+    },
+    {
+      "question_id": "bullard-tyler-distribution-linkage",
+      "question": "In In Bullard Heights Storage What regional distribution linkage is highlighted for Tyler, Texas?",
+      "evaluation_slice": "narrative",
+      "scope_type": "entity_scoped",
+      "table_heavy": false,
+      "target_entities": ["Bullard Heights Storage"],
+      "target_document_ids": ["a85639c1-e7be-4f62-9a9b-7f51348f4225"],
+      "expected_answer_substrings": ["distribution between Texas and Louisiana", "Texas and Louisiana"],
+      "gold_evidence": [
+        {
+          "document_id": "a85639c1-e7be-4f62-9a9b-7f51348f4225",
+          "page": 7,
+          "evidence_type": "narrative",
+          "field_label": "distribution_linkage",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation"]
+        }
+      ],
+      "notes": "Research narrative question from Bullard Heights Storage.pdf. Question wording intentionally matches the research question bank and captured chat phrasing."
+    },
+    {
+      "question_id": "bullard-brookshire-employment",
+      "question": "In Bullard Heights Storage Which grocery company is cited as a major Tyler employer and about how many people work for it locally?",
+      "evaluation_slice": "narrative",
+      "scope_type": "entity_scoped",
+      "table_heavy": false,
+      "target_entities": ["Bullard Heights Storage"],
+      "target_document_ids": ["a85639c1-e7be-4f62-9a9b-7f51348f4225"],
+      "expected_answer_substrings": ["Brookshire Grocery Co.", "Brookshire Grocery Company", "Over 1,000 people", "1,000 people"],
+      "gold_evidence": [
+        {
+          "document_id": "a85639c1-e7be-4f62-9a9b-7f51348f4225",
+          "page": 7,
+          "evidence_type": "narrative",
+          "field_label": "brookshire_local_employment",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation"]
+        }
+      ],
+      "notes": "Research narrative question from Bullard Heights Storage.pdf. Question wording intentionally matches the research question bank and captured chat phrasing."
+    },
+    {
+      "question_id": "filledpl-property-address",
+      "question": "What property address is listed in 2025_Profit_Loss_Filled.xlsx?",
+      "evaluation_slice": "entity_scoped",
+      "scope_type": "entity_scoped",
+      "table_heavy": false,
+      "target_entities": ["2025_Profit_Loss_Filled.xlsx"],
+      "target_document_ids": ["8e0230e6-e733-4ab8-9500-41da69fb867c"],
+      "expected_answer_substrings": ["1540 North Yale Avenue", "Tulsa, OK 74115"],
+      "gold_evidence": [
+        {
+          "document_id": "8e0230e6-e733-4ab8-9500-41da69fb867c",
+          "chunk_id": "spreadsheet_1_1",
+          "evidence_type": "table",
+          "field_label": "property_address",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation"]
+        }
+      ],
+      "notes": "Research spreadsheet question from 2025_Profit_Loss_Filled.xlsx. Current indexed row range for spreadsheet_1_1 includes the property address and monthly P&L values."
+    },
+    {
+      "question_id": "filledpl-feb-rental-income",
+      "question": "What was the rental income in Feb-25 in 2025_Profit_Loss_Filled.xlsx?",
+      "evaluation_slice": "table_factual",
+      "scope_type": "entity_scoped",
+      "table_heavy": true,
+      "target_entities": ["2025_Profit_Loss_Filled.xlsx"],
+      "target_document_ids": ["8e0230e6-e733-4ab8-9500-41da69fb867c"],
+      "expected_answer_substrings": ["20,767.58", "20767.58"],
+      "gold_evidence": [
+        {
+          "document_id": "8e0230e6-e733-4ab8-9500-41da69fb867c",
+          "chunk_id": "spreadsheet_1_1",
+          "evidence_type": "table",
+          "field_label": "rental_income_feb_25",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation"]
+        }
+      ],
+      "notes": "Research spreadsheet question from 2025_Profit_Loss_Filled.xlsx. Current indexed row range for spreadsheet_1_1 includes the monthly rental income row."
+    },
+    {
+      "question_id": "filledpl-nov-taxes-noi",
+      "question": "What were property taxes and net operating income in Nov-25 in 2025_Profit_Loss_Filled.xlsx?",
+      "evaluation_slice": "table_factual",
+      "scope_type": "entity_scoped",
+      "table_heavy": true,
+      "target_entities": ["2025_Profit_Loss_Filled.xlsx"],
+      "target_document_ids": ["8e0230e6-e733-4ab8-9500-41da69fb867c"],
+      "expected_answer_substrings": ["1,278.83", "1278.83", "16,899.17", "16899.17"],
+      "gold_evidence": [
+        {
+          "document_id": "8e0230e6-e733-4ab8-9500-41da69fb867c",
+          "chunk_id": "spreadsheet_1_1",
+          "evidence_type": "table",
+          "field_label": "property_taxes_and_net_operating_income_nov_25",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation"]
+        }
+      ],
+      "notes": "Research spreadsheet question from 2025_Profit_Loss_Filled.xlsx. Current indexed row range for spreadsheet_1_1 includes both the property tax and NOI rows."
+    }
+  ]
+}

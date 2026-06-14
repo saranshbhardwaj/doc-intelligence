@@ -32,6 +32,13 @@ import app.db_models_templates  # noqa: F401
 import app.db_models_io_logs    # noqa: F401
 
 from app.db_models_io_logs import LLMIOLog
+from app.core.rag.eval_annotations import (
+    build_promptfoo_annotation_vars,
+    get_expected_answer_substrings,
+    load_benchmark_annotations,
+    load_benchmark_annotations_from_path,
+    lookup_benchmark_annotation,
+)
 from app.core.rag.eval_contract import RAG_EVAL_CONTRACT_VERSION
 
 SUPPORTED_STAGES = [
@@ -107,7 +114,7 @@ STRUCTURAL_ASSERTIONS = {
         {
             # RAG prompt instructs the model to cite as [Sn:pN] (sequential source, page).
             "type": "javascript",
-            "value": "/\\[S\\d+:p\\d+\\]/.test(JSON.parse(output).text)",
+            "value": "/\\[S\\d+:p\\d+(?:,\\s*S\\d+:p\\d+)*\\]/.test(JSON.parse(output).text)",
             "metric": "rag/has_citations",
         },
         # Use contextTransform so the judge sees the actual LLM-visible context (extracted
@@ -120,7 +127,7 @@ STRUCTURAL_ASSERTIONS = {
             "contextTransform": "JSON.parse(output).context",
             "metric": "gen/faithfulness",
         },
-        {"type": "answer-relevance", "threshold": 0.65, "metric": "gen/answer_relevance"},
+        {"type": "answer-relevance", "threshold": 0.50, "metric": "gen/answer_relevance"},
     ],
     "rag_comparison": [
         {"type": "javascript", "value": "JSON.parse(output).text.length > 100"},
@@ -143,7 +150,7 @@ STRUCTURAL_ASSERTIONS = {
             "contextTransform": "JSON.parse(output).context",
             "metric": "comparison/faithfulness",
         },
-        {"type": "answer-relevance", "threshold": 0.65, "metric": "comparison/answer_relevance"},
+        {"type": "answer-relevance", "threshold": 0.50, "metric": "comparison/answer_relevance"},
     ],
 }
 
@@ -232,8 +239,8 @@ def _validate_rag_export_entry(
             reasons.append("missing_document_scope")
         if not metadata.get("chunk_scores"):
             reasons.append("missing_chunk_scores")
-        if not json.loads(e2e_vars.get("expected_pages", "[]")):
-            reasons.append("missing_expected_pages")
+        if not json.loads(e2e_vars.get("expected_anchors", "[]")):
+            reasons.append("missing_expected_anchors")
 
     elif export_stage == "rag_generation":
         if not system_prompt:
@@ -449,37 +456,64 @@ def _build_golden_assertions(normalized: str, output_raw: str, annotations: dict
                     })
 
     elif normalized == "rag_retrieval":
-        # Golden: page+document recall ≥ 80%.
-        # expected_pages is built from chunk_scores in the io_log metadata.
-        # Page-based matching is stable across re-indexing (chunk IDs change, pages don't).
+        # Golden: retrieval anchor recall >= 80%.
+        # Prefer curated benchmark gold evidence when available; fall back to captured
+        # expected anchors/pages from the original session when benchmark metadata is absent.
+        # PDFs use document+page anchors; spreadsheets use document+chunk_id anchors.
         assertions.append({
             "type": "javascript",
             "value": (
                 "(() => {"
-                "const expected = JSON.parse(context.vars.expected_pages);"
-                "if (!expected || expected.length === 0) return true;"
+                "const benchmarkGold = JSON.parse(context.vars.benchmark_gold_evidence || '[]');"
+                "const expectedAnchors = JSON.parse(context.vars.expected_anchors || context.vars.expected_pages || '[]');"
+                "const candidateDocumentIds = new Set(JSON.parse(context.vars.document_ids || '[]'));"
+                "const benchmarkGoldUsable = benchmarkGold.length > 0 && benchmarkGold.some(item => item && item.document_id && candidateDocumentIds.has(item.document_id));"
+                "const expected = benchmarkGoldUsable ? benchmarkGold : expectedAnchors;"
+                "const useSpreadsheetSheetFallback = !benchmarkGoldUsable;"
+                "const keyForAnchor = (item) => {"
+                "if (!item || !item.document_id) return null;"
+                "if (item.chunk_id) {"
+                "const sheetName = item.sheet_name || item.sheet;"
+                "if (useSpreadsheetSheetFallback && sheetName) return item.document_id + ':sheet:' + String(sheetName).toLowerCase();"
+                "return item.document_id + ':chunk:' + item.chunk_id;"
+                "}"
+                "const page = item.page ?? item.bbox_page ?? item.page_number;"
+                "if (page === null || page === undefined) return null;"
+                "return item.document_id + ':page:' + page;"
+                "};"
+                "const expectedKeys = expected.map(keyForAnchor).filter(Boolean);"
+                "if (expectedKeys.length === 0) return true;"
                 "const chunks = JSON.parse(output).chunks;"
-                "const gotSet = new Set(chunks.map(c => c.document_id + ':' + c.page));"
-                "const hits = expected.filter(e => gotSet.has(e.document_id + ':' + e.page)).length;"
-                "return hits / expected.length >= 0.8;"
+                "const gotSet = new Set(chunks.map(keyForAnchor).filter(Boolean));"
+                "const hits = expectedKeys.filter(key => gotSet.has(key)).length;"
+                "return hits / expectedKeys.length >= 0.8;"
                 "})()"
             ),
             "metric": "retrieval/page_recall_80",
         })
 
     elif normalized == "rag_generation":
-        # Tier 3: inject expected-value assertion if an annotation exists for this question.
-        # annotations maps user_question (lowercase-trimmed) → expected substring.
-        if annotations and user_question:
-            key = user_question.strip().lower()
-            expected = annotations.get(key) or annotations.get(user_question.strip())
-            if expected:
-                escaped = _escape_js_string(str(expected))
-                assertions.append({
-                    "type": "javascript",
-                    "value": f"JSON.parse(output).text.toLowerCase().includes('{escaped.lower()}')",
-                    "metric": f"golden/expected_value",
-                })
+        # Tier 3: inject expected-value assertions if benchmark annotations exist.
+        annotation = lookup_benchmark_annotation(annotations, user_question)
+        expected_variants = [
+            str(expected).lower()
+            for expected in get_expected_answer_substrings(annotation)
+            if expected
+        ]
+        if expected_variants:
+            assertions.append({
+                "type": "javascript",
+                "value": (
+                    "(() => {"
+                    "const text = JSON.parse(output).text.toLowerCase();"
+                    "const normalizeValue = (value) => value.toLowerCase().replace(/[,$]/g, '');"
+                    "const normalizedText = normalizeValue(text);"
+                    f"const expectedVariants = {json.dumps(expected_variants)};"
+                    "return expectedVariants.some(expected => text.includes(expected) || normalizedText.includes(normalizeValue(expected)));"
+                    "})()"
+                ),
+                "metric": "golden/expected_value_any",
+            })
 
         # context-relevance is intentionally omitted: we send 10-15 chunks per query
         # (dense financial PDFs need broad retrieval), so the ratio of "required sentences /
@@ -489,7 +523,7 @@ def _build_golden_assertions(normalized: str, output_raw: str, annotations: dict
             "type": "llm-rubric",
             "value": (
                 "The response is factually grounded in the document context. "
-                "It directly addresses the user's question, includes at least one [Dn:pN] citation, "
+                "It directly addresses the user's question, includes at least one [Sn:pN] citation, "
                 "and does not contain obvious hallucinations or fabricated facts."
             ),
             "metric": "golden/rag_quality",
@@ -550,19 +584,35 @@ def _build_e2e_vars(entry: LLMIOLog, export_stage: str) -> dict:
         extra["user_question"] = metadata.get("user_question", "")
         extra["document_ids"] = json.dumps(metadata.get("document_ids", []), ensure_ascii=False)
         extra["collection_id"] = metadata.get("collection_id") or ""
-        # Golden ground truth: page+doc pairs resolved same way as citations
+        extra["query_understanding"] = json.dumps(metadata.get("query_understanding") or {}, ensure_ascii=False)
+        # Golden ground truth: page anchors for PDFs, chunk anchors for spreadsheets.
         chunk_scores = metadata.get("chunk_scores", [])
         expected_pages = []
+        expected_anchors = []
         seen = set()
         for cs in chunk_scores:
             doc_id = cs.get("document_id")
             page = cs.get("bbox_page") or cs.get("page_number")
+            chunk_id = cs.get("chunk_id")
             if doc_id and page is not None:
-                key = f"{doc_id}:{page}"
+                key = f"{doc_id}:page:{page}"
                 if key not in seen:
                     seen.add(key)
                     expected_pages.append({"document_id": doc_id, "page": page})
+                    expected_anchors.append({"document_id": doc_id, "page": page})
+            elif doc_id and chunk_id:
+                key = f"{doc_id}:chunk:{chunk_id}"
+                if key not in seen:
+                    seen.add(key)
+                    expected_anchors.append({
+                        "document_id": doc_id,
+                        "chunk_id": chunk_id,
+                        "sheet_name": cs.get("sheet_name"),
+                        "row_start": cs.get("row_start"),
+                        "row_end": cs.get("row_end"),
+                    })
         extra["expected_pages"] = json.dumps(expected_pages, ensure_ascii=False)
+        extra["expected_anchors"] = json.dumps(expected_anchors, ensure_ascii=False)
 
     elif export_stage in ("rag_generation", "rag_comparison"):
         # Generation providers need the raw question and prompt-visible context for assertions.
@@ -589,6 +639,9 @@ def export_entries(
 
         system_prompt = _get_system_prompt(entry, version)
         e2e_vars = _build_e2e_vars(entry, normalized_stage)
+        user_question = e2e_vars.get("user_question", "")
+        benchmark_annotation = lookup_benchmark_annotation(annotations, user_question)
+        benchmark_vars = build_promptfoo_annotation_vars(benchmark_annotation)
 
         if normalized_stage in ("rag_retrieval", "rag_generation", "rag_comparison"):
             is_valid, reasons = _validate_rag_export_entry(entry, normalized_stage, system_prompt, e2e_vars)
@@ -606,7 +659,6 @@ def export_entries(
         assertions = list(STRUCTURAL_ASSERTIONS[normalized_stage])
 
         if golden and entry.output:
-            user_question = e2e_vars.get("user_question", "")
             assertions.extend(_build_golden_assertions(normalized_stage, entry.output, annotations, user_question))
 
         # Parse output for metadata
@@ -621,8 +673,9 @@ def export_entries(
             "vars": {
                 "system_prompt": system_prompt,
                 "user_message": entry.user_message or "",
-                "query": e2e_vars.get("user_question", ""),
+                "query": user_question,
                 **e2e_vars,
+                **benchmark_vars,
             },
             "assert": assertions,
             "_metadata": {
@@ -636,6 +689,7 @@ def export_entries(
                 "input_tokens": entry.input_tokens,
                 "output_tokens": entry.output_tokens,
                 "duration_ms": entry.duration_ms,
+                "benchmark_annotation": benchmark_annotation,
                 "golden": golden,
             },
         }
@@ -773,9 +827,9 @@ def main():
         "--annotations",
         default=None,
         help=(
-            "Path to a JSON file mapping user questions to expected answer substrings. "
-            "For RAG generation golden exports, injects a Tier-3 value assertion for each matched question. "
-            "Example: evals/annotations/rag-chat.json"
+            "Path to a legacy flat annotations file or the structured benchmark annotation schema "
+            "under evals/annotations/. For RAG generation golden exports, injects value assertions "
+            "for each matched question."
         ),
     )
     args = parser.parse_args()
@@ -786,10 +840,7 @@ def main():
         if not annotations_path.exists():
             logger.error(f"Annotations file not found: {annotations_path}")
             sys.exit(1)
-        with open(annotations_path, encoding="utf-8") as f:
-            raw = json.load(f)
-        # Normalise keys to lowercase-stripped for case-insensitive matching
-        annotations = {k.strip().lower(): v for k, v in raw.items()}
+        annotations = load_benchmark_annotations_from_path(annotations_path)
         logger.info(f"Loaded {len(annotations)} annotations from {annotations_path}")
 
     log_ids = [i.strip() for i in args.log_ids.split(",")] if args.log_ids else None

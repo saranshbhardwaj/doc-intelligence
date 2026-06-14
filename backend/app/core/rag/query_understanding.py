@@ -11,8 +11,41 @@ from pydantic import BaseModel, Field
 from typing import List, Optional
 from enum import Enum
 import logging
+import re
 
 logger = logging.getLogger(__name__)
+
+
+_HISTORY_REFERENCE_PATTERNS = (
+    re.compile(r"^\s*(and|also)\b", re.IGNORECASE),
+    re.compile(r"\b(what|how)\s+about\b", re.IGNORECASE),
+    re.compile(r"\bthe\s+other\b", re.IGNORECASE),
+    re.compile(r"\b(this|that|same)\s+(one|property|document|deal)\b", re.IGNORECASE),
+    re.compile(r"\b(you\s+mentioned|mentioned\s+earlier|earlier|previously|before)\b", re.IGNORECASE),
+    re.compile(r"\bits\b", re.IGNORECASE),
+    re.compile(r"\b(it|they|them|those)\b", re.IGNORECASE),
+)
+
+_FIELD_SYNONYM_MAP = {
+    "lot size": ["lot size", "site size", "parcel size", "acreage"],
+    "approximate year built": ["approximate year built", "year built", "built in", "construction year"],
+    "year built": ["year built", "built in", "construction year"],
+    "price per unit": ["price per unit", "per unit", "ppu"],
+    "price per square foot": ["price per square foot", "price per sqft", "per square foot", "psf"],
+    "asking price": ["asking price", "offering price", "listing price", "purchase price", "sale price"],
+    "cap rate": ["cap rate", "capitalization rate", "going-in cap rate"],
+    "noi": ["noi", "net operating income", "annual noi"],
+}
+
+_FIELD_DETECTION_RULES = [
+    ("price per square foot", (r"\bprice per square foot\b", r"\bprice per sqft\b", r"\bpsf\b")),
+    ("price per unit", (r"\bprice per unit\b", r"\bper unit\b", r"\bppu\b")),
+    ("approximate year built", (r"\bapprox(?:imate|\.)? year built\b", r"\byear built\b", r"\bconstruction year\b")),
+    ("lot size", (r"\blot size\b", r"\bsite size\b", r"\bparcel size\b", r"\bacreage\b")),
+    ("asking price", (r"\basking price\b", r"\boffering price\b", r"\blisting price\b")),
+    ("cap rate", (r"\bcap rate\b", r"\bcapitalization rate\b")),
+    ("noi", (r"\bnoi\b", r"\bnet operating income\b")),
+]
 
 
 class QueryType(str, Enum):
@@ -129,6 +162,106 @@ class QueryUnderstanding(BaseModel):
     )
 
 
+def should_consult_history_for_query(query: Optional[str]) -> bool:
+    """Return True when the raw query likely depends on prior conversation."""
+    text = (query or "").strip()
+    if not text:
+        return False
+
+    return any(pattern.search(text) for pattern in _HISTORY_REFERENCE_PATTERNS)
+
+
+def _dedupe_preserve(items: List[str]) -> List[str]:
+    seen = set()
+    ordered: List[str] = []
+    for item in items:
+        normalized = item.strip().lower()
+        if not normalized or normalized in seen:
+            continue
+        seen.add(normalized)
+        ordered.append(item.strip())
+    return ordered
+
+
+def _extract_target_phrase(query: str) -> Optional[str]:
+    patterns = [
+        r"\bfor\s+(.+?)(?:\?|$)",
+        r"\bof\s+(.+?)(?:\?|$)",
+        r"\bat\s+(.+?)(?:\?|$)",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, query, re.IGNORECASE)
+        if not match:
+            continue
+        candidate = match.group(1).strip(" .?\t\n\r")
+        candidate = re.sub(r"^(the|property|deal)\s+", "", candidate, flags=re.IGNORECASE)
+        if candidate:
+            return candidate
+    return None
+
+
+def _detect_explicit_fact_fields(query: str) -> List[str]:
+    lowered = query.lower()
+    detected: List[str] = []
+    for canonical, patterns in _FIELD_DETECTION_RULES:
+        if any(re.search(pattern, lowered, re.IGNORECASE) for pattern in patterns):
+            detected.append(canonical)
+    return _dedupe_preserve(detected)
+
+
+def _apply_deterministic_fallbacks(query: str, understanding: "QueryUnderstanding") -> "QueryUnderstanding":
+    """Recover obvious single-property metric lookups when LLM extraction is sparse."""
+    explicit_fields = _detect_explicit_fact_fields(query)
+    explicit_target = _extract_target_phrase(query)
+
+    if not explicit_fields or not explicit_target:
+        return understanding
+
+    existing_targets = [name for name in (understanding.target_property_names or []) if isinstance(name, str) and name.strip()]
+    if len(existing_targets) > 1:
+        return understanding
+
+    has_property_entity = any(
+        entity.entity_type in {"property", "deal", "document"} and entity.name.strip()
+        for entity in (understanding.entities or [])
+    )
+
+    if understanding.query_type == QueryType.COMPARISON:
+        return understanding
+
+    understanding.query_type = QueryType.DATA_EXTRACTION
+    understanding.scope_mode = ScopeMode.SINGLE_DOC
+    understanding.target_property_names = existing_targets or [explicit_target]
+    understanding.data_fields = _dedupe_preserve(list(understanding.data_fields or []) + explicit_fields)
+
+    if not understanding.data_field_synonyms:
+        synonyms: List[str] = []
+        for field in understanding.data_fields:
+            synonyms.extend(_FIELD_SYNONYM_MAP.get(field.lower(), [field]))
+        understanding.data_field_synonyms = _dedupe_preserve(synonyms)
+
+    if not has_property_entity:
+        understanding.entities.append(
+            ExtractedEntity(name=understanding.target_property_names[0], entity_type="property", confidence=0.72)
+        )
+
+    existing_metric_names = {entity.name.strip().lower() for entity in understanding.entities if entity.entity_type == "metric"}
+    for field in understanding.data_fields:
+        if field.lower() not in existing_metric_names:
+            understanding.entities.append(
+                ExtractedEntity(name=field, entity_type="metric", confidence=0.7)
+            )
+
+    understanding.table_boost = max(float(understanding.table_boost or 1.0), 1.2)
+    understanding.narrative_boost = min(float(understanding.narrative_boost or 1.0), 0.9)
+    understanding.confidence = max(float(understanding.confidence or 0.0), 0.65)
+
+    if not understanding.reformulated_query:
+        understanding.reformulated_query = query
+
+    return understanding
+
+
 def is_narrow_explicit_fact_lookup(query_understanding: Optional["QueryUnderstanding"]) -> bool:
     """Return True for narrow fact lookups that should avoid broad retrieval behaviors."""
     if not query_understanding:
@@ -161,15 +294,32 @@ def is_narrow_explicit_fact_lookup(query_understanding: Optional["QueryUnderstan
     if not has_specific_target:
         return False
 
-    metric_like_fields = {
+    exact_fact_like_fields = {
         "price", "asking price", "purchase price", "valuation", "value",
-        "noi", "cap rate", "irr", "equity multiple", "rent", "occupancy",
+        "noi", "net operating income", "cap rate", "irr", "equity multiple", "rent", "occupancy",
         "yield", "leverage", "loan", "interest rate", "expense", "revenue",
-        "cash flow",
+        "cash flow", "address", "property address", "situs address", "use code",
+        "tax rate area", "year built", "unit count", "square footage", "building square footage",
+        "lot size", "acreage", "lease expiration", "market rent", "contract rent",
+        "balance due", "status", "monthly charge", "gross potential rent",
+        "other income", "vacancy loss", "real estate taxes", "property taxes",
+        "management fee", "utilities", "repairs and maintenance",
+        "effective gross income", "egi", "operating expenses", "total operating expenses",
+        "gross income", "gross scheduled rent",
+    }
+    descriptive_field_cues = {
+        "feature", "features", "design", "amenity", "amenities", "layout",
+        "highlights", "highlighted", "description", "described", "narrative",
+        "strategy", "business plan", "positioning", "nearby", "access",
+        "private space", "private-space",
     }
 
-    # Strong signal when LLM returns a compact explicit field list.
-    if 1 <= len(data_fields) <= 3:
+    joined_fields = " ".join(data_fields)
+    looks_descriptive = any(term in joined_fields for term in descriptive_field_cues)
+    looks_exact_fact = any(term in joined_fields for term in exact_fact_like_fields)
+
+    # Strong signal only for compact explicit fact lists, not descriptive requests.
+    if 1 <= len(data_fields) <= 3 and looks_exact_fact and not looks_descriptive:
         return True
 
     # Fallback when data_fields is empty but entities still indicate a narrow metric lookup.
@@ -182,8 +332,7 @@ def is_narrow_explicit_fact_lookup(query_understanding: Optional["QueryUnderstan
 
     # Medium-confidence fallback for slightly longer metric-centric field lists.
     if 1 <= len(data_fields) <= 5:
-        joined_fields = " ".join(data_fields)
-        if any(term in joined_fields for term in metric_like_fields) and confidence >= 0.6:
+        if looks_exact_fact and not looks_descriptive and confidence >= 0.6:
             return True
 
     return False
@@ -334,6 +483,7 @@ Be concise and accurate. Focus on extraction, not explanation."""
             )
 
             understanding = QueryUnderstanding(**result["data"])
+            understanding = _apply_deterministic_fallbacks(query, understanding)
 
             logger.info(
                 "Query understanding complete",

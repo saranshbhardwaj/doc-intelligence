@@ -82,8 +82,9 @@ class Settings(BaseSettings):
     spreadsheet_max_sheets: int = 30
     spreadsheet_max_rows_per_sheet: int = 10_000
     spreadsheet_max_total_cells: int = 250_000
-    spreadsheet_rows_per_chunk: int = 200
-    spreadsheet_max_chunk_tokens: int = 6000
+    spreadsheet_rows_per_chunk: int = 60
+    spreadsheet_rows_overlap: int = 8
+    spreadsheet_max_chunk_tokens: int = 1800
 
     # Template fill guardrails
     template_fill_max_template_mb: int = 10
@@ -271,6 +272,10 @@ class Settings(BaseSettings):
     #          "BAAI/bge-reranker-base" (110M params, higher quality, multilingual)
     rag_reranker_model: str = "cross-encoder/ms-marco-MiniLM-L-6-v2"
 
+    # Some HF rerankers (e.g., jinaai/jina-reranker-v2-*) require trust_remote_code=True.
+    # Keep disabled by default for safety; enable explicitly for controlled experiments.
+    rag_reranker_trust_remote_code: bool = False
+
     # Batch size for re-ranking (process multiple query-doc pairs together)
     rag_reranker_batch_size: int = 8
 
@@ -279,6 +284,11 @@ class Settings(BaseSettings):
 
     # Apply metadata boosting to re-ranker scores (gentle nudge for tables/narrative)
     rag_reranker_apply_metadata_boost: bool = True
+
+    # Lightweight structured-evidence rescue for table/key-value chunks that generic
+    # web-trained cross-encoders often under-score in financial document RAG.
+    rag_reranker_structured_signal_enabled: bool = True
+    rag_reranker_structured_signal_weight: float = 0.2
 
     # Skip re-ranking when candidate pool is tiny (chat/general RAG)
     rag_reranker_min_candidates_chat: int = 6
@@ -320,12 +330,14 @@ class Settings(BaseSettings):
     # BM25-matched structured chunks are passed directly to the LLM. Cap prevents
     # edge cases where many tables match a broad query from crowding out reranker results.
     rag_reranker_bypass_max_structured: int = 3
+    rag_reranker_bypass_max_structured_data_query: int = 5
 
     # Score inheritance factors for expanded chunks (0.0-1.0)
     # Lower = expanded chunks rank below original chunks
     rag_expansion_score_narrative: float = 0.90  # Table → linked narrative
-    rag_expansion_score_table: float = 0.85      # Narrative → linked table
+    rag_expansion_score_table: float = 0.90      # Narrative → linked table
     rag_expansion_score_parent: float = 0.75     # Continuation → parent
+    rag_expansion_score_spreadsheet_neighbor: float = 0.95  # Spreadsheet row-window neighbor
 
     # ===== RAG CHUNK COMPRESSION SETTINGS =====
     # Handle chunks that exceed re-ranker token limits
