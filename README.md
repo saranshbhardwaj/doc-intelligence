@@ -38,6 +38,25 @@ npm install
 npm run dev
 ```
 
+# Research Reproducibility
+
+This repository contains the implementation and evaluation framework used in the paper:
+
+"Modality-Aware Selective Reranking for Financial Document Retrieval"
+
+For reproducibility resources, benchmark definitions, evaluation artifacts, and statistical analyses, see:
+
+/evals/README.md
+
+Key components:
+
+- Hybrid Retrieval
+- Phrase-Aware Retrieval
+- Modality-Aware Selective Reranking
+- Scope-Aware Retrieval
+- Response Validation Guardrails
+- Benchmark Evaluation Framework
+
 ## Environment Variables
 
 ### Backend
