@@ -409,7 +409,7 @@ class DocumentRepository:
                 return []
 
     def get_doc_info_by_ids(self, document_ids: List[str], org_id: Optional[str] = None) -> List[Dict[str, str]]:
-        """Return minimal document info for a list of IDs."""
+        """Return lightweight document info plus scope text for a list of IDs."""
         if not document_ids:
             return []
         with self._get_session() as db:
@@ -418,7 +418,58 @@ class DocumentRepository:
                 if org_id:
                     stmt = stmt.where(Document.org_id == org_id)
                 result = db.execute(stmt).all()
-                return [{"id": str(row.id), "filename": row.filename} for row in result]
+
+                doc_rows = [{"id": str(row.id), "filename": row.filename} for row in result]
+                doc_map = {row["id"]: {**row, "scope_text": "", "aliases": []} for row in doc_rows}
+                if not doc_map:
+                    return []
+
+                chunk_stmt = (
+                    select(
+                        DocumentChunk.document_id,
+                        DocumentChunk.page_number,
+                        DocumentChunk.chunk_index,
+                        DocumentChunk.section_heading,
+                        DocumentChunk.text,
+                    )
+                    .where(DocumentChunk.document_id.in_(list(doc_map.keys())))
+                    .where(
+                        (DocumentChunk.page_number.is_(None))
+                        | (DocumentChunk.page_number <= 6)
+                        | (DocumentChunk.chunk_index <= 8)
+                    )
+                    .order_by(
+                        DocumentChunk.document_id,
+                        DocumentChunk.page_number.asc().nullsfirst(),
+                        DocumentChunk.chunk_index.asc(),
+                    )
+                )
+                chunk_rows = db.execute(chunk_stmt).all()
+
+                collected_counts: Dict[str, int] = {doc_id: 0 for doc_id in doc_map}
+                heading_aliases: Dict[str, List[str]] = {doc_id: [] for doc_id in doc_map}
+                text_fragments: Dict[str, List[str]] = {doc_id: [] for doc_id in doc_map}
+
+                for row in chunk_rows:
+                    doc_id = str(row.document_id)
+                    if doc_id not in doc_map or collected_counts[doc_id] >= 4:
+                        continue
+
+                    section_heading = (row.section_heading or "").strip()
+                    if section_heading and section_heading not in heading_aliases[doc_id]:
+                        heading_aliases[doc_id].append(section_heading)
+
+                    text = (row.text or "").strip()
+                    if text:
+                        text_fragments[doc_id].append(text[:500])
+                        collected_counts[doc_id] += 1
+
+                for doc_id, doc in doc_map.items():
+                    scope_parts = [doc["filename"], *heading_aliases[doc_id], *text_fragments[doc_id]]
+                    doc["scope_text"] = "\n".join(part for part in scope_parts if part).strip()
+                    doc["aliases"] = heading_aliases[doc_id]
+
+                return list(doc_map.values())
             except SQLAlchemyError as e:
                 logger.error(
                     "Failed to load document info",

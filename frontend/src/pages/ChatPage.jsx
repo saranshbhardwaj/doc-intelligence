@@ -352,6 +352,7 @@ export default function ChatPage() {
         currentSessionDocuments={chat.currentSession?.documents || []}
         getToken={getToken}
         onAddDocuments={handleAddDocuments}
+        onRemoveDocument={handleRemoveDocument}
       />
     </AppLayout>
   );

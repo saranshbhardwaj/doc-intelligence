@@ -31,6 +31,19 @@ _COMPARISON_CONTEXT_END_MARKERS = (
     "\n## Comparison Focus",
     "\n" + "=" * 80,
 )
+_COMPARISON_VALIDATION_HEADER = (
+    "ADDITIONAL COMPARISON VALIDATION RULES:\n"
+    "- Treat each metric label literally. Never substitute NOI for Gross Potential Rent, "
+    "rent for NOI, current for year-one, or pro forma for current unless the cited value is explicitly labeled that way.\n"
+    "- Only compare, rank, or recommend on metrics explicitly disclosed for the relevant document. "
+    "If a metric is missing for any document, write **Not disclosed** and say that the direct comparison is limited.\n"
+    "- For period-specific comparisons such as Current, Year One, and Pro Forma, only include a row when that exact "
+    "metric-period pair is explicitly present for every document. Otherwise omit the row or mark the missing value as "
+    "**Not disclosed**. Never fill a missing period from NOI, cap rate, or any other different metric.\n"
+    "- Do not infer undisclosed metrics or unsupported qualitative claims such as execution risk, "
+    "cash-on-cash superiority, or upside superiority unless the prompt gives direct evidence.\n"
+    "- Before stating higher, lower, better, worse, or more upside, verify the cited numbers support that exact direction.\n"
+)
 
 
 def _extract_context_from_comparison_prompt(prompt_text: str) -> str:
@@ -55,12 +68,22 @@ def _extract_context_from_comparison_prompt(prompt_text: str) -> str:
     return ""
 
 
+def _apply_comparison_guardrails(prompt_text: str) -> str:
+    if not prompt_text:
+        return prompt_text
+
+    if _COMPARISON_VALIDATION_HEADER in prompt_text:
+        return prompt_text
+
+    return f"{_COMPARISON_VALIDATION_HEADER}\n{prompt_text}"
+
+
 def call_api(prompt, options, context):
     import anthropic
     vars_ = context.get("vars", {})
     # In comparison mode, the full prompt (instructions + paired chunks) is stored
     # as system_prompt. We send it as the user message to match stream_chat(prompt).
-    full_prompt = vars_.get("system_prompt", "")
+    full_prompt = _apply_comparison_guardrails(vars_.get("system_prompt", ""))
 
     if not full_prompt:
         return {"error": "Missing system_prompt (comparison prompt) in test vars"}
@@ -83,6 +106,7 @@ def call_api(prompt, options, context):
             model=model,
             max_tokens=max_tokens,
             temperature=0.0,
+            system=_COMPARISON_VALIDATION_HEADER,
             messages=[{"role": "user", "content": full_prompt}],
         ) as stream:
             message = stream.get_final_message()

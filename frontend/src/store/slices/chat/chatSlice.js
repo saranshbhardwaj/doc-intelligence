@@ -43,6 +43,7 @@ const initialChatState = {
   thinkingMessage: "",
   streamingMessage: "",
   chatError: null,
+  sessionWarning: null,
 
   // Comparison mode state
   comparison: {

@@ -8,6 +8,31 @@ from app.repositories.document_repository import DocumentRepository
 from app.utils.logging import logger
 
 
+_MATCH_NORMALIZATION_PATTERNS = (
+    (re.compile(r"\bst\.?\b", re.IGNORECASE), "street"),
+    (re.compile(r"\bave\.?\b", re.IGNORECASE), "avenue"),
+    (re.compile(r"\bblvd\.?\b", re.IGNORECASE), "boulevard"),
+    (re.compile(r"\brd\.?\b", re.IGNORECASE), "road"),
+    (re.compile(r"\bdr\.?\b", re.IGNORECASE), "drive"),
+    (re.compile(r"\bln\.?\b", re.IGNORECASE), "lane"),
+    (re.compile(r"\bct\.?\b", re.IGNORECASE), "court"),
+    (re.compile(r"\bpkwy\.?\b", re.IGNORECASE), "parkway"),
+)
+
+
+def _normalize_match_text(value: str) -> str:
+    text = (value or "").lower().strip()
+    if not text:
+        return ""
+
+    text = text.replace("&", " and ")
+    text = re.sub(r"[_\-/]+", " ", text)
+    text = re.sub(r"[^a-z0-9\s]", " ", text)
+    for pattern, replacement in _MATCH_NORMALIZATION_PATTERNS:
+        text = pattern.sub(replacement, text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
 class DocumentMatcher:
     def __init__(self, db):
         self.db = db
@@ -53,12 +78,7 @@ class DocumentMatcher:
             best_score = 0.0
 
             for doc in documents:
-                fn_no_ext = doc["filename"].rsplit(".", 1)[0].lower().strip() if "." in doc["filename"] else doc["filename"].lower()
-                s1 = difflib.SequenceMatcher(None, extracted_clean, fn_no_ext).ratio()
-                s2 = difflib.SequenceMatcher(None, extracted_clean, doc["filename"].lower()).ratio()
-                score = max(s1, s2)
-                if extracted_clean in fn_no_ext or fn_no_ext in extracted_clean:
-                    score = max(score, 0.8)
+                score = self._score_document_match(extracted_clean, doc)
                 if score > best_score:
                     best_score = score
                     best_match = doc
@@ -170,16 +190,7 @@ class DocumentMatcher:
         best_score = 0.0
 
         for doc in documents:
-            filename = doc["filename"]
-            filename_no_ext = filename.rsplit(".", 1)[0] if "." in filename else filename
-            filename_clean = filename_no_ext.lower().strip()
-
-            score1 = difflib.SequenceMatcher(None, extracted_clean, filename_clean).ratio()
-            score2 = difflib.SequenceMatcher(None, extracted_clean, doc["filename"].lower()).ratio()
-            score = max(score1, score2)
-
-            if extracted_clean in filename_clean or filename_clean in extracted_clean:
-                score = max(score, 0.8)
+            score = self._score_document_match(extracted_clean, doc)
 
             if score > best_score:
                 best_score = score
@@ -188,3 +199,30 @@ class DocumentMatcher:
         if best_score >= threshold:
             return best_match
         return None
+
+    def _score_document_match(self, extracted_clean: str, doc: Dict[str, str]) -> float:
+        filename = doc["filename"]
+        filename_no_ext = filename.rsplit(".", 1)[0] if "." in filename else filename
+
+        extracted_normalized = _normalize_match_text(extracted_clean)
+        candidates = [filename_no_ext.lower().strip(), filename.lower().strip()]
+
+        for alias in doc.get("aliases", []) or []:
+            if isinstance(alias, str) and alias.strip():
+                candidates.append(alias.lower().strip())
+
+        scope_text = (doc.get("scope_text") or "").lower().strip()
+        if scope_text:
+            candidates.append(scope_text)
+
+        best_score = 0.0
+        for candidate in candidates:
+            if not candidate:
+                continue
+            candidate_normalized = _normalize_match_text(candidate)
+            score = difflib.SequenceMatcher(None, extracted_normalized, candidate_normalized).ratio()
+            if extracted_normalized in candidate_normalized or candidate_normalized in extracted_normalized:
+                score = max(score, 0.8)
+            best_score = max(best_score, score)
+
+        return best_score

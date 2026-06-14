@@ -14,6 +14,7 @@ Original chunks are preserved and returned to caller.
 
 from typing import List, Dict, Optional, TYPE_CHECKING
 import logging
+import re
 from sentence_transformers import CrossEncoder
 from app.config import settings
 from app.core.rag.metadata_booster import MetadataBooster
@@ -42,6 +43,12 @@ class Reranker:
     """
 
     CROSS_ENCODER_TOKEN_LIMIT = 512
+    _STRUCTURED_CHUNK_TYPES = {"table", "table_block", "key_value_pairs", "key_value"}
+    _QUERY_STOPWORDS = {
+        "a", "an", "and", "are", "at", "be", "by", "for", "from", "how",
+        "in", "is", "it", "of", "on", "or", "the", "to", "what", "when",
+        "where", "which", "who", "with",
+    }
 
     def __init__(
         self,
@@ -66,11 +73,16 @@ class Reranker:
 
         # Load cross-encoder model
         try:
-            self.model = CrossEncoder(self.model_name, max_length=512)
+            self.model = CrossEncoder(
+                self.model_name,
+                max_length=512,
+                trust_remote_code=settings.rag_reranker_trust_remote_code,
+            )
             logger.info(
                 f"Reranker initialized: model={self.model_name}, "
                 f"batch_size={self.batch_size}, "
-                f"metadata_boost={self.apply_metadata_boost}"
+                f"metadata_boost={self.apply_metadata_boost}, "
+                f"trust_remote_code={settings.rag_reranker_trust_remote_code}"
             )
         except Exception as e:
             logger.error(f"Failed to load cross-encoder model {self.model_name}: {e}", exc_info=True)
@@ -102,7 +114,9 @@ class Reranker:
         query: str,
         chunks: List[Dict],
         query_understanding: Optional['QueryUnderstanding'] = None,
-        top_k: Optional[int] = None
+        top_k: Optional[int] = None,
+        apply_metadata_boost: Optional[bool] = None,
+        apply_structured_signal: Optional[bool] = None,
     ) -> List[Dict]:
         """
         Re-rank chunks based on relevance to query.
@@ -166,7 +180,8 @@ class Reranker:
                 chunk["rerank_score"] = float(score)
 
             # Step 4: Optionally apply metadata boosting (gentle nudge)
-            if self.apply_metadata_boost:
+            use_metadata_boost = self.apply_metadata_boost if apply_metadata_boost is None else apply_metadata_boost
+            if use_metadata_boost:
                 # Pass QueryUnderstanding directly if available, otherwise use basic dict
                 boost_input = query_understanding if query_understanding else {"query_type": query_type_str}
                 chunks = self.metadata_booster.apply_boost(
@@ -175,6 +190,36 @@ class Reranker:
                     score_field="rerank_score"
                 )
                 logger.debug("Applied metadata boosting to rerank scores")
+
+            use_structured_signal = (
+                settings.rag_reranker_structured_signal_enabled
+                if apply_structured_signal is None
+                else apply_structured_signal
+            )
+            if use_structured_signal:
+                boosted_structured = 0
+                for chunk in chunks:
+                    structured_evidence_score = self._compute_structured_evidence_score(
+                        query=query,
+                        chunk=chunk,
+                        query_understanding=query_understanding,
+                    )
+                    chunk["structured_evidence_score"] = structured_evidence_score
+                    if structured_evidence_score > 0:
+                        chunk["rerank_score"] += (
+                            settings.rag_reranker_structured_signal_weight
+                            * structured_evidence_score
+                        )
+                        boosted_structured += 1
+
+                if boosted_structured:
+                    logger.debug(
+                        "Applied structured evidence bonus",
+                        extra={
+                            "boosted_structured_chunks": boosted_structured,
+                            "query": query[:50],
+                        },
+                    )
 
             # Step 5: Sort by rerank score (descending)
             ranked_chunks = sorted(chunks, key=lambda x: x["rerank_score"], reverse=True)
@@ -204,6 +249,121 @@ class Reranker:
                 reverse=True
             )
             return fallback_chunks[:top_k] if top_k else fallback_chunks
+
+    @classmethod
+    def _is_structured_chunk(cls, chunk: Dict) -> bool:
+        chunk_type = chunk.get("section_type")
+        if not chunk_type:
+            metadata = chunk.get("chunk_metadata") or {}
+            if isinstance(metadata, dict):
+                chunk_type = metadata.get("chunk_type")
+        return bool(chunk.get("is_tabular") or chunk_type in cls._STRUCTURED_CHUNK_TYPES)
+
+    @classmethod
+    def _tokenize_structured_signal(cls, text: str) -> list[str]:
+        return re.findall(r"[a-z0-9]+", (text or "").lower())
+
+    @classmethod
+    def _extract_identifier_targets(cls, query: str) -> list[tuple[str, str]]:
+        targets: list[tuple[str, str]] = []
+        for label, value in re.findall(
+            r"\b(unit|suite|apt|apartment|building)\s+([a-z0-9-]+)\b",
+            (query or "").lower(),
+        ):
+            if value:
+                targets.append((label, value))
+        return targets
+
+    @classmethod
+    def _has_exact_structured_identifier_match(
+        cls,
+        chunk_text: str,
+        label: str,
+        value: str,
+    ) -> bool:
+        if label == "unit":
+            return bool(
+                re.search(rf"(?m)(?:^|\|)\s*{re.escape(value)}\s*\|", chunk_text)
+            )
+
+        return bool(
+            re.search(rf"\b{re.escape(label)}\s*[:#-]?\s*{re.escape(value)}\b", chunk_text)
+        )
+
+    @classmethod
+    def _salient_query_terms(cls, query: str, query_understanding: Optional['QueryUnderstanding']) -> list[str]:
+        data_fields = [
+            field.strip().lower()
+            for field in (getattr(query_understanding, "data_fields", []) or [])
+            if isinstance(field, str) and field.strip()
+        ]
+        if data_fields:
+            return [
+                token
+                for field in data_fields
+                for token in cls._tokenize_structured_signal(field)
+                if len(token) > 2 and token not in cls._QUERY_STOPWORDS
+            ]
+
+        return [
+            token
+            for token in cls._tokenize_structured_signal(query)
+            if len(token) > 2 and token not in cls._QUERY_STOPWORDS
+        ]
+
+    @classmethod
+    def _compute_structured_evidence_score(
+        cls,
+        query: str,
+        chunk: Dict,
+        query_understanding: Optional['QueryUnderstanding'] = None,
+    ) -> float:
+        """Return a small, inspectable bonus for structured financial evidence."""
+        if not cls._is_structured_chunk(chunk):
+            return 0.0
+
+        chunk_text = chunk.get("text", "") or ""
+        chunk_text_lower = chunk_text.lower()
+        heading = (chunk.get("section_heading") or "").lower()
+
+        score = 0.2
+
+        if chunk.get("is_phrase_match"):
+            score += 0.15
+
+        identifier_targets = cls._extract_identifier_targets(query)
+        identifier_values = {value for _, value in identifier_targets}
+        if identifier_targets:
+            exact_identifier_match = any(
+                cls._has_exact_structured_identifier_match(chunk_text_lower, label, value)
+                for label, value in identifier_targets
+            )
+            if exact_identifier_match:
+                score += 0.35
+
+        query_numbers = set(re.findall(r"\d[\d,./%-]*", query or ""))
+        if identifier_values:
+            query_numbers = {number for number in query_numbers if number not in identifier_values}
+
+        if query_numbers and any(number in chunk_text for number in query_numbers):
+            score += 0.2
+
+        salient_terms = cls._salient_query_terms(query, query_understanding)
+        if salient_terms:
+            term_hits = sum(1 for term in set(salient_terms) if term in chunk_text_lower)
+            heading_hits = sum(1 for term in set(salient_terms) if term in heading)
+            score += min(0.25, 0.08 * term_hits)
+            score += min(0.15, 0.05 * heading_hits)
+
+        data_fields = [
+            field.strip().lower()
+            for field in (getattr(query_understanding, "data_fields", []) or [])
+            if isinstance(field, str) and field.strip()
+        ]
+        if data_fields and any(field in chunk_text_lower or field in heading for field in data_fields):
+            score += 0.2
+
+        return min(score, 1.0)
 
     def filter_noise(
         self,

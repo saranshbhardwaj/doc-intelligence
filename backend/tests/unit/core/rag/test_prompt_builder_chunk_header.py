@@ -39,3 +39,8 @@ class TestChunkHeaderFormat:
     def test_chunk_text_included(self):
         result = self._format([self._make_chunk(text="Cap rate is 8.11%")])
         assert "Cap rate is 8.11%" in result
+
+    def test_missing_page_number_falls_back_to_page_one(self):
+        result = self._format([self._make_chunk(page_number=None, text="NOI is 441197")])
+        assert "[S1:p1]" in result
+        assert "(Page 1)" in result

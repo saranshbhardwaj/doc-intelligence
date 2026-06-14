@@ -132,6 +132,74 @@ npx promptfoo eval
 npx promptfoo view
 ```
 
+### Retrieval Study: A0-A6 Switch Surface
+
+`providers/rag_retrieval.py` accepts an optional `ablation_id` test var.
+If omitted, it defaults to `A6` and runs the full production-style retrieval path.
+
+Use these exact IDs in promptfoo dataset vars:
+
+| `ablation_id` | System | Enabled | Disabled |
+|---------------|--------|---------|----------|
+| `A0` | Dense baseline | semantic retrieval only | keyword retrieval, phrase constraints, reranker, structured bypass, scope routing, guardrail |
+| `A1` | Hybrid baseline | semantic + keyword + RRF | phrase constraints, structured bypass, scope routing, guardrail |
+| `A2` | Hybrid + generic rerank | A1 + rerank all chunks | phrase constraints, structured bypass, scope routing, guardrail |
+| `A3` | Hybrid + phrase-aware retrieval | A2 + `RetrievalQuery` lexical required and optional constraints | structured bypass, scope routing, guardrail |
+| `A4` | Hybrid + selective reranking | A3 + structured bypass for BM25-matched table and key-value chunks | scope routing, guardrail |
+| `A5` | A4 + scope-aware retrieval | A4 + document-scoped routing for named-entity queries | guardrail |
+| `A6` | Full system | A5 + guardrail regeneration + confidence-aware reranker skip | nothing |
+
+The retrieval provider consumes these dataset vars for research runs:
+
+| Var | Required | Meaning |
+|-----|----------|---------|
+| `user_question` | yes | Raw user query |
+| `document_ids` | yes if no `collection_id` | JSON array of candidate document UUIDs |
+| `collection_id` | yes if no `document_ids` | Collection scope fallback |
+| `query_understanding` | strongly recommended | Serialized production `QueryUnderstanding`; required for non-`A6` ablations on exported fixtures |
+| `expected_pages` | yes for golden retrieval evals | JSON array of gold `{document_id, page}` pairs |
+| `ablation_id` | no | One of `A0` through `A6`; defaults to `A6` |
+
+Example retrieval test vars:
+
+```json
+{
+  "user_question": "What is the 2024 property tax for Point Blank Portfolio?",
+  "document_ids": "[\"110bce13-325a-4b56-8b2c-6d0cec61a23c\"]",
+  "collection_id": "",
+  "query_understanding": "{\"query_type\":\"data_extraction\",\"data_fields\":[\"property tax\"],\"scope_mode\":\"single_doc\",\"target_property_names\":[\"Point Blank Portfolio\"]}",
+  "expected_pages": "[{\"document_id\":\"110bce13-325a-4b56-8b2c-6d0cec61a23c\",\"page\":18}]",
+  "ablation_id": "A4"
+}
+```
+
+For a reproducible A0-A6 sweep, export one golden retrieval dataset once, then run the same fixture set seven times with `ablation_id` changed per run.
+
+### Benchmark Annotations
+
+The exporter still accepts the legacy flat file in `annotations/rag-chat.json`, but it also accepts the structured benchmark schema in `annotations/rag-benchmark.schema.json`.
+When a structured annotation is present, the exporter copies these promptfoo vars into retrieval and generation fixtures:
+
+| Var | Meaning |
+|-----|---------|
+| `benchmark_question_id` | Stable benchmark row id |
+| `benchmark_eval_slice` | One of `table_factual`, `narrative`, `entity_scoped`, `ambiguous_multi_doc` |
+| `benchmark_scope_type` | Scope label for slice analysis |
+| `benchmark_table_heavy` | JSON boolean for the table-heavy subset |
+| `benchmark_target_entities` | JSON array of target entity names |
+| `benchmark_target_document_ids` | JSON array of in-scope document ids |
+| `benchmark_expected_answer_substrings` | JSON array of accepted answer surface forms |
+| `benchmark_gold_evidence` | JSON array of gold evidence objects |
+| `benchmark_numeric_targets` | JSON array of canonical numeric targets |
+| `benchmark_table_labels` | JSON array of referenced table labels |
+
+That gives you one exported dataset carrying both promptfoo assertions and the research metadata needed for Page Recall@K, Table Recall@K, Numeric Exact Match, Phrase Match Preservation Rate, Scope Error Rate, and table-heavy subset reporting.
+
+Schema and example files:
+
+- `annotations/rag-benchmark.schema.json`
+- `annotations/rag-benchmark.sample.json`
+
 ---
 
 ## Regression Testing: Prompt Changes

@@ -25,9 +25,11 @@ class RetrievalQuery:
     lexical_required: Phrases that MUST appear adjacent in matching chunks.
                       Each entry is passed to phraseto_tsquery and AND'd together
                       as the WHERE filter. Empty → no phrase filter.
+                      Reserved for single-fact lookups where all requested evidence
+                      should live in the same chunk.
     lexical_optional: Terms that SHOULD appear. OR'd together via plainto_tsquery
-                      and combined with required phrases for ts_rank_cd scoring.
-                      Does NOT filter — only influences ranking.
+                      or phraseto_tsquery and combined with required phrases for
+                      ts_rank_cd scoring. Does NOT filter — only influences ranking.
     """
 
     semantic_text: str
@@ -45,7 +47,9 @@ class RetrievalQuery:
         Build a structured RetrievalQuery from a QueryUnderstanding object.
 
         For narrow fact lookups (data_extraction with a specific target):
-          - lexical_required = data_fields (exact phrases, AND-filtered)
+                    - single-field lookup: lexical_required = data_fields (exact phrases, AND-filtered)
+                    - multi-field lookup: lexical_required = [] so fields from different chunks
+                        are not filtered out; exact phrases move into lexical_optional instead
           - lexical_optional = filtered synonyms (OR-scored recall boost)
 
         For broad queries:
@@ -64,22 +68,48 @@ class RetrievalQuery:
             excluded.update(_tokenize(stem))
         # Keep only substantive tokens (length > 2)
         excluded = {t for t in excluded if len(t) > 2}
+        identifier_entities = _identifier_like_entities(understanding)
 
         if is_narrow_explicit_fact_lookup(understanding):
             required = [f for f in (understanding.data_fields or []) if f.strip()]
-
-            semantic_lower = semantic_text.lower()
-            required_lower = {r.lower() for r in required}
-            optional = [
-                s for s in (understanding.data_field_synonyms or [])
-                if s.lower() not in semantic_lower
-                and s.lower() not in required_lower
-                and s.strip()
+            date_terms = [
+                getattr(entity, "name", "").strip()
+                for entity in (getattr(understanding, "entities", []) or [])
+                if getattr(entity, "entity_type", "") == "date"
+                and getattr(entity, "name", "").strip()
             ]
+            has_date_constraint = bool(date_terms)
+
+            required_lower = {r.lower() for r in required}
+            if len(required) <= 1:
+                if has_date_constraint:
+                    optional_candidates = list(required) + identifier_entities + date_terms + [
+                        s for s in (understanding.data_field_synonyms or [])
+                        if s.lower() not in required_lower and s.strip()
+                    ]
+                    optional = list(dict.fromkeys(optional_candidates))
+                    lexical_required = []
+                else:
+                    semantic_lower = semantic_text.lower()
+                    optional_candidates = identifier_entities + [
+                        s for s in (understanding.data_field_synonyms or [])
+                        if s.lower() not in semantic_lower
+                        and s.lower() not in required_lower
+                        and s.strip()
+                    ]
+                    optional = list(dict.fromkeys(optional_candidates))
+                    lexical_required = required
+            else:
+                optional_candidates = list(required) + identifier_entities + date_terms + [
+                    s for s in (understanding.data_field_synonyms or [])
+                    if s.lower() not in required_lower and s.strip()
+                ]
+                optional = list(dict.fromkeys(optional_candidates))
+                lexical_required = []
 
             return cls(
                 semantic_text=semantic_text,
-                lexical_required=required,
+                lexical_required=lexical_required,
                 lexical_optional=optional,
             )
         else:
@@ -106,5 +136,31 @@ class RetrievalQuery:
 
 
 def _tokenize(text: str) -> List[str]:
-    """Split text into lowercase alphabetic tokens."""
-    return re.findall(r"[a-z]+", text.lower())
+    """Split text into lowercase alphanumeric tokens."""
+    return re.findall(r"[a-z0-9]+", text.lower())
+
+
+def _identifier_like_entities(understanding: QueryUnderstanding) -> List[str]:
+    target_names = {
+        name.strip().lower()
+        for name in (getattr(understanding, "target_property_names", None) or [])
+        if isinstance(name, str) and name.strip()
+    }
+    data_fields = {
+        field.strip().lower()
+        for field in (getattr(understanding, "data_fields", None) or [])
+        if isinstance(field, str) and field.strip()
+    }
+
+    identifiers: List[str] = []
+    for entity in (getattr(understanding, "entities", None) or []):
+        name = getattr(entity, "name", "")
+        normalized = name.strip().lower()
+        if not normalized:
+            continue
+        if normalized in target_names or normalized in data_fields:
+            continue
+        if any(ch.isdigit() for ch in normalized):
+            identifiers.append(name.strip())
+
+    return list(dict.fromkeys(identifiers))

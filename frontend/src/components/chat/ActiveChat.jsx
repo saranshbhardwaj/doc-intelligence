@@ -81,15 +81,46 @@ export default function ActiveChat({
   const posthog = usePostHog();
   const chatLimits = useUser()?.info?.limits?.chat_messages;
   const [message, setMessage] = useState("");
+  const chatLimitToastStateRef = useRef({
+    limit: null,
+    warned90: false,
+    warned96: false,
+    lastUsed: 0,
+  });
 
   useEffect(() => {
-    if (!chatLimits?.limit || chatLimits.used < 40) return;
-    if (chatLimits.used >= 45) {
-      toast.error(`${chatLimits.used}/${chatLimits.limit} chat messages used today — almost at your daily limit.`, { duration: 6000 });
-    } else {
-      toast.warning(`Heads up: ${chatLimits.used} of ${chatLimits.limit} chat messages used today.`, { duration: 5000 });
+    const limit = Number(chatLimits?.limit || 0);
+    const used = Number(chatLimits?.used || 0);
+    if (limit <= 0) return;
+
+    const toastState = chatLimitToastStateRef.current;
+    if (toastState.limit !== limit || used < toastState.lastUsed) {
+      toastState.limit = limit;
+      toastState.warned90 = false;
+      toastState.warned96 = false;
     }
-  }, [chatLimits?.used]);
+    toastState.lastUsed = used;
+
+    const usageRatio = used / limit;
+
+    if (usageRatio >= 0.96 && !toastState.warned96) {
+      toastState.warned96 = true;
+      toast.error(`${used}/${limit} chat messages used today — you are close to your daily limit.`, {
+        duration: 7000,
+        closeButton: true,
+      });
+      return;
+    }
+
+    if (usageRatio >= 0.9 && !toastState.warned90) {
+      toastState.warned90 = true;
+      toast.warning(`${used}/${limit} chat messages used today.`, {
+        description: "You have used 90% of your daily chat limit.",
+        duration: 6000,
+        closeButton: true,
+      });
+    }
+  }, [chatLimits?.limit, chatLimits?.used]);
   const [showComparisonPanel, setShowComparisonPanel] = useState(false);
   const [showPdfPanel, setShowPdfPanel] = useState(false);
   const [isMobile, setIsMobile] = useState(false);

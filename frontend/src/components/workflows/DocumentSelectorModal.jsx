@@ -37,6 +37,7 @@ import {
   X,
 } from "lucide-react";
 import { toast } from "sonner";
+import { getUsageLimitHint, getUsageLimitTitle, isUsageLimitError } from "../../utils/apiErrorHandler";
 import {
   listCollections,
   getCollection,
@@ -341,6 +342,17 @@ export default function DocumentSelectorModal({ open, onOpenChange }) {
             : u
         )
       );
+
+      if (isUsageLimitError(error)) {
+        toast.warning(getUsageLimitTitle(error), {
+          description: [error.message, getUsageLimitHint(error)]
+            .filter(Boolean)
+            .join(" "),
+          duration: 7000,
+        });
+        return;
+      }
+
       toast.error(`Failed to upload ${upload.file.name}`);
     }
   };

@@ -7,7 +7,8 @@ for improved retrieval quality.
 
 from typing import List, Dict, Optional, Tuple
 from sqlalchemy.orm import Session
-from sqlalchemy import select, func
+from sqlalchemy import case, select, func
+import re
 from app.db_models_chat import DocumentChunk, CollectionDocument
 from app.core.embeddings import get_embedding_provider
 from app.core.rag.query_analyzer import QueryAnalyzer
@@ -64,6 +65,9 @@ class HybridRetriever:
         query_understanding=None,  # QueryUnderstanding object (optional, for HyDE + metadata boost)
         min_semantic_similarity: Optional[float] = None,
         section_types: Optional[List[str]] = None,  # e.g. ["narrative"], ["table", "key_value_pairs"]
+        use_semantic: bool = True,
+        use_keyword: bool = True,
+        apply_metadata_boost: bool = True,
     ) -> List[Dict]:
         """
         Hybrid retrieval combining vector + keyword search.
@@ -78,6 +82,9 @@ class HybridRetriever:
         Returns:
             List of chunks with hybrid scores, sorted by relevance.
         """
+        if not use_semantic and not use_keyword:
+            raise ValueError("At least one retrieval leg must be enabled")
+
         # 1. Analyze query for content preferences
         query_analysis = self.query_analyzer.analyze(rq.semantic_text)
 
@@ -87,20 +94,28 @@ class HybridRetriever:
         )
 
         # 2. Semantic search (vector similarity, with optional HyDE enhancement)
-        semantic_results = self._semantic_search(
-            rq,
-            collection_id,
-            top_k=top_k,
-            document_ids=document_ids,
-            query_understanding=query_understanding,
-            min_semantic_similarity=min_semantic_similarity,
-            section_types=section_types,
+        semantic_results = (
+            self._semantic_search(
+                rq,
+                collection_id,
+                top_k=top_k,
+                document_ids=document_ids,
+                query_understanding=query_understanding,
+                min_semantic_similarity=min_semantic_similarity,
+                section_types=section_types,
+            )
+            if use_semantic
+            else []
         )
 
         # 3. Keyword search (BM25/FTS) — uses structured lexical constraints from rq
-        keyword_results = self._keyword_search(
-            rq, collection_id, top_k=top_k, document_ids=document_ids,
-            section_types=section_types,
+        keyword_results = (
+            self._keyword_search(
+                rq, collection_id, top_k=top_k, document_ids=document_ids,
+                section_types=section_types,
+            )
+            if use_keyword
+            else []
         )
 
         # 4. Merge and normalize scores
@@ -108,8 +123,11 @@ class HybridRetriever:
 
         # 5. Apply metadata boosting
         # Use QueryUnderstanding if available for LLM-determined boost values, otherwise use QueryAnalyzer result
-        boost_input = query_understanding if query_understanding else query_analysis
-        boosted = self._apply_metadata_boost(merged, boost_input)
+        if apply_metadata_boost:
+            boost_input = query_understanding if query_understanding else query_analysis
+            boosted = self._apply_metadata_boost(merged, boost_input)
+        else:
+            boosted = merged
 
         # 6. Sort by hybrid score and return top-k
         ranked = sorted(boosted, key=lambda x: x["hybrid_score"], reverse=True)[:top_k]
@@ -123,11 +141,11 @@ class HybridRetriever:
                 if isinstance(metadata, dict):
                     chunk_type = metadata.get("chunk_type")
 
-            if chunk_type == "table" or chunk.get("is_tabular"):
+            if chunk_type in {"table", "table_block"} or chunk.get("is_tabular"):
                 type_counts["table"] += 1
             elif chunk_type in ("key_value_pairs", "key_value"):
                 type_counts["key_value"] += 1
-            elif chunk_type == "narrative":
+            elif chunk_type in {"narrative", "narrative_block"}:
                 type_counts["narrative"] += 1
             else:
                 type_counts["unknown"] += 1
@@ -142,6 +160,9 @@ class HybridRetriever:
                 "chunk_type_counts": type_counts,
                 "lexical_required": rq.lexical_required,
                 "lexical_optional_count": len(rq.lexical_optional),
+                "use_semantic": use_semantic,
+                "use_keyword": use_keyword,
+                "apply_metadata_boost": apply_metadata_boost,
             }
         )
 
@@ -395,7 +416,13 @@ class HybridRetriever:
             DocumentChunk.text_search_vector,
             rank_q,  # Always score with the lenient rank query
             2
-        ).label("rank")
+        )
+
+        identifier_boost = _build_identifier_match_boost(rq)
+        if identifier_boost is not None:
+            rank_expr = (rank_expr + identifier_boost)
+
+        rank_expr = rank_expr.label("rank")
 
         stmt = select(
             DocumentChunk.id,
@@ -585,3 +612,44 @@ class HybridRetriever:
             query_input,
             score_field="hybrid_score"
         )
+
+
+def _build_identifier_match_boost(rq: RetrievalQuery):
+    """Boost chunks containing exact identifier tokens that FTS ranks poorly in tables."""
+    identifier_tokens = _extract_identifier_tokens(rq)
+    if not identifier_tokens:
+        return None
+
+    boost_expr = None
+    for token in identifier_tokens:
+        token_pattern = rf"(^|[^0-9A-Za-z]){re.escape(token)}([^0-9A-Za-z]|$)"
+        token_boost = case(
+            (DocumentChunk.text.op("~*")(token_pattern), 0.35),
+            else_=0.0,
+        )
+        boost_expr = token_boost if boost_expr is None else (boost_expr + token_boost)
+
+    return boost_expr
+
+
+def _extract_identifier_tokens(rq: RetrievalQuery) -> List[str]:
+    tokens: List[str] = []
+    for term in [*rq.lexical_required, *rq.lexical_optional]:
+        for token in re.findall(r"[A-Za-z]*\d+[A-Za-z]*", term or ""):
+            normalized = token.lower()
+            if _should_boost_identifier_token(normalized):
+                tokens.append(normalized)
+
+    return list(dict.fromkeys(tokens))
+
+
+def _should_boost_identifier_token(token: str) -> bool:
+    if len(token) < 2:
+        return False
+
+    if token.isdigit() and len(token) == 4:
+        year = int(token)
+        if 1900 <= year <= 2099:
+            return False
+
+    return True

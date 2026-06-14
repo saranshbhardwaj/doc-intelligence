@@ -25,6 +25,24 @@ const getErrorMessage = (error) => {
   return error?.message || "An unexpected error occurred";
 };
 
+const normalizeExtractionError = (error, fallback = "An unexpected error occurred") => {
+  if (typeof error === "string") {
+    return {
+      message: error,
+      isRetryable: false,
+    };
+  }
+
+  if (error?.message) {
+    return error;
+  }
+
+  return {
+    message: fallback,
+    isRetryable: false,
+  };
+};
+
 export const createExtractionSlice = (set, get) => ({
   // ========== State ==========
   extraction: {
@@ -208,7 +226,7 @@ export const createExtractionSlice = (set, get) => ({
             return;
           }
 
-          setError(errorMsg);
+          setError(normalizeExtractionError(errorData, errorMsg));
           setProcessing(false);
         },
         onEnd: async (data) => {
@@ -241,7 +259,7 @@ export const createExtractionSlice = (set, get) => ({
       return response;
     } catch (err) {
       console.error("Upload failed:", err);
-      setError(getErrorMessage(err));
+      setError(normalizeExtractionError(err));
       setProcessing(false);
       throw err;
     }
@@ -325,7 +343,7 @@ export const createExtractionSlice = (set, get) => ({
             typeof errorData === "string"
               ? errorData
               : errorData?.message || "Extraction failed";
-          setError(errorMsg);
+          setError(normalizeExtractionError(errorData, errorMsg));
           setProcessing(false);
         },
         onEnd: async (data) => {
@@ -347,7 +365,7 @@ export const createExtractionSlice = (set, get) => ({
       return response;
     } catch (err) {
       console.error("Library extraction failed:", err);
-      setError(getErrorMessage(err));
+      setError(normalizeExtractionError(err));
       setProcessing(false);
       throw err;
     }
@@ -429,7 +447,7 @@ export const createExtractionSlice = (set, get) => ({
             typeof errorData === "string"
               ? errorData
               : errorData?.message || "Extraction failed";
-          setError(errorMsg);
+          setError(normalizeExtractionError(errorData, errorMsg));
           setProcessing(false);
         },
         onEnd: async (data) => {
@@ -451,7 +469,7 @@ export const createExtractionSlice = (set, get) => ({
       return response;
     } catch (err) {
       console.error("Temp extraction failed:", err);
-      setError(getErrorMessage(err));
+      setError(normalizeExtractionError(err));
       setProcessing(false);
       throw err;
     }
@@ -513,7 +531,7 @@ export const createExtractionSlice = (set, get) => ({
             typeof errorData === "string"
               ? errorData
               : errorData?.message || "Extraction failed";
-          setError(errorMsg);
+          setError(normalizeExtractionError(errorData, errorMsg));
           setProcessing(false);
         },
         onEnd: async (data) => {
@@ -541,7 +559,7 @@ export const createExtractionSlice = (set, get) => ({
       return response;
     } catch (err) {
       console.error("Retry failed:", err);
-      setError(getErrorMessage(err));
+      setError(normalizeExtractionError(err));
       setProcessing(false);
       throw err;
     }
@@ -602,7 +620,7 @@ export const createExtractionSlice = (set, get) => ({
             return;
           }
 
-          setError(errorMsg);
+          setError(normalizeExtractionError(errorData, errorMsg));
           setProcessing(false);
         },
         onEnd: async (data) => {
@@ -628,7 +646,7 @@ export const createExtractionSlice = (set, get) => ({
       }));
     } catch (err) {
       console.error("Reconnection failed:", err);
-      setError(getErrorMessage(err));
+      setError(normalizeExtractionError(err));
       setProcessing(false);
     }
   },

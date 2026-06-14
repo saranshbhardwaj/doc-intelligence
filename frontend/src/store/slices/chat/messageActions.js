@@ -5,6 +5,8 @@ import * as chatApi from "../../../api/chat";
 import { getErrorMessage } from "./utils";
 import { toast } from "sonner";
 
+const SESSION_WARNING_REMINDER_INTERVAL = 10;
+
 export const createChatMessageActions = (set, get) => ({
   sendMessage: async (getToken, message, numChunks = 5) => {
     const sessionId = get().chat.currentSession?.id;
@@ -79,23 +81,36 @@ export const createChatMessageActions = (set, get) => ({
           }));
         },
         onSessionWarning: (data) => {
-          // Display toast notification for long conversation
-          toast.warning("Long conversation detected", {
-            description: data.recommendation || "Consider starting a new session for best results",
-            duration: 8000,
-            action: {
-              label: "New Session",
-              onClick: () => {
-                // Clear current session and show empty state
-                get().startNewChat();
-                try {
-                  localStorage.removeItem("lastActiveChatSessionId");
-                } catch (e) {
-                  console.error("Failed to clear last session:", e);
-                }
+          const recommendation =
+            data?.recommendation || "Consider starting a new session for best results";
+          const messageCount = Number(data?.message_count) || 0;
+          const previousWarning = get().chat.sessionWarning;
+          const lastToastCount = previousWarning?.lastToastCount || 0;
+          const shouldShowReminderToast =
+            !previousWarning ||
+            (messageCount > 0 &&
+              messageCount >= lastToastCount + SESSION_WARNING_REMINDER_INTERVAL);
+
+          set((state) => ({
+            chat: {
+              ...state.chat,
+              sessionWarning: {
+                active: true,
+                messageCount,
+                recommendation,
+                lastToastCount: shouldShowReminderToast
+                  ? messageCount
+                  : state.chat.sessionWarning?.lastToastCount || 0,
               },
             },
-          });
+          }));
+
+          if (shouldShowReminderToast) {
+            toast.warning("Long conversation detected", {
+              description: recommendation,
+              duration: 5000,
+            });
+          }
         },
         onComparisonSelection: (data) => {
           get().setComparisonSelectionNeeded(data);

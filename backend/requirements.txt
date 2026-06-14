@@ -38,7 +38,7 @@ jsonschema==4.23.0  # Strict JSON Schema validation for workflow outputs
 lxml>=5.3.0  # Namespace-aware worksheet XML patching for Excel dropdown preservation
 python-docx==1.2.0
 markdown==3.4.4
-pandas==2.2.3
+pandas==2.3.0
 xlsxwriter==3.1.2
 openpyxl==3.1.5  # Excel template reading/writing with formula preservation
 prometheus-client==0.18.0

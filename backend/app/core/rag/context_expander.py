@@ -12,6 +12,7 @@ from sqlalchemy import select
 
 from app.db_models_chat import DocumentChunk
 from app.core.rag.query_understanding import QueryType
+from app.config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -159,19 +160,43 @@ class ContextExpander:
             if config['fetch_narrative'] and metadata.get('linked_narrative_id'):
                 target_id = metadata['linked_narrative_id']
                 expansion_ids.add(target_id)
-                expansion_map[chunk_id].append((target_id, 'table_context', 0.90))
+                expansion_map[chunk_id].append((
+                    target_id,
+                    'table_context',
+                    settings.rag_expansion_score_narrative,
+                ))
 
             # Narratives may need tables
             if config['fetch_tables'] and metadata.get('linked_table_ids'):
                 for table_id in metadata['linked_table_ids'][:config['max_tables']]:
                     expansion_ids.add(table_id)
-                    expansion_map[chunk_id].append((table_id, 'linked_table', 0.85))
+                    expansion_map[chunk_id].append((
+                        table_id,
+                        'linked_table',
+                        settings.rag_expansion_score_table,
+                    ))
 
             # Continuations need parent
             if config['fetch_parent'] and metadata.get('is_continuation') and metadata.get('parent_chunk_id'):
                 parent_id = metadata['parent_chunk_id']
                 expansion_ids.add(parent_id)
-                expansion_map[chunk_id].append((parent_id, 'continuation_parent', 0.75))
+                expansion_map[chunk_id].append((
+                    parent_id,
+                    'continuation_parent',
+                    settings.rag_expansion_score_parent,
+                ))
+
+            if config['fetch_spreadsheet_neighbors']:
+                for neighbor_key in ('spreadsheet_prev_chunk_id', 'spreadsheet_next_chunk_id'):
+                    neighbor_id = metadata.get(neighbor_key)
+                    if not neighbor_id:
+                        continue
+                    expansion_ids.add(neighbor_id)
+                    expansion_map[chunk_id].append((
+                        neighbor_id,
+                        'spreadsheet_neighbor',
+                        settings.rag_expansion_score_spreadsheet_neighbor,
+                    ))
 
         # PASS 2: Single batch fetch (1 query instead of N)
         if not expansion_ids:
@@ -226,37 +251,45 @@ class ContextExpander:
             Config dict with fetch_narrative, fetch_tables, fetch_parent, max_tables
         """
         is_tabular = chunk.get('is_tabular', False)
+        metadata = chunk.get('chunk_metadata') or chunk.get('metadata') or {}
+        source_kind = metadata.get('source_kind') if isinstance(metadata, dict) else None
+        is_spreadsheet_table = bool(is_tabular and source_kind == 'spreadsheet')
 
         configs = {
             QueryType.DATA_EXTRACTION: {
                 'fetch_narrative': is_tabular,    # Tables always get narrative
                 'fetch_tables': not is_tabular,   # Narratives get supporting tables
                 'fetch_parent': True,
-                'max_tables': 2
+                'max_tables': 2,
+                'fetch_spreadsheet_neighbors': is_spreadsheet_table,
             },
             QueryType.SUMMARIZATION: {
                 'fetch_narrative': False,
                 'fetch_tables': False,
                 'fetch_parent': True,  # Only continuations
-                'max_tables': 0
+                'max_tables': 0,
+                'fetch_spreadsheet_neighbors': False,
             },
             QueryType.ENTITY_LOOKUP: {
                 'fetch_narrative': is_tabular,  # Tables get context
                 'fetch_tables': False,          # No extra tables
                 'fetch_parent': False,
-                'max_tables': 0
+                'max_tables': 0,
+                'fetch_spreadsheet_neighbors': is_spreadsheet_table,
             },
             QueryType.GENERAL_QA: {
                 'fetch_narrative': is_tabular,
                 'fetch_tables': not is_tabular,
                 'fetch_parent': True,
-                'max_tables': 1
+                'max_tables': 1,
+                'fetch_spreadsheet_neighbors': is_spreadsheet_table,
             },
             QueryType.COMPARISON: {
                 'fetch_narrative': is_tabular,
                 'fetch_tables': not is_tabular,
                 'fetch_parent': True,
-                'max_tables': 2
+                'max_tables': 2,
+                'fetch_spreadsheet_neighbors': is_spreadsheet_table,
             }
         }
 

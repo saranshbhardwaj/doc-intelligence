@@ -1,6 +1,7 @@
 import { Card } from "../ui/card";
 import { Badge } from "../ui/badge";
 import { Progress } from "../ui/progress";
+import { getUsageLimitHint, getUsageLimitTitle, isUsageLimitError } from "../../utils/apiErrorHandler";
 
 // Minimal neutral stage descriptors
 const STAGES = [
@@ -19,21 +20,41 @@ export default function ProgressTracker({ progress, error, onRetry }) {
     const errorMessage = typeof error === "string" ? error : error.message;
     const errorStage = typeof error === "object" ? error.stage : null;
     const isRetryable = typeof error === "object" ? error.isRetryable : false;
+    const isLimitError = typeof error === "object" && isUsageLimitError(error);
+    const title = isLimitError ? getUsageLimitTitle(error) : errorMessage;
+    const detailMessage = isLimitError ? errorMessage : null;
+    const helperText = isLimitError ? getUsageLimitHint(error) : null;
 
     return (
-      <Card className="mt-4 p-4 border border-red-300 dark:border-red-600 bg-red-50 dark:bg-red-950/40">
+      <Card className={isLimitError
+        ? "mt-4 p-4 border border-amber-300 dark:border-amber-500 bg-amber-50 dark:bg-amber-950/30"
+        : "mt-4 p-4 border border-red-300 dark:border-red-600 bg-red-50 dark:bg-red-950/40"}>
         <div className="flex items-start gap-3">
-          <span className="text-xl">⚠️</span>
+          <span className="text-xl">{isLimitError ? "⛔" : "⚠️"}</span>
           <div className="space-y-1 flex-1">
-            <p className="font-medium text-red-800 dark:text-red-300">
-              {errorMessage}
+            <p className={isLimitError
+              ? "font-medium text-amber-900 dark:text-amber-200"
+              : "font-medium text-red-800 dark:text-red-300"}>
+              {title}
             </p>
+            {detailMessage && detailMessage !== title && (
+              <p className="text-sm text-amber-800 dark:text-amber-200">
+                {detailMessage}
+              </p>
+            )}
             {errorStage && (
-              <p className="text-xs text-red-700 dark:text-red-400">
+              <p className={isLimitError
+                ? "text-xs text-amber-700 dark:text-amber-300"
+                : "text-xs text-red-700 dark:text-red-400"}>
                 Stage: {errorStage}
               </p>
             )}
-            {isRetryable && onRetry && (
+            {helperText && (
+              <p className="text-xs text-amber-700 dark:text-amber-300">
+                {helperText}
+              </p>
+            )}
+            {!isLimitError && isRetryable && onRetry && (
               <button
                 onClick={onRetry}
                 className="text-xs px-2 py-1 rounded bg-red-600 text-foreground hover:bg-destructive"

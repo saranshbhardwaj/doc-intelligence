@@ -25,6 +25,7 @@ import UploadModal from "../components/library/UploadModal";
 import { Button } from "../components/ui/button";
 import { Sheet, SheetContent, SheetTitle, SheetDescription } from "../components/ui/sheet";
 import { LibraryPageSkeleton } from "../components/skeletons/PageSkeletons";
+import { getUsageLimitHint, getUsageLimitTitle, isUsageLimitError } from "../utils/apiErrorHandler";
 import {
   listCollections,
   createCollection as apiCreateCollection,
@@ -81,6 +82,7 @@ export default function LibraryPage() {
   const [deletingDocId, setDeletingDocId] = useState(null);
   const [mobileCollectionsOpen, setMobileCollectionsOpen] = useState(false);
   const [createRequestCount, setCreateRequestCount] = useState(0);
+  const locallyHandledTerminalJobsRef = useRef(new Set());
 
   // Overlay live progress from Zustand indexingJobs onto API-fetched documents.
   // Keeps progress accurate after SPA navigation: the SSE stream survives navigation
@@ -115,10 +117,39 @@ export default function LibraryPage() {
     };
   }, [totalDocs, documents, collections]);
 
-  const pageHeader = {
-    eyebrow: "Workspace",
-    title: "Library",
-  };
+  const incrementCollectionDocumentCount = useCallback((collectionId, delta) => {
+    if (!collectionId || delta === 0) return;
+
+    setCollections((prev) =>
+      prev.map((collection) =>
+        collection.id === collectionId
+          ? {
+              ...collection,
+              document_count: Math.max(0, (collection.document_count || 0) + delta),
+            }
+          : collection
+      )
+    );
+  }, []);
+
+  const upsertDocumentRow = useCallback((documentId, updater) => {
+    setDocuments((prev) => {
+      const index = prev.findIndex((doc) => doc.id === documentId);
+      if (index === -1) {
+        const nextDoc = typeof updater === "function" ? updater(null) : updater;
+        return nextDoc ? [nextDoc, ...prev] : prev;
+      }
+
+      const nextDoc = typeof updater === "function" ? updater(prev[index]) : updater;
+      if (!nextDoc) {
+        return prev.filter((doc) => doc.id !== documentId);
+      }
+
+      const next = [...prev];
+      next[index] = nextDoc;
+      return next;
+    });
+  }, []);
 
   // Fetch collections
   const fetchCollections = useCallback(async () => {
@@ -180,6 +211,47 @@ export default function LibraryPage() {
     [getToken, page, pageSize, sortBy, sortOrder, searchQuery, statusFilter]
   );
 
+  const syncDocumentRowFromCollection = useCallback(
+    async (collectionId, documentId) => {
+      try {
+        const res = await apiGetCollection(getToken, collectionId, {
+          limit: pageSize,
+          offset: page * pageSize,
+          sort_by: sortBy,
+          sort_order: sortOrder,
+          search: searchQuery || null,
+          status: statusFilter,
+        });
+
+        const syncedDocument = res?.documents?.find((doc) => doc.id === documentId);
+        if (!syncedDocument) return;
+
+        upsertDocumentRow(documentId, (doc) =>
+          doc
+            ? {
+                ...doc,
+                ...syncedDocument,
+                status_detail: syncedDocument.status === "completed" ? "Ready" : doc.status_detail,
+                progress_percent: syncedDocument.status === "completed" ? 100 : doc.progress_percent,
+              }
+            : syncedDocument
+        );
+      } catch (error) {
+        console.error("Failed to sync document metadata:", error);
+      }
+    },
+    [
+      getToken,
+      page,
+      pageSize,
+      searchQuery,
+      sortBy,
+      sortOrder,
+      statusFilter,
+      upsertDocumentRow,
+    ]
+  );
+
   // Re-fetch when a job is removed from the store (completed or cleared), so the
   // table shows the final DB status without requiring a manual refresh.
   // The length check exits early on every progress tick — only does work on removal.
@@ -192,7 +264,13 @@ export default function LibraryPage() {
     if (currentKeys.length >= prevKeys.length) return; // no removals — skip
 
     const removed = prevKeys.filter((id) => !indexingJobs[id]);
-    if (removed.length > 0 && selectedCollection) {
+    if (removed.length === 0 || !selectedCollection) return;
+
+    const locallyHandled = locallyHandledTerminalJobsRef.current;
+    const requiresSync = removed.some((id) => !locallyHandled.has(id));
+    removed.forEach((id) => locallyHandled.delete(id));
+
+    if (requiresSync) {
       fetchDocuments(selectedCollection.id);
       fetchCollections();
     }
@@ -293,11 +371,44 @@ export default function LibraryPage() {
 
         if (isImmediateComplete) {
           const existingName = response?.existing_filename || response?.filename || file.name;
+          const shouldShowInTable = selectedCollection?.id === targetCollectionId;
+
+          if (shouldShowInTable) {
+            let inserted = false;
+            upsertDocumentRow(response.document_id, (existingDoc) => {
+              if (existingDoc) {
+                return {
+                  ...existingDoc,
+                  status: "completed",
+                  status_detail: "Ready",
+                  progress_percent: 100,
+                  has_embeddings: true,
+                };
+              }
+
+              inserted = true;
+              return {
+                id: response.document_id,
+                filename: existingName,
+                status: "completed",
+                status_detail: "Ready",
+                progress_percent: 100,
+                page_count: 0,
+                chunk_count: 0,
+                has_embeddings: true,
+                created_at: new Date().toISOString(),
+              };
+            });
+
+            if (inserted) {
+              setTotalDocs((prev) => prev + 1);
+              incrementCollectionDocumentCount(targetCollectionId, 1);
+            }
+          }
+
           toast.info(
             `The file ${file.name} has the same content as ${existingName}.`
           );
-          await fetchDocuments(targetCollectionId);
-          await fetchCollections();
           return;
         }
 
@@ -315,7 +426,11 @@ export default function LibraryPage() {
             has_embeddings: false,
             created_at: new Date().toISOString(),
           };
-          setDocuments((prev) => [tempDoc, ...prev]);
+          if (selectedCollection?.id === targetCollectionId) {
+            upsertDocumentRow(response.document_id, tempDoc);
+            setTotalDocs((prev) => prev + 1);
+          }
+          incrementCollectionDocumentCount(targetCollectionId, 1);
 
           const cleanup = await connectToIndexingProgress(
             getToken,
@@ -346,10 +461,26 @@ export default function LibraryPage() {
 
               // Update store - mark specific document as complete
               completeIndexing(response.document_id);
+              locallyHandledTerminalJobsRef.current.add(response.document_id);
 
-              // Refresh documents
-              fetchDocuments(targetCollectionId);
-              fetchCollections();
+              if (selectedCollection?.id === targetCollectionId) {
+                upsertDocumentRow(response.document_id, (doc) =>
+                  doc
+                    ? {
+                        ...doc,
+                        status: "completed",
+                        status_detail: "Ready",
+                        progress_percent: 100,
+                        has_embeddings: true,
+                      }
+                    : doc
+                );
+
+                void syncDocumentRowFromCollection(
+                  targetCollectionId,
+                  response.document_id
+                );
+              }
 
               // Clear from store after short delay
               setTimeout(() => clearIndexingJob(response.document_id), 1000);
@@ -359,22 +490,20 @@ export default function LibraryPage() {
 
               // Update store - mark specific document as failed
               failIndexing(response.document_id, error.message);
+              locallyHandledTerminalJobsRef.current.add(response.document_id);
 
               // Update local UI
-              setDocuments((prev) =>
-                prev.map((doc) =>
-                  doc.id === response.document_id
+              if (selectedCollection?.id === targetCollectionId) {
+                upsertDocumentRow(response.document_id, (doc) =>
+                  doc
                     ? {
                         ...doc,
                         status: "failed",
                         status_detail: error.message,
                       }
                     : doc
-                )
-              );
-
-              fetchDocuments(targetCollectionId);
-              fetchCollections();
+                );
+              }
 
               toast.error(`Failed to index ${file.name}`, { description: error.message });
             },
@@ -391,13 +520,24 @@ export default function LibraryPage() {
             targetCollectionId,
             cleanup
           );
-        } else {
-          await fetchDocuments(targetCollectionId);
-          await fetchCollections();
         }
       } catch (error) {
         console.error(`Failed to upload ${file.name}:`, error);
-        toast.error(`Failed to upload ${file.name}`);
+        const description = error?.message || error?.detail?.message;
+
+        if (isUsageLimitError(error)) {
+          toast.warning(getUsageLimitTitle(error), {
+            description: [description, getUsageLimitHint(error)]
+              .filter(Boolean)
+              .join(" "),
+            duration: 7000,
+          });
+          return;
+        }
+
+        toast.error(`Failed to upload ${file.name}`, {
+          description,
+        });
       }
     });
 
@@ -524,14 +664,14 @@ export default function LibraryPage() {
 
   if (loadingCollections) {
     return (
-      <AppLayout lockViewport pageHeader={pageHeader}>
+      <AppLayout lockViewport suppressPageHeader>
         <LibraryPageSkeleton />
       </AppLayout>
     );
   }
 
   return (
-    <AppLayout lockViewport pageHeader={pageHeader}>
+    <AppLayout lockViewport suppressPageHeader>
       <div className="flex h-full min-h-0 flex-col px-3 pb-6 pt-3 sm:px-6">
         <StatsHeader
           totalDocuments={stats.totalDocuments}

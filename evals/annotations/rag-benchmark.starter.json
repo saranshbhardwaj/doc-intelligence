@@ -1,0 +1,234 @@
+{
+  "schema_version": "2026-05-27",
+  "dataset_name": "rag-chat-starter-benchmark",
+  "questions": [
+    {
+      "question_id": "tulsa-asking-price",
+      "question": "what is the asking price for Tulsa storage unit?",
+      "evaluation_slice": "table_factual",
+      "scope_type": "entity_scoped",
+      "table_heavy": false,
+      "target_entities": ["Tulsa Storage Units & Parking"],
+      "target_document_ids": ["8754d9a2-d9cb-4330-92f9-36130a0ee489"],
+      "expected_answer_substrings": ["$2,500,000", "2,500,000"],
+      "gold_evidence": [
+        {
+          "document_id": "8754d9a2-d9cb-4330-92f9-36130a0ee489",
+          "page": 7,
+          "evidence_type": "narrative",
+          "field_label": "asking_price",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation", "numeric_em"],
+          "normalized_value": {
+            "field_name": "asking_price",
+            "canonical_value": 2500000.0,
+            "unit": "usd",
+            "comparison": "exact",
+            "accepted_surface_forms": ["$2,500,000", "2,500,000", "2500000"],
+            "raw_value": "$2,500,000"
+          }
+        }
+      ],
+      "numeric_targets": [
+        {
+          "field_name": "asking_price",
+          "canonical_value": 2500000.0,
+          "unit": "usd",
+          "comparison": "exact",
+          "accepted_surface_forms": ["$2,500,000", "2,500,000", "2500000"],
+          "raw_value": "$2,500,000"
+        }
+      ],
+      "notes": "Simple numeric fact from Tulsa narrative investment overview."
+    },
+    {
+      "question_id": "tulsa-lot-size-income",
+      "question": "what is the lot size and median income for Tulsa storage unit?",
+      "evaluation_slice": "table_factual",
+      "scope_type": "entity_scoped",
+      "table_heavy": true,
+      "target_entities": ["Tulsa Storage Units & Parking"],
+      "target_document_ids": ["8754d9a2-d9cb-4330-92f9-36130a0ee489"],
+      "expected_answer_substrings": ["2.70", "59,300"],
+      "gold_evidence": [
+        {
+          "document_id": "8754d9a2-d9cb-4330-92f9-36130a0ee489",
+          "page": 10,
+          "evidence_type": "table",
+          "table_label": "site_description",
+          "field_label": "lot_size",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation", "numeric_em"],
+          "normalized_value": {
+            "field_name": "lot_size",
+            "canonical_value": 2.7,
+            "unit": "acres",
+            "comparison": "exact",
+            "accepted_surface_forms": ["2.70 acres", "2.70", "2.7 acres"],
+            "raw_value": "Apx. 2.70 Acres (One Parcel)"
+          }
+        },
+        {
+          "document_id": "8754d9a2-d9cb-4330-92f9-36130a0ee489",
+          "page": 25,
+          "evidence_type": "narrative",
+          "field_label": "median_household_income",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation", "numeric_em"],
+          "normalized_value": {
+            "field_name": "median_household_income",
+            "canonical_value": 59300.0,
+            "unit": "usd",
+            "comparison": "exact",
+            "accepted_surface_forms": ["$59,300", "59,300", "59300"],
+            "raw_value": "$59,300"
+          }
+        }
+      ],
+      "numeric_targets": [
+        {
+          "field_name": "lot_size",
+          "canonical_value": 2.7,
+          "unit": "acres",
+          "comparison": "exact",
+          "accepted_surface_forms": ["2.70 acres", "2.70", "2.7 acres"],
+          "raw_value": "Apx. 2.70 Acres (One Parcel)"
+        },
+        {
+          "field_name": "median_household_income",
+          "canonical_value": 59300.0,
+          "unit": "usd",
+          "comparison": "exact",
+          "accepted_surface_forms": ["$59,300", "59,300", "59300"],
+          "raw_value": "$59,300"
+        }
+      ],
+      "notes": "Compound question mixing table evidence and market demographics narrative."
+    },
+    {
+      "question_id": "pb-tax-2024",
+      "question": "What is the 2024 property tax for point blank porfolio?",
+      "evaluation_slice": "table_factual",
+      "scope_type": "entity_scoped",
+      "table_heavy": true,
+      "target_entities": ["Point Blank Portfolio"],
+      "target_document_ids": ["110bce13-325a-4b56-8b2c-6d0cec61a23c"],
+      "expected_answer_substrings": ["$15,275", "15,275"],
+      "gold_evidence": [
+        {
+          "document_id": "110bce13-325a-4b56-8b2c-6d0cec61a23c",
+          "page": 18,
+          "evidence_type": "table",
+          "table_label": "operating_expenses",
+          "field_label": "property_taxes_2024",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation", "numeric_em"],
+          "normalized_value": {
+            "field_name": "property_taxes_2024",
+            "canonical_value": 15275.0,
+            "unit": "usd",
+            "comparison": "exact",
+            "accepted_surface_forms": ["$15,275", "15,275", "15275"],
+            "raw_value": "$15,275"
+          }
+        }
+      ],
+      "numeric_targets": [
+        {
+          "field_name": "property_taxes_2024",
+          "canonical_value": 15275.0,
+          "unit": "usd",
+          "comparison": "exact",
+          "accepted_surface_forms": ["$15,275", "15,275", "15275"],
+          "raw_value": "$15,275"
+        }
+      ],
+      "notes": "High-value table-heavy benchmark item for exact-match and citation accuracy."
+    },
+    {
+      "question_id": "lane-address",
+      "question": "What is the address of LANE PRAIRIE STORAGE?",
+      "evaluation_slice": "entity_scoped",
+      "scope_type": "entity_scoped",
+      "table_heavy": false,
+      "target_entities": ["Lane Prairie Storage"],
+      "target_document_ids": ["195649f9-83a3-4543-a16a-42f057be7de0"],
+      "expected_answer_substrings": ["303 County Road 704", "Joshua, TX 76058"],
+      "gold_evidence": [
+        {
+          "document_id": "195649f9-83a3-4543-a16a-42f057be7de0",
+          "page": 1,
+          "evidence_type": "narrative",
+          "field_label": "property_address",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation"]
+        }
+      ],
+      "numeric_targets": [],
+      "notes": "Pure scope-sensitive retrieval question; use it to inspect wrong-document leakage."
+    },
+    {
+      "question_id": "lane-cap-rate",
+      "question": "What is the cap rate for LANE PRAIRIE STORAGE?",
+      "evaluation_slice": "table_factual",
+      "scope_type": "entity_scoped",
+      "table_heavy": false,
+      "target_entities": ["Lane Prairie Storage"],
+      "target_document_ids": ["195649f9-83a3-4543-a16a-42f057be7de0"],
+      "expected_answer_substrings": ["8.49", "7.33"],
+      "gold_evidence": [
+        {
+          "document_id": "195649f9-83a3-4543-a16a-42f057be7de0",
+          "page": 7,
+          "evidence_type": "narrative",
+          "field_label": "current_cap_rate",
+          "relevance": 3,
+          "supports": ["retrieval", "generation", "citation", "numeric_em"],
+          "normalized_value": {
+            "field_name": "current_cap_rate",
+            "canonical_value": 8.49,
+            "unit": "percent",
+            "comparison": "exact",
+            "accepted_surface_forms": ["8.49%", "8.49", "8.490"],
+            "raw_value": "8.49%"
+          }
+        },
+        {
+          "document_id": "195649f9-83a3-4543-a16a-42f057be7de0",
+          "page": 7,
+          "evidence_type": "narrative",
+          "field_label": "year_1_cap_rate",
+          "relevance": 2,
+          "supports": ["retrieval", "generation", "citation", "numeric_em"],
+          "normalized_value": {
+            "field_name": "year_1_cap_rate",
+            "canonical_value": 7.33,
+            "unit": "percent",
+            "comparison": "exact",
+            "accepted_surface_forms": ["7.33%", "7.33", "7.330"],
+            "raw_value": "7.33%"
+          }
+        }
+      ],
+      "numeric_targets": [
+        {
+          "field_name": "current_cap_rate",
+          "canonical_value": 8.49,
+          "unit": "percent",
+          "comparison": "exact",
+          "accepted_surface_forms": ["8.49%", "8.49", "8.490"],
+          "raw_value": "8.49%"
+        },
+        {
+          "field_name": "year_1_cap_rate",
+          "canonical_value": 7.33,
+          "unit": "percent",
+          "comparison": "exact",
+          "accepted_surface_forms": ["7.33%", "7.33", "7.330"],
+          "raw_value": "7.33%"
+        }
+      ],
+      "notes": "Good failure-analysis item because generic rerankers sometimes blur the current vs year-one cap-rate distinction."
+    }
+  ]
+}
