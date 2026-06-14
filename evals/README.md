@@ -5,6 +5,47 @@ Test fixtures are exported from real runs stored in the database.
 
 ---
 
+# Research Reproducibility
+
+This repository contains the implementation used in:
+
+"Modality-Aware Selective Reranking for Financial Document Retrieval"
+
+Paper Components
+
+├── backend/app/core/rag/
+
+│   ├── hybrid_retriever.py
+
+│   ├── retrieval_query.py
+
+│   ├── query_understanding.py
+
+│   ├── document_matching.py
+
+│   └── rag_service.py
+
+
+├── evals/
+
+│   ├── promptfooconfig.yaml
+
+│   ├── benchmark/
+
+│   ├── results/
+
+│   └── statistical_analysis/
+
+Benchmark:
+96 questions
+26 CRE documents
+
+Main Results:
+A0-A6 ablation study
+Wilson CI
+McNemar tests
+Bootstrap intervals
+
 ## Setup
 
 ```bash
