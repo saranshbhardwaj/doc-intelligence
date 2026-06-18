@@ -132,7 +132,7 @@ export default function MemoHistorySheet({
     return (
       <Button variant="outline" size="sm" disabled className="underwriting-memo-secondary">
         <Loader2 className="h-4 w-4 animate-spin" />
-        Memos
+        Past memos
       </Button>
     );
   }
@@ -149,24 +149,31 @@ export default function MemoHistorySheet({
         className="underwriting-memo-secondary"
       >
         <History className="h-4 w-4" />
-        Memos
+        Past memos
         <span className="underwriting-memo-count">{memos.length}</span>
       </Button>
 
       <Sheet open={open} onOpenChange={onOpenChange}>
         <SheetContent
           side="right"
-          className="flex h-full w-[100vw] max-w-none flex-col overflow-hidden bg-background p-0 sm:w-[520px] sm:max-w-[520px]"
+          className="flex h-full w-[100vw] max-w-none flex-col overflow-hidden bg-background p-0 sm:w-[560px] sm:max-w-[560px]"
         >
-          <div className="border-b border-border/70 bg-card/80 px-5 py-4 backdrop-blur-xl">
+          <div className="border-b border-border/70 bg-gradient-to-b from-uw-citation-soft/70 to-card px-5 py-4 backdrop-blur-xl">
             <SheetHeader className="space-y-1 text-left">
               <div className="flex items-center gap-2 pr-8">
                 <div className="underwriting-memo-sheet-mark">
                   <FileText className="h-4 w-4" />
                 </div>
-                <SheetTitle className="text-base font-semibold">Credit memo history</SheetTitle>
+                <div className="min-w-0">
+                  <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-uw-citation">
+                    IC memos
+                  </p>
+                  <SheetTitle className="mt-1 font-display text-lg font-semibold tracking-tight">
+                    Memo history
+                  </SheetTitle>
+                </div>
               </div>
-              <SheetDescription>
+              <SheetDescription className="leading-6">
                 {memos.length} version{memos.length === 1 ? '' : 's'}
                 {dealName ? ` for ${dealName}` : ''}
               </SheetDescription>
@@ -196,7 +203,7 @@ export default function MemoHistorySheet({
                 </p>
                 {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin text-muted-foreground" /> : null}
               </div>
-              <div className="overflow-hidden rounded-xl border border-border/70 bg-card">
+              <div className="overflow-hidden rounded-[1rem] border border-border/70 bg-card shadow-panel">
                 {memos.map((memo) => (
                   <MemoHistoryRow
                     key={memo.id}
@@ -301,7 +308,7 @@ function MemoHistoryRow({ memo, latest, downloading, deleting, onDownload, onReg
     <div className="underwriting-memo-row">
       <div className="min-w-0 flex-1">
         <div className="flex flex-wrap items-center gap-2">
-          <span className="font-semibold text-foreground">v{memo.version}</span>
+          <span className="font-semibold text-foreground">Version {memo.version}</span>
           {latest ? <span className="underwriting-memo-latest-chip">Latest</span> : null}
           <StatusPill status={memo.status} />
         </div>

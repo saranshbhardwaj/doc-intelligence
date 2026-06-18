@@ -26,11 +26,11 @@ export async function getUnderwritingRun(getToken, runId) {
   return response.data;
 }
 
-export async function updateUnderwritingInputs(getToken, runId, inputs) {
+export async function updateUnderwritingInputs(getToken, runId, inputs, fieldCitations) {
   const api = createAuthenticatedApi(getToken);
-  const response = await api.patch(`/api/v1/re/underwriting/runs/${runId}/inputs`, {
-    inputs,
-  });
+  const payload = { inputs };
+  if (fieldCitations !== undefined) payload.field_citations = fieldCitations;
+  const response = await api.patch(`/api/v1/re/underwriting/runs/${runId}/inputs`, payload);
   return response.data;
 }
 

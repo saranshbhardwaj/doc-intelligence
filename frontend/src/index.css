@@ -81,6 +81,9 @@
     --cite-tier-extracted-fg: 192 85% 34%;
     --cite-tier-extracted-bg: var(--surface-soft);
     --cite-tier-extracted-border: var(--primary);
+    --cite-tier-manual-fg: 216 70% 38%;
+    --cite-tier-manual-bg: 216 95% 94%;
+    --cite-tier-manual-border: 216 70% 56%;
 
     /* Document type badge tokens (bg + foreground text) */
     --dt-spa: 214 95% 93%;        --dt-spa-fg: 214 89% 35%;
@@ -174,6 +177,9 @@
     --cite-tier-extracted-fg: 191 82% 72%;
     --cite-tier-extracted-bg: var(--surface-soft);
     --cite-tier-extracted-border: var(--primary);
+    --cite-tier-manual-fg: 216 78% 76%;
+    --cite-tier-manual-bg: 216 42% 18%;
+    --cite-tier-manual-border: 216 70% 56%;
 
     /* Comparison document colors - dark mode */
     --doc-a: 191 82% 54%;
@@ -1728,6 +1734,12 @@
     box-shadow: inset 3px 0 0 hsl(var(--uw-danger));
   }
 
+  .field-input-row.cited.confidence-manual {
+    border-color: hsl(var(--cite-tier-manual-border) / 0.45);
+    background: hsl(var(--cite-tier-manual-bg) / 0.76);
+    box-shadow: inset 3px 0 0 hsl(var(--cite-tier-manual-border));
+  }
+
   .field-affix {
     padding: 0 10px;
     font-size: 12px;
@@ -1849,6 +1861,12 @@
     color: hsl(var(--cite-tier-extracted-fg));
     border-color: hsl(var(--cite-tier-extracted-border) / 0.4);
     background: hsl(var(--cite-tier-extracted-bg) / 0.65);
+  }
+
+  .cite-tier-manual {
+    color: hsl(var(--cite-tier-manual-fg));
+    border-color: hsl(var(--cite-tier-manual-border) / 0.42);
+    background: hsl(var(--cite-tier-manual-bg) / 0.8);
   }
 
   .field-section {
@@ -1989,18 +2007,19 @@
     order: 4;
     display: inline-flex;
     align-items: center;
-    gap: 6px;
-    border-radius: 12px;
-    border: 1px solid hsl(var(--shell-border) / 0.55);
-    background: hsl(var(--card) / 0.72);
-    padding: 3px;
+    gap: 4px;
+    border-radius: 14px;
+    border: 1px solid hsl(var(--shell-border) / 0.62);
+    background:
+      linear-gradient(180deg, hsl(var(--card) / 0.92), hsl(var(--surface-soft) / 0.72));
+    padding: 4px;
     box-shadow:
       inset 0 1px 0 hsl(var(--border) / 0.24),
-      0 12px 24px -22px hsl(var(--foreground) / 0.38);
+      0 14px 28px -24px hsl(var(--foreground) / 0.36);
   }
 
   .underwriting-memo-primary {
-    @apply h-8 gap-1.5 rounded-lg border-0 px-3 text-xs font-semibold shadow-none;
+    @apply h-9 gap-1.5 rounded-[0.65rem] border-0 px-3.5 text-xs font-semibold shadow-none;
     background: linear-gradient(135deg, hsl(var(--uw-tint)), hsl(var(--primary)));
     color: hsl(var(--primary-foreground));
   }
@@ -2016,11 +2035,11 @@
   }
 
   .underwriting-memo-secondary {
-    @apply h-8 gap-1.5 rounded-lg border-0 bg-transparent px-2.5 text-xs font-semibold text-muted-foreground shadow-none;
+    @apply h-9 gap-1.5 rounded-[0.65rem] border-0 bg-transparent px-3 text-xs font-semibold text-muted-foreground shadow-none;
   }
 
   .underwriting-memo-secondary:hover {
-    background: hsl(var(--muted) / 0.72);
+    background: hsl(var(--muted) / 0.78);
     color: hsl(var(--foreground));
   }
 
@@ -2037,7 +2056,7 @@
   }
 
   .underwriting-memo-latest {
-    @apply rounded-xl border p-4;
+    @apply rounded-[1rem] border p-4;
     border-color: hsl(var(--uw-citation) / 0.26);
     background:
       radial-gradient(circle at top right, hsl(var(--uw-citation) / 0.1), transparent 42%),
@@ -2048,7 +2067,7 @@
   }
 
   .underwriting-memo-row {
-    @apply flex items-center justify-between gap-3 border-b px-3 py-3 text-sm;
+    @apply flex items-center justify-between gap-3 border-b px-3.5 py-3 text-sm transition-colors;
     border-color: hsl(var(--border) / 0.58);
   }
 
@@ -2057,7 +2076,7 @@
   }
 
   .underwriting-memo-row:hover {
-    background: hsl(var(--muted) / 0.35);
+    background: hsl(var(--muted) / 0.38);
   }
 
   .underwriting-memo-status {
@@ -2109,6 +2128,10 @@
 
   .uw-confidence-dot-neutral {
     background: hsl(var(--muted-foreground) / 0.45);
+  }
+
+  .uw-confidence-dot-manual {
+    background: hsl(var(--cite-tier-manual-border));
   }
 
   @media (max-width: 1024px) {

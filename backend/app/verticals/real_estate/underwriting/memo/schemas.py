@@ -121,6 +121,9 @@ class MemoContext:
     year_built: Optional[int]
     num_units: Optional[int]
     rentable_sqft: Optional[float]
+    total_unit_count: Optional[int]
+    storage_unit_count: Optional[int]
+    non_storage_unit_count: Optional[int]
     cc_unit_count: int
     nc_unit_count: int
     climate_control_pct: float
@@ -161,12 +164,14 @@ class MemoContext:
     # Sizing
     max_loan: dict = field(default_factory=dict)
     financing: dict = field(default_factory=dict)
+    operational: dict = field(default_factory=dict)
 
     # Inputs reused in narration
     unit_mix: list[dict] = field(default_factory=list)
     rent_comps: list[dict] = field(default_factory=list)
     criteria: dict = field(default_factory=dict)
     capex_reserve_per_unit: Optional[float] = None
+    source_support: list[dict] = field(default_factory=list)
 
     # Verdict
     classification: Optional[str] = None
@@ -182,7 +187,7 @@ class MemoContext:
     thesis_text: Optional[str] = None
     strategy_type: Optional[str] = None        # Stable Income | Value-Add | Distressed | Conversion | Portfolio Build | Opportunistic
     hold_period_years_override: Optional[int] = None
-    verdict_override: Optional[str] = None      # Pursue | Pass | Needs Review | None
+    verdict_override: Optional[str] = None      # Pursue | Needs Review | Below Screen | None
     verdict_override_reason: Optional[str] = None
     custom_conditions: list[str] = field(default_factory=list)
     sourcing_type: Optional[str] = None
@@ -196,3 +201,4 @@ class MemoContext:
 
     # Source document ID list (for citation post-validation)
     document_ids: list[str] = field(default_factory=list)
+    citation_doc_labels: dict[str, str] = field(default_factory=dict)

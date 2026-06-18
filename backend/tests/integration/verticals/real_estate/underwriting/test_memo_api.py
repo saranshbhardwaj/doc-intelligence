@@ -247,8 +247,12 @@ class TestDownloadMemo:
         assert resp.status_code == 200
         body = resp.json()
         assert "url" in body
+        assert body["filename"].endswith("_IC_Memo_v1.docx")
         assert body["url"].startswith("https://")
-        mock_presign.assert_called_once_with("re-underwriting-memos/u/r/m_v1.docx")
+        mock_presign.assert_called_once_with(
+            "re-underwriting-memos/u/r/m_v1.docx",
+            filename=body["filename"],
+        )
 
     def test_incomplete_memo_returns_409(
         self, authed_client, completed_run, db_session

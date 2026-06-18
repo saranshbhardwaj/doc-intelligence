@@ -168,6 +168,8 @@ class TestMemoTask:
         db_session.refresh(seeded_memo)
         assert seeded_memo.status == "complete"
         assert seeded_memo.r2_key
+        assert seeded_memo.id not in seeded_memo.r2_key
+        assert seeded_memo.r2_key.endswith("Test_IC_Memo_v1.docx")
         assert seeded_memo.file_size_bytes and seeded_memo.file_size_bytes > 1000
 
         # Validate the DOCX bytes are a real document

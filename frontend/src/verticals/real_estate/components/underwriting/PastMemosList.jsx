@@ -48,18 +48,18 @@ export default function PastMemosList({ runId, getToken, refreshKey, onRegenerat
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <Button variant="outline" size="sm" className="gap-1.5">
+        <Button variant="outline" size="sm" className="underwriting-memo-secondary">
           <FileText className="h-4 w-4" />
           Past memos
-          <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] font-semibold text-muted-foreground">
+          <span className="underwriting-memo-count">
             {memos.length}
           </span>
           <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
         </Button>
       </PopoverTrigger>
-      <PopoverContent align="end" className="w-96 p-0">
-        <div className="border-b border-border px-3 py-2">
-          <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-muted-foreground">
+      <PopoverContent align="end" className="w-96 overflow-hidden rounded-[1rem] border-border/70 bg-card p-0 shadow-panel">
+        <div className="border-b border-border/70 bg-uw-citation-soft/50 px-3 py-3">
+          <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-uw-citation">
             Past memos
           </p>
         </div>
@@ -74,7 +74,7 @@ export default function PastMemosList({ runId, getToken, refreshKey, onRegenerat
           {memos.map((m) => (
             <li
               key={m.id}
-              className="flex flex-wrap items-center justify-between gap-2 px-3 py-2 text-sm"
+              className="flex flex-wrap items-center justify-between gap-2 px-3 py-3 text-sm transition-colors hover:bg-muted/35"
             >
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">

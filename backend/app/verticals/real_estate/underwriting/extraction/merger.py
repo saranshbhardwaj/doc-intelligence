@@ -11,6 +11,7 @@ Priority rules (industry standard):
 from __future__ import annotations
 
 from dataclasses import dataclass, field as dc_field
+import re
 from typing import Any, Optional
 
 from .schemas import (
@@ -20,6 +21,13 @@ from .schemas import (
     T12Extraction,
 )
 from ..benchmarks import get_expense_floors
+
+
+DEFAULT_HOLD_PERIOD_YEARS = 5
+DEFAULT_EXIT_CAP_RATE = 0.08
+DEFAULT_EXIT_CAP_SPREAD = 0.005
+PRO_FORMA_CAP_RATE_RE = re.compile(r"\b(pro\s*forma|stabili[sz]ed)\b.{0,40}\bcap\s*rate\b", re.IGNORECASE)
+SALE_CAP_RATE_RE = re.compile(r"\b(exit|terminal|going[-\s]*out|sale|disposition)\b.{0,40}\bcap\s*rate\b", re.IGNORECASE)
 
 
 @dataclass(slots=True)
@@ -197,6 +205,37 @@ def _apply_om_plausibility_guards(om: OMExtraction, flags: list[dict[str, Any]])
                     )
 
 
+def _is_pro_forma_cap_rate_source(source_text: str | None) -> bool:
+    if not source_text:
+        return False
+    return bool(PRO_FORMA_CAP_RATE_RE.search(source_text) and not SALE_CAP_RATE_RE.search(source_text))
+
+
+def _apply_om_cap_rate_label_guards(
+    om: OMExtraction,
+    field_citations: dict,
+    flags: list[dict[str, Any]],
+) -> None:
+    """Reject broker pro forma/stabilized cap rates when misclassified as sale cap assumptions."""
+
+    for field in ("exit_cap_rate", "market_cap_rate_sale"):
+        if getattr(om, field, None) is None:
+            continue
+        source_text = (field_citations.get(field) or {}).get("source_text")
+        if not _is_pro_forma_cap_rate_source(source_text):
+            continue
+        _invalidate_field(
+            om,
+            "om",
+            field,
+            (
+                f"{field.replace('_', ' ')} was sourced from a broker pro forma/stabilized cap-rate label, "
+                "not an explicit exit, terminal, going-out, sale, or disposition cap rate."
+            ),
+            flags,
+        )
+
+
 def _apply_rent_roll_plausibility_guards(rent_roll: RentRollExtraction, flags: list[dict[str, Any]]) -> None:
     _guard_positive(rent_roll, "rent_roll", "num_units_actual", flags, "Rent roll unit count")
     _guard_range(rent_roll, "rent_roll", "physical_occupancy_pct", 0.0, 1.0, flags, "Rent roll physical occupancy")
@@ -221,6 +260,7 @@ def apply_plausibility_guards(results: list[ExtractedDocResult]) -> tuple[list[E
         sanitized = result.model_copy(deep=True)
         if sanitized.om and not sanitized.error:
             _apply_om_plausibility_guards(sanitized.om, flags)
+            _apply_om_cap_rate_label_guards(sanitized.om, sanitized.field_citations or {}, flags)
         if sanitized.rent_roll and not sanitized.error:
             _apply_rent_roll_plausibility_guards(sanitized.rent_roll, flags)
         if sanitized.t12 and not sanitized.error:
@@ -330,6 +370,41 @@ def _describe_source(doc_type: str | None, field: str | None) -> str:
     }.get(doc_type or "", doc_type or "source")
     field_label = _humanize_field_name(field)
     return f"{doc_label} {field_label}" if field_label else doc_label
+
+
+def _default_exit_cap_candidate(om: Optional[OMExtraction]) -> MergeCandidate:
+    purchase_cap = om.market_cap_rate_purchase if om else None
+    if purchase_cap:
+        exit_cap = min(max(purchase_cap + DEFAULT_EXIT_CAP_SPREAD, 0.01), 0.20)
+        formula = (
+            f"{purchase_cap * 100:.2f}% purchase cap rate + "
+            f"{DEFAULT_EXIT_CAP_SPREAD * 100:.2f}% spread"
+        )
+        return _candidate(
+            exit_cap,
+            "om",
+            "exit_cap_rate",
+            formula,
+            True,
+            False,
+            {
+                "selection_note": (
+                    "Used default terminal cap assumption equal to purchase cap rate plus 50 bps "
+                    "because OM exit cap rate was unavailable."
+                ),
+                "derived_from_field": "market_cap_rate_purchase",
+                "default_basis": "purchase_cap_plus_50bps",
+            },
+        )
+    return _candidate(
+        DEFAULT_EXIT_CAP_RATE,
+        "om",
+        "exit_cap_rate",
+        None,
+        True,
+        False,
+        {"default_basis": "fallback_8pct"},
+    )
 
 
 def _benchmark_citation(
@@ -702,9 +777,19 @@ def _build_merged_inputs(
                     if skipped_sources:
                         metadata.setdefault("used_fallback_source", True)
                         metadata.setdefault("preferred_sources_missing", skipped_sources)
+                        if is_default_candidate:
+                            selection_note = (
+                                f"Used default {_humanize_field_name(output_field)} assumption because "
+                                f"{', '.join(skipped_sources)} was unavailable."
+                            )
+                        else:
+                            selection_note = (
+                                f"Used {_describe_source(doc_type, src_field)} because "
+                                f"{', '.join(skipped_sources)} was unavailable."
+                            )
                         metadata.setdefault(
                             "selection_note",
-                            f"Used {_describe_source(doc_type, src_field)} because {', '.join(skipped_sources)} was unavailable.",
+                            selection_note,
                         )
                 citations[output_field] = _cited(
                     per_doc_citations,
@@ -966,14 +1051,14 @@ def _build_merged_inputs(
         return {
             "hold_period_years": pick("hold_period_years",
                 _candidate(om.hold_period_years if om else None, "om", "hold_period_years"),
-                _candidate(10, "om", "hold_period_years", None, True),
+                _candidate(DEFAULT_HOLD_PERIOD_YEARS, "om", "hold_period_years", None, True),
             ),
             "market_cap_rate_sale": pick("market_cap_rate_sale",
                 _candidate(om.market_cap_rate_sale if om else None, "om", "market_cap_rate_sale"),
             ),
             "exit_cap_rate": pick("exit_cap_rate",
                 _candidate(om.exit_cap_rate if om else None, "om", "exit_cap_rate"),
-                _candidate(0.065, "om", "exit_cap_rate", None, True),
+                _default_exit_cap_candidate(om),
             ),
             "selling_cost_pct": pick("selling_cost_pct",
                 _candidate(om.selling_cost_pct if om else None, "om", "selling_cost_pct"),

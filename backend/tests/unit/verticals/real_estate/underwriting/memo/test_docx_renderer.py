@@ -37,6 +37,9 @@ def ctx():
         year_built=2010,
         num_units=400,
         rentable_sqft=50_000,
+        total_unit_count=400,
+        storage_unit_count=400,
+        non_storage_unit_count=None,
         cc_unit_count=100,
         nc_unit_count=300,
         climate_control_pct=0.25,
@@ -84,13 +87,36 @@ def ctx():
         rent_position_analysis=[
             {"size": "10 x 10", "climate_type": "NC", "subject_current_rent": 110.0,
              "subject_market_rent": 115.0, "comp_average_rent": 120.0,
-             "current_vs_comp_ratio": 0.917, "market_vs_comp_ratio": 0.958, "comp_count": 4},
+             "current_vs_comp_ratio": 0.917, "market_vs_comp_ratio": 0.958, "comp_count": 4,
+             "bucket": "medium"},
         ],
         unit_mix=[
             {"size": "10 x 10", "climate_type": "NC", "num_units": 100,
              "occupancy_pct": 0.92, "current_rent": 110.0},
             {"size": "10 x 20", "climate_type": "CC", "num_units": 50,
              "occupancy_pct": 0.88, "current_rent": 175.0},
+        ],
+        source_support=[
+            {
+                "group": "Property",
+                "field_key": "num_units",
+                "label": "Underwriting Unit Count",
+                "value": "133",
+                "source_basis": "Manual override",
+                "citations": "Tulsa Storage OM.pdf: p6",
+                "confidence": "-",
+                "notes": "Manual override; original value 205. Original source text: Total Units: 205",
+            },
+            {
+                "group": "Debt / Exit",
+                "field_key": "exit_cap_rate",
+                "label": "Exit Cap Rate",
+                "value": "8.61%",
+                "source_basis": "Model default",
+                "citations": "-",
+                "confidence": "0%",
+                "notes": "Used default exit cap because OM exit cap was unavailable.",
+            },
         ],
     )
 
@@ -180,11 +206,25 @@ class TestRenderMemoDocx:
         assert "medium" in full_text.lower()
 
     def test_appendix_lists_cited_docs(self, ctx):
+        ctx.citation_doc_labels = {"doc-om-1": "Tulsa Storage OM.pdf"}
         out = render_memo_docx(ctx, _sections())
         doc = Document(io.BytesIO(out))
         full_text = "\n".join(p.text for p in doc.paragraphs)
-        assert "doc-om-1" in full_text
+        assert "Tulsa Storage OM.pdf" in full_text
         assert "5" in full_text and "9" in full_text
+
+    def test_appendix_renders_key_input_source_support(self, ctx):
+        out = render_memo_docx(ctx, _sections())
+        doc = Document(io.BytesIO(out))
+        para_text = "\n".join(p.text for p in doc.paragraphs)
+        cells = _all_table_text(doc)
+
+        assert "Key Input Source Support" in para_text
+        assert "Underwriting Unit Count" in cells
+        assert "Manual override" in cells
+        assert "original value 205" in cells
+        assert "Exit Cap Rate" in cells
+        assert "Model default" in cells
 
     def test_no_unresolved_placeholders(self, ctx):
         out = render_memo_docx(ctx, _sections())
@@ -209,9 +249,20 @@ class TestRenderMemoDocx:
         para_text = "\n".join(p.text for p in doc.paragraphs)
         cells = _all_table_text(doc)
         assert "Unit Mix" in para_text
+        assert "Type" in cells
         # Mix-row cells appear inside the table
         assert "10 x 10" in cells
         assert "92.00%" in cells  # occupancy_pct=0.92 -> "92.00%"
+
+    def test_unit_mix_table_uses_category_for_non_storage_rows(self, ctx):
+        ctx.unit_mix = [
+            {"size": "10 x 20", "unit_category": "covered_parking", "climate_type": "CC",
+             "num_units": 2, "occupancy_pct": 0.5, "current_rent": 70.0},
+        ]
+        out = render_memo_docx(ctx, _sections())
+        doc = Document(io.BytesIO(out))
+        cells = _all_table_text(doc)
+        assert "Covered Parking" in cells
 
     def test_noi_bridge_table_rendered(self, ctx):
         out = render_memo_docx(ctx, _sections())
@@ -257,8 +308,20 @@ class TestRenderMemoDocx:
         para_text = "\n".join(p.text for p in doc.paragraphs)
         cells = _all_table_text(doc)
         assert "Rent Position by Size Bucket" in para_text
+        assert "bucket-level weighted averages" in para_text
         assert "Current vs Comp" in cells  # header cell
+        assert "Bucket / Example Size" in cells
+        assert "Medium bucket (e.g. 10 x 10)" in cells
         assert "10 x 10" in cells
+
+    def test_inline_citation_labels_are_friendly(self, ctx):
+        ctx.citation_doc_labels = {"doc-om-1": "Offering Memorandum"}
+        out = render_memo_docx(ctx, _sections())
+        doc = Document(io.BytesIO(out))
+        text = "\n".join(p.text for p in doc.paragraphs)
+
+        assert "[Offering Memorandum:p5]" in text
+        assert "[doc-om-1:p5]" not in text
 
     def test_verdict_override_renders_audit_line(self, ctx):
         """When ctx.verdict_override differs from classification_calculator,

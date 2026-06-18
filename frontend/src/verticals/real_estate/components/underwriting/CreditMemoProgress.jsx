@@ -94,13 +94,13 @@ export default function CreditMemoProgress({ open, onClose, jobId, memoId, getTo
   if (!open) return null;
 
   return (
-    <div className="fixed bottom-4 right-4 z-40 w-96 rounded-xl border border-border bg-card p-4 shadow-lg">
+    <div className="fixed bottom-4 right-4 z-40 w-[calc(100vw-2rem)] max-w-sm rounded-[1rem] border border-border/70 bg-card p-4 shadow-shell">
       <div className="flex items-center justify-between mb-3">
         <div className="flex items-center gap-2">
-          {status === 'running' ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-          {status === 'complete' ? <CheckCircle2 className="h-4 w-4 text-green-600" /> : null}
+          {status === 'running' ? <Loader2 className="h-4 w-4 animate-spin text-primary" /> : null}
+          {status === 'complete' ? <CheckCircle2 className="h-4 w-4 text-uw-success" /> : null}
           {status === 'failed' ? <AlertTriangle className="h-4 w-4 text-destructive" /> : null}
-          <p className="text-sm font-semibold">Credit memo</p>
+          <p className="text-sm font-semibold">IC memo</p>
         </div>
         <button type="button" onClick={onClose} aria-label="Close">
           <X className="h-4 w-4 text-muted-foreground hover:text-foreground" />

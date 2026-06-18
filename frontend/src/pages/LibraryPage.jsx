@@ -241,9 +241,11 @@ export default function LibraryPage() {
       setSelectedCollection(res);
       setUploadCollection(res.id);
       setSearchParams({ collection: res.id });
+      return res;
     } catch (error) {
       console.error("Failed to create collection:", error);
       toast.error(error.response?.data?.detail || error.message || "Failed to create collection");
+      throw error;
     }
   };
 
@@ -671,7 +673,11 @@ export default function LibraryPage() {
             selectedCollection={selectedCollection}
             loading={loadingCollections}
             onSelectCollection={handleSelectCollection}
-            onCreateCollection={handleCreateCollection}
+            onCreateCollection={async (name) => {
+              const collection = await handleCreateCollection(name);
+              setMobileCollectionsOpen(false);
+              return collection;
+            }}
             onDeleteCollection={handleDeleteCollection}
             requestCreate={createRequestCount}
           />

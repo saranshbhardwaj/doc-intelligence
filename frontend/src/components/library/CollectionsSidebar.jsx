@@ -41,6 +41,7 @@ export default function CollectionsSidebar({
   const [searchQuery, setSearchQuery] = useState("");
   const [showNewCollection, setShowNewCollection] = useState(false);
   const [newCollectionName, setNewCollectionName] = useState("");
+  const [creatingCollection, setCreatingCollection] = useState(false);
 
   // Allow external callers (e.g. empty state buttons) to trigger create form
   useEffect(() => {
@@ -58,11 +59,16 @@ export default function CollectionsSidebar({
     );
   }, [collections, searchQuery]);
 
-  const handleCreateCollection = () => {
+  const handleCreateCollection = async () => {
     if (!newCollectionName.trim()) return;
-    onCreateCollection?.(newCollectionName.trim());
-    setNewCollectionName("");
-    setShowNewCollection(false);
+    try {
+      setCreatingCollection(true);
+      await onCreateCollection?.(newCollectionName.trim());
+      setNewCollectionName("");
+      setShowNewCollection(false);
+    } finally {
+      setCreatingCollection(false);
+    }
   };
 
   return (
@@ -188,17 +194,19 @@ export default function CollectionsSidebar({
             placeholder="Collection name"
             value={newCollectionName}
             onChange={(e) => setNewCollectionName(e.target.value)}
-            onKeyPress={(e) => e.key === "Enter" && handleCreateCollection()}
+            onKeyDown={(e) => e.key === "Enter" && handleCreateCollection()}
             className="mb-2 h-10 rounded-xl border-border/70 bg-background/70 text-sm"
             autoFocus
+            disabled={creatingCollection}
           />
           <div className="flex gap-2">
             <Button
               size="sm"
               onClick={handleCreateCollection}
+              disabled={creatingCollection || !newCollectionName.trim()}
               className="h-9 flex-1 rounded-full"
             >
-              Create
+              {creatingCollection ? "Creating..." : "Create"}
             </Button>
             <Button
               size="sm"
@@ -207,6 +215,7 @@ export default function CollectionsSidebar({
                 setShowNewCollection(false);
                 setNewCollectionName("");
               }}
+              disabled={creatingCollection}
               className="h-9 flex-1 rounded-full"
             >
               Cancel

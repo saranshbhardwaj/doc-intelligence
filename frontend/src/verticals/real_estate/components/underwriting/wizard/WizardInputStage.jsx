@@ -309,7 +309,7 @@ export default function WizardInputStage({
             <NumericField label="Other OpEx (Annual)" value={inputs.operational.other_opex_annual} onChange={(v) => patchOp('other_opex_annual', v)} placeholder="0" prefix="$" citation={getCitation('other_opex_annual')} onOpenSource={handleOpenSource} badge={driverBadge('other_opex_annual')} note={driverNote('other_opex_annual')} disabled={!isDriver('other_opex_annual')} />
 
             <FieldGroup label="Growth Assumptions" />
-            <NumericField label="Rent Growth" value={inputs.operational.rent_growth_pct} onChange={(v) => patchOp('rent_growth_pct', v)} placeholder="3" suffix="%" citation={getCitation('rent_growth_pct')} onOpenSource={handleOpenSource} badge="Drives projections" note="Applies to future-year revenue growth." />
+            <NumericField label="Rent Growth" value={inputs.operational.rent_growth_pct} onChange={(v) => patchOp('rent_growth_pct', v)} placeholder="3" suffix="%" citation={getCitation('rent_growth_pct')} onOpenSource={handleOpenSource} badge="Drives projections" note="Recurring annual growth, not one-time pro forma step-up." />
             <NumericField label="OpEx Growth" value={inputs.operational.opex_growth_pct} onChange={(v) => patchOp('opex_growth_pct', v)} placeholder="2" suffix="%" citation={getCitation('opex_growth_pct')} onOpenSource={handleOpenSource} badge="Drives projections" note="Applies to future-year operating expense growth." />
             <NumericField label="Property Tax Growth" value={inputs.operational.property_tax_growth_pct} onChange={(v) => patchOp('property_tax_growth_pct', v)} placeholder="4" suffix="%" citation={getCitation('property_tax_growth_pct')} onOpenSource={handleOpenSource} badge="Drives projections" note="Applies to future-year property tax growth when tax is modeled as a line item." />
 
@@ -375,13 +375,17 @@ export default function WizardInputStage({
                 <div>
                   <div className="flex flex-wrap items-center gap-2">
                     <p className="text-sm font-semibold text-foreground">Nearby rent comps</p>
-                    {rentCompsCitation ? <Sparkles className="h-3.5 w-3.5 text-uw-citation" /> : null}
-                    {rentCompsCitation ? <span className="text-[11px] font-medium uppercase tracking-[0.16em] text-uw-citation">AI extracted</span> : null}
+                    {rentCompsCitation && !rentCompsCitation.is_manual ? <Sparkles className="h-3.5 w-3.5 text-uw-citation" /> : null}
+                    {rentCompsCitation ? (
+                      <span className="text-[11px] font-medium uppercase tracking-[0.16em] text-uw-citation">
+                        {rentCompsCitation.is_manual ? 'Manual edits' : 'AI extracted'}
+                      </span>
+                    ) : null}
                   </div>
                   <p className="mt-1 text-sm text-muted-foreground">Add your tight comp set manually, or review rows extracted from OM competitive-set tables.</p>
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
-                  {rentCompsCitation ? (
+                  {rentCompsCitation && !rentCompsCitation.is_manual ? (
                     <Button type="button" variant="ghost" size="sm" className="h-8 rounded-full px-3 text-[11px] font-semibold text-uw-citation hover:bg-background/70" onClick={() => handleOpenSource(rentCompsCitation)}>
                       Source
                     </Button>
@@ -469,7 +473,7 @@ export default function WizardInputStage({
             <FieldGroup label="Exit" />
             <NumericField label="Hold Period" value={inputs.exit.hold_period_years} onChange={(v) => patchExit('hold_period_years', v)} suffix="yrs" citation={getCitation('hold_period_years')} onOpenSource={handleOpenSource} />
             <NumericField label="Market Cap Rate Sale" value={inputs.exit.market_cap_rate_sale} onChange={(v) => patchExit('market_cap_rate_sale', v)} suffix="%" citation={getCitation('market_cap_rate_sale')} onOpenSource={handleOpenSource} />
-            <NumericField label="Exit Cap Rate" value={inputs.exit.exit_cap_rate} onChange={(v) => patchExit('exit_cap_rate', v)} suffix="%" citation={getCitation('exit_cap_rate')} onOpenSource={handleOpenSource} />
+            <NumericField label="Exit Cap Rate" value={inputs.exit.exit_cap_rate} onChange={(v) => patchExit('exit_cap_rate', v)} suffix="%" citation={getCitation('exit_cap_rate')} onOpenSource={handleOpenSource} note="Terminal sale cap only. Default uses purchase cap +50 bps when OM exit cap is unavailable." />
             <NumericField label="Selling Cost" value={inputs.exit.selling_cost_pct} onChange={(v) => patchExit('selling_cost_pct', v)} suffix="%" citation={getCitation('selling_cost_pct')} onOpenSource={handleOpenSource} />
           </div>
         );

@@ -27,6 +27,7 @@ def ctx():
     return MemoContext(
         deal_name="X", address=None, asset_type="self_storage",
         year_built=None, num_units=None, rentable_sqft=None,
+        total_unit_count=None, storage_unit_count=None, non_storage_unit_count=None,
         cc_unit_count=0, nc_unit_count=0, climate_control_pct=0.0,
         purchase_price=None, price_per_unit=None, price_per_sqft=None, cap_rate_at_cost=None,
         population_3mi=None, avg_household_income_3mi=None, storage_sqft_per_capita_3mi=None,
@@ -133,6 +134,8 @@ class TestSharpenedRiskAndRecommendationInstructions:
         # should be referenced so the LLM stops saying "data not provided".
         assert "current_vs_comp_avg" in text
         assert "matched_bucket_count" in text
+        assert "current_ratio_bucket_count" in text
+        assert "cannot be quantified" in text
 
 
 class TestQualityFixesRoundTwo:
@@ -181,5 +184,13 @@ class TestQualityFixesRoundTwo:
         assert "EM" in text and "IRR" in text  # EM-as-IRR-mitigant ban
         assert "equity multiple" in text.lower()
         assert "Cash-on-cash" in text or "cash-on-cash" in text
+        assert "Additional leverage is a financing option" in text
+        assert "Do NOT cite IRR" in text
         # Fall-through to null when no same-dimension mitigant exists.
         assert "null" in text.lower()
+
+    def test_recommendation_instructions_soften_below_screen_language(self):
+        text = SECTION_INSTRUCTIONS[SECTION_RECOMMENDATION]
+        assert "does not clear the configured screen" in text
+        assert "warrant rejection" in text
+        assert "OM-only underwriting" in text
