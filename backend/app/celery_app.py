@@ -75,6 +75,7 @@ celery_app.conf.task_routes = {
     "app.verticals.private_equity.diligence.investigations.tasks.*": {"queue": "critical"},
     "app.verticals.real_estate.template_filling.tasks.*": {"queue": "critical"},
     "app.verticals.real_estate.underwriting.extraction.tasks.tasks.*": {"queue": "critical"},
+    "app.verticals.real_estate.underwriting.memo.tasks.*": {"queue": "critical"},
     # Default: document indexing runs in background, can wait
     "app.services.tasks.document_processor.*": {"queue": "default"},
     "app.services.tasks.stuck_task_monitor.*": {"queue": "default"},
@@ -145,6 +146,7 @@ try:
         import app.verticals.private_equity.diligence.investigations.tasks  # noqa: F401 - PE diligence investigation tasks
         import app.verticals.real_estate.template_filling.tasks  # noqa: F401 - RE template filling tasks
         import app.verticals.real_estate.underwriting.extraction.tasks.tasks  # noqa: F401 - RE underwriting extraction pipeline tasks
+        import app.verticals.real_estate.underwriting.memo.tasks  # noqa: F401 - RE underwriting IC memo generation task
 except Exception as e:
     # Log task import failures so we can debug worker registration issues
     import sys

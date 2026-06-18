@@ -13,7 +13,7 @@ from app.utils.logging import logger
 from app.verticals.real_estate.underwriting.extraction.tasks.tasks import start_re_underwriting_chain
 from app.verticals.real_estate.underwriting.schemas.self_storage import SelfStorageInputs, UnitMixRow
 from app.verticals.real_estate.underwriting.calculator import calculate, calculate_sensitivity
-from app.verticals.real_estate.underwriting.max_loan import calculate_max_loan
+from app.verticals.real_estate.underwriting.max_loan import compute_max_loan_for_run
 from app.verticals.real_estate.underwriting.noi_bridge import build_noi_bridge
 from app.verticals.real_estate.underwriting.stress_tests import run_stress_tests
 from app.verticals.real_estate.underwriting.rollover import compute_rollover_risk
@@ -405,51 +405,26 @@ def max_loan_sizing(
     if not run.inputs:
         raise HTTPException(status_code=400, detail="Run has no saved inputs")
 
+    # Validate inputs early so a malformed run returns a 400 instead of a 500.
     try:
-        inputs = SelfStorageInputs(**run.inputs)
+        SelfStorageInputs(**run.inputs)
     except ValidationError as exc:
         logger.warning(f"Max-loan: run {run_id} inputs failed validation: {exc}")
         raise HTTPException(status_code=400, detail="Run inputs are not valid")
 
-    dscr_floor = (
-        payload.dscr_floor
-        if payload.dscr_floor is not None
-        else (inputs.criteria.dscr_year_one_floor or 1.25)
-    )
-    max_ltv = (
-        payload.max_ltv
-        if payload.max_ltv is not None
-        else (inputs.criteria.max_ltv or 0.65)
-    )
-    debt_yield_floor = (
-        payload.debt_yield_floor
-        if payload.debt_yield_floor is not None
-        else 0.08
-    )
-
-    artifact = run.result_artifact or {}
-    noi_year_one = (
-        artifact.get("noi_year_one")
-        or inputs.operational.noi_year_one_stated
-        or inputs.operational.noi_current_stated
-    )
-
-    current_loan = (inputs.acquisition.purchase_price or 0.0) * inputs.financing.ltv_pct
-
     try:
-        result = calculate_max_loan(
-            noi_year_one=noi_year_one,
-            purchase_price=inputs.acquisition.purchase_price,
-            interest_rate_pct=inputs.financing.interest_rate_pct,
-            amortization_years=inputs.financing.amortization_years,
-            dscr_floor=dscr_floor,
-            max_ltv=max_ltv,
-            debt_yield_floor=debt_yield_floor,
-            current_loan=current_loan,
+        result = compute_max_loan_for_run(
+            run,
+            dscr_floor=payload.dscr_floor,
+            max_ltv=payload.max_ltv,
+            debt_yield_floor=payload.debt_yield_floor,
         )
     except Exception as e:
         logger.error(f"Max-loan sizing failed for run {run_id}: {e}")
         raise HTTPException(status_code=400, detail="Max-loan calculation failed")
+
+    if result is None:
+        raise HTTPException(status_code=400, detail="Run has no saved inputs")
 
     return result.model_dump()
 

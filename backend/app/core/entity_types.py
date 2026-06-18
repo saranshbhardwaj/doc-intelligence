@@ -14,6 +14,7 @@ ENTITY_RESPONSE_FIELD_NAMES = {
     "analysis_run": "analysis_run_id",
     "investigation_run": "investigation_run_id",
     "underwriting_run": "run_id",
+    "underwriting_memo": "memo_id",
 }
 
 
@@ -82,6 +83,18 @@ def resolve_entity_owner(entity_type: str, entity_id: str, org_id: str) -> Tuple
         if not run:
             raise HTTPException(status_code=404, detail="Underwriting run not found")
         return run.user_id, None
+
+    elif entity_type == "underwriting_memo":
+        from app.db_models_re_memos import UnderwritingMemo
+        from app.database import SessionLocal
+        db = SessionLocal()
+        try:
+            memo = db.query(UnderwritingMemo).filter(UnderwritingMemo.id == entity_id).first()
+        finally:
+            db.close()
+        if not memo:
+            raise HTTPException(status_code=404, detail="Underwriting memo not found")
+        return memo.user_id, None
 
     else:
         raise HTTPException(status_code=404, detail=f"Unknown job entity type: {entity_type}")

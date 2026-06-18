@@ -9,10 +9,10 @@ import {
   AlertTriangle,
   CheckCircle2,
   ChevronLeft,
-  Download,
   Loader2,
   MapPin,
   SlidersHorizontal,
+  Sparkles,
   Trash2,
   Warehouse,
   XCircle,
@@ -40,11 +40,14 @@ import { useAppAuth } from '../../../hooks/useAppAuth';
 import { useUnderwriting, useUnderwritingActions } from '../../../store';
 import { deleteUnderwritingRun, recalculateScenario, runSensitivityAnalysis } from '../../../api/re-underwriting';
 import {
+  CreditMemoModal,
+  CreditMemoProgress,
   DiscrepanciesSection,
   EvidenceSection,
   MarketSection,
   MaxBidPanel,
   MaxLoanPanel,
+  MemoHistorySheet,
   ModelBasisPanel,
   OperationsSection,
   ReturnsSection,
@@ -79,7 +82,7 @@ function WorkspaceMark() {
 export default function UnderwritingResult() {
   const { runId } = useParams();
   const navigate = useNavigate();
-  const { getToken } = useAppAuth();
+  const { getToken, user: currentUser } = useAppAuth();
   const { currentRun } = useUnderwriting();
   const { loadRun } = useUnderwritingActions();
 
@@ -96,6 +99,13 @@ export default function UnderwritingResult() {
   const [isScenarioLoading, setIsScenarioLoading] = useState(false);
   const [isDeleting, setIsDeleting] = useState(false);
   const scenarioDebounceRef = useRef(null);
+
+  // Credit memo state
+  const [memoModalOpen, setMemoModalOpen] = useState(false);
+  const [memoHistoryOpen, setMemoHistoryOpen] = useState(false);
+  const [memoProgress, setMemoProgress] = useState(null); // { jobId, memoId } | null
+  const [memoRefreshKey, setMemoRefreshKey] = useState(0);
+  const [memoPrefill, setMemoPrefill] = useState(null);
 
   useEffect(() => {
     if (runId) loadRun(getToken, runId);
@@ -156,6 +166,22 @@ export default function UnderwritingResult() {
       setIsDeleting(false);
     }
   }, [getToken, isDeleting, navigate, runId]);
+
+  const handleMemoSubmitted = (resp) => {
+    setMemoProgress({ jobId: resp.job_id, memoId: resp.memo_id });
+    setMemoRefreshKey((k) => k + 1);
+  };
+
+  const handleRegenerate = (memo) => {
+    // NOTE: MemoSummary includes prior analyst inputs so regeneration can start from a previous version.
+    setMemoPrefill({
+      cover_data: memo.cover_data || {},
+      sponsor_data: memo.sponsor_data || {},
+      thesis_data: memo.thesis_data || {},
+      market_notes: memo.market_notes || null,
+    });
+    setMemoModalOpen(true);
+  };
 
   // ── Derived data ──────────────────────────────────────────────────────────
 
@@ -874,7 +900,7 @@ export default function UnderwritingResult() {
                             <Button
                               variant="ghost"
                               size="icon"
-                              className="h-9 w-9 rounded-full text-destructive hover:bg-destructive/10 hover:text-destructive"
+                              className="underwriting-topbar-delete h-9 w-9 rounded-full text-destructive hover:bg-destructive/10 hover:text-destructive"
                               disabled={isDeleting}
                               title="Delete this analysis"
                             >
@@ -896,10 +922,27 @@ export default function UnderwritingResult() {
                             </AlertDialogFooter>
                           </AlertDialogContent>
                         </AlertDialog>
-                        <Button variant="outline" size="sm" disabled title="Underwriting export is not available yet.">
-                          <Download className="mr-1.5 h-4 w-4" />
-                          Export
-                        </Button>
+                        <div className="underwriting-memo-actions" aria-label="Credit memo actions">
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => { setMemoPrefill(null); setMemoModalOpen(true); }}
+                            disabled={!verdict}
+                            className="underwriting-memo-primary"
+                          >
+                            <Sparkles className="h-4 w-4" />
+                            Generate memo
+                          </Button>
+                          <MemoHistorySheet
+                            runId={runId}
+                            getToken={getToken}
+                            refreshKey={memoRefreshKey}
+                            dealName={currentRun.name}
+                            open={memoHistoryOpen}
+                            onOpenChange={setMemoHistoryOpen}
+                            onRegenerate={handleRegenerate}
+                          />
+                        </div>
                       </div>
                     </div>
                   </div>
@@ -1339,6 +1382,23 @@ export default function UnderwritingResult() {
           </ResizablePanel>
         ) : null}
       </ResizablePanelGroup>
+      <CreditMemoModal
+        open={memoModalOpen}
+        onClose={() => setMemoModalOpen(false)}
+        runId={runId}
+        getToken={getToken}
+        persistedInputs={persistedInputs}
+        currentUser={currentUser}
+        prefill={memoPrefill}
+        onSubmitted={handleMemoSubmitted}
+      />
+      <CreditMemoProgress
+        open={Boolean(memoProgress)}
+        onClose={() => setMemoProgress(null)}
+        jobId={memoProgress?.jobId}
+        memoId={memoProgress?.memoId}
+        getToken={getToken}
+      />
     </AppLayout>
   );
 }
