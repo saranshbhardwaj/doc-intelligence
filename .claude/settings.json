@@ -1,4 +1,12 @@
 {
+  "permissions": {
+    "allow": [
+      "Bash(python -m pytest tests/unit/verticals/real_estate/underwriting/memo/ -v --tb=short)",
+      "Bash(python -m pytest tests/unit/verticals/real_estate/underwriting/memo/test_docx_renderer.py -v)",
+      "Bash(cd /c/Users/sar13821/Documents/AI/doc-intelligence && grep -n \"SECTION_EXECUTIVE_SUMMARY\\\\|PROSE_SECTIONS = \" backend/app/verticals/real_estate/underwriting/memo/schemas.py | head -20)",
+      "Read(//c/c/Users/sar13821/Documents/AI/doc-intelligence/backend/app/verticals/real_estate/underwriting/memo/**)"
+    ]
+  },
   "enabledPlugins": {
     "ruflo-adr@ruflo": true,
     "ruflo-workflows@ruflo": true,
