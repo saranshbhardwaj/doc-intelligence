@@ -3,9 +3,6 @@
  */
 import * as chatApi from "../../../api/chat";
 import { getErrorMessage } from "./utils";
-import { toast } from "sonner";
-
-const SESSION_WARNING_REMINDER_INTERVAL = 10;
 
 export const createChatMessageActions = (set, get) => ({
   sendMessage: async (getToken, message, numChunks = 5) => {
@@ -80,37 +77,8 @@ export const createChatMessageActions = (set, get) => ({
             },
           }));
         },
-        onSessionWarning: (data) => {
-          const recommendation =
-            data?.recommendation || "Consider starting a new session for best results";
-          const messageCount = Number(data?.message_count) || 0;
-          const previousWarning = get().chat.sessionWarning;
-          const lastToastCount = previousWarning?.lastToastCount || 0;
-          const shouldShowReminderToast =
-            !previousWarning ||
-            (messageCount > 0 &&
-              messageCount >= lastToastCount + SESSION_WARNING_REMINDER_INTERVAL);
-
-          set((state) => ({
-            chat: {
-              ...state.chat,
-              sessionWarning: {
-                active: true,
-                messageCount,
-                recommendation,
-                lastToastCount: shouldShowReminderToast
-                  ? messageCount
-                  : state.chat.sessionWarning?.lastToastCount || 0,
-              },
-            },
-          }));
-
-          if (shouldShowReminderToast) {
-            toast.warning("Long conversation detected", {
-              description: recommendation,
-              duration: 5000,
-            });
-          }
+        onSessionWarning: () => {
+          // Intentionally ignore session-length warnings for RAG chat UX.
         },
         onComparisonSelection: (data) => {
           get().setComparisonSelectionNeeded(data);
