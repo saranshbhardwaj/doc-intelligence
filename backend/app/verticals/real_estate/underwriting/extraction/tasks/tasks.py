@@ -13,7 +13,6 @@ from __future__ import annotations
 
 from celery import chain, chord, group, shared_task
 from celery.exceptions import SoftTimeLimitExceeded
-from pydantic import ValidationError
 
 from app.config import settings
 from app.database import get_db
@@ -25,15 +24,14 @@ from app.utils.logging import logger
 
 from ..extractor import extract_document
 from ..llm_service import REExtractionLLMService
-from ..merger import apply_plausibility_guards, merge_extractions
+from ..merger import merge_extractions
 from ..discrepancy import detect_discrepancies_from_results
 from ..schemas import ExtractedDocResult
 from ...calculator import calculate
-from ...noi_bridge import build_noi_bridge
 from ...stress_tests import run_stress_tests
 from ...rollover import compute_rollover_risk
 from ...verdict import evaluate
-from ...schemas.self_storage import SelfStorageInputs, UnitMixRow, VerdictWarning
+from ...schemas.self_storage import SelfStorageInputs, UnitMixRow
 
 
 def _weighted_average_unit_mix_rent(unit_mix: list, field_name: str) -> float | None:
@@ -66,46 +64,35 @@ def _select_best_unit_mix(doc_results: list[ExtractedDocResult]) -> list[UnitMix
     return []
 
 
-# OM attribute names that differ from their artifact output key
-_OM_FIELD_RENAMES: dict[str, str] = {
-    "gpr_annual_projected": "gross_potential_rent_annual",
-}
-# OM attribute name that produces an additional aliased output key
-_OM_FIELD_ALIASES: dict[str, str] = {
-    "expense_ratio_pro_forma": "opex_pct",
-}
-
-
 def _build_om_source_data(doc_results: list[ExtractedDocResult]) -> dict | None:
     for result in doc_results:
         if result.doc_type != "om" or not result.om or result.error:
             continue
         om = result.om
-
-        # All scalar fields for free — new fields added to OMExtraction appear automatically
-        data: dict = om.model_dump(exclude_none=True, exclude={"unit_mix", "rent_comps"})
-
-        # Apply renames (output key differs from OM attribute name)
-        for src, dst in _OM_FIELD_RENAMES.items():
-            if src in data:
-                data[dst] = data.pop(src)
-
-        # Apply aliases (extra output key alongside the original)
-        for src, alias in _OM_FIELD_ALIASES.items():
-            if src in data:
-                data[alias] = data[src]
-
-        # Computed fields
+        data = {
+            "num_units": om.num_units,
+            "rentable_sqft": om.rentable_sqft,
+            "gross_potential_rent_annual": om.gpr_annual_projected,
+            "avg_in_place_rent_per_unit_monthly": om.avg_in_place_rent_per_unit_monthly,
+            "avg_market_rent_per_unit_monthly": om.avg_market_rent_per_unit_monthly,
+            "expense_ratio_pro_forma": om.expense_ratio_pro_forma,
+            "opex_pct": om.expense_ratio_pro_forma,
+            "market_cap_rate_purchase": om.market_cap_rate_purchase,
+            "market_cap_rate_sale": om.market_cap_rate_sale,
+            "property_tax_growth_pct": om.property_tax_growth_pct,
+            "mil_rate": om.mil_rate,
+            "nearby_storage_count_1mi": om.nearby_storage_count_1mi,
+            "nearby_storage_count_3mi": om.nearby_storage_count_3mi,
+            "nearby_storage_count_5mi": om.nearby_storage_count_5mi,
+            "population_3mi": om.population_3mi,
+            "avg_household_income_3mi": om.avg_household_income_3mi,
+            "storage_sqft_per_capita_3mi": om.storage_sqft_per_capita_3mi,
+            "unit_mix": [row.model_dump() for row in om.unit_mix],
+            "rent_comps": [row.model_dump() for row in om.rent_comps],
+        }
         if om.vacancy_pct_projected is not None:
             data["occupancy_pct"] = 1.0 - om.vacancy_pct_projected
-
-        # Complex types (serialised separately)
-        if om.unit_mix:
-            data["unit_mix"] = [row.model_dump() for row in om.unit_mix]
-        if om.rent_comps:
-            data["rent_comps"] = [row.model_dump() for row in om.rent_comps]
-
-        return {k: v for k, v in data.items() if v not in (None, [], {})}
+        return {key: value for key, value in data.items() if value not in (None, [], {})}
     return None
 
 
@@ -143,10 +130,6 @@ def _build_rent_roll_source_data(doc_results: list[ExtractedDocResult]) -> dict 
             data["unit_mix"] = [row.model_dump() for row in rr.unit_mix]
         if rr.lease_records:
             data["leases"] = [record.model_dump() for record in rr.lease_records]
-        if result.extraction_metadata.get("spreadsheet_interpretation"):
-            data["source_metadata"] = result.extraction_metadata["spreadsheet_interpretation"]
-        if result.extraction_metadata.get("review_warnings"):
-            data["review_warnings"] = result.extraction_metadata["review_warnings"]
         return data
     return None
 
@@ -182,8 +165,6 @@ def _build_t12_source_data(doc_results: list[ExtractedDocResult]) -> dict | None
         if t12.period_months is not None:
             summary["period_months"] = t12.period_months
             summary["annualized"] = t12.period_months < 12
-        if t12.noi_actual is not None:
-            summary["noi_actual"] = t12.noi_actual * factor
         if t12.bad_debt_annual is not None:
             summary["bad_debt_annual"] = t12.bad_debt_annual * factor
         if t12.corrections_collections_annual is not None:
@@ -203,55 +184,11 @@ def _build_t12_source_data(doc_results: list[ExtractedDocResult]) -> dict | None
         ]
         if missing_expense_fields:
             summary["missing_expense_fields"] = missing_expense_fields
-        data = {"summary": {key: value for key, value in summary.items() if value is not None}}
-        source_metadata = result.extraction_metadata.get("t12_table_totals")
-        if source_metadata:
-            data["source_metadata"] = source_metadata
-        if result.extraction_metadata.get("review_warnings"):
-            data["review_warnings"] = result.extraction_metadata["review_warnings"]
-        return data
+        return {"summary": {key: value for key, value in summary.items() if value is not None}}
     return None
 
 
-def _build_discrepancy_warning(discrepancies: list[dict]) -> VerdictWarning | None:
-    material = [
-        discrepancy for discrepancy in discrepancies or []
-        if discrepancy.get("severity") in {"critical", "error", "warning"}
-    ]
-    if not material:
-        return None
-
-    critical_count = sum(1 for discrepancy in material if discrepancy.get("severity") in {"critical", "error"})
-    preview = "; ".join((discrepancy.get("note") or discrepancy.get("field") or "source conflict") for discrepancy in material[:2])
-    if len(material) > 2:
-        preview = f"{preview}; and {len(material) - 2} more"
-    return VerdictWarning(
-        key="source_discrepancies",
-        message=f"Source documents disagree on underwriting inputs: {preview}.",
-        severity="critical" if critical_count else "warning",
-    )
-
-
-def _build_plausibility_warning(plausibility_flags: list[dict]) -> VerdictWarning | None:
-    if not plausibility_flags:
-        return None
-
-    fields = list(dict.fromkeys(flag.get("field") for flag in plausibility_flags if flag.get("field")))
-    preview = ", ".join(field.replace("_", " ") for field in fields[:3])
-    if len(fields) > 3:
-        preview = f"{preview}, and {len(fields) - 3} more"
-
-    return VerdictWarning(
-        key="plausibility_flags",
-        message=(
-            "Some extracted assumptions were ignored as implausible and require analyst review"
-            + (f": {preview}." if preview else ".")
-        ),
-        severity="critical",
-    )
-
-
-def _build_source_artifact_data(doc_results: list[ExtractedDocResult], plausibility_flags: list[dict] | None = None) -> dict:
+def _build_source_artifact_data(doc_results: list[ExtractedDocResult]) -> dict:
     artifact_data: dict = {}
     om_data = _build_om_source_data(doc_results)
     rent_roll_data = _build_rent_roll_source_data(doc_results)
@@ -284,8 +221,6 @@ def _build_source_artifact_data(doc_results: list[ExtractedDocResult], plausibil
         artifact_data["rent_roll_data"] = rent_roll_data
     if t12_data:
         artifact_data["t12_data"] = t12_data
-    if plausibility_flags:
-        artifact_data["plausibility_flags"] = plausibility_flags
 
     return artifact_data
 
@@ -295,17 +230,6 @@ def _get_t12_period_months(doc_results: list[ExtractedDocResult]) -> int | None:
         if result.doc_type == "t12" and result.t12 and not result.error and result.t12.period_months:
             return result.t12.period_months
     return None
-
-
-def _get_extracted_om_t12(doc_results: list[ExtractedDocResult]):
-    om = None
-    t12 = None
-    for result in doc_results:
-        if result.doc_type == "om" and result.om and not result.error:
-            om = result.om
-        elif result.doc_type == "t12" and result.t12 and not result.error:
-            t12 = result.t12
-    return om, t12
 
 
 def _get_db_session():
@@ -407,13 +331,7 @@ def re_merge_extractions_task(self, doc_result_dicts: list[dict]) -> dict:
             progress_percent=60, message="Merging extracted data...",
         )
         results = [ExtractedDocResult(**d) for d in doc_result_dicts]
-        sanitized_results, plausibility_flags = apply_plausibility_guards(results)
-        if plausibility_flags:
-            logger.warning(
-                "Plausibility guards ignored extracted underwriting values",
-                extra={"run_id": run_id, "flag_count": len(plausibility_flags)},
-            )
-        merged_inputs, field_citations = merge_extractions(sanitized_results)
+        merged_inputs, field_citations = merge_extractions(results)
 
         # Merge per-doc citation_context dicts (keys are unique: S{source_index}:p{page})
         merged_citation_context: dict = {}
@@ -426,8 +344,7 @@ def re_merge_extractions_task(self, doc_result_dicts: list[dict]) -> dict:
             "merged_inputs": merged_inputs,
             "field_citations": field_citations,
             "citation_context": merged_citation_context,
-            "doc_results": [result.model_dump() for result in sanitized_results],
-            "plausibility_flags": plausibility_flags,
+            "doc_results": doc_result_dicts,
         }
     except SoftTimeLimitExceeded:
         tracker.mark_error(
@@ -458,34 +375,13 @@ def re_detect_discrepancies_task(self, payload: dict) -> dict:
             progress_percent=70, message="Checking for inconsistencies...",
         )
         results = [ExtractedDocResult(**d) for d in payload.get("doc_results", [])]
-        discrepancies = detect_discrepancies_from_results(results, payload.get("merged_inputs", {}))
+        discrepancies = detect_discrepancies_from_results(results)
         payload["discrepancies"] = discrepancies
         return payload
     except Exception as e:
         logger.warning(f"Discrepancy detection failed (non-fatal): {e}", extra={"run_id": run_id})
         payload["discrepancies"] = []
         return payload
-
-
-def _describe_validation_error(exc: ValidationError) -> str:
-    """Convert a Pydantic ValidationError into a plain-English user message.
-
-    Each missing/invalid field becomes one bullet. The message guides the
-    user to enter the value manually in the wizard rather than showing a
-    raw Pydantic traceback.
-    """
-    field_msgs: list[str] = []
-    for error in exc.errors():
-        loc = " → ".join(str(part) for part in error["loc"])
-        pydantic_msg = error.get("msg", "invalid value")
-        field_msgs.append(f"  • {loc}: {pydantic_msg}")
-
-    fields_block = "\n".join(field_msgs)
-    return (
-        f"Could not run calculations — {len(field_msgs)} required field(s) are missing "
-        f"or invalid:\n{fields_block}\n\n"
-        "Please enter these values manually in the wizard and re-run the analysis."
-    )
 
 
 @shared_task(
@@ -507,50 +403,15 @@ def re_calculate_underwriting_task(self, payload: dict) -> dict:
             status="calculating", current_stage="calculation",
             progress_percent=80, message="Running calculations...",
         )
-        merged_inputs = payload.get("merged_inputs", {})
-        # Snapshot the user's current verdict-gate thresholds into criteria so this
-        # run's pass/fail gates are frozen at extraction time and immune to future default changes.
-        run_obj = repo.get_by_id(run_id)
-        if run_obj:
-            from app.repositories.user_repository import UserRepository
-            from app.schemas.user_thresholds import UserUnderwritingThresholds
-            saved = UserRepository().get_underwriting_thresholds(run_obj.user_id) or {}
-            if saved:
-                thresholds = UserUnderwritingThresholds(**saved)
-                criteria = merged_inputs.get("criteria", {})
-                for key in ("dscr_year_one_floor", "stress_dscr_floor", "rollover_risk_pct"):
-                    if criteria.get(key) is None:
-                        val = getattr(thresholds, key, None)
-                        if val is not None:
-                            criteria[key] = val
-                merged_inputs = {**merged_inputs, "criteria": criteria}
-
-        inputs = SelfStorageInputs(**merged_inputs)
+        inputs = SelfStorageInputs(**payload.get("merged_inputs", {}))
         doc_results = [ExtractedDocResult(**d) for d in payload.get("doc_results", [])]
         result = calculate(inputs)
-        result.income_basis_months = inputs.operational.income_basis_months
-        result.income_basis_note = inputs.operational.income_basis_note
         stress = run_stress_tests(inputs)
         result.stress_tests = stress
         result.unit_mix = _select_best_unit_mix(doc_results)
         if inputs.lease_records:
             result.rollover_risk = compute_rollover_risk(inputs.lease_records)
-        verdict = evaluate(result, inputs.criteria, stress, _get_t12_period_months(doc_results), inputs=inputs)
-        plausibility_warning = _build_plausibility_warning(payload.get("plausibility_flags", []))
-        if plausibility_warning is not None:
-            verdict.warnings.append(plausibility_warning)
-            if verdict.status == "worth_pursuing":
-                verdict.status = "needs_review"
-            if plausibility_warning.message not in verdict.rationale:
-                verdict.rationale = f"{verdict.rationale} Warning: {plausibility_warning.message}"
-
-        discrepancy_warning = _build_discrepancy_warning(payload.get("discrepancies", []))
-        if discrepancy_warning is not None:
-            verdict.warnings.append(discrepancy_warning)
-            if verdict.status == "worth_pursuing":
-                verdict.status = "needs_review"
-            if discrepancy_warning.message not in verdict.rationale:
-                verdict.rationale = f"{verdict.rationale} Warning: {discrepancy_warning.message}"
+        verdict = evaluate(result, inputs.criteria, stress, _get_t12_period_months(doc_results))
 
         tracker.update_progress(
             status="completed", current_stage="storage",
@@ -574,9 +435,7 @@ def re_calculate_underwriting_task(self, payload: dict) -> dict:
         result_payload["verdict"] = verdict.model_dump()
         if inputs.rent_comps:
             result_payload["rent_comps"] = [row.model_dump() for row in inputs.rent_comps]
-        result_payload.update(_build_source_artifact_data(doc_results, payload.get("plausibility_flags", [])))
-        om, t12 = _get_extracted_om_t12(doc_results)
-        result_payload["noi_bridge"] = build_noi_bridge(inputs, om, t12, result)
+        result_payload.update(_build_source_artifact_data(doc_results))
         repo.update_result(run_id, result_payload, typed_metrics)
         repo.update_extraction(
             run_id,
@@ -612,15 +471,6 @@ def re_calculate_underwriting_task(self, payload: dict) -> dict:
             internal_error="SoftTimeLimitExceeded", error_type="timeout", is_retryable=False,
         )
         repo.update_status(run_id, "failed", "Calculation timed out")
-        raise
-    except ValidationError as e:
-        user_message = _describe_validation_error(e)
-        logger.error(f"Calculation failed (missing inputs): {e}", extra={"run_id": run_id})
-        tracker.mark_error(
-            error_stage="calculation", error_message=user_message,
-            internal_error=str(e)[:1000], error_type="missing_inputs", is_retryable=False,
-        )
-        repo.update_status(run_id, "failed", user_message[:500])
         raise
     except Exception as e:
         logger.error(f"Calculation failed: {e}", extra={"run_id": run_id})

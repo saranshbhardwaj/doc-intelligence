@@ -819,6 +819,14 @@ def _build_merged_inputs(
     _t12_opex_derived, _t12_opex_formula, _t12_opex_is_computed = _derived_t12_expense_ratio_details(t12, t12_factor)
     _om_other_opex_parts = _om_other_opex_components(om)
 
+    for evidence_field in (
+        "proposed_loan_amount",
+        "proposed_down_payment_amount",
+        "proposed_down_payment_pct",
+    ):
+        if om is not None and getattr(om, evidence_field, None) is not None:
+            citations[evidence_field] = _cited(per_doc_citations, "om", evidence_field)
+
     _other_inc = _om_other_income_total(om)
     _other_formula: str | None = None
     if om and om.other_income_annual is None and _other_inc is not None:

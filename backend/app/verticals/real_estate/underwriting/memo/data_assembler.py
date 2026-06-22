@@ -42,6 +42,9 @@ _SOURCE_SUPPORT_FIELDS = (
     ("Expenses", "utilities_annual", "Utilities", ("operational", "utilities_annual"), "money"),
     ("Expenses", "marketing_annual", "Marketing", ("operational", "marketing_annual"), "money"),
     ("Expenses", "other_opex_annual", "Other OpEx", ("operational", "other_opex_annual"), "money"),
+    ("Debt / Exit", "proposed_loan_amount", "OM Proposed Loan", ("om_financing_evidence", "proposed_loan_amount"), "money"),
+    ("Debt / Exit", "proposed_down_payment_amount", "OM Proposed Down Payment", ("om_financing_evidence", "proposed_down_payment_amount"), "money"),
+    ("Debt / Exit", "proposed_down_payment_pct", "OM Proposed Down Payment %", ("om_financing_evidence", "proposed_down_payment_pct"), "pct"),
     ("Debt / Exit", "ltv_pct", "LTV", ("financing", "ltv_pct"), "pct"),
     ("Debt / Exit", "interest_rate_pct", "Interest Rate", ("financing", "interest_rate_pct"), "pct"),
     ("Debt / Exit", "loan_term_years", "Loan Term", ("financing", "loan_term_years"), "years"),
@@ -68,6 +71,29 @@ def _safe_div(num: Optional[float], denom: Optional[float]) -> Optional[float]:
     if num is None or denom is None or denom == 0:
         return None
     return num / denom
+
+
+def _om_financing_evidence(artifact: dict, purchase_price: float | None, model_capital_structure: dict) -> dict:
+    om_data = _get(artifact, "om_data", {}) or {}
+    proposed_loan = _get(om_data, "proposed_loan_amount")
+    proposed_down_payment = _get(om_data, "proposed_down_payment_amount")
+    proposed_down_pct = _get(om_data, "proposed_down_payment_pct")
+    proposed_ltv = _safe_div(proposed_loan, purchase_price)
+    if proposed_ltv is None and proposed_down_pct is not None:
+        proposed_ltv = 1.0 - proposed_down_pct
+    model_loan = _get(model_capital_structure, "loan_amount")
+    model_ltv = _safe_div(model_loan, purchase_price)
+    evidence = {
+        "proposed_loan_amount": proposed_loan,
+        "proposed_down_payment_amount": proposed_down_payment,
+        "proposed_down_payment_pct": proposed_down_pct,
+        "proposed_ltv_pct": proposed_ltv,
+        "model_loan_amount": model_loan,
+        "model_ltv_pct": model_ltv,
+    }
+    if proposed_ltv is not None and model_ltv is not None:
+        evidence["ltv_delta_pct"] = model_ltv - proposed_ltv
+    return {key: value for key, value in evidence.items() if value is not None}
 
 
 def _first(*values):
@@ -523,6 +549,8 @@ def build_memo_context(run, memo) -> MemoContext:
 
     # ── Max loan (computed inline — not persisted) ─────────────────────────
     max_loan = _compute_max_loan(run)
+    capital_structure = _get(artifact, "capital_structure", {}) or {}
+    om_financing_evidence = _om_financing_evidence(artifact, purchase_price, capital_structure)
 
     # ── Verdict / classification ───────────────────────────────────────────
     verdict_status = getattr(run, "verdict_status", None)
@@ -554,7 +582,7 @@ def build_memo_context(run, memo) -> MemoContext:
     document_ids = _extract_om_document_ids(getattr(run, "document_ids", None))
     citation_doc_labels = _source_document_labels(getattr(run, "document_ids", None), citation_context)
     source_support = _build_source_support(
-        inputs,
+        {**inputs, "om_financing_evidence": om_financing_evidence},
         getattr(run, "field_citations", None) or {},
         citation_context,
         citation_doc_labels,
@@ -602,7 +630,8 @@ def build_memo_context(run, memo) -> MemoContext:
         stress_tests=_get(artifact, "stress_tests", []) or [],
         rollover=_get(artifact, "rollover_risk", {}) or _get(artifact, "rollover", {}) or {},
         projections=list(_get(artifact, "projections", []) or []),
-        capital_structure=_get(artifact, "capital_structure", {}) or {},
+        capital_structure=capital_structure,
+        om_financing_evidence=om_financing_evidence,
         rent_position_analysis=rent_position_analysis,
         max_loan=max_loan,
         financing=financing,

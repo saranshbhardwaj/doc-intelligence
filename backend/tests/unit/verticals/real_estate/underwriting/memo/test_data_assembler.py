@@ -449,6 +449,30 @@ class TestBuildMemoContext:
         assert ctx.capital_structure["loan_amount"] == 3_250_000.0
         assert ctx.capital_structure["total_equity_invested"] == 1_890_000.0
 
+    def test_carries_om_financing_evidence_vs_model_debt(self):
+        run = _run(artifact_overrides={
+            "om_data": {
+                "proposed_loan_amount": 1_625_000.0,
+                "proposed_down_payment_amount": 875_000.0,
+                "proposed_down_payment_pct": 0.35,
+            },
+            "capital_structure": {
+                "purchase_price": 2_500_000.0,
+                "loan_amount": 1_750_000.0,
+                "down_payment": 750_000.0,
+            },
+        })
+        run.inputs["acquisition"]["purchase_price"] = 2_500_000.0
+        run.inputs["financing"]["ltv_pct"] = 0.70
+
+        ctx = build_memo_context(run, _memo())
+
+        assert ctx.om_financing_evidence["proposed_loan_amount"] == 1_625_000.0
+        assert ctx.om_financing_evidence["proposed_ltv_pct"] == pytest.approx(0.65)
+        assert ctx.om_financing_evidence["model_loan_amount"] == 1_750_000.0
+        assert ctx.om_financing_evidence["model_ltv_pct"] == pytest.approx(0.70)
+        assert ctx.om_financing_evidence["ltv_delta_pct"] == pytest.approx(0.05)
+
     def test_carries_rent_position_analysis(self):
         ctx = build_memo_context(_run(), _memo())
         assert len(ctx.rent_position_analysis) == 2

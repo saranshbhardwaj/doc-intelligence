@@ -132,6 +132,12 @@ def create_memo(
         )
 
     repo = ReMemoRepository(db)
+    if repo.has_active(run_id):
+        raise HTTPException(
+            status_code=409,
+            detail="A memo is already generating for this underwriting run",
+        )
+
     memo = repo.create(
         run_id=run_id,
         user_id=user.id,
@@ -155,12 +161,22 @@ def create_memo(
         job_id=task_id,
     )
     if not job:
+        repo.delete_pending(memo.id, user.id)
         raise HTTPException(status_code=500, detail="Failed to create job for memo generation")
 
-    generate_credit_memo_task.apply_async(
-        args=[memo.id, run_id, user.id],
-        task_id=task_id,
-    )
+    try:
+        generate_credit_memo_task.apply_async(
+            args=[memo.id, run_id, user.id],
+            task_id=task_id,
+        )
+    except Exception:
+        repo.delete_pending(memo.id, user.id)
+        logger.exception(
+            "Credit memo dispatch failed",
+            extra={"memo_id": memo.id, "run_id": run_id, "user_id": user.id, "task_id": task_id},
+        )
+        raise HTTPException(status_code=500, detail="Failed to dispatch memo generation")
+
     repo.update_status(memo.id, "pending", job_id=task_id)
 
     logger.info(

@@ -395,6 +395,18 @@ const formatPercent = (value) => (
   value == null ? '—' : `${(Number(value) * 100).toFixed(2)}%`
 );
 
+const formatInputPercent = (value) => {
+  if (value === '' || value == null) return '—';
+  const number = Number(value);
+  return Number.isFinite(number) ? `${number.toFixed(1)}%` : '—';
+};
+
+const formatYears = (value) => {
+  if (value === '' || value == null) return '—';
+  const number = Number(value);
+  return Number.isFinite(number) ? `${number.toFixed(0)} yrs` : '—';
+};
+
 const periodLabel = {
   t12: 'T-12',
   current: 'Current',
@@ -451,6 +463,52 @@ export function OperationsModelBasisPanel({ expenseBasis }) {
           {expenseBasis.warnings.join(' ')}
         </div>
       ) : null}
+    </div>
+  );
+}
+
+export function OperationsProjectionBasisPanel({ inputs }) {
+  const operational = inputs?.operational ?? {};
+  const exit = inputs?.exit ?? {};
+  const hasTaxGrowthOverride = operational.property_tax_growth_pct !== '' && operational.property_tax_growth_pct != null;
+  const propertyTaxGrowthDisplay = hasTaxGrowthOverride
+    ? formatInputPercent(operational.property_tax_growth_pct)
+    : `${formatInputPercent(operational.opex_growth_pct)} via OpEx`;
+
+  return (
+    <div className="col-span-full rounded-xl border border-border/60 bg-muted/20 p-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">Projection Basis</p>
+          <p className="mt-1 text-base font-semibold text-foreground">Future-year growth and exit assumptions</p>
+          <p className="mt-1 text-sm text-muted-foreground">
+            These assumptions drive years 2+ and sale proceeds. They do not change the Year-1 NOI build-up above.
+          </p>
+        </div>
+        <span className="rounded-full bg-primary/10 px-3 py-1 text-xs font-semibold text-primary">Drives projections</span>
+      </div>
+      <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
+        <div>
+          <p className="text-xs text-muted-foreground">Rent growth</p>
+          <p className="font-semibold text-foreground">{formatInputPercent(operational.rent_growth_pct)}</p>
+        </div>
+        <div>
+          <p className="text-xs text-muted-foreground">OpEx growth</p>
+          <p className="font-semibold text-foreground">{formatInputPercent(operational.opex_growth_pct)}</p>
+        </div>
+        <div>
+          <p className="text-xs text-muted-foreground">Tax growth</p>
+          <p className="font-semibold text-foreground">{propertyTaxGrowthDisplay}</p>
+        </div>
+        <div>
+          <p className="text-xs text-muted-foreground">Hold period</p>
+          <p className="font-semibold text-foreground">{formatYears(exit.hold_period_years)}</p>
+        </div>
+        <div>
+          <p className="text-xs text-muted-foreground">Exit cap</p>
+          <p className="font-semibold text-foreground">{formatInputPercent(exit.exit_cap_rate)}</p>
+        </div>
+      </div>
     </div>
   );
 }

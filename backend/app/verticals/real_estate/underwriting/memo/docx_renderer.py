@@ -65,6 +65,12 @@ def _fmt_pct(v: Optional[float]) -> str:
     return f"{v * 100:.2f}%"
 
 
+def _fmt_signed_pct(v: Optional[float]) -> str:
+    if v is None:
+        return "—"
+    return f"{v * 100:+.2f}%"
+
+
 def _fmt_x(v: Optional[float]) -> str:
     if v is None:
         return "—"
@@ -396,6 +402,20 @@ def _render_capital_stack(doc, ctx: MemoContext) -> None:
         ("Capex Reserve (initial)", _fmt_money(cs.get("capex_reserve_initial"))),
         ("Total Equity Invested", _fmt_money(cs.get("total_equity_invested"))),
     ])
+    om_debt = ctx.om_financing_evidence or {}
+    if om_debt.get("proposed_loan_amount") is not None or om_debt.get("proposed_ltv_pct") is not None:
+        _para(
+            doc,
+            "OM proposed financing is shown for source comparison only; modeled returns use the capital stack above.",
+        )
+        _add_kv_table(doc, [
+            ("OM Proposed Loan", _fmt_money(om_debt.get("proposed_loan_amount"))),
+            ("OM Proposed Down Payment", _fmt_money(om_debt.get("proposed_down_payment_amount"))),
+            ("OM Proposed Down Payment %", _fmt_pct(om_debt.get("proposed_down_payment_pct"))),
+            ("OM Proposed LTV", _fmt_pct(om_debt.get("proposed_ltv_pct"))),
+            ("Model LTV", _fmt_pct(om_debt.get("model_ltv_pct"))),
+            ("Model LTV Delta", _fmt_signed_pct(om_debt.get("ltv_delta_pct"))),
+        ])
 
 
 def _render_rent_position_grid(doc, ctx: MemoContext) -> None:
@@ -542,7 +562,7 @@ def render_memo_docx(ctx: MemoContext, sections: dict[str, Any]) -> bytes:
 
     # 3. Transaction Overview
     _h1(doc, "3. Transaction Overview")
-    price_unit_label = "Price / Storage Unit" if ctx.non_storage_unit_count else "Price / Unit"
+    price_unit_label = "Price / Total Unit-Space" if ctx.non_storage_unit_count else "Price / Unit"
     _add_kv_table(doc, [
         ("Purchase Price", _fmt_money(ctx.purchase_price)),
         (price_unit_label, _fmt_money(ctx.price_per_unit)),

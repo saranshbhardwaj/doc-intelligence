@@ -302,6 +302,51 @@ class TestRenderMemoDocx:
         assert "Senior Loan" in cells
         assert "$3,250,000" in cells
 
+    def test_capital_stack_renders_om_proposed_debt_comparison(self, ctx):
+        ctx.purchase_price = 2_500_000.0
+        ctx.capital_structure = {
+            "purchase_price": 2_500_000.0,
+            "loan_amount": 1_750_000.0,
+            "down_payment": 750_000.0,
+            "closing_cost": 50_000.0,
+            "total_equity_invested": 800_000.0,
+        }
+        ctx.om_financing_evidence = {
+            "proposed_loan_amount": 1_625_000.0,
+            "proposed_down_payment_amount": 875_000.0,
+            "proposed_down_payment_pct": 0.35,
+            "proposed_ltv_pct": 0.65,
+            "model_loan_amount": 1_750_000.0,
+            "model_ltv_pct": 0.70,
+            "ltv_delta_pct": 0.05,
+        }
+
+        out = render_memo_docx(ctx, _sections())
+        doc = Document(io.BytesIO(out))
+        para_text = "\n".join(p.text for p in doc.paragraphs)
+        cells = _all_table_text(doc)
+
+        assert "OM proposed financing" in para_text
+        assert "OM Proposed Loan" in cells
+        assert "$1,625,000" in cells
+        assert "OM Proposed LTV" in cells
+        assert "65.00%" in cells
+        assert "Model LTV Delta" in cells
+        assert "+5.00%" in cells
+
+    def test_transaction_overview_labels_mixed_use_unit_pricing(self, ctx):
+        ctx.total_unit_count = 205
+        ctx.storage_unit_count = 133
+        ctx.non_storage_unit_count = 72
+        ctx.price_per_unit = 12_195.0
+
+        out = render_memo_docx(ctx, _sections())
+        doc = Document(io.BytesIO(out))
+        cells = _all_table_text(doc)
+
+        assert "Price / Total Unit-Space" in cells
+        assert "Price / Storage Unit" not in cells
+
     def test_rent_position_grid_rendered(self, ctx):
         out = render_memo_docx(ctx, _sections())
         doc = Document(io.BytesIO(out))

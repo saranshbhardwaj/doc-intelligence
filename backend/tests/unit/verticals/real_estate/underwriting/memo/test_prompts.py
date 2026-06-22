@@ -17,6 +17,8 @@ from app.verticals.real_estate.underwriting.memo.schemas import (
     SECTION_RECOMMENDATION,
     SECTION_PROPERTY_DESCRIPTION,
     SECTION_MARKET_OVERVIEW,
+    SECTION_TRANSACTION_OVERVIEW,
+    SECTION_FINANCIAL_ANALYSIS,
     MemoContext,
     RetrievedChunk,
 )
@@ -137,6 +139,24 @@ class TestSharpenedRiskAndRecommendationInstructions:
         assert "current_ratio_bucket_count" in text
         assert "cannot be quantified" in text
 
+    def test_memo_instructions_call_out_om_vs_model_financing(self):
+        text = SECTION_INSTRUCTIONS[SECTION_TRANSACTION_OVERVIEW] + SECTION_INSTRUCTIONS[SECTION_FINANCIAL_ANALYSIS]
+        assert "om_financing_evidence" in text
+        assert "OM proposed" in text
+        assert "model" in text.lower()
+
+    def test_rent_position_instructions_distinguish_below_street_from_comp_position(self):
+        from app.verticals.real_estate.underwriting.memo.schemas import SECTION_RENT_POSITION
+        text = SECTION_INSTRUCTIONS[SECTION_RENT_POSITION]
+        assert "below-street" in text.lower()
+        assert "comp-set" in text.lower()
+
+    def test_risks_instructions_use_expansion_vs_compression_correctly(self):
+        text = SECTION_INSTRUCTIONS[SECTION_RISKS]
+        assert "cap expansion" in text.lower()
+        assert "cap compression" in text.lower()
+        assert "do not call" in text.lower()
+
 
 class TestQualityFixesRoundTwo:
     """Regression tests for the second round of prompt tightening: thesis seed
@@ -194,3 +214,32 @@ class TestQualityFixesRoundTwo:
         assert "does not clear the configured screen" in text
         assert "warrant rejection" in text
         assert "OM-only underwriting" in text
+
+    def test_investment_thesis_below_screen_tone_is_not_final_rejection(self):
+        from app.verticals.real_estate.underwriting.memo.schemas import SECTION_INVESTMENT_THESIS
+        text = SECTION_INSTRUCTIONS[SECTION_INVESTMENT_THESIS]
+        assert "do not write \"should not proceed\"" in text.lower()
+        assert "under current assumptions" in text.lower()
+        assert "do not write" in text.lower() and "absent a clear value-add thesis" in text.lower()
+
+    def test_transaction_instructions_ban_storage_unit_label_for_mixed_use(self):
+        text = SECTION_INSTRUCTIONS[SECTION_TRANSACTION_OVERVIEW]
+        assert "per total unit-space" in text
+        assert "Do NOT write" in text and "per storage unit" in text
+
+    def test_property_description_uses_gap_sentence_only_when_no_excerpts(self):
+        from app.verticals.real_estate.underwriting.memo.schemas import SECTION_PROPERTY_DESCRIPTION
+        text = SECTION_INSTRUCTIONS[SECTION_PROPERTY_DESCRIPTION]
+        assert "Only use the gap sentence" in text
+        assert "if no SOURCE EXCERPTS" in text
+
+    def test_sponsor_negative_track_record_is_flag_not_strength(self):
+        from app.verticals.real_estate.underwriting.memo.schemas import SECTION_SPONSOR
+        text = SECTION_INSTRUCTIONS[SECTION_SPONSOR]
+        assert "negative track_record_irr" in text
+        assert "red flag" in text.lower()
+
+    def test_risk_mitigants_do_not_use_dscr_for_irr_or_sponsor_for_em(self):
+        text = SECTION_INSTRUCTIONS[SECTION_RISKS]
+        assert "DSCR cushion does not mitigate an IRR miss" in text
+        assert "Sponsor experience does not mitigate an equity-multiple miss" in text

@@ -109,6 +109,23 @@ def test_om_purchase_price_always_used():
     assert merged["exit"]["exit_cap_rate"] == 0.065
 
 
+def test_om_proposed_financing_does_not_override_model_ltv():
+    results = [
+        _om_result(
+            purchase_price=2_500_000.0,
+            proposed_loan_amount=1_625_000.0,
+            proposed_down_payment_amount=875_000.0,
+            proposed_down_payment_pct=0.35,
+        )
+    ]
+
+    merged, citations = merge_extractions(results)
+
+    assert merged["financing"]["ltv_pct"] == 0.70
+    assert citations["ltv_pct"]["is_default"] is True
+    assert citations["proposed_loan_amount"]["doc_type"] == "om"
+
+
 def test_missing_purchase_price_remains_none_not_zero_default():
     results = [_om_result(gpr_annual_projected=520_000.0)]
 

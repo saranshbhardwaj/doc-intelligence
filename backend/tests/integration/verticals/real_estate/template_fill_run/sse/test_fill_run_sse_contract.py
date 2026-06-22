@@ -61,6 +61,7 @@ def test_sse_failed_job_emits_error_then_end(sse_client, monkeypatch):
             return failed_job
 
     monkeypatch.setattr("app.api.jobs.JobRepository", lambda: _JobRepoStub())
+    monkeypatch.setattr("app.api.jobs.resolve_entity_owner", lambda entity_type, entity_id, org_id: ("test-user", "test-org"))
 
     response = sse_client.get("/api/jobs/job-failed-1/stream?token=fake")
     events = _collect_sse_events(response.text)
@@ -85,6 +86,7 @@ def test_sse_completed_job_emits_complete_then_end(sse_client, monkeypatch):
             return completed_job
 
     monkeypatch.setattr("app.api.jobs.JobRepository", lambda: _JobRepoStub())
+    monkeypatch.setattr("app.api.jobs.resolve_entity_owner", lambda entity_type, entity_id, org_id: ("test-user", "test-org"))
     monkeypatch.setattr("app.api.jobs.build_entity_complete_event", lambda job: {"message": "Done", "job_id": job.job_id})
 
     response = sse_client.get("/api/jobs/job-complete-1/stream?token=fake")
@@ -94,6 +96,27 @@ def test_sse_completed_job_emits_complete_then_end(sse_client, monkeypatch):
     assert events[0][1]["job_id"] == "job-complete-1"
     assert events[1][0] == "end"
     assert events[1][1]["reason"] == "completed"
+
+
+@pytest.mark.integration
+def test_sse_completed_job_rejects_non_owner(sse_client, monkeypatch):
+    completed_job = SimpleNamespace(
+        job_id="job-complete-foreign",
+        status="completed",
+        entity_type="template_fill_run",
+        entity_id="fill-foreign",
+    )
+
+    class _JobRepoStub:
+        def get_job(self, _job_id):
+            return completed_job
+
+    monkeypatch.setattr("app.api.jobs.JobRepository", lambda: _JobRepoStub())
+    monkeypatch.setattr("app.api.jobs.resolve_entity_owner", lambda entity_type, entity_id, org_id: ("other-user", "test-org"))
+
+    response = sse_client.get("/api/jobs/job-complete-foreign/stream?token=fake")
+
+    assert response.status_code == 403
 
 
 @pytest.mark.integration

@@ -6,7 +6,7 @@ import { StressTestTable, RolloverRiskPanel } from './index';
 import KeyValueList from './KeyValueList';
 import OccupancyBadge from './OccupancyBadge';
 import SourceSupportActions from './SourceSupportActions';
-import { formatCompactCurrency, formatCurrency, formatPercent } from './formatters';
+import { buildPropertyTaxSupportRows, formatCompactCurrency, formatCurrency, formatPercent } from './formatters';
 
 function getExpenseBasisTone(source) {
   if (source === 't12_line_items' || source === 't12_expense_ratio' || source === 'om_year1_line_items') return 'success';
@@ -160,24 +160,7 @@ export default function OperationsSection({
         : '—',
     },
   ].filter((row, index) => index === 0 || hasSupportValue(row.value));
-  const taxSupportRows = [
-    { label: 'Property tax (year 1)', value: formatCurrency(propertyTaxAnnual) },
-    { label: 'Tax value basis', value: formatCurrency(operational?.property_tax_value_basis_amount) },
-    { label: 'Tax assessed value', value: formatCurrency(operational?.property_tax_assessed_value) },
-    { label: 'Tax assessment ratio', value: formatPercent(operational?.property_tax_assessment_ratio) },
-    {
-      label: 'Tax millage rate',
-      value: operational?.property_tax_millage_rate != null
-        ? `${operational.property_tax_millage_rate.toFixed(2)} mills`
-        : '—',
-    },
-    {
-      label: 'Tax rate / assessed $',
-      value: operational?.property_tax_rate_per_assessed_dollar != null
-        ? operational.property_tax_rate_per_assessed_dollar.toFixed(5)
-        : '—',
-    },
-  ].filter((row) => hasSupportValue(row.value));
+  const taxSupportRows = buildPropertyTaxSupportRows(operational, propertyTaxAnnual);
   const growthAssumptionRows = [
     { label: 'Property tax growth', value: formatPercent(propertyTaxGrowthPct) },
   ].filter((row) => hasSupportValue(row.value));

@@ -34,6 +34,16 @@ def test_om_prompt_maps_property_tax_mechanics_to_explicit_fields():
     assert "do not confuse tax rate" in prompt
 
 
+def test_om_prompt_preserves_proposed_financing_as_evidence_only():
+    prompt = OM_EXTRACTION_SYSTEM_PROMPT.lower()
+
+    assert "proposed_loan_amount" in prompt
+    assert "proposed_down_payment_amount" in prompt
+    assert "proposed_down_payment_pct" in prompt
+    assert "do not map them into ltv_pct" in prompt
+    assert "map ltv_pct only when" in prompt
+
+
 def test_om_prompt_uses_three_mile_column_for_demographics():
     prompt = OM_EXTRACTION_SYSTEM_PROMPT.lower()
 

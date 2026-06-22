@@ -125,6 +125,20 @@ class ReMemoRepository:
         memo.metadata_json = dict(metadata)
         self.db.commit()
 
+    def delete_pending(self, memo_id: str, user_id: str) -> bool:
+        """Delete a pending memo that has not been handed to a worker yet."""
+        memo = self.db.get(UnderwritingMemo, memo_id)
+        if memo is None or memo.user_id != user_id or memo.status != "pending":
+            return False
+        try:
+            self.db.delete(memo)
+            self.db.commit()
+            return True
+        except Exception:
+            self.db.rollback()
+            logger.exception("Failed to delete pending memo", extra={"memo_id": memo_id})
+            raise
+
     def has_active(self, run_id: str) -> bool:
         """Return True if any memo on this run is currently generating."""
         stmt = (

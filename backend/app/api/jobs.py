@@ -90,9 +90,17 @@ async def stream_job_progress(job_id: str, token: Optional[str] = Query(None)):
             }
         )
 
-    # For terminal-state jobs (failed/completed), skip ownership check and go straight to
-    # event_generator which will emit the appropriate SSE event and close cleanly.
-    # This prevents HTTP 404 when the associated entity (e.g. document) was cleaned up.
+    # Generic ownership verification. Even terminal jobs can reveal entity IDs
+    # and status, so authorize before emitting any SSE payload.
+    entity_owner_id, entity_org_id = resolve_entity_owner(job.entity_type, job.entity_id, org_id)
+
+    if entity_owner_id != user_id or (entity_org_id is not None and entity_org_id != org_id):
+        logger.warning(
+            f"[SSE] User {user_id} attempted to access {job.entity_type} job {job_id} owned by {entity_owner_id}",
+            extra={"job_id": job_id, "user_id": user_id, "org_id": org_id, "owner_id": entity_owner_id, "entity_org_id": entity_org_id, "entity_type": job.entity_type}
+        )
+        raise HTTPException(status_code=403, detail="You don't have permission to access this job")
+
     if job.status in ("failed", "completed"):
         async def terminal_event_generator():
             if job.status == "completed":
@@ -115,17 +123,6 @@ async def stream_job_progress(job_id: str, token: Optional[str] = Query(None)):
                 "Content-Type": "text/event-stream; charset=utf-8"
             }
         )
-
-    # Generic ownership verification
-    entity_owner_id, entity_org_id = resolve_entity_owner(job.entity_type, job.entity_id, org_id)
-
-    # Verify ownership
-    if entity_owner_id != user_id or (entity_org_id is not None and entity_org_id != org_id):
-        logger.warning(
-            f"[SSE] User {user_id} attempted to access {job.entity_type} job {job_id} owned by {entity_owner_id}",
-            extra={"job_id": job_id, "user_id": user_id, "org_id": org_id, "owner_id": entity_owner_id, "entity_org_id": entity_org_id, "entity_type": job.entity_type}
-        )
-        raise HTTPException(status_code=403, detail="You don't have permission to access this job")
 
     logger.info(
         f"[SSE] User {user_id} authorized to stream {job.entity_type} job {job_id}",
