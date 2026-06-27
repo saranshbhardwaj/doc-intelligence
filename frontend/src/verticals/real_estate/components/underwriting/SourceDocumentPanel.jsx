@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { AlertCircle, Download, FileSpreadsheet, FileText, Loader2, X } from 'lucide-react';
+import { AlertCircle, FileText, Loader2, X } from 'lucide-react';
 import { Alert, AlertDescription } from '@/components/ui/alert';
 import { Button } from '@/components/ui/button';
 import DocumentViewer from '@/components/pdf/DocumentViewer';
@@ -37,17 +37,6 @@ function buildHighlightPayload(citation) {
   return null;
 }
 
-function isSpreadsheetCitation(citation, filename = '', contentType = '') {
-  const lowerName = String(filename || citation?.filename || '').toLowerCase();
-  const lowerType = String(contentType || '').toLowerCase();
-  return citation?.source_kind === 'spreadsheet'
-    || lowerName.endsWith('.xlsx')
-    || lowerName.endsWith('.xlsm')
-    || lowerName.endsWith('.csv')
-    || lowerType.includes('spreadsheet')
-    || lowerType.includes('text/csv');
-}
-
 export default function SourceDocumentPanel({ citation, isOpen = true, onClose = null }) {
   const { getToken } = useAppAuth();
   const [isLoadingDoc, setIsLoadingDoc] = useState(false);
@@ -61,10 +50,6 @@ export default function SourceDocumentPanel({ citation, isOpen = true, onClose =
   const docTypeLabel = DOC_TYPE_LABELS[activeCitation?.doc_type] || activeCitation?.doc_type || 'Document';
   const highlightPayload = useMemo(() => buildHighlightPayload(activeCitation), [activeCitation]);
   const defaultPage = Number(activeCitation?.page);
-  const spreadsheetCitation = isSpreadsheetCitation(activeCitation, documentFilename, documentContentType);
-  const sheetLocation = activeCitation?.sheet_name
-    ? `${activeCitation.sheet_name}${activeCitation.row_start ? ` rows ${activeCitation.row_start}-${activeCitation.row_end}` : ''}`
-    : null;
 
   useEffect(() => {
     if (!isOpen || !activeCitation?.document_id) {
@@ -122,65 +107,51 @@ export default function SourceDocumentPanel({ citation, isOpen = true, onClose =
 
   if (!activeCitation) {
     return (
-      <div className="flex h-full items-center justify-center bg-slate-950 px-6 text-center text-sm text-slate-400">
+      <div className="flex h-full items-center justify-center bg-muted/20 px-6 text-center text-sm text-muted-foreground">
         Select a cited field to preview its source document.
       </div>
     );
   }
 
   return (
-    <div className="flex h-full flex-col overflow-hidden border-l border-slate-800 bg-slate-950">
-      <div className="flex shrink-0 items-center justify-between border-b border-slate-800 bg-slate-950/95 px-4 py-2.5">
+    <div className="flex h-full flex-col overflow-hidden border-l border-border/60 bg-background">
+      <div className="flex shrink-0 items-center justify-between border-b border-border/60 bg-card px-4 py-2.5">
         <div className="flex min-w-0 items-center gap-2">
-          {spreadsheetCitation ? (
-            <FileSpreadsheet className="h-4 w-4 shrink-0 text-slate-400" />
-          ) : (
-            <FileText className="h-4 w-4 shrink-0 text-slate-400" />
-          )}
-          <span className="truncate text-sm font-medium text-slate-100">
+          <FileText className="h-4 w-4 shrink-0 text-muted-foreground" />
+          <span className="truncate text-sm font-medium text-foreground">
             {documentFilename || activeCitation.filename || 'Data Source'}
           </span>
           {activeCitation.page ? (
-            <span className="shrink-0 text-xs text-slate-500">· p.{activeCitation.page}</span>
-          ) : null}
-          {sheetLocation ? (
-            <span className="shrink-0 text-xs text-slate-500">· {sheetLocation}</span>
+            <span className="shrink-0 text-xs text-muted-foreground">· p.{activeCitation.page}</span>
           ) : null}
         </div>
         {onClose ? (
-          <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0 text-slate-400 hover:bg-slate-900 hover:text-slate-100" onClick={onClose} title="Close source panel">
+          <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0" onClick={onClose} title="Close source panel">
             <X className="h-4 w-4" />
           </Button>
         ) : null}
       </div>
 
-      <div className="shrink-0 border-b border-slate-800 bg-slate-900/80 px-4 py-3">
+      <div className="shrink-0 border-b border-border/60 bg-muted/30 px-4 py-3">
         <div className="flex flex-wrap items-center gap-2">
           <UnderwritingStatusBadge tone="active">{docTypeLabel}</UnderwritingStatusBadge>
           {activeCitation.page ? (
-            <span className="text-xs text-slate-400">Page {activeCitation.page}</span>
-          ) : null}
-          {sheetLocation ? (
-            <span className="text-xs text-slate-400">{sheetLocation}</span>
+            <span className="text-xs text-muted-foreground">Page {activeCitation.page}</span>
           ) : null}
         </div>
         {activeCitation.source_text ? (
           <>
-            <p className="mt-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Extracted text</p>
-            <p className="mt-1 line-clamp-3 text-xs leading-5 text-slate-200">{activeCitation.source_text}</p>
+            <p className="mt-3 text-[11px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Extracted text</p>
+            <p className="mt-1 text-xs leading-5 text-foreground line-clamp-3">{activeCitation.source_text}</p>
           </>
         ) : (
-          <p className="mt-2 text-xs leading-5 text-slate-400">
-            {spreadsheetCitation
-              ? 'Review the cited sheet and row window from the extracted spreadsheet context.'
-              : 'Jump directly to the cited source page to validate the assumption.'}
-          </p>
+          <p className="mt-2 text-xs leading-5 text-muted-foreground">Jump directly to the cited source page to validate the assumption.</p>
         )}
       </div>
 
-      <div className="min-h-0 flex-1 overflow-hidden bg-slate-950">
+      <div className="min-h-0 flex-1 overflow-hidden bg-muted/20">
         {isLoadingDoc ? (
-          <div className="flex h-full items-center justify-center gap-2 text-sm text-slate-400">
+          <div className="flex h-full items-center justify-center gap-2 text-sm text-muted-foreground">
             <Loader2 className="h-4 w-4 animate-spin" />
             Loading source document...
           </div>
@@ -204,30 +175,7 @@ export default function SourceDocumentPanel({ citation, isOpen = true, onClose =
           </div>
         ) : null}
 
-        {!isLoadingDoc && documentUrl && spreadsheetCitation ? (
-          <div className="h-full overflow-y-auto px-5 py-5 text-sm text-slate-200">
-            <div className="rounded-2xl border border-slate-800 bg-slate-900/80 p-4">
-              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-500">Spreadsheet source</p>
-              <p className="mt-2 text-sm font-semibold text-slate-100">{sheetLocation || 'Spreadsheet rows'}</p>
-              <p className="mt-2 text-xs leading-5 text-slate-400">
-                Spreadsheet citations are anchored to sheet and row ranges. Open the source workbook if you need to inspect formulas, hidden rows, or formatting.
-              </p>
-              {activeCitation.source_text ? (
-                <pre className="mt-4 max-h-[55vh] overflow-auto whitespace-pre-wrap rounded-xl border border-slate-800 bg-slate-950 p-3 text-xs leading-5 text-slate-200">
-                  {activeCitation.source_text}
-                </pre>
-              ) : null}
-              <Button asChild variant="outline" size="sm" className="mt-4 border-slate-700 bg-slate-950 text-slate-100 hover:bg-slate-900">
-                <a href={documentUrl} target="_blank" rel="noreferrer">
-                  <Download className="mr-2 h-3.5 w-3.5" />
-                  Open source file
-                </a>
-              </Button>
-            </div>
-          </div>
-        ) : null}
-
-        {!isLoadingDoc && documentUrl && !spreadsheetCitation ? (
+        {!isLoadingDoc && documentUrl ? (
           <DocumentViewer
             fileUrl={documentUrl}
             filename={documentFilename || activeCitation.filename || ''}
@@ -238,7 +186,7 @@ export default function SourceDocumentPanel({ citation, isOpen = true, onClose =
         ) : null}
 
         {!isLoadingDoc && !documentUrl && !documentMissing && !documentError ? (
-          <div className="flex h-full items-center justify-center px-6 text-center text-sm text-slate-400">
+          <div className="flex h-full items-center justify-center px-6 text-center text-sm text-muted-foreground">
             No document available for this citation.
           </div>
         ) : null}

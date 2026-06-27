@@ -93,9 +93,7 @@ def authed_client(db_session, memo_user):
 class TestCreateMemo:
     def test_happy_path_returns_memo_id_and_job_id(self, authed_client, completed_run):
         """Happy path: valid completed run → 200, memo_id + job_id returned, task dispatched."""
-        with patch(
-            "app.verticals.real_estate.api.memos.generate_credit_memo_task.apply_async"
-        ) as mock_dispatch:
+        with patch("app.verticals.real_estate.api.memos.generate_credit_memo_task") as mock_task:
             resp = authed_client.post(
                 f"/api/v1/re/underwriting/runs/{completed_run.id}/memos",
                 json={
@@ -117,11 +115,29 @@ class TestCreateMemo:
         assert "job_id" in body
         assert "version" in body
         assert body["version"] == 1
-        mock_dispatch.assert_called_once()
+        mock_task.apply_async.assert_called_once()
         # Verify task was dispatched with (memo_id, run_id, user_id)
-        call_kwargs = mock_dispatch.call_args
+        call_kwargs = mock_task.apply_async.call_args
         assert call_kwargs.kwargs["args"][0] == body["memo_id"]
         assert call_kwargs.kwargs["args"][1] == completed_run.id
+
+    def test_dispatch_failure_removes_pending_memo(
+        self, authed_client, completed_run, db_session
+    ):
+        """Celery dispatch failure must not leave an inert pending memo in history."""
+        from app.repositories.re_memo_repository import ReMemoRepository
+
+        repo = ReMemoRepository(db_session)
+        with patch("app.verticals.real_estate.api.memos.generate_credit_memo_task") as mock_task:
+            mock_task.apply_async.side_effect = RuntimeError("broker unavailable")
+            resp = authed_client.post(
+                f"/api/v1/re/underwriting/runs/{completed_run.id}/memos",
+                json={"cover_data": {}, "sponsor_data": {}, "market_notes": None},
+            )
+
+        assert resp.status_code == 500
+        assert "failed to dispatch" in resp.json()["detail"].lower()
+        assert repo.list_by_run(completed_run.id, completed_run.user_id) == []
 
     def test_run_without_result_artifact_returns_400(
         self, authed_client, db_session, completed_run
@@ -146,6 +162,51 @@ class TestCreateMemo:
         )
 
         assert resp.status_code == 404
+
+    def test_active_memo_returns_409_without_dispatch(
+        self, authed_client, completed_run, db_session
+    ):
+        """Run with pending/generating memo → 409 and no duplicate task."""
+        from app.repositories.re_memo_repository import ReMemoRepository
+
+        repo = ReMemoRepository(db_session)
+        repo.create(
+            run_id=completed_run.id,
+            user_id=completed_run.user_id,
+            cover_data={},
+            sponsor_data={},
+            market_notes=None,
+        )
+
+        with patch("app.verticals.real_estate.api.memos.generate_credit_memo_task") as mock_task:
+            resp = authed_client.post(
+                f"/api/v1/re/underwriting/runs/{completed_run.id}/memos",
+                json={"cover_data": {}, "sponsor_data": {}, "market_notes": None},
+            )
+
+        assert resp.status_code == 409
+        assert "already generating" in resp.json()["detail"].lower()
+        mock_task.apply_async.assert_not_called()
+
+    def test_job_creation_failure_removes_pending_memo(
+        self, authed_client, completed_run, db_session
+    ):
+        """Job creation failure must not leave an inert pending memo in history."""
+        from app.repositories.re_memo_repository import ReMemoRepository
+
+        repo = ReMemoRepository(db_session)
+        with patch("app.verticals.real_estate.api.memos.JobRepository") as mock_job_repo_cls, \
+             patch("app.verticals.real_estate.api.memos.generate_credit_memo_task.apply_async") as mock_dispatch:
+            mock_job_repo_cls.return_value.create_job.return_value = None
+            resp = authed_client.post(
+                f"/api/v1/re/underwriting/runs/{completed_run.id}/memos",
+                json={"cover_data": {}, "sponsor_data": {}, "market_notes": None},
+            )
+
+        assert resp.status_code == 500
+        assert "failed to create job" in resp.json()["detail"].lower()
+        assert repo.list_by_run(completed_run.id, completed_run.user_id) == []
+        mock_dispatch.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

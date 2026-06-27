@@ -73,6 +73,8 @@ This section answers "why this deal" and frames the entire memo. Build it from t
    - "Opportunistic" → emphasize unique angle that doesn't fit other categories
 3. STRUCTURED DATA.sourcing_type / sourcing_detail. If present, work into one sentence ("Sourced off-market via repeat seller relationship.")
 
+If STRUCTURED DATA.classification is "Below Screen", frame the thesis as "Under current assumptions, the deal does not clear the configured screen." Do not write "should not proceed", "reject", or similar final-investment language in the thesis section. Do not write "absent a clear value-add thesis" when value-add opportunities, below-market tenant upside, or conversion notes appear anywhere in STRUCTURED DATA or SOURCE EXCERPTS; instead say the upside is not enough to offset the modeled screen under current assumptions or requires diligence.
+
 If NEITHER thesis_text NOR strategy_type is present, the entire section reads:
 "Investment thesis has not been articulated for this deal. The underwriting metrics are documented in Section 6 and the verdict in Section 10; analyst should populate the thesis before committee submission."
 
@@ -82,12 +84,12 @@ Do NOT include numbers that contradict STRUCTURED DATA.""",
 
     SECTION_TRANSACTION_OVERVIEW: """SECTION: Transaction Overview
 Output: 1 short paragraph (~3 sentences).
-Use ONLY values from STRUCTURED DATA.purchase_price, price_per_unit, price_per_sqft, cap_rate_at_cost, total_unit_count, storage_unit_count, non_storage_unit_count. State the price, $/storage unit when non_storage_unit_count is present; otherwise state $/unit. State $/rentable sqft and the going-in cap rate. If non_storage_unit_count is present, the only allowed unit-mix phrase is: "[total_unit_count] total units/spaces, including [storage_unit_count] storage units and [non_storage_unit_count] non-storage units/spaces." Do NOT invent any alternate unit count. Do NOT comment on whether the price is fair — that is the Recommendation section's job. No citations needed.""",
+Use ONLY values from STRUCTURED DATA.purchase_price, price_per_unit, price_per_sqft, cap_rate_at_cost, total_unit_count, storage_unit_count, non_storage_unit_count, capital_structure, and om_financing_evidence. State the price, $/total unit-space when non_storage_unit_count is present; otherwise state $/unit. Use the exact phrase "per total unit-space" for mixed storage/parking/residential deals. Do NOT write "per storage unit" unless price_per_unit was computed from storage_unit_count only. State $/rentable sqft and the going-in cap rate. If non_storage_unit_count is present, the only allowed unit-mix phrase is: "[total_unit_count] total units/spaces, including [storage_unit_count] storage units and [non_storage_unit_count] non-storage units/spaces." If STRUCTURED DATA.om_financing_evidence shows OM proposed debt that differs from model debt, state it as source-vs-model: "OM proposed [proposed_ltv_pct] / [proposed_loan_amount], while the model uses [model_ltv_pct] / [model_loan_amount]." Do NOT rewrite the model capital stack from OM proposed financing. Do NOT invent any alternate unit count. Do NOT comment on whether the price is fair — that is the Recommendation section's job. No citations needed.""",
 
     SECTION_PROPERTY_DESCRIPTION: """SECTION: Property Description
 Output: 2-3 short paragraphs. Strictly about the PHYSICAL property.
 Paragraph 1 (structured): year built, total unit/space count, storage unit count, non-storage unit count when present, total rentable sqft, CC unit count vs NC unit count, climate-control percentage. All numbers come from STRUCTURED DATA verbatim. If total_unit_count differs from storage_unit_count, do not collapse them into a single "units" number. Never calculate a storage count by subtracting non_storage_unit_count from storage_unit_count.
-Paragraph 2 (narrative): construction type, on-site management, security, recent capex, drive-up vs interior access. THIS MUST come from SOURCE EXCERPTS with inline [doc:page] citations. If SOURCE EXCERPTS contains no relevant material, write ONE sentence: "No additional property description available from the offering memorandum." Do not invent.
+Paragraph 2 (narrative): construction type, on-site management, security, recent capex, drive-up vs interior access. THIS MUST come from SOURCE EXCERPTS with inline [doc:page] citations. Only use the gap sentence if no SOURCE EXCERPTS contain relevant property description material. The gap sentence is: "No additional property description available from the offering memorandum." Do not invent.
 Paragraph 3 (optional): explicitly stated value-add or expansion opportunities — only if SOURCE EXCERPTS supports them.
 
 DO NOT include in this section (each belongs in a different section):
@@ -113,6 +115,8 @@ When a free-text field is filtered out, do NOT mention that field at all — do 
 
 CONSISTENCY CHECK: if sponsor_data.liquidity > sponsor_data.net_worth, do NOT report both numbers — they are inconsistent (liquidity is a subset of net worth). Report the lower of the two as liquidity and flag in ONE phrase: "Net-worth and liquidity figures require analyst verification (reported values are inconsistent)."
 
+TRACK RECORD CHECK: if sponsor_data.track_record_irr is negative, treat negative track_record_irr as a red flag, not a credential. Do not use deal count or years of experience as a mitigant for negative realized performance without also flagging the negative IRR.
+
 If sponsor_data is empty OR has no meaningful fields populated after the placeholder filter, the entire section must read: "Sponsor information not provided. To be completed prior to committee submission."
 Do not infer sponsor experience from the deal type. Do not invent a track record. No citations.""",
 
@@ -136,6 +140,8 @@ Read STRUCTURED DATA.rent_position which has these fields:
 - current_ratio_bucket_count: how many buckets had enough subject rent data to compute a current-rent ratio.
 - unmatched_bucket_count, unmatched_sizes: subject buckets without clean comp coverage.
 
+If STRUCTURED DATA.operational or source excerpts mention below-market tenants, below-street rents, or tenant-level rent variance, keep that separate from comp-set rent positioning. Tenant-level below-street upside can coexist with comp-set rents above market; explicitly distinguish below-street tenant recapture from external comp-set market positioning.
+
 Acceptable claims:
 - Whether overall in-place rents are above or below market (use current_vs_comp_avg).
 - Whether the operator's stated market rent diverges from comp average (compare current_vs_comp_avg to market_vs_comp_avg).
@@ -157,6 +163,7 @@ Return 3-6 risks. For each risk, the `source` field MUST be one of these enum va
 
 Do NOT invent risks not supported by the above. Do NOT include generic risks ("interest rate risk", "market conditions") unless a specific stress test or warning in STRUCTURED DATA points to them.
 If discussing rent growth, use STRUCTURED DATA.operational.rent_growth_pct exactly. Do not infer a growth rate from projections or source excerpts when this field is present.
+If discussing exit-cap stress, use cap expansion/compression correctly: higher exit cap = cap expansion and lower sale value; lower exit cap = cap compression and higher sale value. Do not call an Exit Cap +0.50% downside case "compression" or cite it as improving equity multiple.
 
 MITIGANTS — required discipline:
 For every risk, evaluate ALL FIVE mitigant sources below in order and use the first that applies. Only set `mitigant` to null when NONE of the five yield a defensible mitigant.
@@ -173,8 +180,10 @@ If a risk has no supportable mitigant after evaluating all 5 sources, set `mitig
 
 DIMENSION-MATCH RULE: a mitigant MUST address the same risk dimension as the risk itself.
 - IRR miss → mitigant must address upside (DSCR cushion, LTV slack, conversion thesis), NOT equity multiple. EM and IRR measure different things (terminal vs annual); citing EM as offsetting IRR is incorrect.
+- DSCR cushion does not mitigate an IRR miss by itself; DSCR is lender coverage, not equity return. Only cite DSCR as a separate positive credit metric, not as the mitigant for equity return failure.
 - Cash-on-cash miss → mitigant must address near-term cash flow from operations or expenses, NOT DSCR cushion, NOT higher leverage, and NOT 10-year equity multiple. Additional leverage is a financing option, not a risk mitigant; DSCR is a lender coverage metric, not an equity cash-yield mitigant.
 - Equity multiple miss → mitigant must address terminal value, purchase basis, hold-period value creation, or exit support. Do NOT cite IRR as a mitigant for an equity-multiple shortfall.
+- Sponsor experience does not mitigate an equity-multiple miss unless the source data ties sponsor execution to a specific value-creation lever that improves terminal value.
 - Lease-up / non-storage concentration risk → mitigant must address the diversification or stability of that revenue stream, NOT pure occupancy snapshot (occupancy today doesn't mitigate concentration tomorrow).
 - Mixed-use / non-storage risk → mitigant must specifically address parking/residential operations or revenue durability. Generic self-storage sponsor experience is not enough.
 - Stress-case return shortfall → mitigant must address equity return downside, NOT DSCR or lender coverage.

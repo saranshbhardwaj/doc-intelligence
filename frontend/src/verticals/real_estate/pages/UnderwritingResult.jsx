@@ -61,6 +61,7 @@ import {
   formatCompactCurrency,
   formatCurrency,
   formatEvidenceValue,
+  formatFailureGap,
   formatMultiple,
   formatPercent,
   formatRatioPercent,
@@ -1170,10 +1171,7 @@ export default function UnderwritingResult() {
                                         color: Math.abs(item.gap) > 0.01 ? 'hsl(var(--uw-danger))' : 'hsl(var(--uw-risk))',
                                       }}
                                     >
-                                      {item.gap > 0 ? '+' : ''}
-                                      {Math.abs(item.gap) < 0.1
-                                        ? `${(item.gap * 10000).toFixed(0)} bps`
-                                        : `${(item.gap * 100).toFixed(1)}%`}
+                                      {formatFailureGap(item.metric, item.gap)}
                                     </span>
                                   ) : item.citations.length > 0 ? (
                                     <button

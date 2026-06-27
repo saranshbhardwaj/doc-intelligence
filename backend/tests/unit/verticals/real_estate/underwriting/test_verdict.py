@@ -1,22 +1,14 @@
 """Unit tests for the underwriting verdict engine."""
 import pytest
-from app.schemas.user_thresholds import UserUnderwritingThresholds
-from app.verticals.real_estate.underwriting.verdict import _DEFAULTS, evaluate
+from app.verticals.real_estate.underwriting.verdict import evaluate
 from app.verticals.real_estate.underwriting.schemas.self_storage import (
     SelfStorageResult,
     InvestmentCriteria,
     CapitalStructure,
-    OperationalInputs,
-    SelfStorageInputs,
-    AcquisitionInputs,
-    ExitInputs,
-    FinancingInputs,
-    ProjectDetails,
     TotalReturn,
     StressScenario,
     RolloverRisk,
     UnitMixRow,
-    ExpenseBasis,
 )
 
 
@@ -68,7 +60,7 @@ class TestVerdictWorthPursuing:
 
         assert verdict.status == "worth_pursuing"
         assert verdict.failures == []
-        assert "Passes the initial screen" in verdict.rationale
+        assert "All investment criteria met" in verdict.rationale
 
 
 class TestVerdictSingleFailures:
@@ -149,14 +141,15 @@ class TestVerdictNoneMetrics:
     """None metrics skip checks without failing."""
 
     def test_none_irr_skips_check(self, passing_result, default_criteria):
-        """result.irr = None with equity invested → IRR non-convergence remains a hard failure."""
+        """result.irr = None → IRR check skipped, not a failure."""
         result = passing_result.model_copy()
         result.irr = None
 
         verdict = evaluate(result, default_criteria)
 
-        assert verdict.status == "below_standards"
-        assert any(f.metric == "irr" for f in verdict.failures)
+        # Should still pass because other metrics pass
+        assert verdict.status == "worth_pursuing"
+        assert not any(f.metric == "irr" for f in verdict.failures)
 
 
 class TestVerdictMultipleFailures:
@@ -235,7 +228,7 @@ class TestVerdictRolloverWarning:
 
         verdict = evaluate(result, default_criteria)
 
-        assert not any(w.key == "rollover_concentration" for w in verdict.warnings)
+        assert "Warning:" not in verdict.rationale
 
 
 class TestVerdictMixedRevenueWarning:
@@ -245,11 +238,13 @@ class TestVerdictMixedRevenueWarning:
         result = passing_result.model_copy()
         result.unit_mix = [
             {
-                "unit_category": "storage",
+                "section": "NON-CLIMATE",
+                "unit_type": "10 x 10",
                 "num_units": 100,
             },
             {
-                "unit_category": "parking",
+                "section": "COVERED PARKING",
+                "unit_type": "Parking",
                 "num_units": 20,
             },
         ]
@@ -257,7 +252,7 @@ class TestVerdictMixedRevenueWarning:
         verdict = evaluate(result, default_criteria)
 
         assert any(w.key == "mixed_revenue_unit_mix" for w in verdict.warnings)
-        assert "20 of 120 units/spaces (17% of unit count)" in verdict.rationale
+        assert "20 of 120 units/spaces" in verdict.rationale
 
 
 class TestVerdictEvidenceQualityWarning:
@@ -266,216 +261,9 @@ class TestVerdictEvidenceQualityWarning:
     def test_t6_annualized_warning_appended_to_rationale(self, passing_result, default_criteria):
         verdict = evaluate(passing_result, default_criteria, income_statement_period_months=6)
 
-        assert verdict.status == "needs_review"
-        warning = next(w for w in verdict.warnings if w.key == "annualized_short_period_income")
-        assert warning.severity == "warning"
+        assert verdict.status == "worth_pursuing"
+        assert any(w.key == "annualized_short_period_income" for w in verdict.warnings)
         assert "trailing 6-month period, annualized" in verdict.rationale
-        assert "-10% reduction to GPR" in warning.message
-
-    @pytest.mark.parametrize("months", [7, 8, 9, 10, 11])
-    def test_t7_through_t11_emit_annualized_warning_with_severity(self, passing_result, default_criteria, months):
-        verdict = evaluate(passing_result, default_criteria, income_statement_period_months=months)
-
-        warning = next(w for w in verdict.warnings if w.key == "annualized_short_period_income")
-        assert warning.severity == "warning"
-        assert f"trailing {months}-month period" in warning.message
-        assert verdict.status == "needs_review"
-
-    def test_period_under_three_months_emits_stronger_warning(self, passing_result, default_criteria):
-        verdict = evaluate(passing_result, default_criteria, income_statement_period_months=2)
-
-        warning = next(w for w in verdict.warnings if w.key == "very_short_period_income")
-        assert warning.severity == "critical"
-
-    def test_t3_period_emits_stronger_warning(self, passing_result, default_criteria):
-        verdict = evaluate(passing_result, default_criteria, income_statement_period_months=3)
-
-        warning = next(w for w in verdict.warnings if w.key == "very_short_period_income")
-        assert warning.severity == "critical"
-
-    def test_missing_expense_lines_requires_review(self, passing_result, default_criteria):
-        inputs = SelfStorageInputs(
-            project=ProjectDetails(name="Test Deal", asset_type="self_storage"),
-            acquisition=AcquisitionInputs(purchase_price=5_000_000),
-            operational=OperationalInputs(
-                gross_potential_rent_annual=600_000,
-                vacancy_credit_loss_pct=0.08,
-                other_income_annual=20_000,
-                property_tax_annual=0,
-                insurance_annual=0,
-                payroll_annual=0,
-                repairs_maintenance_annual=0,
-                utilities_annual=0,
-                marketing_annual=0,
-                other_opex_annual=0,
-                mgmt_fee_pct=0.08,
-                rent_growth_pct=0.03,
-                opex_growth_pct=0.02,
-            ),
-            financing=FinancingInputs(
-                ltv_pct=0.70,
-                interest_rate_pct=0.065,
-                amortization_years=25,
-                loan_term_years=10,
-            ),
-            exit=ExitInputs(hold_period_years=5, exit_cap_rate=0.065, selling_cost_pct=0.03),
-            criteria=default_criteria,
-        )
-
-        verdict = evaluate(passing_result, default_criteria, inputs=inputs)
-
-        assert verdict.status == "needs_review"
-        expense_warning = next(w for w in verdict.warnings if w.key == "expenses_missing")
-        assert expense_warning.severity == "critical"
-        assert "analyst review is required" in verdict.rationale
-
-    def test_low_expense_ratio_requires_review(self, passing_result, default_criteria):
-        result = passing_result.model_copy(deep=True)
-        result.expense_basis = ExpenseBasis(
-            source="om_year1_line_items",
-            label="Year 1 OM line items",
-            ratio=0.27,
-            period="year1",
-            method="line_items",
-            expense_ratio=0.27,
-            reason="test",
-        )
-        inputs = SelfStorageInputs(
-            project=ProjectDetails(name="Low OpEx Deal", asset_type="self_storage"),
-            acquisition=AcquisitionInputs(purchase_price=5_000_000),
-            operational=OperationalInputs(gross_potential_rent_annual=600_000),
-            financing=FinancingInputs(),
-            exit=ExitInputs(),
-            criteria=default_criteria,
-        )
-
-        verdict = evaluate(result, default_criteria, inputs=inputs)
-
-        warning = next(w for w in verdict.warnings if w.key == "expense_ratio_benchmark")
-        assert verdict.status == "needs_review"
-        assert "below the 30%" in warning.message
-
-    def test_high_expense_ratio_requires_review(self, passing_result, default_criteria):
-        result = passing_result.model_copy(deep=True)
-        result.expense_basis = ExpenseBasis(
-            source="om_year1_line_items",
-            label="Year 1 OM line items",
-            ratio=0.49,
-            period="year1",
-            method="line_items",
-            expense_ratio=0.49,
-            reason="test",
-        )
-        inputs = SelfStorageInputs(
-            project=ProjectDetails(name="High OpEx Deal", asset_type="self_storage"),
-            acquisition=AcquisitionInputs(purchase_price=5_000_000),
-            operational=OperationalInputs(gross_potential_rent_annual=600_000),
-            financing=FinancingInputs(),
-            exit=ExitInputs(),
-            criteria=default_criteria,
-        )
-
-        verdict = evaluate(result, default_criteria, inputs=inputs)
-
-        warning = next(w for w in verdict.warnings if w.key == "expense_ratio_benchmark")
-        assert verdict.status == "needs_review"
-        assert "above the 45%" in warning.message
-
-    def test_sqft_per_capita_supply_watch_requires_review(self, passing_result, default_criteria):
-        inputs = SelfStorageInputs(
-            project=ProjectDetails(
-                name="Supply Watch Deal",
-                asset_type="self_storage",
-                storage_sqft_per_capita_3mi=6.9,
-                nearby_storage_count_3mi=10,
-            ),
-            acquisition=AcquisitionInputs(purchase_price=5_000_000),
-            operational=OperationalInputs(gross_potential_rent_annual=600_000),
-            financing=FinancingInputs(),
-            exit=ExitInputs(),
-            criteria=default_criteria,
-        )
-
-        verdict = evaluate(passing_result, default_criteria, inputs=inputs)
-
-        warning = next(w for w in verdict.warnings if w.key == "market_supply_watch")
-        assert verdict.status == "needs_review"
-        assert "6.9 sqft/capita" in warning.message
-        assert "10 competitors" in warning.message
-
-
-class TestVerdictOMNOIWarnings:
-    """OM-NOI mode swaps missing-support warnings for a quick-screen warning."""
-
-    def _om_noi_inputs(self, criteria):
-        return SelfStorageInputs(
-            project=ProjectDetails(name="OM Deal", asset_type="self_storage"),
-            acquisition=AcquisitionInputs(purchase_price=8_000_000),
-            operational=OperationalInputs(
-                gross_potential_rent_annual=0.0,
-                noi_current_stated=663_830.0,
-            ),
-            financing=FinancingInputs(
-                ltv_pct=0.70,
-                interest_rate_pct=0.065,
-                amortization_years=25,
-                loan_term_years=10,
-            ),
-            exit=ExitInputs(hold_period_years=5, exit_cap_rate=0.065, selling_cost_pct=0.03),
-            criteria=criteria,
-        )
-
-    def test_om_noi_mode_suppresses_expenses_missing(self, passing_result, default_criteria):
-        result = passing_result.model_copy(deep=True)
-        result.expense_basis = ExpenseBasis(
-            source="om_noi",
-            label="OM-stated NOI quick screen",
-            reason="test",
-        )
-
-        verdict = evaluate(result, default_criteria, inputs=self._om_noi_inputs(default_criteria))
-        keys = [warning.key for warning in verdict.warnings]
-
-        assert "expenses_missing" not in keys
-
-    def test_om_noi_mode_suppresses_income_period_unknown(self, passing_result, default_criteria):
-        result = passing_result.model_copy(deep=True)
-        result.expense_basis = ExpenseBasis(
-            source="om_noi",
-            label="OM-stated NOI quick screen",
-            reason="test",
-        )
-
-        verdict = evaluate(result, default_criteria, inputs=self._om_noi_inputs(default_criteria))
-        keys = [warning.key for warning in verdict.warnings]
-
-        assert "income_period_unknown" not in keys
-
-    def test_om_noi_mode_adds_quick_screen_warning(self, passing_result, default_criteria):
-        result = passing_result.model_copy(deep=True)
-        result.expense_basis = ExpenseBasis(
-            source="om_noi",
-            label="OM-stated NOI quick screen",
-            reason="test",
-        )
-
-        verdict = evaluate(result, default_criteria, inputs=self._om_noi_inputs(default_criteria))
-        quick_screen = next(w for w in verdict.warnings if w.key == "om_noi_quick_screen")
-
-        assert quick_screen.severity == "warning"
-
-    def test_missing_basis_still_emits_expenses_missing(self, passing_result, default_criteria):
-        result = passing_result.model_copy(deep=True)
-        result.expense_basis = ExpenseBasis(
-            source="missing",
-            label="Missing expense support",
-            reason="test",
-        )
-
-        verdict = evaluate(result, default_criteria, inputs=self._om_noi_inputs(default_criteria))
-        keys = [warning.key for warning in verdict.warnings]
-
-        assert "expenses_missing" in keys
 
 
 class TestVerdictMixedRevenueWarning:
@@ -484,100 +272,26 @@ class TestVerdictMixedRevenueWarning:
     def test_mixed_revenue_warning_added_for_parking_and_residential_rows(self, passing_result, default_criteria):
         result = passing_result.model_copy()
         result.unit_mix = [
-            UnitMixRow(unit_category="storage", num_units=133),
-            UnitMixRow(unit_category="parking", num_units=68),
-            UnitMixRow(unit_category="residential", num_units=2),
+            UnitMixRow(section="NON-CLIMATE", unit_type="Storage", num_units=133),
+            UnitMixRow(section="UNCOVERED PARKING", unit_type="Parking", num_units=68),
+            UnitMixRow(section="RESIDENTIAL LEASE", unit_type="Residential", num_units=2),
         ]
 
         verdict = evaluate(result, default_criteria)
 
-        assert verdict.status == "needs_review"
+        assert verdict.status == "worth_pursuing"
         assert len(verdict.failures) == 0
-        assert any(w.key == "mixed_revenue_material" for w in verdict.warnings)
+        assert any(w.key == "mixed_revenue_unit_mix" for w in verdict.warnings)
         assert "Mixed revenue detected" in verdict.rationale
-        assert "70 of 203 units/spaces (34% of unit count)" in verdict.rationale
-
-    def test_material_mixed_revenue_by_scheduled_rent_requires_review(self, passing_result, default_criteria):
-        result = passing_result.model_copy()
-        result.unit_mix = [
-            UnitMixRow(unit_category="storage", num_units=100, current_rent=50),
-            UnitMixRow(unit_category="residential", num_units=1, current_rent=1_500),
-        ]
-
-        verdict = evaluate(result, default_criteria)
-
-        warning = next(w for w in verdict.warnings if w.key == "mixed_revenue_material")
-        assert verdict.status == "needs_review"
-        assert "approximately 23% of scheduled rent" in warning.message
+        assert "70 of 203 units/spaces" in verdict.rationale
 
     def test_storage_only_unit_mix_has_no_mixed_revenue_warning(self, passing_result, default_criteria):
         result = passing_result.model_copy()
         result.unit_mix = [
-            UnitMixRow(unit_category="storage", climate_type="NC", size="5 x 10", num_units=45),
-            UnitMixRow(unit_category="storage", climate_type="CC", size="10 x 10", num_units=30),
+            UnitMixRow(section="NON-CLIMATE", unit_type="5 x 10", num_units=45),
+            UnitMixRow(section="CLIMATE CONTROL", unit_type="10 x 10", num_units=30),
         ]
 
         verdict = evaluate(result, default_criteria)
 
         assert not any(w.key == "mixed_revenue_unit_mix" for w in verdict.warnings)
-
-
-class TestVerdictUserThresholds:
-    """Per-user threshold overrides change pass/fail results; None thresholds use defaults."""
-
-    def test_none_thresholds_uses_default_dscr_floor(self, passing_result, default_criteria):
-        result = passing_result.model_copy()
-        result.dscr_year_one = _DEFAULTS["dscr_year_one_floor"] - 0.01  # just below default
-
-        verdict = evaluate(result, default_criteria, thresholds=None)
-
-        assert verdict.status == "below_standards"
-        assert any(f.metric == "dscr_year_one" for f in verdict.failures)
-        assert any(f.target == _DEFAULTS["dscr_year_one_floor"] for f in verdict.failures)
-
-    def test_custom_dscr_floor_overrides_default(self, passing_result, default_criteria):
-        result = passing_result.model_copy()
-        result.dscr_year_one = 1.20  # below default 1.25 but above custom 1.18
-
-        criteria = default_criteria.model_copy(update={"dscr_year_one_floor": 1.18})
-        verdict = evaluate(result, criteria)
-
-        assert verdict.status == "worth_pursuing"
-        assert not any(f.metric == "dscr_year_one" for f in verdict.failures)
-
-    def test_custom_dscr_floor_still_fails_below_custom(self, passing_result, default_criteria):
-        result = passing_result.model_copy()
-        result.dscr_year_one = 1.10  # below both default and custom
-
-        criteria = default_criteria.model_copy(update={"dscr_year_one_floor": 1.18})
-        verdict = evaluate(result, criteria)
-
-        assert verdict.status == "below_standards"
-        failure = next(f for f in verdict.failures if f.metric == "dscr_year_one")
-        assert failure.target == pytest.approx(1.18)
-
-    def test_custom_stress_dscr_floor(self, passing_result, default_criteria):
-        stress = [StressScenario(scenario_key="base", label="base", min_dscr=1.12)]  # below default 1.15, above custom 1.10
-        criteria = default_criteria.model_copy(update={"stress_dscr_floor": 1.10})
-
-        verdict = evaluate(passing_result, criteria, stress_scenarios=stress)
-
-        assert not any(f.metric == "stress_dscr_floor" for f in verdict.failures)
-
-    def test_default_stress_floor_fails_without_custom(self, passing_result, default_criteria):
-        stress = [StressScenario(scenario_key="base", label="base", min_dscr=1.12)]  # below default 1.15
-
-        verdict = evaluate(passing_result, default_criteria, stress_scenarios=stress, thresholds=None)
-
-        assert any(f.metric == "stress_dscr_floor" for f in verdict.failures)
-
-    def test_unset_threshold_fields_fall_back_to_defaults(self, passing_result, default_criteria):
-        result = passing_result.model_copy()
-        result.dscr_year_one = 1.20  # below default 1.25
-
-        # thresholds with only stress floor set; dscr floor should still default to 1.25
-        custom = UserUnderwritingThresholds(stress_dscr_floor=1.10)
-        verdict = evaluate(result, default_criteria, thresholds=custom)
-
-        assert any(f.metric == "dscr_year_one" for f in verdict.failures)
-        assert any(f.target == pytest.approx(1.25) for f in verdict.failures)

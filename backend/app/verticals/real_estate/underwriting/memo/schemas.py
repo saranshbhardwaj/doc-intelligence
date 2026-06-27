@@ -157,6 +157,7 @@ class MemoContext:
     # Capital stack at acquisition (purchase_price, down_payment, loan_amount,
     # closing_cost, capex_reserve_initial, total_equity_invested)
     capital_structure: dict = field(default_factory=dict)
+    om_financing_evidence: dict = field(default_factory=dict)
 
     # Per-size-bucket rent position vs comp set (RentPositionRow list)
     rent_position_analysis: list = field(default_factory=list)

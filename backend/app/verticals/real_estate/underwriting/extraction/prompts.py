@@ -193,7 +193,7 @@ EXTRACT (as JSON):
       - property_tax_rate_per_assessed_dollar: tax rate per $1 of assessed value. Example:
         "current tax rate ($0.11161)" or "$0.11161 per assessed dollar" -> property_tax_rate_per_assessed_dollar = 0.11161.
       If the tax-rate unit is ambiguous, omit both tax-rate fields rather than guessing.
-- Financing: loan_amount, interest_rate, loan_term_years, amortization_years, loan_type if stated
+- Financing: proposed_loan_amount, proposed_down_payment_amount, proposed_down_payment_pct, interest_rate_pct, loan_term_years, amortization_years if stated. Treat proposed loan/down payment as OM financing evidence only; do not map them into ltv_pct. Map ltv_pct only when the document explicitly labels an LTV / loan-to-value percentage.
 - Exit: hold_period_years, exit_cap_rate, selling_cost_pct, market_cap_rate_sale if stated
 - Broker metrics: broker_cap_rate, broker_noi if stated
 - Unit mix: when a unit-mix overview table is present, extract one row per size/type bucket with size, standard_sqft, num_units, occupied_units, occupancy_pct, current_rent, market_rent if explicitly separate, rent_per_sqft, potential_rent, occupied_sqft, total_sqft, pct_of_total_sqft

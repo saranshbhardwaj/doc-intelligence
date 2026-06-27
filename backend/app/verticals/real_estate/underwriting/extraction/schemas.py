@@ -160,6 +160,9 @@ class OMExtraction(BaseModel):
     noi_current_stated:                 Optional[float] = Field(default=None, description="NOI from Current column",                        json_schema_extra={"cite": True})
 
     # ── Financing & Exit ──────────────────────────────────────────────────────
+    proposed_loan_amount: Optional[float] = Field(default=None, description="OM proposed loan amount; source evidence only, does not override model LTV", json_schema_extra={"cite": True})
+    proposed_down_payment_amount: Optional[float] = Field(default=None, description="OM proposed down payment amount; source evidence only", json_schema_extra={"cite": True})
+    proposed_down_payment_pct: Optional[float] = Field(default=None, description="OM proposed down payment percentage as decimal, e.g. 0.35", json_schema_extra={"cite": True})
     ltv_pct:             Optional[float] = Field(default=None, description="decimal e.g. 0.70",      json_schema_extra={"cite": True})
     interest_rate_pct:   Optional[float] = Field(default=None, description="decimal e.g. 0.065",     json_schema_extra={"cite": True})
     amortization_years:  Optional[int]   = Field(default=None, description="loan amortization years", json_schema_extra={"cite": True})

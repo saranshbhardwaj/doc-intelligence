@@ -29,6 +29,127 @@ export function formatMultiple(value) {
   return `${value.toFixed(2)}×`;
 }
 
+export function formatFailureGap(metric, gap) {
+  if (gap == null || !Number.isFinite(Number(gap))) return '—';
+  const value = Number(gap);
+  const sign = value > 0 ? '+' : '';
+
+  if (metric === 'equity_multiple' || metric === 'dscr' || metric === 'dscr_year_one') {
+    return `${sign}${value.toFixed(2)}×`;
+  }
+
+  if (
+    metric === 'irr'
+    || metric === 'cash_on_cash'
+    || metric === 'ltv'
+    || metric === 'stress_dscr_floor'
+  ) {
+    return `${sign}${(value * 10000).toFixed(0)} bps`;
+  }
+
+  return `${sign}${(value * 100).toFixed(1)}%`;
+}
+
+function isPositiveFinite(value) {
+  return value != null && Number.isFinite(Number(value)) && Number(value) > 0;
+}
+
+export function buildPropertyTaxSupportRows(operational = {}, propertyTaxAnnual = null) {
+  const valueBasis = operational?.property_tax_value_basis_amount;
+  const rawAssessedValue = operational?.property_tax_assessed_value;
+  const assessmentRatio = operational?.property_tax_assessment_ratio;
+  const millageRate = operational?.property_tax_millage_rate;
+  const ratePerAssessedDollar = operational?.property_tax_rate_per_assessed_dollar;
+  const effectiveRate = isPositiveFinite(ratePerAssessedDollar)
+    ? Number(ratePerAssessedDollar)
+    : isPositiveFinite(millageRate)
+      ? Number(millageRate) / 1000
+      : null;
+  const assessedReconciles = isPositiveFinite(rawAssessedValue)
+    && isPositiveFinite(effectiveRate)
+    && isPositiveFinite(propertyTaxAnnual)
+    && Math.abs((Number(rawAssessedValue) * effectiveRate) - Number(propertyTaxAnnual)) <= Math.max(Number(propertyTaxAnnual) * 0.05, 100);
+  const shouldTreatAssessedAsValueBasis = isPositiveFinite(rawAssessedValue)
+    && !assessedReconciles
+    && !isPositiveFinite(valueBasis)
+    && isPositiveFinite(assessmentRatio);
+  const displayValueBasis = isPositiveFinite(valueBasis) ? valueBasis : shouldTreatAssessedAsValueBasis ? rawAssessedValue : null;
+  const impliedAssessedValue = isPositiveFinite(displayValueBasis) && isPositiveFinite(assessmentRatio)
+    ? Number(displayValueBasis) * Number(assessmentRatio)
+    : null;
+  const displayAssessedValue = assessedReconciles ? rawAssessedValue : impliedAssessedValue;
+  const impliedTax = isPositiveFinite(displayAssessedValue) && isPositiveFinite(effectiveRate)
+    ? Number(displayAssessedValue) * effectiveRate
+    : null;
+  const reconcilesToBill = isPositiveFinite(impliedTax) && isPositiveFinite(propertyTaxAnnual)
+    ? Math.abs(impliedTax - Number(propertyTaxAnnual)) <= Math.max(Number(propertyTaxAnnual) * 0.05, 100)
+    : null;
+
+  return [
+    {
+      key: 'property_tax_annual',
+      label: 'OM tax bill / Year 1 tax',
+      rawValue: propertyTaxAnnual,
+      value: formatCurrency(propertyTaxAnnual),
+      prefix: '$',
+      help: 'This is the line item used in modeled OpEx when selected as the property-tax driver.',
+    },
+    {
+      key: 'property_tax_value_basis_amount',
+      label: 'Appraised / tax value basis',
+      rawValue: displayValueBasis,
+      value: formatCurrency(displayValueBasis),
+      prefix: '$',
+      help: shouldTreatAssessedAsValueBasis
+        ? 'Extractor stored this as assessed value, but it only reconciles when treated as the pre-assessment value basis.'
+        : 'Pre-assessment value used for tax mechanics, when stated.',
+    },
+    {
+      key: 'property_tax_assessment_ratio',
+      label: 'Assessment ratio',
+      rawValue: assessmentRatio,
+      value: formatPercent(assessmentRatio),
+      suffix: '%',
+      help: 'Applied to the value basis to estimate taxable assessed value.',
+    },
+    {
+      key: 'property_tax_assessed_value',
+      label: impliedAssessedValue != null && !assessedReconciles ? 'Implied taxable assessed value' : 'Taxable assessed value',
+      rawValue: displayAssessedValue,
+      value: formatCurrency(displayAssessedValue),
+      prefix: '$',
+      help: impliedAssessedValue != null && !assessedReconciles
+        ? 'Derived as appraised / tax value basis × assessment ratio.'
+        : 'Taxable assessed value before applying the tax rate.',
+    },
+    {
+      key: 'property_tax_millage_rate',
+      label: 'Tax millage rate',
+      rawValue: millageRate,
+      value: millageRate != null ? `${Number(millageRate).toFixed(2)} mills` : '—',
+      suffix: 'mills',
+    },
+    {
+      key: 'property_tax_rate_per_assessed_dollar',
+      label: 'Tax rate / assessed $',
+      rawValue: ratePerAssessedDollar,
+      value: ratePerAssessedDollar != null ? Number(ratePerAssessedDollar).toFixed(5) : '—',
+    },
+    {
+      key: 'implied_property_tax',
+      label: 'Implied tax from mechanics',
+      rawValue: impliedTax,
+      value: formatCurrency(impliedTax),
+      prefix: '$',
+      help: reconcilesToBill == null
+        ? 'Needs value basis, assessment ratio or taxable value, and tax rate support to reconcile.'
+        : reconcilesToBill
+          ? 'Reconciles to the OM tax bill within rounding tolerance.'
+          : 'Does not reconcile to the OM tax bill; review the extracted tax mechanics.',
+    },
+  ].filter((row) => row.value != null && row.value !== '—');
+}
+
 export function formatCompactCurrency(value) {
   if (value == null) return '—';
   if (Math.abs(value) >= 1_000_000) return `$${(value / 1_000_000).toFixed(1)}M`;

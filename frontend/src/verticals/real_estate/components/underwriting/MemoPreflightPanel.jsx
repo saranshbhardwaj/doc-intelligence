@@ -2,10 +2,10 @@ import { useState } from 'react';
 import { AlertTriangle, CheckCircle2, ChevronDown, Info } from 'lucide-react';
 import { formatMultiple, formatPercent } from './formatters';
 
-function sourceLabel(citation) {
-  if (!citation) return 'Unavailable';
+export function sourceLabel(citation) {
+  if (!citation) return 'Default assumption';
   if (citation.is_manual || citation.doc_type === 'manual') return 'Manual';
-  if (citation.is_default) return 'Default';
+  if (citation.is_default) return 'Default assumption';
   if (citation.doc_type === 'om') return citation.is_computed ? 'OM computed' : 'OM stated';
   if (citation.doc_type === 't12') return citation.is_computed ? 'T-12 computed' : 'T-12';
   if (citation.doc_type === 'rent_roll') return 'Rent roll';
@@ -27,7 +27,7 @@ function iconForTone(tone) {
   return Info;
 }
 
-function buildMemoPreflightItems({
+export function buildMemoPreflightItems({
   persistedInputs,
   artifact,
   currentRun,
@@ -119,7 +119,7 @@ export default function MemoPreflightPanel(props) {
               onClick={() => setExpanded((value) => !value)}
               className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-border/70 bg-background/70 px-3 py-1.5 text-xs font-semibold text-muted-foreground transition-colors hover:text-foreground"
             >
-              {expanded ? 'Show less' : `${hiddenCount} more`}
+              {expanded ? 'Show fewer' : 'Show all flags'}
               <ChevronDown className={`h-3.5 w-3.5 transition-transform ${expanded ? 'rotate-180' : ''}`} />
             </button>
           ) : null}
@@ -134,7 +134,7 @@ export default function MemoPreflightPanel(props) {
                     <Icon className="mt-0.5 h-4 w-4 shrink-0" />
                     <div className="min-w-0">
                       <p className="text-xs font-semibold text-foreground">{item.title}</p>
-                      <p className="mt-0.5 line-clamp-2 text-xs leading-5 text-muted-foreground">
+                      <p className={`mt-0.5 text-xs leading-5 text-muted-foreground ${expanded ? '' : 'line-clamp-2'}`}>
                         {item.detail}
                       </p>
                     </div>

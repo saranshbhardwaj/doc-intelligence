@@ -4,6 +4,7 @@ import {
   canDeleteMemo,
   formatMemoDate,
   getLatestMemo,
+  getMemoStatusLabel,
   getMemoStatusTone,
   getMemoWarningLabel,
 } from './memoHistoryUtils';
@@ -28,8 +29,13 @@ describe('memoHistoryUtils', () => {
   it('maps memo status to visual tones and download eligibility', () => {
     expect(getMemoStatusTone('complete')).toBe('success');
     expect(getMemoStatusTone('failed')).toBe('danger');
+    expect(getMemoStatusTone('pending')).toBe('active');
+    expect(getMemoStatusTone('generating')).toBe('active');
     expect(getMemoStatusTone('running')).toBe('active');
     expect(getMemoStatusTone('queued')).toBe('neutral');
+
+    expect(getMemoStatusLabel('pending')).toBe('Queued');
+    expect(getMemoStatusLabel('generating')).toBe('Generating');
 
     expect(canDownloadMemo({ status: 'complete' })).toBe(true);
     expect(canDownloadMemo({ status: 'failed' })).toBe(false);

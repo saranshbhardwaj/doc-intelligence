@@ -24,7 +24,7 @@ export function getMemoWarningLabel(warnings = []) {
 export function getMemoStatusTone(status) {
   if (status === 'complete') return 'success';
   if (status === 'failed') return 'danger';
-  if (status === 'running' || status === 'processing') return 'active';
+  if (status === 'pending' || status === 'generating' || status === 'running' || status === 'processing') return 'active';
   return 'neutral';
 }
 
@@ -32,6 +32,8 @@ export function getMemoStatusLabel(status) {
   const labels = {
     complete: 'Complete',
     failed: 'Failed',
+    pending: 'Queued',
+    generating: 'Generating',
     running: 'Generating',
     processing: 'Generating',
     queued: 'Queued',
