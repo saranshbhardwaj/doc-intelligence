@@ -192,8 +192,6 @@ def detect_discrepancies_from_results(results: list) -> list[dict]:
     Returns:
         List of discrepancy dicts: {field, sources, severity, note}
     """
-    from .schemas import ExtractedDocResult
-
     om_data: dict = {}
     rent_roll_data: dict = {}
     t12_data: dict = {}
