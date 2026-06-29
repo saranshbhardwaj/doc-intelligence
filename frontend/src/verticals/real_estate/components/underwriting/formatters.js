@@ -2,6 +2,7 @@ export const DOC_TYPE_LABELS = {
   om: 'Offering Memo',
   rent_roll: 'Rent Roll',
   t12: 'T-12',
+  default: 'Default assumption',
 };
 
 export function formatCurrency(value) {
@@ -536,7 +537,17 @@ export function getFieldCitation(fieldCitations, citationContext, fieldKey) {
     ?? fieldCitations[`rent_roll.${fieldKey}`]
     ?? null;
 
-  if (!rawCitation || rawCitation.is_default) return null;
+  if (!rawCitation) return null;
+
+  if (rawCitation.is_default) {
+    return {
+      ...rawCitation,
+      doc_type: 'default',
+      is_default: true,
+      source_text: rawCitation.selection_note ?? rawCitation.formula ?? 'Default assumption',
+      entries: [],
+    };
+  }
 
   if (rawCitation.is_derived) {
     return {

@@ -345,6 +345,9 @@ export const usePeDiligenceActions = () =>
 
 // Underwriting selectors
 export const useUnderwriting = () => useStore((state) => state.underwriting);
+export const useUnderwritingCurrentRun = () => useStore((state) => state.underwriting.currentRun);
+export const useUnderwritingRuns = () => useStore((state) => state.underwriting.runs);
+export const useUnderwritingExtraction = () => useStore((state) => state.underwriting.extraction);
 
 export const useUnderwritingActions = () =>
   useStore(

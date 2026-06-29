@@ -54,6 +54,7 @@ Output: 3 short paragraphs.
 Paragraph 1 — deal snapshot in 2 sentences: property name, asset type, units, purchase price, location. If STRUCTURED DATA.total_unit_count differs from STRUCTURED DATA.storage_unit_count, describe the mix as "[total_unit_count] total units/spaces, including [storage_unit_count] storage units" instead of calling it a [storage_unit_count]-unit facility. If STRUCTURED DATA.strategy_type is set, mention it in one phrase (e.g., "value-add acquisition", "stable-income hold").
 Paragraph 2 — investment thesis in 1-2 sentences. If STRUCTURED DATA.thesis_text is set, paraphrase it (do not copy verbatim). Otherwise cite the single most favorable metric from STRUCTURED DATA.return_metrics or rent_position as the primary strength.
 Paragraph 3 — primary risk in 1 sentence (the most material item from STRUCTURED DATA.warnings, stress_tests, or rollover), followed by the recommendation matching STRUCTURED DATA.classification verbatim. If STRUCTURED DATA.verdict_override is set AND differs from STRUCTURED DATA.classification_calculator, append: "Note: analyst override of calculator's [calculator value] — rationale in Recommendation section."
+Do NOT describe above comp or above market rents as "pricing power". If STRUCTURED DATA.rent_position.current_vs_comp_avg is above 1.0, frame it as rent sustainability / downside risk unless source-supported tenant-level below-street upside is explicitly being discussed separately.
 Do not introduce facts that are not also developed in later sections.""",
 
     SECTION_INVESTMENT_THESIS: """SECTION: Investment Thesis
@@ -72,6 +73,8 @@ This section answers "why this deal" and frames the entire memo. Build it from t
    - "Portfolio Build" → emphasize fit with existing portfolio, scale benefits, operator leverage
    - "Opportunistic" → emphasize unique angle that doesn't fit other categories
 3. STRUCTURED DATA.sourcing_type / sourcing_detail. If present, work into one sentence ("Sourced off-market via repeat seller relationship.")
+
+Market/radius discipline: do not use nearby competitor counts as a thesis support unless the exact radius field is present in STRUCTURED DATA. nearby_storage_3mi and nearby_storage_5mi are separate fields; do not transpose a 3-mile count into a 5-mile claim or infer 5-mile competitors when nearby_storage_5mi is null.
 
 If STRUCTURED DATA.classification is "Below Screen", frame the thesis as "Under current assumptions, the deal does not clear the configured screen." Do not write "should not proceed", "reject", or similar final-investment language in the thesis section. Do not write "absent a clear value-add thesis" when value-add opportunities, below-market tenant upside, or conversion notes appear anywhere in STRUCTURED DATA or SOURCE EXCERPTS; instead say the upside is not enough to offset the modeled screen under current assumptions or requires diligence.
 
@@ -101,6 +104,7 @@ Restating transaction terms or returns here is a CRITICAL error.""",
     SECTION_MARKET_OVERVIEW: """SECTION: Market Overview
 Output: 2-3 short paragraphs.
 Paragraph 1 (structured demographics): population_3mi, avg_household_income_3mi, storage_sqft_per_capita_3mi, and competing facility counts (1mi / 3mi / 5mi). All come from STRUCTURED DATA verbatim. If a field is null, omit it; do not infer.
+Use exact radius fields: nearby_storage_1mi is 1-mile competitors, nearby_storage_3mi is 3-mile competitors, nearby_storage_5mi is 5-mile competitors. Do not transpose counts across radii; if nearby_storage_5mi is null, omit the 5-mile count.
 Paragraph 2 (narrative): submarket dynamics, supply pipeline, recent comparable transactions. THIS MUST come from SOURCE EXCERPTS with inline [doc:page] citations. If SOURCE EXCERPTS is empty, write ONE sentence: "No market commentary available in the offering memorandum."
 Paragraph 3 (optional): analyst notes — STRUCTURED DATA.market_notes verbatim or paraphrased, attributed as "Per analyst notes:". Skip if market_notes is null.""",
 
@@ -169,7 +173,7 @@ MITIGANTS — required discipline:
 For every risk, evaluate ALL FIVE mitigant sources below in order and use the first that applies. Only set `mitigant` to null when NONE of the five yield a defensible mitigant.
 
 1. METRIC CUSHION vs CRITERIA. If the risk is a return-threshold miss (IRR, CoC, DSCR), check the OTHER computed metrics in return_metrics against the same criteria. Example: an IRR miss can be partially mitigated by DSCR 1.43x vs the 1.25x floor (18bp cushion) or LTV 70% vs the 80% max (1000bp equity cushion).
-2. FIXED-RATE DEBT STRUCTURE. If the risk is rate/refinance/market-volatility-related, cite STRUCTURED DATA.financing.loan_term_years and amortization_years as the mitigant ("X-year fixed term locks debt service through hold").
+2. FIXED-RATE DEBT STRUCTURE. If the risk is specifically rate/refinance-related, cite STRUCTURED DATA.financing.loan_term_years and amortization_years as the mitigant ("X-year fixed term locks debt service through hold"). Do not use fixed-rate debt for vacancy, occupancy, rent-position, or mixed-use revenue risks.
 3. CAPEX RESERVE. If the risk is physical/operational/condition-related, and STRUCTURED DATA.capex_reserve_per_unit > 0, cite the reserve.
 4. SPONSOR. If the risk is operational/lease-up/execution-related, and sponsor_data has any of (years_experience, deals_in_asset_class, track_record_irr, net_worth, liquidity) populated, cite the most relevant strength. Prefer the structured numeric fields over free-text notes. Example: "Sponsor's 12 prior self-storage acquisitions reduce execution risk." If only the unstructured `experience` summary is present, paraphrase it concisely.
 5. SOURCE EXCERPT. If SOURCE EXCERPTS explicitly describes a mitigant for this risk, cite it with `citation`.
@@ -187,6 +191,7 @@ DIMENSION-MATCH RULE: a mitigant MUST address the same risk dimension as the ris
 - Lease-up / non-storage concentration risk → mitigant must address the diversification or stability of that revenue stream, NOT pure occupancy snapshot (occupancy today doesn't mitigate concentration tomorrow).
 - Mixed-use / non-storage risk → mitigant must specifically address parking/residential operations or revenue durability. Generic self-storage sponsor experience is not enough.
 - Stress-case return shortfall → mitigant must address equity return downside, NOT DSCR or lender coverage.
+- Vacancy/occupancy stress → fixed-rate debt and refinance risk do not mitigate revenue/occupancy downside unless the stress case is explicitly a rate/refinance stress.
 - Rent above market → mitigant must address sustainability (tenure data, defensible advantage), NOT generic sponsor experience.
 
 When NO defensible same-dimension mitigant exists, set `mitigant` to null. Better to flag for committee than to write a mismatched mitigant.""",

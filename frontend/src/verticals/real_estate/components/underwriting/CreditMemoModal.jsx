@@ -19,6 +19,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { Alert, AlertDescription, AlertTitle } from '@/components/ui/alert';
+import { Textarea } from '@/components/ui/textarea';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { generateMemo, getMemoReadiness } from '../../../../api/re-memos';
 import MemoPreflightPanel from './MemoPreflightPanel';
@@ -109,6 +111,8 @@ export default function CreditMemoModal({
   prioritizedWarnings,
   currentUser,
   prefill,
+  workflow,
+  requiresGateOverride = false,
   onSubmitted,
 }) {
   const [tab, setTab] = useState('cover');
@@ -126,6 +130,7 @@ export default function CreditMemoModal({
   const [thesis, setThesis] = useState(EMPTY_THESIS);
   const [marketNotes, setMarketNotes] = useState('');
   const [readiness, setReadiness] = useState(null);
+  const [gateOverrideRationale, setGateOverrideRationale] = useState('');
 
   const underwritingVerdict = persistedInputs?.verdict_status || null;
 
@@ -136,6 +141,7 @@ export default function CreditMemoModal({
 
   useEffect(() => {
     if (!open) return;
+    setGateOverrideRationale('');
     if (prefill) {
       setCover((prev) => ({ ...prev, ...(prefill.cover_data || {}) }));
       setSponsor({ ...EMPTY_SPONSOR, ...(prefill.sponsor_data || {}) });
@@ -181,11 +187,12 @@ export default function CreditMemoModal({
   const isOverrideActive = Boolean(thesis.verdict_override);
   const overrideMissingReason =
     isOverrideActive && !thesis.verdict_override_reason.trim();
+  const gateOverrideMissingReason = requiresGateOverride && gateOverrideRationale.trim().length < 3;
 
   const preparedByValid = (cover.prepared_by || '').trim().length >= MIN_COVER_TEXT_LEN;
   const firmValid = (cover.firm || '').trim().length >= MIN_COVER_TEXT_LEN;
   const coverValid = preparedByValid && firmValid;
-  const canSubmit = !submitting && !overrideMissingReason && coverValid;
+  const canSubmit = !submitting && !overrideMissingReason && !gateOverrideMissingReason && coverValid;
 
   const handleSubmit = async () => {
     if (!coverValid) {
@@ -196,6 +203,10 @@ export default function CreditMemoModal({
     if (overrideMissingReason) {
       setError('Override reason is required when overriding the calculator verdict.');
       setTab('thesis');
+      return;
+    }
+    if (gateOverrideMissingReason) {
+      setError('Gate override rationale is required to generate this memo.');
       return;
     }
     setSubmitting(true);
@@ -223,6 +234,12 @@ export default function CreditMemoModal({
         sponsor_data: sponsor,
         market_notes: marketNotes || null,
         thesis_data: thesisPayload,
+        gate_override: requiresGateOverride
+          ? {
+              rationale: gateOverrideRationale.trim(),
+              workflow_snapshot: workflow || {},
+            }
+          : null,
       });
       onSubmitted?.(resp);
       onClose?.();
@@ -294,6 +311,24 @@ export default function CreditMemoModal({
                 </div>
               </div>
             </div>
+          ) : null}
+
+          {requiresGateOverride ? (
+            <Alert className="mb-4 border-warning/30 bg-warning/10 text-foreground">
+              <AlertTriangle className="h-4 w-4 text-warning" />
+              <AlertTitle>Gate override required</AlertTitle>
+              <AlertDescription className="space-y-2 text-sm text-muted-foreground">
+                <p>
+                  Critical workflow gates are unresolved. Enter the rationale that should be stored with this memo version.
+                </p>
+                <Textarea
+                  value={gateOverrideRationale}
+                  onChange={(event) => setGateOverrideRationale(event.target.value)}
+                  className="min-h-20 resize-y text-sm"
+                  aria-label="Gate override rationale"
+                />
+              </AlertDescription>
+            </Alert>
           ) : null}
 
           <Tabs value={tab} onValueChange={setTab}>

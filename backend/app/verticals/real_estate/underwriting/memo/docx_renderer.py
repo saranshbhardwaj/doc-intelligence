@@ -521,7 +521,7 @@ def _render_source_support(doc, ctx: MemoContext) -> None:
         return
     _table_with_header(
         doc,
-        ["Group", "Input", "Value Used", "Source Basis", "Citation / Page", "Confidence", "Notes"],
+        ["Group", "Input", "Value / Evidence", "Source Basis", "Citation / Page", "Confidence", "Notes"],
         body,
     )
 
@@ -567,7 +567,7 @@ def render_memo_docx(ctx: MemoContext, sections: dict[str, Any]) -> bytes:
         ("Purchase Price", _fmt_money(ctx.purchase_price)),
         (price_unit_label, _fmt_money(ctx.price_per_unit)),
         ("Price / Rentable Sqft", _fmt_money(ctx.price_per_sqft)),
-        ("Going-in Cap Rate", _fmt_pct(ctx.cap_rate_at_cost)),
+        ("Model Going-in Cap Rate", _fmt_pct(ctx.cap_rate_at_cost)),
     ])
     _render_prose_or_placeholder(doc, sections.get(SECTION_TRANSACTION_OVERVIEW), ctx)
 

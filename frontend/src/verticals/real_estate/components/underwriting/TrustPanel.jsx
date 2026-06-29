@@ -1,4 +1,5 @@
-import { AlertCircle, AlertTriangle, Info } from 'lucide-react';
+import { useState } from 'react';
+import { AlertCircle, AlertTriangle, ChevronDown, Info } from 'lucide-react';
 import { UnderwritingStatusBadge } from './UnderwritingUI';
 import {
   formatCompactCurrency,
@@ -121,6 +122,7 @@ function NoiBridgeMini({ bridge }) {
 }
 
 function WarningPill({ warning }) {
+  const [expanded, setExpanded] = useState(false);
   const tone = warning.severity === 'critical'
     ? 'border-destructive/30 bg-destructive/5 text-foreground'
     : warning.severity === 'warning'
@@ -131,14 +133,21 @@ function WarningPill({ warning }) {
     : warning.severity === 'warning'
     ? <AlertTriangle className="h-3 w-3 shrink-0 text-warning" />
     : <Info className="h-3 w-3 shrink-0 text-muted-foreground" />;
-  const text = warning.message.length > 140
+  const isLong = warning.message.length > 140;
+  const text = !expanded && isLong
     ? `${warning.message.slice(0, 137)}…`
     : warning.message;
   return (
-    <div className={`flex items-start gap-1 rounded-lg border px-2.5 py-2 text-xs leading-5 ${tone}`}>
+    <button
+      type="button"
+      onClick={() => isLong && setExpanded((value) => !value)}
+      className={`flex w-full items-start gap-1 rounded-lg border px-2.5 py-2 text-left text-xs leading-5 transition hover:bg-muted/30 ${tone} ${isLong ? 'cursor-pointer' : 'cursor-default'}`}
+      aria-expanded={isLong ? expanded : undefined}
+    >
       {icon}
-      {text}
-    </div>
+      <span className="min-w-0 flex-1">{text}</span>
+      {isLong ? <ChevronDown className={`mt-0.5 h-3 w-3 shrink-0 text-muted-foreground transition-transform ${expanded ? 'rotate-180' : ''}`} /> : null}
+    </button>
   );
 }
 

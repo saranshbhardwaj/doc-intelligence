@@ -5,6 +5,7 @@ from typing import Any, List, Optional
 from pydantic import BaseModel, ValidationError
 from app.database import get_db
 from app.repositories.document_repository import DocumentRepository
+from app.repositories.re_memo_repository import ReMemoRepository
 from app.repositories.re_underwriting_repo import UnderwritingRunRepository
 from app.repositories.job_repository import JobRepository
 from app.auth import get_current_user
@@ -24,6 +25,8 @@ from app.verticals.real_estate.underwriting.result_artifact import (
     get_preserved_unit_mix,
     merge_preserved_result_artifact,
 )
+from app.verticals.real_estate.underwriting.workflow import evaluate_self_storage_workflow
+from app.verticals.real_estate.underwriting.workflow.schemas import UnderwritingWorkflowState
 from app.verticals.real_estate.underwriting.schemas.self_storage import (
     FormulaMetadata,
 )
@@ -187,7 +190,6 @@ def _calculate_and_store_result(
         inputs.criteria,
         stress_tests,
         _get_t12_period_months_from_artifact(existing_artifact),
-        inputs=inputs,
     )
     typed_metrics = {
         "irr": result.irr,
@@ -257,6 +259,27 @@ def get_underwriting_run(run_id: str, user: User = Depends(get_current_user), db
         raise HTTPException(status_code=404, detail="Run not found")
     source_documents = _source_documents_for_run(run.document_ids, user.org_id)
     return {"id": run.id, "name": run.name, "asset_type": run.asset_type, "address": run.address, "status": run.status, "document_ids": run.document_ids or [], "source_documents": source_documents, "inputs": run.inputs, "field_citations": run.field_citations, "citation_context": run.citation_context, "discrepancies": run.discrepancies, "result_artifact": run.result_artifact, "verdict_status": run.verdict_status, "verdict_failures": run.verdict_failures, "irr": run.irr, "cash_on_cash": run.cash_on_cash, "equity_multiple": run.equity_multiple, "dscr_year_one": run.dscr_year_one, "ltv": run.ltv, "cap_rate_year_one": run.cap_rate_year_one, "cap_rate_pro_forma": run.cap_rate_pro_forma, "noi_year_one": run.noi_year_one, "total_profit": run.total_profit, "monthly_cashflow": run.monthly_cashflow, "created_at": run.created_at, "updated_at": run.updated_at, "completed_at": run.completed_at}
+
+
+@router.get("/runs/{run_id}/workflow", response_model=UnderwritingWorkflowState)
+def get_underwriting_workflow(
+    run_id: str,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    repo = UnderwritingRunRepository(db)
+    run = repo.get(run_id, user.id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    memo_repo = ReMemoRepository(db)
+    memos = memo_repo.list_by_run(run_id, user.id)
+    latest_memo = memos[0] if memos else None
+    return evaluate_self_storage_workflow(
+        run,
+        has_active_memo=memo_repo.has_active(run_id),
+        latest_memo=latest_memo,
+    )
 
 
 @router.patch("/runs/{run_id}", response_model=dict)
@@ -368,7 +391,12 @@ def scenario_recalculate(run_id: str, payload: ScenarioOverrides, user: User = D
         result = calculate(inputs)
         stress = run_stress_tests(inputs)
         result.stress_tests = stress
-        verdict = evaluate(result, inputs.criteria, stress, _get_t12_period_months_from_artifact(run.result_artifact), inputs=inputs)
+        verdict = evaluate(
+            result,
+            inputs.criteria,
+            stress,
+            _get_t12_period_months_from_artifact(run.result_artifact),
+        )
 
         # Keep this stateless what-if response lean: the UI only needs scenario
         # metrics here. Persisted calculation paths build result_artifact.noi_bridge.

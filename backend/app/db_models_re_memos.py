@@ -1,7 +1,7 @@
 """SQLAlchemy model for generated underwriting credit memos."""
 from __future__ import annotations
 
-from sqlalchemy import Column, String, Integer, Text, DateTime, ForeignKey, UniqueConstraint
+from sqlalchemy import Boolean, Column, String, Integer, Text, DateTime, ForeignKey, UniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
@@ -43,6 +43,9 @@ class UnderwritingMemo(Base):
     # by the Celery task post-narration; never written by the analyst.
     # Named ``metadata_json`` because SQLAlchemy reserves ``metadata`` on the base.
     metadata_json = Column(JSONB, nullable=False, default=dict)
+    generated_with_override = Column(Boolean, nullable=False, default=False)
+    gate_override_rationale = Column(Text, nullable=True)
+    workflow_snapshot = Column(JSONB, nullable=False, default=dict)
     section_warnings = Column(JSONB, nullable=False, default=list)
     error_message = Column(Text, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)

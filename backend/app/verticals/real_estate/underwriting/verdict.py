@@ -186,13 +186,18 @@ def _build_mixed_revenue_warning(result: SelfStorageResult) -> VerdictWarning | 
     if not result.unit_mix:
         return None
 
-    def _is_non_storage_row(row) -> bool:
+    def _row_value(row, field_name: str, default=None):
         if isinstance(row, dict):
-            section = row.get("section") or ""
-            unit_type = row.get("unit_type") or ""
-        else:
-            section = row.section or ""
-            unit_type = row.unit_type or ""
+            return row.get(field_name, default)
+        return getattr(row, field_name, default)
+
+    def _is_non_storage_row(row) -> bool:
+        unit_category = (_row_value(row, "unit_category") or "").lower()
+        if unit_category and unit_category != "storage":
+            return True
+
+        section = _row_value(row, "section") or ""
+        unit_type = _row_value(row, "unit_type") or ""
         label = " ".join(
             part.strip().lower()
             for part in [section, unit_type]

@@ -15,7 +15,9 @@ export function formatMemoDate(value) {
   });
 }
 
-export function getMemoWarningLabel(warnings = []) {
+export function getMemoWarningLabel(memo) {
+  if (memo?.generated_with_override) return 'Generated with override';
+  const warnings = Array.isArray(memo) ? memo : memo?.section_warnings;
   const count = Array.isArray(warnings) ? warnings.length : 0;
   if (!count) return null;
   return `${count} warning${count === 1 ? '' : 's'}`;

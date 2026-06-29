@@ -41,6 +41,9 @@ class ReMemoRepository:
         sponsor_data: dict,
         market_notes: Optional[str],
         thesis_data: Optional[dict] = None,
+        generated_with_override: bool = False,
+        gate_override_rationale: Optional[str] = None,
+        workflow_snapshot: Optional[dict] = None,
     ) -> UnderwritingMemo:
         try:
             memo = UnderwritingMemo(
@@ -52,6 +55,9 @@ class ReMemoRepository:
                 sponsor_data=sponsor_data,
                 market_notes=market_notes,
                 thesis_data=thesis_data or {},
+                generated_with_override=generated_with_override,
+                gate_override_rationale=gate_override_rationale,
+                workflow_snapshot=workflow_snapshot or {},
                 section_warnings=[],
             )
             self.db.add(memo)

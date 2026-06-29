@@ -253,6 +253,34 @@ class TestBuildMemoContext:
         assert ctx.sourcing_type == "Off-market"
         assert ctx.sourcing_detail.startswith("Repeat seller")
 
+    def test_hold_period_memo_override_updates_source_support(self):
+        run = _run(
+            inputs_overrides={"exit": {"hold_period_years": 5}},
+            document_ids=[{"document_id": "doc-om-1", "doc_type": "om"}],
+            citation_context={
+                "hold-period-src": {"document_id": "doc-om-1", "page": 6},
+            },
+            field_citations={
+                "hold_period_years": {
+                    "doc_type": "om",
+                    "citations": ["hold-period-src"],
+                    "confidence": 0.95,
+                    "source_text": "Hold Period 5 Years",
+                }
+            },
+        )
+        memo = _memo(thesis={"hold_period_years": 10})
+
+        ctx = build_memo_context(run, memo)
+        rows = {row["field_key"]: row for row in ctx.source_support}
+
+        assert ctx.hold_period_years_override == 10
+        assert rows["hold_period_years"]["value"] == "10 years"
+        assert rows["hold_period_years"]["source_basis"] == "Manual override"
+        assert rows["hold_period_years"]["citations"] == "Offering Memorandum: p6"
+        assert "original value 5" in rows["hold_period_years"]["notes"]
+        assert "Original source text: Hold Period 5 Years" in rows["hold_period_years"]["notes"]
+
     def test_verdict_override_wins_over_calculator(self):
         """Analyst override of 'Below Screen' → 'Pursue' must change effective
         classification while preserving calculator's verdict for audit trail."""
@@ -410,6 +438,79 @@ class TestBuildMemoContext:
         assert rows["max_ltv"]["source_basis"] == "Model default"
         assert "Missing preferred source" in rows["max_ltv"]["notes"]
 
+    def test_source_support_includes_default_formula_notes(self):
+        run = _run(
+            field_citations={
+                "exit_cap_rate": {
+                    "doc_type": "default",
+                    "is_default": True,
+                    "confidence": 0,
+                    "selection_note": "Used purchase cap plus spread because terminal exit cap was unavailable.",
+                    "formula": "8.11% purchase cap rate + 0.50% spread",
+                    "preferred_sources_missing": ["OM terminal exit cap"],
+                },
+            },
+        )
+        run.inputs["exit"]["exit_cap_rate"] = 0.0861
+
+        ctx = build_memo_context(run, _memo())
+        rows = {row["field_key"]: row for row in ctx.source_support}
+
+        assert rows["exit_cap_rate"]["source_basis"] == "Model default"
+        assert "8.11% purchase cap rate + 0.50% spread" in rows["exit_cap_rate"]["notes"]
+
+    def test_source_support_keeps_om_purchase_cap_separate_from_default_exit_cap(self):
+        run = _run(
+            inputs_overrides={
+                "acquisition": {"market_cap_rate_purchase": 0.0811},
+                "exit": {"exit_cap_rate": 0.0861},
+            },
+            field_citations={
+                "market_cap_rate_purchase": {
+                    "doc_type": "om",
+                    "confidence": 0.95,
+                    "source_text": "Year One Cap Rate: 8.11%",
+                },
+                "exit_cap_rate": {
+                    "doc_type": "default",
+                    "is_default": True,
+                    "confidence": 0,
+                    "selection_note": "Used purchase cap plus spread because terminal exit cap was unavailable.",
+                    "formula": "8.11% purchase cap rate + 0.50% spread",
+                },
+            },
+        )
+
+        ctx = build_memo_context(run, _memo())
+        rows = {row["field_key"]: row for row in ctx.source_support}
+
+        assert rows["market_cap_rate_purchase"]["label"] == "OM Purchase Cap Rate"
+        assert rows["market_cap_rate_purchase"]["value"] == "8.11%"
+        assert rows["market_cap_rate_purchase"]["source_basis"] == "OM stated"
+        assert rows["exit_cap_rate"]["label"] == "Exit Cap Rate"
+        assert rows["exit_cap_rate"]["value"] == "8.61%"
+        assert rows["exit_cap_rate"]["source_basis"] == "Model default"
+
+    def test_cap_rate_at_cost_does_not_fall_back_to_om_purchase_cap(self):
+        run = _run(
+            inputs_overrides={"acquisition": {"market_cap_rate_purchase": 0.0811}},
+            artifact_overrides={"cap_rate_year_one": None},
+            field_citations={
+                "market_cap_rate_purchase": {
+                    "doc_type": "om",
+                    "confidence": 0.95,
+                    "source_text": "Year One Cap Rate: 8.11%",
+                },
+            },
+        )
+        run.cap_rate_year_one = None
+
+        ctx = build_memo_context(run, _memo())
+        rows = {row["field_key"]: row for row in ctx.source_support}
+
+        assert ctx.cap_rate_at_cost is None
+        assert rows["market_cap_rate_purchase"]["value"] == "8.11%"
+
     def test_source_support_clarifies_underwriting_unit_count_when_unit_mix_differs(self):
         run = _run(
             inputs_overrides={
@@ -472,6 +573,111 @@ class TestBuildMemoContext:
         assert ctx.om_financing_evidence["model_loan_amount"] == 1_750_000.0
         assert ctx.om_financing_evidence["model_ltv_pct"] == pytest.approx(0.70)
         assert ctx.om_financing_evidence["ltv_delta_pct"] == pytest.approx(0.05)
+
+    def test_source_support_uses_om_financing_evidence_values(self):
+        run = _run(
+            artifact_overrides={
+                "om_data": {
+                    "proposed_loan_amount": 1_625_000.0,
+                    "proposed_down_payment_amount": 875_000.0,
+                    "proposed_down_payment_pct": 0.35,
+                },
+                "capital_structure": {
+                    "purchase_price": 2_500_000.0,
+                    "loan_amount": 1_750_000.0,
+                    "down_payment": 750_000.0,
+                },
+            },
+            field_citations={
+                "proposed_loan_amount": {"doc_type": "om", "confidence": 0.95, "source_text": "Loan Amount $1,625,000"},
+                "proposed_down_payment_amount": {"doc_type": "om", "confidence": 0.95, "source_text": "Down Payment 35% / $875,000"},
+                "proposed_down_payment_pct": {"doc_type": "om", "confidence": 0.95, "source_text": "Down Payment 35% / $875,000"},
+            },
+        )
+        run.inputs["acquisition"]["purchase_price"] = 2_500_000.0
+
+        ctx = build_memo_context(run, _memo())
+        rows = {row["field_key"]: row for row in ctx.source_support}
+
+        assert rows["proposed_loan_amount"]["value"] == "$1,625,000"
+        assert rows["proposed_down_payment_amount"]["value"] == "$875,000"
+        assert rows["proposed_down_payment_pct"]["value"] == "35.00%"
+        assert rows["proposed_loan_amount"]["source_basis"] == "Source evidence only"
+
+    def test_om_financing_evidence_recovers_legacy_source_only_values_from_citation_text(self):
+        run = _run(
+            artifact_overrides={
+                "om_data": {},
+                "capital_structure": {
+                    "purchase_price": 2_500_000.0,
+                    "loan_amount": 1_750_000.0,
+                    "down_payment": 750_000.0,
+                },
+            },
+            field_citations={
+                "proposed_loan_amount": {"doc_type": "om", "confidence": 0.95, "source_text": "Loan Amount $1,625,000"},
+                "proposed_down_payment_amount": {"doc_type": "om", "confidence": 0.95, "source_text": "Down Payment 35% / $875,000"},
+                "proposed_down_payment_pct": {"doc_type": "om", "confidence": 0.95, "source_text": "Down Payment 35% / $875,000"},
+            },
+        )
+        run.inputs["acquisition"]["purchase_price"] = 2_500_000.0
+        run.inputs["financing"]["ltv_pct"] = 0.70
+
+        ctx = build_memo_context(run, _memo())
+        rows = {row["field_key"]: row for row in ctx.source_support}
+
+        assert ctx.om_financing_evidence["proposed_loan_amount"] == 1_625_000.0
+        assert ctx.om_financing_evidence["proposed_down_payment_amount"] == 875_000.0
+        assert ctx.om_financing_evidence["proposed_down_payment_pct"] == pytest.approx(0.35)
+        assert ctx.om_financing_evidence["proposed_ltv_pct"] == pytest.approx(0.65)
+        assert rows["proposed_loan_amount"]["value"] == "$1,625,000"
+        assert rows["proposed_down_payment_amount"]["value"] == "$875,000"
+        assert rows["proposed_down_payment_pct"]["value"] == "35.00%"
+
+    def test_source_support_includes_below_market_and_value_add_evidence(self):
+        run = _run(
+            artifact_overrides={
+                "om_data": {
+                    "below_market_tenant_pct": 0.36,
+                    "below_market_monthly_variance": 868,
+                    "below_market_annual_upside": 10_410,
+                    "value_add_notes": "Parking conversion could add $10,200/month or $122,400/year.",
+                },
+            },
+            field_citations={
+                "below_market_tenant_pct": {"doc_type": "om", "confidence": 0.95, "source_text": "36 percent of tenants are paying rental rates below the current street rate"},
+                "below_market_monthly_variance": {"doc_type": "om", "confidence": 0.95, "source_text": "monthly variance of $868"},
+                "below_market_annual_upside": {"doc_type": "om", "confidence": 0.95, "source_text": "$10,410 annually"},
+                "value_add_notes": {"doc_type": "om", "confidence": 0.95, "source_text": "converting the 56 uncovered parking spaces into non-climate-controlled storage units"},
+            },
+        )
+
+        ctx = build_memo_context(run, _memo())
+        rows = {row["field_key"]: row for row in ctx.source_support}
+
+        assert rows["below_market_tenant_pct"]["value"] == "36.00%"
+        assert rows["below_market_monthly_variance"]["value"] == "$868"
+        assert rows["below_market_annual_upside"]["value"] == "$10,410"
+        assert rows["value_add_notes"]["value"] == "Parking conversion could add $10,200/month or $122,400/year."
+        assert rows["value_add_notes"]["source_basis"] == "OM stated"
+
+    def test_uncited_value_add_source_support_is_labeled_as_om_source_evidence(self):
+        run = _run(artifact_overrides={
+            "om_data": {
+                "below_market_tenant_pct": 0.36,
+                "below_market_monthly_variance": 868,
+                "below_market_annual_upside": 10_410,
+                "value_add_notes": "Convert 56 uncovered parking spaces to storage units.",
+            },
+        })
+
+        ctx = build_memo_context(run, _memo())
+        rows = {row["field_key"]: row for row in ctx.source_support}
+
+        assert rows["below_market_tenant_pct"]["source_basis"] == "OM source evidence"
+        assert rows["below_market_monthly_variance"]["source_basis"] == "OM source evidence"
+        assert rows["below_market_annual_upside"]["source_basis"] == "OM source evidence"
+        assert rows["value_add_notes"]["source_basis"] == "OM source evidence"
 
     def test_carries_rent_position_analysis(self):
         ctx = build_memo_context(_run(), _memo())

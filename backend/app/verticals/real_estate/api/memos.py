@@ -4,7 +4,7 @@ from __future__ import annotations
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy.orm import Session
 
 from app.auth import get_current_user
@@ -18,6 +18,7 @@ from app.utils.id_generator import generate_id
 from app.utils.logging import logger
 from app.verticals.real_estate.underwriting.memo.filenames import build_memo_filename
 from app.verticals.real_estate.underwriting.memo.tasks import generate_credit_memo_task
+from app.verticals.real_estate.underwriting.workflow import evaluate_self_storage_workflow
 
 router = APIRouter(prefix="/underwriting", tags=["re_underwriting_memos"])
 
@@ -27,10 +28,24 @@ router = APIRouter(prefix="/underwriting", tags=["re_underwriting_memos"])
 # ---------------------------------------------------------------------------
 
 
+class GateOverrideRequest(BaseModel):
+    rationale: str = Field(min_length=3, max_length=2000)
+    workflow_snapshot: dict = Field(default_factory=dict)
+
+    @field_validator("rationale")
+    @classmethod
+    def rationale_must_not_be_blank(cls, value: str) -> str:
+        stripped = value.strip()
+        if len(stripped) < 3:
+            raise ValueError("Gate override rationale must be at least 3 non-whitespace characters")
+        return stripped
+
+
 class CreateMemoRequest(BaseModel):
     cover_data: dict = Field(default_factory=dict)
     sponsor_data: dict = Field(default_factory=dict)
     market_notes: Optional[str] = None
+    gate_override: Optional[GateOverrideRequest] = None
     # Analyst inputs from "Thesis & Strategy" modal tab. Free-form JSON so
     # adding fields later doesn't require a migration. Recognized keys:
     #   thesis_text, strategy_type, hold_period_years,
@@ -58,6 +73,8 @@ class MemoSummary(BaseModel):
     sponsor_data: dict = Field(default_factory=dict)
     market_notes: Optional[str] = None
     thesis_data: dict = Field(default_factory=dict)
+    generated_with_override: bool = False
+    gate_override_rationale: Optional[str] = None
 
 
 class ListMemosResponse(BaseModel):
@@ -138,6 +155,33 @@ def create_memo(
             detail="A memo is already generating for this underwriting run",
         )
 
+    workflow_state = evaluate_self_storage_workflow(run, has_active_memo=False, latest_memo=None)
+    memo_generation = workflow_state.memo_generation
+    if workflow_state.workflow_key == "unsupported":
+        raise HTTPException(
+            status_code=400,
+            detail="IC memo workflow is only supported for self-storage underwriting runs",
+        )
+
+    gate_override = body.gate_override
+    if memo_generation.requires_override and gate_override is None:
+        raise HTTPException(
+            status_code=400,
+            detail="Gate override rationale is required to generate a memo for this blocked underwriting run",
+        )
+    if not memo_generation.allowed and not memo_generation.requires_override:
+        raise HTTPException(
+            status_code=400,
+            detail=memo_generation.disabled_reason or "Memo generation is not allowed for this underwriting run",
+        )
+
+    override_rationale = gate_override.rationale.strip() if gate_override else None
+    workflow_snapshot = (
+        gate_override.workflow_snapshot or workflow_state.model_dump()
+        if gate_override
+        else {}
+    )
+
     memo = repo.create(
         run_id=run_id,
         user_id=user.id,
@@ -145,6 +189,9 @@ def create_memo(
         sponsor_data=body.sponsor_data,
         market_notes=body.market_notes,
         thesis_data=body.thesis_data,
+        generated_with_override=bool(gate_override),
+        gate_override_rationale=override_rationale,
+        workflow_snapshot=workflow_snapshot,
     )
 
     # Pre-create the JobState row with a known task_id so that JobProgressTracker
@@ -264,6 +311,8 @@ def list_memos(
                 sponsor_data=dict(m.sponsor_data or {}),
                 market_notes=m.market_notes,
                 thesis_data=dict(m.thesis_data or {}),
+                generated_with_override=bool(getattr(m, "generated_with_override", False)),
+                gate_override_rationale=getattr(m, "gate_override_rationale", None),
             )
             for m in memos
         ]

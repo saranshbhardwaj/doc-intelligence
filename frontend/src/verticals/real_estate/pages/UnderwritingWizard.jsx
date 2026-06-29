@@ -28,7 +28,7 @@ import {
 } from '@/components/ui/resizable';
 import AppLayout from '../../../components/layout/AppLayout';
 import { useAppAuth } from '../../../hooks/useAppAuth';
-import { useUnderwriting, useUnderwritingActions } from '../../../store';
+import { useUnderwritingActions, useUnderwritingCurrentRun, useUnderwritingExtraction } from '../../../store';
 import {
   createUnderwritingRun,
   deleteUnderwritingRun,
@@ -132,7 +132,8 @@ export default function UnderwritingWizard() {
   const [searchParams] = useSearchParams();
   const runIdFromUrl = searchParams.get('run_id');
   const { getToken } = useAppAuth();
-  const { currentRun, extraction } = useUnderwriting();
+  const currentRun = useUnderwritingCurrentRun();
+  const extraction = useUnderwritingExtraction();
   const {
     completeExtraction,
     loadRun,
@@ -345,6 +346,7 @@ export default function UnderwritingWizard() {
     hydratedInputsKey.current = runHydrationKey;
   }, [
     runIdFromUrl,
+    currentRun,
     currentRun?.id,
     currentRun?.run_id,
     currentRun?.inputs,

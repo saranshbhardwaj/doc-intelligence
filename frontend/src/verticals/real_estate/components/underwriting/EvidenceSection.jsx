@@ -61,10 +61,14 @@ export default function EvidenceSection({ show, onToggle, evidenceItems, onOpenS
                         ? `Extraction confidence ${Math.round(confidence * 100)}%`
                         : 'Cited input';
                       const isDerived = item.citation?.is_derived;
-                      const docTypeLabel = isDerived
+                      const isDefault = item.citation?.is_default;
+                      const docTypeLabel = isDefault
+                        ? 'Default assumption'
+                        : isDerived
                         ? 'Derived from unit mix'
                         : ({ om: 'Offering Memo', rent_roll: 'Rent Roll', t12: 'T-12' }[item.citation?.doc_type] || item.citation?.doc_type || 'Document');
-                      const subtitleText = item.note ?? (isDerived ? 'Computed from extracted fields' : confidenceLabel);
+                      const subtitleText = item.note ?? (isDefault ? 'Defaulted assumption' : isDerived ? 'Computed from extracted fields' : confidenceLabel);
+                      const badgeTone = isDefault || isDerived ? 'warning' : 'active';
 
                       return (
                         <div key={item.key} className="underwriting-quote-card">
@@ -73,11 +77,15 @@ export default function EvidenceSection({ show, onToggle, evidenceItems, onOpenS
                               <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">{item.label}</p>
                               <p className="mt-2 font-display text-2xl font-semibold tracking-tight text-foreground">{item.value}</p>
                             </div>
-                            <UnderwritingStatusBadge tone={isDerived ? 'warning' : 'active'}>{docTypeLabel}</UnderwritingStatusBadge>
+                            <UnderwritingStatusBadge tone={badgeTone}>{docTypeLabel}</UnderwritingStatusBadge>
                           </div>
 
                           <p className="mt-3 text-xs font-medium uppercase tracking-[0.16em] text-uw-citation">{subtitleText}</p>
-                          {isDerived && item.citation?.formula
+                          {isDefault ? (
+                            <p className="mt-2 text-sm leading-6 text-muted-foreground">
+                              {item.citation.selection_note || item.citation.formula || 'No source value was available; the model used its default assumption.'}
+                            </p>
+                          ) : isDerived && item.citation?.formula
                             ? <p className="mt-2 font-mono text-sm leading-6 text-muted-foreground">{item.citation.formula}</p>
                             : item.citation?.source_text
                               ? <p className="mt-2 text-sm leading-6 text-muted-foreground">{'"'}{item.citation.source_text}{'"'}</p>

@@ -7,6 +7,7 @@ recomputes it on demand and so do we, with the same inputs).
 from __future__ import annotations
 
 import logging
+import re
 from typing import Optional
 from pathlib import PurePath
 
@@ -26,6 +27,7 @@ _VERDICT_STATUS_TO_CLASSIFICATION = {
 
 _SOURCE_SUPPORT_FIELDS = (
     ("Transaction", "purchase_price", "Purchase Price", ("acquisition", "purchase_price"), "money"),
+    ("Transaction", "market_cap_rate_purchase", "OM Purchase Cap Rate", ("acquisition", "market_cap_rate_purchase"), "pct"),
     ("Property", "num_units", "Underwriting Unit Count", ("project", "num_units"), "int"),
     ("Property", "rentable_sqft", "Rentable Sq Ft", ("project", "rentable_sqft"), "sqft"),
     ("Property", "year_built", "Year Built", ("project", "year_built"), "int"),
@@ -34,6 +36,10 @@ _SOURCE_SUPPORT_FIELDS = (
     ("Income", "vacancy_credit_loss_pct", "Vacancy / Credit Loss", ("operational", "vacancy_credit_loss_pct"), "pct"),
     ("Income", "noi_current_stated", "Current NOI", ("operational", "noi_current_stated"), "money"),
     ("Income", "noi_year_one_stated", "Year-1 NOI", ("operational", "noi_year_one_stated"), "money"),
+    ("Value-Add", "below_market_tenant_pct", "Below-Market Tenants", ("om_data", "below_market_tenant_pct"), "pct"),
+    ("Value-Add", "below_market_monthly_variance", "Below-Market Monthly Variance", ("om_data", "below_market_monthly_variance"), "money"),
+    ("Value-Add", "below_market_annual_upside", "Below-Market Annual Upside", ("om_data", "below_market_annual_upside"), "money"),
+    ("Value-Add", "value_add_notes", "Value-Add Notes", ("om_data", "value_add_notes"), "text"),
     ("Expenses", "property_tax_annual", "Property Tax", ("operational", "property_tax_annual"), "money"),
     ("Expenses", "insurance_annual", "Insurance", ("operational", "insurance_annual"), "money"),
     ("Expenses", "mgmt_fee_pct", "Management Fee", ("operational", "mgmt_fee_pct"), "pct"),
@@ -60,6 +66,12 @@ _SOURCE_SUPPORT_FIELDS = (
     ("Criteria", "stress_dscr_floor", "Min DSCR - Stress", ("criteria", "stress_dscr_floor"), "multiple"),
 )
 
+_SOURCE_ONLY_FIELD_KEYS = {
+    "proposed_loan_amount",
+    "proposed_down_payment_amount",
+    "proposed_down_payment_pct",
+}
+
 
 def _get(d, key, default=None):
     if not isinstance(d, dict):
@@ -73,11 +85,61 @@ def _safe_div(num: Optional[float], denom: Optional[float]) -> Optional[float]:
     return num / denom
 
 
-def _om_financing_evidence(artifact: dict, purchase_price: float | None, model_capital_structure: dict) -> dict:
+def _money_from_source_text(text: str | None) -> float | None:
+    if not text:
+        return None
+    match = re.search(r"\$\s*([0-9][0-9,]*(?:\.\d+)?)", str(text))
+    if not match:
+        return None
+    try:
+        return float(match.group(1).replace(",", ""))
+    except ValueError:
+        return None
+
+
+def _pct_from_source_text(text: str | None) -> float | None:
+    if not text:
+        return None
+    match = re.search(r"([0-9]+(?:\.\d+)?)\s*%", str(text))
+    if not match:
+        return None
+    try:
+        return float(match.group(1)) / 100
+    except ValueError:
+        return None
+
+
+def _legacy_source_only_value(field_key: str, field_citations: dict | None) -> float | None:
+    if field_key not in _SOURCE_ONLY_FIELD_KEYS or not isinstance(field_citations, dict):
+        return None
+    meta = field_citations.get(field_key)
+    if not isinstance(meta, dict):
+        return None
+    source_text = meta.get("source_text")
+    if field_key.endswith("_pct"):
+        return _pct_from_source_text(source_text)
+    return _money_from_source_text(source_text)
+
+
+def _om_financing_evidence(
+    artifact: dict,
+    purchase_price: float | None,
+    model_capital_structure: dict,
+    field_citations: dict | None = None,
+) -> dict:
     om_data = _get(artifact, "om_data", {}) or {}
-    proposed_loan = _get(om_data, "proposed_loan_amount")
-    proposed_down_payment = _get(om_data, "proposed_down_payment_amount")
-    proposed_down_pct = _get(om_data, "proposed_down_payment_pct")
+    proposed_loan = _first(
+        _get(om_data, "proposed_loan_amount"),
+        _legacy_source_only_value("proposed_loan_amount", field_citations),
+    )
+    proposed_down_payment = _first(
+        _get(om_data, "proposed_down_payment_amount"),
+        _legacy_source_only_value("proposed_down_payment_amount", field_citations),
+    )
+    proposed_down_pct = _first(
+        _get(om_data, "proposed_down_payment_pct"),
+        _legacy_source_only_value("proposed_down_payment_pct", field_citations),
+    )
     proposed_ltv = _safe_div(proposed_loan, purchase_price)
     if proposed_ltv is None and proposed_down_pct is not None:
         proposed_ltv = 1.0 - proposed_down_pct
@@ -257,6 +319,14 @@ def _format_citation_tokens(tokens, citation_context, doc_labels: dict[str, str]
     return ", ".join(dict.fromkeys(labels)) if labels else "-"
 
 
+def _source_support_basis(group: str, field_key: str, value, meta: dict) -> str:
+    if field_key in _SOURCE_ONLY_FIELD_KEYS:
+        return "Source evidence only"
+    if group == "Value-Add" and value is not None and not meta:
+        return "OM source evidence"
+    return _source_basis_label(meta)
+
+
 def _support_notes(meta: dict | None) -> str:
     if not isinstance(meta, dict):
         return ""
@@ -274,14 +344,20 @@ def _support_notes(meta: dict | None) -> str:
                 notes.append(f"Original source text: {text}")
     elif meta.get("is_default") or meta.get("provenance_kind") == "default":
         notes.append(_short_text(meta.get("selection_note")) or "Model default.")
+        formula = _short_text(meta.get("formula"))
+        if formula:
+            notes.append(f"Formula: {formula}.")
         missing = meta.get("preferred_sources_missing")
         if isinstance(missing, list) and missing:
             notes.append("Missing preferred source: " + ", ".join(str(v) for v in missing[:3]))
     else:
         note = _short_text(meta.get("selection_note"))
+        formula = _short_text(meta.get("formula"))
         source_text = _short_text(meta.get("source_text"))
         if note:
             notes.append(note)
+        if formula:
+            notes.append(f"Formula: {formula}.")
         if source_text:
             notes.append(f"Source text: {source_text}")
         if meta.get("is_uncited_extraction"):
@@ -309,12 +385,45 @@ def _build_source_support(inputs: dict, field_citations: dict, citation_context,
             "field_key": field_key,
             "label": label,
             "value": _format_support_value(value, value_kind),
-            "source_basis": _source_basis_label(citation_meta),
+            "source_basis": _source_support_basis(group, field_key, value, citation_meta),
             "citations": _format_citation_tokens(citation_tokens, citation_context, doc_labels),
             "confidence": _confidence_label(citation_meta),
             "notes": _support_notes(citation_meta),
         })
     return rows
+
+
+def _apply_memo_hold_period_override(
+    inputs: dict,
+    field_citations: dict,
+    thesis_data: dict,
+) -> tuple[dict, dict]:
+    hold_override = thesis_data.get("hold_period_years")
+    if hold_override is None:
+        return inputs, field_citations
+    try:
+        hold_override = int(hold_override)
+    except (TypeError, ValueError):
+        return inputs, field_citations
+
+    effective_inputs = dict(inputs)
+    exit_inputs = dict(_get(inputs, "exit", {}) or {})
+    original_value = exit_inputs.get("hold_period_years")
+    exit_inputs["hold_period_years"] = hold_override
+    effective_inputs["exit"] = exit_inputs
+
+    effective_citations = dict(field_citations or {})
+    original_meta = effective_citations.get("hold_period_years")
+    original_citation = dict(original_meta) if isinstance(original_meta, dict) else {}
+    override_meta = {
+        "manual_override": True,
+        "original_value": original_value,
+    }
+    if original_citation:
+        override_meta["original_citation"] = original_citation
+        override_meta["citations"] = original_citation.get("citations")
+    effective_citations["hold_period_years"] = override_meta
+    return effective_inputs, effective_citations
 
 
 def _clarify_unit_count_source_support(
@@ -515,12 +624,11 @@ def build_memo_context(run, memo) -> MemoContext:
     price_per_unit = _safe_div(purchase_price, num_units)
     price_per_sqft = _safe_div(purchase_price, rentable_sqft)
 
-    # Cap rate at cost — prefer the modeled year-one cap, fall back to the
-    # broker-stated market cap rate from the acquisition inputs.
+    # Cap rate at cost is a modeled metric. The OM purchase cap is preserved
+    # separately in source support so it is not mislabeled as a model result.
     cap_rate_at_cost = _first(
         getattr(run, "cap_rate_year_one", None),
         _get(artifact, "cap_rate_year_one"),
-        _get(acquisition, "market_cap_rate_purchase"),
     )
 
     # ── NOI buildup (Year 1) ───────────────────────────────────────────────
@@ -550,7 +658,8 @@ def build_memo_context(run, memo) -> MemoContext:
     # ── Max loan (computed inline — not persisted) ─────────────────────────
     max_loan = _compute_max_loan(run)
     capital_structure = _get(artifact, "capital_structure", {}) or {}
-    om_financing_evidence = _om_financing_evidence(artifact, purchase_price, capital_structure)
+    field_citations = getattr(run, "field_citations", None) or {}
+    om_financing_evidence = _om_financing_evidence(artifact, purchase_price, capital_structure, field_citations)
 
     # ── Verdict / classification ───────────────────────────────────────────
     verdict_status = getattr(run, "verdict_status", None)
@@ -581,9 +690,18 @@ def build_memo_context(run, memo) -> MemoContext:
     citation_context = getattr(run, "citation_context", None)
     document_ids = _extract_om_document_ids(getattr(run, "document_ids", None))
     citation_doc_labels = _source_document_labels(getattr(run, "document_ids", None), citation_context)
+    effective_source_inputs, effective_field_citations = _apply_memo_hold_period_override(
+        inputs,
+        field_citations,
+        thesis_data,
+    )
     source_support = _build_source_support(
-        {**inputs, "om_financing_evidence": om_financing_evidence},
-        getattr(run, "field_citations", None) or {},
+        {
+            **effective_source_inputs,
+            "om_data": _get(artifact, "om_data", {}) or {},
+            "om_financing_evidence": om_financing_evidence,
+        },
+        effective_field_citations,
         citation_context,
         citation_doc_labels,
     )
