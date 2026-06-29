@@ -220,11 +220,50 @@ class TestRenderMemoDocx:
         cells = _all_table_text(doc)
 
         assert "Key Input Source Support" in para_text
+        assert "Value / Evidence" in cells
+        assert "Value Used" not in cells
         assert "Underwriting Unit Count" in cells
         assert "Manual override" in cells
         assert "original value 205" in cells
         assert "Exit Cap Rate" in cells
         assert "Model default" in cells
+
+    def test_transaction_and_appendix_label_model_purchase_and_exit_cap_distinctly(self, ctx):
+        ctx.cap_rate_at_cost = 0.075
+        ctx.source_support.extend([
+            {
+                "group": "Transaction",
+                "field_key": "market_cap_rate_purchase",
+                "label": "OM Purchase Cap Rate",
+                "value": "8.11%",
+                "source_basis": "OM stated",
+                "citations": "Tulsa Storage OM.pdf: p6",
+                "confidence": "95%",
+                "notes": "Source text: Year One Cap Rate: 8.11%",
+            },
+            {
+                "group": "Debt / Exit",
+                "field_key": "exit_cap_rate",
+                "label": "Exit Cap Rate",
+                "value": "8.61%",
+                "source_basis": "Model default",
+                "citations": "-",
+                "confidence": "0%",
+                "notes": "Formula: 8.11% purchase cap rate + 0.50% spread.",
+            },
+        ])
+
+        out = render_memo_docx(ctx, _sections())
+        doc = Document(io.BytesIO(out))
+        cells = _all_table_text(doc)
+
+        assert "Model Going-in Cap Rate" in cells
+        assert "7.50%" in cells
+        assert "OM Purchase Cap Rate" in cells
+        assert "8.11%" in cells
+        assert "Exit Cap Rate" in cells
+        assert "8.61%" in cells
+        assert "8.11% purchase cap rate + 0.50% spread" in cells
 
     def test_no_unresolved_placeholders(self, ctx):
         out = render_memo_docx(ctx, _sections())

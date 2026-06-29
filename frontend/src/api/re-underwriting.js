@@ -26,6 +26,12 @@ export async function getUnderwritingRun(getToken, runId) {
   return response.data;
 }
 
+export async function getUnderwritingWorkflow(getToken, runId) {
+  const api = createAuthenticatedApi(getToken);
+  const response = await api.get(`/api/v1/re/underwriting/runs/${runId}/workflow`);
+  return response.data;
+}
+
 export async function updateUnderwritingInputs(getToken, runId, inputs, fieldCitations) {
   const api = createAuthenticatedApi(getToken);
   const payload = { inputs };

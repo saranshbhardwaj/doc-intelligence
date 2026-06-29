@@ -8,6 +8,7 @@ import { useNavigate, useParams } from 'react-router-dom';
 import {
   AlertTriangle,
   CheckCircle2,
+  ChevronDown,
   ChevronLeft,
   Loader2,
   MapPin,
@@ -29,6 +30,7 @@ import {
   AlertDialogTrigger,
 } from '@/components/ui/alert-dialog';
 import { Button } from '@/components/ui/button';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@/components/ui/collapsible';
 import {
   ResizableHandle,
   ResizablePanel,
@@ -37,8 +39,8 @@ import {
 import { UnderwritingResultSkeleton } from '../../../components/skeletons/PageSkeletons';
 import AppLayout from '../../../components/layout/AppLayout';
 import { useAppAuth } from '../../../hooks/useAppAuth';
-import { useUnderwriting, useUnderwritingActions } from '../../../store';
-import { deleteUnderwritingRun, recalculateScenario, runSensitivityAnalysis } from '../../../api/re-underwriting';
+import { useUnderwritingActions, useUnderwritingCurrentRun } from '../../../store';
+import { deleteUnderwritingRun, getUnderwritingWorkflow, recalculateScenario, runSensitivityAnalysis } from '../../../api/re-underwriting';
 import {
   CreditMemoModal,
   CreditMemoProgress,
@@ -47,6 +49,7 @@ import {
   MarketSection,
   MaxBidPanel,
   MaxLoanPanel,
+  MemoReadinessGatePanel,
   MetricCalculationDetail,
   MemoHistorySheet,
   ModelBasisPanel,
@@ -71,7 +74,10 @@ import {
   getUnitMixSource,
   getUnitMixSummary,
   pickUnitMix,
+  requiresMemoOverride,
+  WorkflowPhaseTracker,
 } from '../components/underwriting';
+import { getMemoActionState } from './underwritingWorkflowMemoGate';
 
 function WorkspaceMark() {
   return (
@@ -85,7 +91,7 @@ export default function UnderwritingResult() {
   const { runId } = useParams();
   const navigate = useNavigate();
   const { getToken, user: currentUser } = useAppAuth();
-  const { currentRun } = useUnderwriting();
+  const currentRun = useUnderwritingCurrentRun();
   const { loadRun } = useUnderwritingActions();
 
   const [showSourcePanel, setShowSourcePanel] = useState(false);
@@ -108,10 +114,78 @@ export default function UnderwritingResult() {
   const [memoProgress, setMemoProgress] = useState(null); // { jobId, memoId } | null
   const [memoRefreshKey, setMemoRefreshKey] = useState(0);
   const [memoPrefill, setMemoPrefill] = useState(null);
+  const [workflow, setWorkflow] = useState(null);
+  const [workflowError, setWorkflowError] = useState(null);
+  const [workflowStatus, setWorkflowStatus] = useState('idle');
+  const [workflowPanelOpen, setWorkflowPanelOpen] = useState(false);
+  const resultScrollRef = useRef(null);
+
+  const isSelfStorageRun = useMemo(
+    () => (currentRun?.asset_type || currentRun?.inputs?.project?.asset_type) === 'self_storage',
+    [currentRun?.asset_type, currentRun?.inputs?.project?.asset_type],
+  );
+  const memoActionState = useMemo(
+    () => getMemoActionState(currentRun, workflowStatus, workflow),
+    [currentRun, workflowStatus, workflow],
+  );
 
   useEffect(() => {
     if (runId) loadRun(getToken, runId);
   }, [getToken, loadRun, runId]);
+
+  useEffect(() => {
+    if (!runId || !currentRun) {
+      setWorkflow(null);
+      setWorkflowError(null);
+      setWorkflowStatus('idle');
+      return;
+    }
+    const currentRunId = currentRun.id || currentRun.run_id;
+    if (currentRunId && String(currentRunId) !== String(runId)) {
+      setWorkflow(null);
+      setWorkflowError(null);
+      setWorkflowStatus('idle');
+      return;
+    }
+    if (!isSelfStorageRun) {
+      setWorkflow(null);
+      setWorkflowError(null);
+      setWorkflowStatus('not-required');
+      return;
+    }
+    let cancelled = false;
+    setWorkflow(null);
+    setWorkflowError(null);
+    setWorkflowStatus('loading');
+    getUnderwritingWorkflow(getToken, runId)
+      .then((data) => {
+        if (!cancelled) {
+          setWorkflow(data);
+          setWorkflowError(null);
+          setWorkflowStatus('ready');
+        }
+      })
+      .catch((err) => {
+        if (!cancelled) {
+          setWorkflow(null);
+          setWorkflowError(err?.message || 'Failed to load workflow state.');
+          setWorkflowStatus('error');
+        }
+      });
+    return () => { cancelled = true; };
+  }, [
+    getToken,
+    isSelfStorageRun,
+    runId,
+    memoRefreshKey,
+    currentRun,
+    currentRun?.asset_type,
+    currentRun?.id,
+    currentRun?.inputs?.project?.asset_type,
+    currentRun?.run_id,
+    currentRun?.status,
+    currentRun?.updated_at,
+  ]);
 
   const handleOpenSource = (citation) => {
     setActiveCitation(citation);
@@ -185,6 +259,44 @@ export default function UnderwritingResult() {
     setMemoModalOpen(true);
   };
 
+  const focusUnderwritingSection = useCallback((section) => {
+    if (!section) return;
+    if (section === 'returns') setShowReturns(true);
+    if (section === 'operations') setShowOperations(true);
+    if (section === 'evidence') setShowEvidence(true);
+    if (section === 'market') setShowMarket(true);
+    if (section === 'scenario') setShowScenario(true);
+
+    const scrollToSection = () => {
+      const target = document.querySelector(`[data-underwriting-section="${section}"]`);
+      if (!target) return;
+      const container = resultScrollRef.current;
+      if (!container) {
+        target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        return;
+      }
+
+      const containerTop = container.getBoundingClientRect().top;
+      const targetTop = target.getBoundingClientRect().top;
+      container.scrollTo({
+        top: container.scrollTop + targetTop - containerTop - 12,
+        behavior: 'smooth',
+      });
+    };
+
+    window.requestAnimationFrame(() => {
+      window.requestAnimationFrame(scrollToSection);
+    });
+  }, []);
+
+  const handleWorkflowPhaseClick = useCallback((phase) => {
+    focusUnderwritingSection(phase?.related_sections?.[0]);
+  }, [focusUnderwritingSection]);
+
+  const handleWorkflowFindingClick = useCallback((finding) => {
+    focusUnderwritingSection(finding?.related_section);
+  }, [focusUnderwritingSection]);
+
   // ── Derived data ──────────────────────────────────────────────────────────
 
   const artifact = currentRun?.result_artifact || {};
@@ -197,6 +309,12 @@ export default function UnderwritingResult() {
   const verdictLabel = verdictStatus === 'worth_pursuing' ? 'Passes Screen'
     : verdictStatus === 'needs_review' ? 'Passes With Conditions'
     : verdictStatus ? 'Below Screen' : 'In Review';
+
+  const handleGenerateMemo = useCallback(() => {
+    if (!verdict || memoActionState.disabled) return;
+    setMemoPrefill(null);
+    setMemoModalOpen(true);
+  }, [memoActionState.disabled, verdict]);
 
   const projections = artifact.projections || [];
   const stressTests = artifact.stress_tests || [];
@@ -949,6 +1067,30 @@ export default function UnderwritingResult() {
       citation: getFieldCitation(fieldCitations, citationContext, 'interest_rate_pct'),
     },
     {
+      key: 'proposed_loan_amount',
+      category: 'Financing / Exit',
+      label: 'OM proposed loan',
+      value: formatEvidenceValue(formatCompactCurrency, artifact.om_data?.proposed_loan_amount),
+      note: 'Source evidence only; model debt is sized from purchase price and LTV.',
+      citation: getFieldCitation(fieldCitations, citationContext, 'proposed_loan_amount'),
+    },
+    {
+      key: 'proposed_down_payment_amount',
+      category: 'Financing / Exit',
+      label: 'OM proposed down payment',
+      value: formatEvidenceValue(formatCompactCurrency, artifact.om_data?.proposed_down_payment_amount),
+      note: 'Source evidence only; model equity is sized from model LTV.',
+      citation: getFieldCitation(fieldCitations, citationContext, 'proposed_down_payment_amount'),
+    },
+    {
+      key: 'proposed_down_payment_pct',
+      category: 'Financing / Exit',
+      label: 'OM proposed down payment %',
+      value: formatEvidenceValue(formatPercent, artifact.om_data?.proposed_down_payment_pct),
+      note: 'Source evidence only; model LTV can differ.',
+      citation: getFieldCitation(fieldCitations, citationContext, 'proposed_down_payment_pct'),
+    },
+    {
       key: 'market_cap_rate_purchase',
       category: 'Acquisition',
       label: 'Market cap rate purchase',
@@ -969,7 +1111,55 @@ export default function UnderwritingResult() {
       value: formatEvidenceValue(formatPercent, persistedInputs.exit?.market_cap_rate_sale),
       citation: getFieldCitation(fieldCitations, citationContext, 'market_cap_rate_sale'),
     },
+    {
+      key: 'below_market_tenant_pct',
+      category: 'Value-Add',
+      label: 'Below-market tenants',
+      value: formatEvidenceValue(formatPercent, artifact.om_data?.below_market_tenant_pct),
+      citation: getFieldCitation(fieldCitations, citationContext, 'below_market_tenant_pct'),
+    },
+    {
+      key: 'below_market_monthly_variance',
+      category: 'Value-Add',
+      label: 'Below-market monthly variance',
+      value: formatEvidenceValue(formatCompactCurrency, artifact.om_data?.below_market_monthly_variance),
+      citation: getFieldCitation(fieldCitations, citationContext, 'below_market_monthly_variance'),
+    },
+    {
+      key: 'below_market_annual_upside',
+      category: 'Value-Add',
+      label: 'Below-market annual upside',
+      value: formatEvidenceValue(formatCompactCurrency, artifact.om_data?.below_market_annual_upside),
+      citation: getFieldCitation(fieldCitations, citationContext, 'below_market_annual_upside'),
+    },
+    {
+      key: 'value_add_notes',
+      category: 'Value-Add',
+      label: 'Value-add notes',
+      value: artifact.om_data?.value_add_notes ?? '—',
+      citation: getFieldCitation(fieldCitations, citationContext, 'value_add_notes'),
+    },
   ].filter((item) => item.citation);
+
+  const workflowGateCounts = (workflow?.gates || []).reduce((counts, gate) => {
+    const status = gate.status || 'not_started';
+    return { ...counts, [status]: (counts[status] || 0) + 1 };
+  }, {});
+  const workflowBlockedCount = workflowGateCounts.blocked || 0;
+  const workflowReviewCount = workflowGateCounts.needs_review || 0;
+  const workflowPassedCount = workflowGateCounts.passed || 0;
+  const workflowMemoState = workflow?.memo_generation || {};
+  const workflowMemoLabel = workflowMemoState.requires_override
+    ? 'Memo needs override rationale'
+    : workflowMemoState.allowed
+      ? 'Memo ready'
+      : workflowMemoState.disabled_reason || 'Memo gated';
+  const WorkflowMemoIcon = workflowMemoState.requires_override
+    ? AlertTriangle
+    : workflowMemoState.allowed
+      ? CheckCircle2
+      : XCircle;
+  const shouldShowWorkflowPanel = isSelfStorageRun && (workflow || workflowError || workflowStatus === 'loading');
 
   // ── Render ────────────────────────────────────────────────────────────────
 
@@ -1001,7 +1191,7 @@ export default function UnderwritingResult() {
         className="h-full min-w-0"
       >
         <ResizablePanel id="uw-result-main" order={1} defaultSize={showSourcePanel ? 58 : 100} minSize={40}>
-          <div className="h-full overflow-y-auto">
+          <div ref={resultScrollRef} className="h-full overflow-y-auto">
             <div className="mx-auto max-w-7xl px-4 py-5 sm:px-6 sm:py-8">
               <div className="underwriting-shell page-enter">
                 <div
@@ -1011,7 +1201,7 @@ export default function UnderwritingResult() {
                 <div className="p-4 sm:p-6">
 
                   {/* Top bar */}
-                  <div className="underwriting-topbar -m-4 mb-4 sm:-m-6 sm:mb-6">
+                  <div className="underwriting-topbar -m-4 mb-4 sm:-m-6 sm:mb-6" data-underwriting-section="source_documents">
                     <div className="underwriting-topbar-row">
                       <div className="underwriting-topbar-main">
                         <WorkspaceMark />
@@ -1061,17 +1251,23 @@ export default function UnderwritingResult() {
                             </AlertDialogFooter>
                           </AlertDialogContent>
                         </AlertDialog>
-                        <div className="underwriting-memo-actions" aria-label="Credit memo actions">
+                        <div className="underwriting-memo-actions" data-underwriting-section="memo_history" aria-label="Credit memo actions">
                           <Button
                             variant="outline"
                             size="sm"
-                            onClick={() => { setMemoPrefill(null); setMemoModalOpen(true); }}
-                            disabled={!verdict}
+                            onClick={handleGenerateMemo}
+                            disabled={!verdict || memoActionState.disabled}
+                            title={memoActionState.helperText || 'Generate IC memo'}
                             className="underwriting-memo-primary"
                           >
                             <Sparkles className="h-4 w-4" />
                             Generate IC memo
                           </Button>
+                          {memoActionState.helperText ? (
+                            <p className="max-w-[18rem] text-[11px] leading-4 text-muted-foreground">
+                              {memoActionState.helperText}
+                            </p>
+                          ) : null}
                           <MemoHistorySheet
                             runId={runId}
                             getToken={getToken}
@@ -1085,6 +1281,77 @@ export default function UnderwritingResult() {
                       </div>
                     </div>
                   </div>
+
+                  {shouldShowWorkflowPanel ? (
+                    <Collapsible open={workflowPanelOpen} onOpenChange={setWorkflowPanelOpen} className="mb-4">
+                      <section className="rounded-lg border border-border/70 bg-card/80 shadow-sm">
+                        <CollapsibleTrigger asChild>
+                          <button
+                            type="button"
+                            className="flex w-full flex-col gap-3 p-3 text-left transition hover:bg-muted/30 md:flex-row md:items-center md:justify-between"
+                            aria-label="Toggle acquisition workflow details"
+                          >
+                            <div className="min-w-0">
+                              <p className="text-[10px] font-bold uppercase tracking-[0.2em] text-muted-foreground">Acquisition workflow</p>
+                              <div className="mt-1 flex flex-wrap items-center gap-2">
+                                <h2 className="font-display text-sm font-semibold text-foreground">
+                                  {workflow?.workflow_name || 'Self-Storage Acquisition Underwrite'}
+                                </h2>
+                                <span className="rounded-full border border-border bg-background px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                                  {workflowStatus === 'loading' ? 'loading' : workflow?.overall_status?.replace(/_/g, ' ') || 'in review'}
+                                </span>
+                              </div>
+                            </div>
+                            <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                              {workflowStatus === 'loading' ? (
+                                <span className="inline-flex items-center gap-1.5 rounded-full border border-primary/20 bg-primary/10 px-2 py-1 text-primary">
+                                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                  Loading gates
+                                </span>
+                              ) : null}
+                              {workflow ? (
+                                <>
+                                  <span className="inline-flex items-center gap-1.5 rounded-full border border-success/20 bg-success/10 px-2 py-1 text-success">
+                                    <CheckCircle2 className="h-3.5 w-3.5" />
+                                    {workflowPassedCount} passed
+                                  </span>
+                                  <span className="inline-flex items-center gap-1.5 rounded-full border border-warning/25 bg-warning/10 px-2 py-1 text-warning">
+                                    <AlertTriangle className="h-3.5 w-3.5" />
+                                    {workflowReviewCount} review
+                                  </span>
+                                  <span className="inline-flex items-center gap-1.5 rounded-full border border-destructive/25 bg-destructive/10 px-2 py-1 text-destructive">
+                                    <XCircle className="h-3.5 w-3.5" />
+                                    {workflowBlockedCount} blocked
+                                  </span>
+                                  <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-background px-2 py-1 text-muted-foreground">
+                                    <WorkflowMemoIcon className="h-3.5 w-3.5" />
+                                    {workflowMemoLabel}
+                                  </span>
+                                </>
+                              ) : null}
+                              <ChevronDown className={`h-4 w-4 transition-transform ${workflowPanelOpen ? 'rotate-180' : ''}`} />
+                            </div>
+                          </button>
+                        </CollapsibleTrigger>
+                        <CollapsibleContent>
+                          <div className="grid gap-3 border-t border-border/70 p-3 xl:grid-cols-[minmax(0,1fr)_320px]">
+                            <div className="space-y-2">
+                              <WorkflowPhaseTracker workflow={workflow} onPhaseClick={handleWorkflowPhaseClick} />
+                              {workflowError ? (
+                                <div className="rounded-lg border border-warning/35 bg-warning/10 p-3 text-xs text-warning">
+                                  {workflowError}
+                                </div>
+                              ) : null}
+                            </div>
+                            <MemoReadinessGatePanel
+                              workflow={workflow}
+                              onFindingClick={handleWorkflowFindingClick}
+                            />
+                          </div>
+                        </CollapsibleContent>
+                      </section>
+                    </Collapsible>
+                  ) : null}
 
                   <TrustPanel
                     expanded={showTrustPanel}
@@ -1114,6 +1381,7 @@ export default function UnderwritingResult() {
                   {/* Verdict hero banner */}
                   <div
                     className="underwriting-hero-banner"
+                    data-underwriting-section="verdict"
                     data-tone={verdictTone === 'success' ? 'success' : verdictTone === 'warning' ? 'warning' : verdictTone === 'danger' ? 'danger' : undefined}
                   >
                     <div className="flex flex-col gap-5 xl:flex-row xl:items-start xl:justify-between">
@@ -1240,17 +1508,19 @@ export default function UnderwritingResult() {
                   ) : null}
 
                   {/* What-if scenario panel */}
-                  {showScenario && (
-                    <ScenarioPanel
-                      baseScenario={baseScenario}
-                      scenarioValues={scenarioValues}
-                      onValueChange={handleScenarioChange}
-                      onReset={resetScenario}
-                      scenarioResult={scenarioResult}
-                      isScenarioLoading={isScenarioLoading}
-                      currentRun={currentRun}
-                    />
-                  )}
+                  <div data-underwriting-section="scenario">
+                    {showScenario && (
+                      <ScenarioPanel
+                        baseScenario={baseScenario}
+                        scenarioValues={scenarioValues}
+                        onValueChange={handleScenarioChange}
+                        onReset={resetScenario}
+                        scenarioResult={scenarioResult}
+                        isScenarioLoading={isScenarioLoading}
+                        currentRun={currentRun}
+                      />
+                    )}
+                  </div>
 
                   {/* Key returns metrics */}
                   <div className="mt-5">
@@ -1287,7 +1557,7 @@ export default function UnderwritingResult() {
                       onOpenSource={handleOpenSource}
                     />
                   </div>
-                  <div className="mt-5">
+                  <div className="mt-5" data-underwriting-section="max_loan">
                     <MaxLoanPanel
                       runId={runId}
                       getToken={getToken}
@@ -1408,108 +1678,118 @@ export default function UnderwritingResult() {
 
                   {/* Sections */}
                   <div className="mt-6 grid gap-5">
-                    <ReturnsSection
-                      show={showReturns}
-                      onToggle={() => setShowReturns((v) => !v)}
-                      projections={projections}
-                      proformaData={proformaData}
-                      incomeBasisMonths={artifact.income_basis_months}
-                      capitalStructure={capitalStructure}
-                      loanAmount={loanAmount}
-                      purchasePrice={purchasePrice}
-                      equityInvested={equityInvested}
-                      equityPct={equityPct}
-                      ltvPct={ltvPct}
-                      equityRaiseTone={equityRaiseTone}
-                      equityRaiseLabel={equityRaiseLabel}
-                      currentRun={currentRun}
-                      currentRentPerDoor={currentRentPerDoor}
-                      marketRentPerDoor={marketRentPerDoor}
-                      rentSpreadPerDoor={rentSpreadPerDoor}
-                      occupancy={occupancy}
-                      impliedCapRate={impliedCapRate}
-                      breakEvenOccupancyPct={breakEvenOccupancyPct}
-                      totalUnits={totalUnits}
-                      sourceCitations={sourceCitations}
-                      omStatedNoi={omStatedNoi}
-                      noiBridge={noiBridge}
-                      modeledNoi={modeledNoi}
-                      noiBridgeDelta={noiBridgeDelta}
-                      noiBridgeDeltaPct={noiBridgeDeltaPct}
-                      noiBridgeAlert={noiBridgeAlert}
-                      expenseBasisSource={expenseBasis?.source}
-                      onOpenSource={handleOpenSource}
-                    />
+                    <section data-underwriting-section="returns">
+                      <ReturnsSection
+                        show={showReturns}
+                        onToggle={() => setShowReturns((v) => !v)}
+                        projections={projections}
+                        proformaData={proformaData}
+                        incomeBasisMonths={artifact.income_basis_months}
+                        capitalStructure={capitalStructure}
+                        loanAmount={loanAmount}
+                        purchasePrice={purchasePrice}
+                        equityInvested={equityInvested}
+                        equityPct={equityPct}
+                        ltvPct={ltvPct}
+                        equityRaiseTone={equityRaiseTone}
+                        equityRaiseLabel={equityRaiseLabel}
+                        currentRun={currentRun}
+                        currentRentPerDoor={currentRentPerDoor}
+                        marketRentPerDoor={marketRentPerDoor}
+                        rentSpreadPerDoor={rentSpreadPerDoor}
+                        occupancy={occupancy}
+                        impliedCapRate={impliedCapRate}
+                        breakEvenOccupancyPct={breakEvenOccupancyPct}
+                        totalUnits={totalUnits}
+                        sourceCitations={sourceCitations}
+                        omStatedNoi={omStatedNoi}
+                        noiBridge={noiBridge}
+                        modeledNoi={modeledNoi}
+                        noiBridgeDelta={noiBridgeDelta}
+                        noiBridgeDeltaPct={noiBridgeDeltaPct}
+                        noiBridgeAlert={noiBridgeAlert}
+                        expenseBasisSource={expenseBasis?.source}
+                        onOpenSource={handleOpenSource}
+                      />
+                    </section>
 
-                    <OperationsSection
-                      show={showOperations}
-                      onToggle={() => setShowOperations((v) => !v)}
-                      unitMix={unitMix}
-                      unitMixSummary={unitMixSummary}
-                      unitMixIsPartial={unitMixIsPartial}
-                      propertyUnits={propertyUnits}
-                      extractedUnits={extractedUnits}
-                      unitMixCoveragePct={unitMixCoveragePct}
-                      occupancy={occupancy}
-                      currentExpenseRatio={currentExpenseRatio}
-                      proFormaExpenseRatio={proFormaExpenseRatio}
-                      propertyTaxAnnual={persistedInputs.operational?.property_tax_annual}
-                      propertyTaxGrowthPct={persistedInputs.operational?.property_tax_growth_pct ?? artifact.om_data?.property_tax_growth_pct}
-                      badDebtAnnual={persistedInputs.operational?.bad_debt_annual ?? artifact.t12_data?.summary?.bad_debt_annual}
-                      correctionsCollectionsAnnual={persistedInputs.operational?.corrections_collections_annual ?? artifact.t12_data?.summary?.corrections_collections_annual}
-                      purchasePrice={purchasePrice}
-                      totalUnits={totalUnits}
-                      rentableSqft={persistedInputs.project?.rentable_sqft}
-                      operational={persistedInputs.operational}
-                      expenseBasis={expenseBasis}
-                      expenseBasisFormula={expenseBasisFormula}
-                      sourceCitations={sourceCitations}
-                      stressTests={stressTests}
-                      stressBaseAssumptions={{
-                        vacancy_credit_loss_pct: persistedInputs.operational?.vacancy_credit_loss_pct,
-                        rent_growth_pct: persistedInputs.operational?.rent_growth_pct,
-                        exit_cap_rate: persistedInputs.exit?.exit_cap_rate,
-                        interest_rate_pct: persistedInputs.financing?.interest_rate_pct,
-                      }}
-                      rolloverRisk={rolloverRisk}
-                      missingExpenseFields={artifact.t12_data?.summary?.missing_expense_fields || []}
-                      onOpenSource={handleOpenSource}
-                    />
+                    <section data-underwriting-section="operations">
+                      <OperationsSection
+                        show={showOperations}
+                        onToggle={() => setShowOperations((v) => !v)}
+                        unitMix={unitMix}
+                        unitMixSummary={unitMixSummary}
+                        unitMixIsPartial={unitMixIsPartial}
+                        propertyUnits={propertyUnits}
+                        extractedUnits={extractedUnits}
+                        unitMixCoveragePct={unitMixCoveragePct}
+                        occupancy={occupancy}
+                        currentExpenseRatio={currentExpenseRatio}
+                        proFormaExpenseRatio={proFormaExpenseRatio}
+                        propertyTaxAnnual={persistedInputs.operational?.property_tax_annual}
+                        propertyTaxGrowthPct={persistedInputs.operational?.property_tax_growth_pct ?? artifact.om_data?.property_tax_growth_pct}
+                        badDebtAnnual={persistedInputs.operational?.bad_debt_annual ?? artifact.t12_data?.summary?.bad_debt_annual}
+                        correctionsCollectionsAnnual={persistedInputs.operational?.corrections_collections_annual ?? artifact.t12_data?.summary?.corrections_collections_annual}
+                        purchasePrice={purchasePrice}
+                        totalUnits={totalUnits}
+                        rentableSqft={persistedInputs.project?.rentable_sqft}
+                        operational={persistedInputs.operational}
+                        expenseBasis={expenseBasis}
+                        expenseBasisFormula={expenseBasisFormula}
+                        sourceCitations={sourceCitations}
+                        stressTests={stressTests}
+                        stressBaseAssumptions={{
+                          vacancy_credit_loss_pct: persistedInputs.operational?.vacancy_credit_loss_pct,
+                          rent_growth_pct: persistedInputs.operational?.rent_growth_pct,
+                          exit_cap_rate: persistedInputs.exit?.exit_cap_rate,
+                          interest_rate_pct: persistedInputs.financing?.interest_rate_pct,
+                        }}
+                        rolloverRisk={rolloverRisk}
+                        missingExpenseFields={artifact.t12_data?.summary?.missing_expense_fields || []}
+                        onOpenSource={handleOpenSource}
+                      />
+                    </section>
 
-                    <EvidenceSection
-                      show={showEvidence}
-                      onToggle={() => setShowEvidence((v) => !v)}
-                      evidenceItems={evidenceItems}
-                      onOpenSource={handleOpenSource}
-                    />
+                    <section data-underwriting-section="evidence">
+                      <EvidenceSection
+                        show={showEvidence}
+                        onToggle={() => setShowEvidence((v) => !v)}
+                        evidenceItems={evidenceItems}
+                        onOpenSource={handleOpenSource}
+                      />
+                    </section>
 
-                    <MarketSection
-                      show={showMarket}
-                      onToggle={() => setShowMarket((v) => !v)}
-                      address={address}
-                      mapUrl={mapUrl}
-                      nearbyStorageCount1Mi={marketData.nearby_storage_count_1mi}
-                      nearbyStorageCount3Mi={marketData.nearby_storage_count_3mi}
-                      nearbyStorageCount5Mi={marketData.nearby_storage_count_5mi}
-                      demographics={demographics}
-                      impliedCapRate={impliedCapRate}
-                      purchasePrice={purchasePrice}
-                      capRateSubmarket={capRateSubmarket}
-                      capRatePurchase={capRatePurchase}
-                      capRateSale={capRateSale}
-                      bpsDelta={bpsDelta}
-                      capRateSpreadBps={capRateSpreadBps}
-                      rentPositionAnalysis={rentPositionAnalysis}
-                      rentComps={rentComps}
-                      rentCompCoverage={rentCompCoverage}
-                      unknownClimateCompCount={artifact.unknown_climate_comp_count ?? 0}
-                    />
+                    <section data-underwriting-section="market">
+                      <MarketSection
+                        show={showMarket}
+                        onToggle={() => setShowMarket((v) => !v)}
+                        address={address}
+                        mapUrl={mapUrl}
+                        nearbyStorageCount1Mi={marketData.nearby_storage_count_1mi}
+                        nearbyStorageCount3Mi={marketData.nearby_storage_count_3mi}
+                        nearbyStorageCount5Mi={marketData.nearby_storage_count_5mi}
+                        demographics={demographics}
+                        impliedCapRate={impliedCapRate}
+                        purchasePrice={purchasePrice}
+                        capRateSubmarket={capRateSubmarket}
+                        capRatePurchase={capRatePurchase}
+                        capRateSale={capRateSale}
+                        bpsDelta={bpsDelta}
+                        capRateSpreadBps={capRateSpreadBps}
+                        rentPositionAnalysis={rentPositionAnalysis}
+                        rentComps={rentComps}
+                        rentCompCoverage={rentCompCoverage}
+                        unknownClimateCompCount={artifact.unknown_climate_comp_count ?? 0}
+                      />
+                    </section>
 
-                    <DiscrepanciesSection
-                      discrepancies={discrepancies}
-                      discrepancySupportByField={discrepancySupportByField}
-                      onOpenSource={handleOpenSource}
-                    />
+                    <section data-underwriting-section="discrepancies">
+                      <DiscrepanciesSection
+                        discrepancies={discrepancies}
+                        discrepancySupportByField={discrepancySupportByField}
+                        onOpenSource={handleOpenSource}
+                      />
+                    </section>
                   </div>
 
                 </div>
@@ -1538,6 +1818,8 @@ export default function UnderwritingResult() {
         prioritizedWarnings={prioritizedWarnings}
         currentUser={currentUser}
         prefill={memoPrefill}
+        workflow={workflow}
+        requiresGateOverride={requiresMemoOverride(workflow)}
         onSubmitted={handleMemoSubmitted}
       />
       <CreditMemoProgress

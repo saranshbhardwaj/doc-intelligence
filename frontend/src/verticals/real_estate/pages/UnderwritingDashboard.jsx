@@ -22,7 +22,7 @@ import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import AppLayout from '../../../components/layout/AppLayout';
 import { useAppAuth } from '../../../hooks/useAppAuth';
-import { useUnderwriting, useUnderwritingActions } from '../../../store';
+import { useUnderwritingActions, useUnderwritingRuns } from '../../../store';
 import { deleteUnderwritingRun, updateUnderwritingRunMetadata } from '../../../api/re-underwriting';
 import {
   UnderwritingDefaultsModal,
@@ -279,7 +279,7 @@ function RunRow({ run, onOpen, onDelete }) {
 export default function UnderwritingDashboard() {
   const navigate = useNavigate();
   const { getToken } = useAppAuth();
-  const { runs } = useUnderwriting();
+  const runs = useUnderwritingRuns();
   const { loadRuns } = useUnderwritingActions();
   const [query, setQuery] = useState('');
 

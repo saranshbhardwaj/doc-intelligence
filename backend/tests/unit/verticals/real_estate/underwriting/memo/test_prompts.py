@@ -209,6 +209,13 @@ class TestQualityFixesRoundTwo:
         # Fall-through to null when no same-dimension mitigant exists.
         assert "null" in text.lower()
 
+    def test_risks_instructions_do_not_use_fixed_rate_debt_for_vacancy_stress(self):
+        text = SECTION_INSTRUCTIONS[SECTION_RISKS]
+        assert "Vacancy/occupancy stress" in text
+        assert "fixed-rate debt" in text
+        assert "refinance risk" in text
+        assert "does not mitigate" in text
+
     def test_recommendation_instructions_soften_below_screen_language(self):
         text = SECTION_INSTRUCTIONS[SECTION_RECOMMENDATION]
         assert "does not clear the configured screen" in text
@@ -226,6 +233,26 @@ class TestQualityFixesRoundTwo:
         text = SECTION_INSTRUCTIONS[SECTION_TRANSACTION_OVERVIEW]
         assert "per total unit-space" in text
         assert "Do NOT write" in text and "per storage unit" in text
+
+    def test_executive_summary_bans_above_comp_rents_as_pricing_power(self):
+        from app.verticals.real_estate.underwriting.memo.schemas import SECTION_EXECUTIVE_SUMMARY
+        text = SECTION_INSTRUCTIONS[SECTION_EXECUTIVE_SUMMARY]
+        assert "pricing power" in text
+        assert "above comp" in text.lower() or "above market" in text.lower()
+        assert "downside" in text.lower() or "sustainability" in text.lower()
+
+    def test_memo_instructions_preserve_competitor_radius_counts(self):
+        from app.verticals.real_estate.underwriting.memo.schemas import SECTION_INVESTMENT_THESIS
+        text = SECTION_INSTRUCTIONS[SECTION_INVESTMENT_THESIS] + SECTION_INSTRUCTIONS[SECTION_MARKET_OVERVIEW]
+        assert "nearby_storage_3mi" in text
+        assert "nearby_storage_5mi" in text
+        assert "Do not transpose" in text or "do not transpose" in text
+
+    def test_transaction_instructions_require_model_vs_om_debt_distinction(self):
+        text = SECTION_INSTRUCTIONS[SECTION_TRANSACTION_OVERVIEW]
+        assert "source-vs-model" in text
+        assert "model debt" in text.lower()
+        assert "OM proposed" in text
 
     def test_property_description_uses_gap_sentence_only_when_no_excerpts(self):
         from app.verticals.real_estate.underwriting.memo.schemas import SECTION_PROPERTY_DESCRIPTION

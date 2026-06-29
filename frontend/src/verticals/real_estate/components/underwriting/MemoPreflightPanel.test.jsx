@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { buildMemoPreflightItems, sourceLabel } from './MemoPreflightPanel';
+import { buildMemoPreflightItems, sourceLabel } from './memoPreflightUtils';
 
 describe('sourceLabel', () => {
   it('uses analyst-facing labels for missing and default sources', () => {

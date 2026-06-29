@@ -121,6 +121,112 @@ class TestCreateMemo:
         assert call_kwargs.kwargs["args"][0] == body["memo_id"]
         assert call_kwargs.kwargs["args"][1] == completed_run.id
 
+    def test_create_memo_persists_gate_override(self, authed_client, completed_run, db_session):
+        from app.repositories.re_memo_repository import ReMemoRepository
+
+        with patch("app.verticals.real_estate.api.memos.generate_credit_memo_task") as mock_task:
+            resp = authed_client.post(
+                f"/api/v1/re/underwriting/runs/{completed_run.id}/memos",
+                json={
+                    "cover_data": {},
+                    "sponsor_data": {},
+                    "market_notes": None,
+                    "gate_override": {
+                        "rationale": "Committee requested a draft memo for discussion.",
+                        "workflow_snapshot": {"workflow_key": "self_storage_acquisition_underwrite", "gates": []},
+                    },
+                },
+            )
+
+        assert resp.status_code == 200, resp.text
+        memo = ReMemoRepository(db_session).get(resp.json()["memo_id"], completed_run.user_id)
+        assert memo.generated_with_override is True
+        assert memo.gate_override_rationale == "Committee requested a draft memo for discussion."
+        assert memo.workflow_snapshot["workflow_key"] == "self_storage_acquisition_underwrite"
+        mock_task.apply_async.assert_called_once()
+
+    def test_create_memo_rejects_blank_gate_override_rationale(self, authed_client, completed_run):
+        resp = authed_client.post(
+            f"/api/v1/re/underwriting/runs/{completed_run.id}/memos",
+            json={
+                "cover_data": {},
+                "sponsor_data": {},
+                "gate_override": {"rationale": "   ", "workflow_snapshot": {}},
+            },
+        )
+
+        assert resp.status_code == 422
+
+    def test_critical_blocked_run_without_gate_override_returns_400_without_dispatch(
+        self, authed_client, completed_run, db_session
+    ):
+        from app.repositories.re_memo_repository import ReMemoRepository
+
+        completed_run.verdict_status = "below_screen"
+        db_session.commit()
+
+        with patch("app.verticals.real_estate.api.memos.generate_credit_memo_task") as mock_task:
+            resp = authed_client.post(
+                f"/api/v1/re/underwriting/runs/{completed_run.id}/memos",
+                json={"cover_data": {}, "sponsor_data": {}, "market_notes": None},
+            )
+
+        assert resp.status_code == 400
+        assert "gate override" in resp.json()["detail"].lower()
+        assert "rationale" in resp.json()["detail"].lower()
+        assert ReMemoRepository(db_session).list_by_run(completed_run.id, completed_run.user_id) == []
+        mock_task.apply_async.assert_not_called()
+
+    def test_critical_blocked_run_with_gate_override_succeeds_and_persists_snapshot(
+        self, authed_client, completed_run, db_session
+    ):
+        from app.repositories.re_memo_repository import ReMemoRepository
+
+        completed_run.verdict_status = "below_screen"
+        db_session.commit()
+
+        with patch("app.verticals.real_estate.api.memos.generate_credit_memo_task") as mock_task:
+            resp = authed_client.post(
+                f"/api/v1/re/underwriting/runs/{completed_run.id}/memos",
+                json={
+                    "cover_data": {},
+                    "sponsor_data": {},
+                    "market_notes": None,
+                    "gate_override": {
+                        "rationale": "Committee requested a blocked-run discussion draft.",
+                        "workflow_snapshot": {},
+                    },
+                },
+            )
+
+        assert resp.status_code == 200, resp.text
+        memo = ReMemoRepository(db_session).get(resp.json()["memo_id"], completed_run.user_id)
+        assert memo.generated_with_override is True
+        assert memo.gate_override_rationale == "Committee requested a blocked-run discussion draft."
+        assert memo.workflow_snapshot["workflow_key"] == "self_storage_acquisition_underwrite"
+        assert memo.workflow_snapshot["memo_generation"]["requires_override"] is True
+        assert "investment_screen" in memo.workflow_snapshot["memo_generation"]["blocking_gate_ids"]
+        mock_task.apply_async.assert_called_once()
+
+    def test_non_self_storage_run_returns_400_without_dispatch(
+        self, authed_client, completed_run, db_session
+    ):
+        from app.repositories.re_memo_repository import ReMemoRepository
+
+        completed_run.asset_type = "multifamily"
+        db_session.commit()
+
+        with patch("app.verticals.real_estate.api.memos.generate_credit_memo_task") as mock_task:
+            resp = authed_client.post(
+                f"/api/v1/re/underwriting/runs/{completed_run.id}/memos",
+                json={"cover_data": {}, "sponsor_data": {}, "market_notes": None},
+            )
+
+        assert resp.status_code == 400
+        assert "self-storage" in resp.json()["detail"].lower()
+        assert ReMemoRepository(db_session).list_by_run(completed_run.id, completed_run.user_id) == []
+        mock_task.apply_async.assert_not_called()
+
     def test_dispatch_failure_removes_pending_memo(
         self, authed_client, completed_run, db_session
     ):
@@ -275,6 +381,27 @@ class TestListMemos:
         assert isinstance(memo["section_warnings"], list)
         assert isinstance(memo["cover_data"], dict)
         assert isinstance(memo["sponsor_data"], dict)
+
+    def test_summary_includes_override_fields(self, authed_client, completed_run, db_session):
+        from app.repositories.re_memo_repository import ReMemoRepository
+
+        repo = ReMemoRepository(db_session)
+        repo.create(
+            run_id=completed_run.id,
+            user_id=completed_run.user_id,
+            cover_data={},
+            sponsor_data={},
+            market_notes=None,
+            generated_with_override=True,
+            gate_override_rationale="Need an IC discussion draft.",
+            workflow_snapshot={"overall_status": "blocked"},
+        )
+
+        resp = authed_client.get(f"/api/v1/re/underwriting/runs/{completed_run.id}/memos")
+
+        memo = resp.json()["memos"][0]
+        assert memo["generated_with_override"] is True
+        assert memo["gate_override_rationale"] == "Need an IC discussion draft."
 
 
 # ---------------------------------------------------------------------------

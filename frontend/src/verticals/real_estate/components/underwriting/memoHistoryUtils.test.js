@@ -26,6 +26,10 @@ describe('memoHistoryUtils', () => {
     expect(getMemoWarningLabel([])).toBeNull();
   });
 
+  it('labels memos generated with gate override', () => {
+    expect(getMemoWarningLabel({ generated_with_override: true, section_warnings: [] })).toBe('Generated with override');
+  });
+
   it('maps memo status to visual tones and download eligibility', () => {
     expect(getMemoStatusTone('complete')).toBe('success');
     expect(getMemoStatusTone('failed')).toBe('danger');

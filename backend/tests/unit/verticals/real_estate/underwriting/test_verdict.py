@@ -238,13 +238,13 @@ class TestVerdictMixedRevenueWarning:
         result = passing_result.model_copy()
         result.unit_mix = [
             {
-                "section": "NON-CLIMATE",
-                "unit_type": "10 x 10",
+                "unit_category": "storage",
+                "size": "10 x 10",
                 "num_units": 100,
             },
             {
-                "section": "COVERED PARKING",
-                "unit_type": "Parking",
+                "unit_category": "parking",
+                "size": "Parking",
                 "num_units": 20,
             },
         ]
@@ -272,9 +272,9 @@ class TestVerdictMixedRevenueWarning:
     def test_mixed_revenue_warning_added_for_parking_and_residential_rows(self, passing_result, default_criteria):
         result = passing_result.model_copy()
         result.unit_mix = [
-            UnitMixRow(section="NON-CLIMATE", unit_type="Storage", num_units=133),
-            UnitMixRow(section="UNCOVERED PARKING", unit_type="Parking", num_units=68),
-            UnitMixRow(section="RESIDENTIAL LEASE", unit_type="Residential", num_units=2),
+            UnitMixRow(unit_category="storage", size="10 x 10", num_units=133),
+            UnitMixRow(unit_category="parking", size="Parking", num_units=68),
+            UnitMixRow(unit_category="residential", size="Residential", num_units=2),
         ]
 
         verdict = evaluate(result, default_criteria)
@@ -288,8 +288,8 @@ class TestVerdictMixedRevenueWarning:
     def test_storage_only_unit_mix_has_no_mixed_revenue_warning(self, passing_result, default_criteria):
         result = passing_result.model_copy()
         result.unit_mix = [
-            UnitMixRow(section="NON-CLIMATE", unit_type="5 x 10", num_units=45),
-            UnitMixRow(section="CLIMATE CONTROL", unit_type="10 x 10", num_units=30),
+            UnitMixRow(unit_category="storage", size="5 x 10", num_units=45),
+            UnitMixRow(unit_category="storage", size="10 x 10", num_units=30),
         ]
 
         verdict = evaluate(result, default_criteria)

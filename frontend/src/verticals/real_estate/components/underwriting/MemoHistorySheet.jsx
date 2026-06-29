@@ -247,7 +247,8 @@ export default function MemoHistorySheet({
 }
 
 function LatestMemoCard({ memo, downloading, onDownload, onRegenerate }) {
-  const warningLabel = getMemoWarningLabel(memo.section_warnings);
+  const warningLabel = getMemoWarningLabel(memo);
+  const warningTitle = memo.gate_override_rationale || memo.section_warnings?.join('\n') || warningLabel;
   return (
     <section className="underwriting-memo-latest">
       <div className="flex items-start justify-between gap-3">
@@ -266,9 +267,9 @@ function LatestMemoCard({ memo, downloading, onDownload, onRegenerate }) {
       </div>
 
       {warningLabel ? (
-        <div className="mt-4 flex items-start gap-2 rounded-lg border border-uw-risk/25 bg-uw-risk-soft/70 p-3 text-xs text-uw-risk">
+        <div className="mt-4 flex items-start gap-2 rounded-lg border border-uw-risk/25 bg-uw-risk-soft/70 p-3 text-xs text-uw-risk" title={warningTitle}>
           <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-          <span>{warningLabel} in generated sections</span>
+          <span>{warningLabel}</span>
         </div>
       ) : (
         <div className="mt-4 flex items-center gap-2 rounded-lg border border-uw-success/25 bg-uw-success-soft/70 p-3 text-xs text-uw-success">
@@ -302,7 +303,8 @@ function LatestMemoCard({ memo, downloading, onDownload, onRegenerate }) {
 }
 
 function MemoHistoryRow({ memo, latest, downloading, deleting, onDownload, onRegenerate, onDeleteRequest }) {
-  const warningLabel = getMemoWarningLabel(memo.section_warnings);
+  const warningLabel = getMemoWarningLabel(memo);
+  const warningTitle = memo.gate_override_rationale || memo.section_warnings?.join('\n') || warningLabel;
   const deleteAllowed = canDeleteMemo(memo);
   return (
     <div className="underwriting-memo-row">
@@ -316,7 +318,7 @@ function MemoHistoryRow({ memo, latest, downloading, deleting, onDownload, onReg
           {formatMemoDate(memo.completed_at || memo.created_at)}
         </p>
         {warningLabel ? (
-          <p className="mt-1 flex items-center gap-1 text-xs text-uw-risk">
+          <p className="mt-1 flex items-center gap-1 text-xs text-uw-risk" title={warningTitle}>
             <AlertTriangle className="h-3 w-3" />
             {warningLabel}
           </p>

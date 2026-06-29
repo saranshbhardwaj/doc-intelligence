@@ -933,3 +933,5 @@ def test_re_calculate_task_validation_error_message(monkeypatch):
     assert "wizard" in captured_error_message.get("error_message", "").lower() or \
            "manually" in captured_error_message.get("error_message", "").lower() or \
            "enter" in captured_error_message.get("error_message", "").lower()
+
+
