@@ -23,6 +23,7 @@ class UnderwritingRunRepository:
         asset_type: str = "self_storage",
         address: str | None = None,
         document_ids: list | None = None,
+        source_metadata: dict | None = None,
     ) -> UnderwritingRun:
         """Create and persist a new underwriting run, returning the hydrated record."""
         try:
@@ -32,6 +33,7 @@ class UnderwritingRunRepository:
                 asset_type=asset_type,
                 address=address,
                 document_ids=document_ids,
+                source_metadata=source_metadata or {},
             )
             self.db.add(run)
             self.db.commit()
@@ -86,6 +88,28 @@ class UnderwritingRunRepository:
         except SQLAlchemyError:
             self.db.rollback()
             logger.exception("Failed to update status for run %s", run_id)
+            raise
+
+    def mark_extraction_started(
+        self,
+        run_id: str,
+        user_id: str,
+        document_ids: list,
+        extraction_job_id: str,
+    ) -> bool:
+        """Mark a user's run as actively extracting with the provided source documents."""
+        run = self.get(run_id, user_id)
+        if not run:
+            return False
+        try:
+            run.document_ids = document_ids
+            run.status = "extracting"
+            run.extraction_job_id = extraction_job_id
+            self.db.commit()
+            return True
+        except SQLAlchemyError:
+            self.db.rollback()
+            logger.exception("Failed to mark extraction started for run %s", run_id)
             raise
 
     def update_extraction(

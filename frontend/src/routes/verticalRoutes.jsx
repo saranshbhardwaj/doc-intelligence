@@ -24,6 +24,7 @@ import {
   UnderwritingDashboard,
   UnderwritingWizard,
   UnderwritingResult,
+  AcquisitionWorkspacePage,
 } from '../verticals/real_estate/pages';
 import PDFPopoutPage from '../verticals/real_estate/pages/PDFPopoutPage';
 import ExcelPopoutPage from '../verticals/real_estate/pages/ExcelPopoutPage';
@@ -61,6 +62,10 @@ export const reRoutes = [
   {
     path: '/re/fills/:fillRunId/excel-popout',
     element: <ExcelPopoutPage />,
+  },
+  {
+    path: '/re/acquisitions',
+    element: <AcquisitionWorkspacePage />,
   },
   {
     path: '/re/underwriting',

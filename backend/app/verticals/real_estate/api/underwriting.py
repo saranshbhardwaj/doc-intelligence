@@ -39,6 +39,10 @@ class CreateUnderwritingRunRequest(BaseModel):
     address: Optional[str] = None
     documents: List[dict]
 
+
+class StartExtractionRequest(BaseModel):
+    documents: Optional[List[dict]] = None
+
 class UpdateInputsRequest(BaseModel):
     inputs: dict
     field_citations: Optional[dict] = None
@@ -135,6 +139,51 @@ def _source_documents_for_run(document_ids: list[dict] | None, org_id: str | Non
         doc for doc in (document_ids or [])
         if isinstance(doc, dict) and doc.get("document_id") and doc.get("doc_type")
     ]
+
+
+def _valid_document_specs(documents: list[dict] | None) -> list[dict]:
+    return [
+        {"document_id": doc["document_id"], "doc_type": doc["doc_type"]}
+        for doc in (documents or [])
+        if isinstance(doc, dict) and doc.get("document_id") and doc.get("doc_type")
+    ]
+
+
+def _dispatch_extraction_for_run(
+    repo: UnderwritingRunRepository,
+    job_repo: JobRepository,
+    run,
+    user_id: str,
+    documents: list[dict],
+) -> dict:
+    doc_specs = _valid_document_specs(documents)
+    if not doc_specs:
+        raise ValueError("At least one source document is required to run extraction")
+    if not any(doc.get("doc_type") == "om" for doc in doc_specs):
+        raise ValueError("At least one document with doc_type 'om' is required to run extraction")
+
+    existing_job = job_repo.get_job(run.id)
+    if existing_job:
+        if existing_job.status in {"queued", "processing", "extracting"}:
+            raise ValueError("Extraction is already running for this underwriting run")
+        job_repo.delete_job(run.id)
+
+    job_state = job_repo.create_job(
+        entity_type="underwriting_run",
+        entity_id=run.id,
+        status="extracting",
+        current_stage="initialization",
+        progress_percent=5,
+        job_id=run.id,
+    )
+    if not job_state:
+        raise ValueError("Failed to create job state")
+
+    if not repo.mark_extraction_started(run.id, user_id, doc_specs, run.id):
+        raise ValueError("Failed to update underwriting run for extraction")
+
+    start_re_underwriting_chain(run.id, doc_specs, run.id)
+    return {"run_id": run.id, "extraction_job_id": run.id, "status": "extracting"}
     if not source_specs:
         return []
 
@@ -230,20 +279,35 @@ def create_underwriting_run(payload: CreateUnderwritingRunRequest, user: User = 
             logger.info(f"Created manual underwriting run: {run.id}", extra={"user_id": user.id})
             return {"run_id": run.id, "extraction_job_id": None, "status": "needs_review"}
 
-        om_docs = [d for d in payload.documents if d.get("doc_type") == "om"]
-        if not om_docs:
-            raise ValueError("At least one document with doc_type 'om' is required to run extraction")
-
-        job_state = job_repo.create_job(entity_type="underwriting_run", entity_id=run.id, status="extracting", current_stage="initialization", progress_percent=5, job_id=run.id)
-        if not job_state:
-            raise ValueError("Failed to create job state")
-        doc_specs = [{"document_id": d["document_id"], "doc_type": d["doc_type"]} for d in payload.documents]
-        start_re_underwriting_chain(run.id, doc_specs, run.id)
+        result = _dispatch_extraction_for_run(repo, job_repo, run, user.id, payload.documents)
         logger.info(f"Created underwriting run: {run.id}", extra={"user_id": user.id})
-        return {"run_id": run.id, "extraction_job_id": run.id, "status": "extracting"}
+        return result
     except Exception as e:
         logger.error(f"Failed to create underwriting run: {e}")
         raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.post("/runs/{run_id}/extract", response_model=dict)
+def start_underwriting_extraction(
+    run_id: str,
+    payload: StartExtractionRequest,
+    user: User = Depends(get_current_user),
+    db: Session = Depends(get_db),
+):
+    repo = UnderwritingRunRepository(db)
+    run = repo.get(run_id, user.id)
+    if not run:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    documents = payload.documents if payload.documents is not None else run.document_ids
+    try:
+        result = _dispatch_extraction_for_run(repo, JobRepository(), run, user.id, documents)
+        logger.info(f"Started underwriting extraction: {run.id}", extra={"user_id": user.id})
+        return result
+    except ValueError as exc:
+        message = str(exc)
+        status_code = 409 if "already running" in message else 400
+        raise HTTPException(status_code=status_code, detail=message)
 
 @router.get("/runs", response_model=dict)
 def list_underwriting_runs(user: User = Depends(get_current_user), db: Session = Depends(get_db), limit: int = Query(20, ge=1, le=100), offset: int = Query(0, ge=0)):
@@ -258,7 +322,7 @@ def get_underwriting_run(run_id: str, user: User = Depends(get_current_user), db
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
     source_documents = _source_documents_for_run(run.document_ids, user.org_id)
-    return {"id": run.id, "name": run.name, "asset_type": run.asset_type, "address": run.address, "status": run.status, "document_ids": run.document_ids or [], "source_documents": source_documents, "inputs": run.inputs, "field_citations": run.field_citations, "citation_context": run.citation_context, "discrepancies": run.discrepancies, "result_artifact": run.result_artifact, "verdict_status": run.verdict_status, "verdict_failures": run.verdict_failures, "irr": run.irr, "cash_on_cash": run.cash_on_cash, "equity_multiple": run.equity_multiple, "dscr_year_one": run.dscr_year_one, "ltv": run.ltv, "cap_rate_year_one": run.cap_rate_year_one, "cap_rate_pro_forma": run.cap_rate_pro_forma, "noi_year_one": run.noi_year_one, "total_profit": run.total_profit, "monthly_cashflow": run.monthly_cashflow, "created_at": run.created_at, "updated_at": run.updated_at, "completed_at": run.completed_at}
+    return {"id": run.id, "name": run.name, "asset_type": run.asset_type, "address": run.address, "status": run.status, "document_ids": run.document_ids or [], "source_documents": source_documents, "source_metadata": run.source_metadata or {}, "inputs": run.inputs, "field_citations": run.field_citations, "citation_context": run.citation_context, "discrepancies": run.discrepancies, "result_artifact": run.result_artifact, "verdict_status": run.verdict_status, "verdict_failures": run.verdict_failures, "irr": run.irr, "cash_on_cash": run.cash_on_cash, "equity_multiple": run.equity_multiple, "dscr_year_one": run.dscr_year_one, "ltv": run.ltv, "cap_rate_year_one": run.cap_rate_year_one, "cap_rate_pro_forma": run.cap_rate_pro_forma, "noi_year_one": run.noi_year_one, "total_profit": run.total_profit, "monthly_cashflow": run.monthly_cashflow, "created_at": run.created_at, "updated_at": run.updated_at, "completed_at": run.completed_at}
 
 
 @router.get("/runs/{run_id}/workflow", response_model=UnderwritingWorkflowState)

@@ -10,6 +10,7 @@ from app.auth import require_vertical
 from .templates import router as templates_router
 from .underwriting import router as underwriting_router
 from .memos import router as memos_router
+from .acquisitions import router as acquisitions_router
 
 router = APIRouter(
     prefix="/re",
@@ -21,6 +22,7 @@ router = APIRouter(
 router.include_router(templates_router)
 router.include_router(underwriting_router)
 router.include_router(memos_router)
+router.include_router(acquisitions_router)
 
 
 @router.get("/health")

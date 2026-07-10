@@ -12,6 +12,13 @@ export async function createUnderwritingRun(getToken, payload) {
   return response.data;
 }
 
+export async function startUnderwritingExtraction(getToken, runId, documents) {
+  const api = createAuthenticatedApi(getToken);
+  const payload = documents ? { documents } : {};
+  const response = await api.post(`/api/v1/re/underwriting/runs/${runId}/extract`, payload);
+  return response.data;
+}
+
 export async function listUnderwritingRuns(getToken, { limit = 20, offset = 0 } = {}) {
   const api = createAuthenticatedApi(getToken);
   const response = await api.get(`/api/v1/re/underwriting/runs`, {

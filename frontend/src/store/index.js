@@ -16,6 +16,7 @@ import { createTemplateFillSlice } from "./slices/templateFillSlice";
 import { createFeedbackSlice } from "./slices/feedbackSlice";
 import { createPeDiligenceSlice } from "./slices/peDiligenceSlice";
 import { createUnderwritingSlice } from "./slices/underwritingSlice";
+import { createAcquisitionSlice } from "./slices/acquisitionSlice";
 
 /**
  * Main store combining all slices
@@ -31,6 +32,7 @@ export const useStore = create(
       ...createFeedbackSlice(...args),
       ...createPeDiligenceSlice(...args),
       ...createUnderwritingSlice(...args),
+      ...createAcquisitionSlice(...args),
     }),
     {
       name: "sand-cloud-storage", // localStorage key
@@ -361,6 +363,20 @@ export const useUnderwritingActions = () =>
       completeExtraction: state.completeExtraction,
       resetExtraction: state.resetExtraction,
       updateRunInList: state.updateRunInList,
+    }))
+  );
+
+// Acquisition selectors
+export const useAcquisitions = () => useStore((state) => state.acquisitions);
+export const useAcquisitionActions = () =>
+  useStore(
+    useShallow((state) => ({
+      loadAcquisitionCandidates: state.loadAcquisitionCandidates,
+      selectAcquisitionCandidate: state.selectAcquisitionCandidate,
+      createAcquisitionCandidate: state.createAcquisitionCandidate,
+      attachAcquisitionDocument: state.attachAcquisitionDocument,
+      detachAcquisitionDocument: state.detachAcquisitionDocument,
+      createRunFromAcquisitionCandidate: state.createRunFromAcquisitionCandidate,
     }))
   );
 

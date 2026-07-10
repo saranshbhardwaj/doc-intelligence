@@ -32,6 +32,7 @@ import { useUnderwritingActions, useUnderwritingCurrentRun, useUnderwritingExtra
 import {
   createUnderwritingRun,
   deleteUnderwritingRun,
+  startUnderwritingExtraction,
   streamUnderwritingExtractionProgress,
   updateUnderwritingInputs,
   updateUnderwritingRunMetadata,
@@ -39,6 +40,13 @@ import {
 import { fromApiInputs, toApiInputs } from '../utils/underwritingInputs';
 import { streamJobProgress } from '../../../api/sse-utils';
 import DocumentSelectorDialog from '../components/DocumentSelectorDialog';
+import {
+  buildExtractionDocuments,
+  hydrateProjectDataFromRun,
+  buildSelectedDoc,
+  buildSelectedDocsFromRun,
+  EMPTY_UNDERWRITING_DOCS,
+} from '../utils/underwritingDocuments';
 import {
   DOC_SLOTS,
   INITIAL_PROJECT_DATA,
@@ -68,9 +76,7 @@ const UNDERWRITING_SOURCE_EXTENSIONS = {
   rent_roll: ['pdf', 'docx', 'pptx', 'xlsx', 'xlsm', 'csv', 'jpg', 'jpeg', 'png', 'bmp', 'tif', 'tiff', 'heif', 'heic'],
 };
 
-const EMPTY_SELECTED_DOCS = { om: null, t12: null, rent_roll: null };
-
-const SLOT_LABELS = Object.fromEntries(DOC_SLOTS.map((slot) => [slot.key, slot.label]));
+const EMPTY_SELECTED_DOCS = EMPTY_UNDERWRITING_DOCS;
 
 function valuesEqual(left, right) {
   if ((left == null || left === '') && (right == null || right === '')) return true;
@@ -106,25 +112,6 @@ function toManualCitation(existingCitation, previousValue) {
     original_citation: originalCitation ?? null,
     selection_note: 'Analyst manually updated this field.',
   };
-}
-
-function buildSelectedDocsFromRun(run) {
-  const docs = Array.isArray(run?.source_documents) && run.source_documents.length
-    ? run.source_documents
-    : run?.document_ids || [];
-
-  return docs.reduce((acc, doc) => {
-    const docType = doc?.doc_type;
-    const documentId = doc?.document_id || doc?.id;
-    if (!docType || !documentId || !(docType in acc)) return acc;
-
-    acc[docType] = {
-      document_id: documentId,
-      doc_type: docType,
-      name: doc.name || doc.filename || SLOT_LABELS[docType] || 'Document',
-    };
-    return acc;
-  }, { ...EMPTY_SELECTED_DOCS });
 }
 
 export default function UnderwritingWizard() {
@@ -298,7 +285,38 @@ export default function UnderwritingWizard() {
     updateExtractionProgress,
   ]);
 
-  // When a run is loaded (post-extraction or re-hydrated from DB), populate form.
+  // When a run is loaded, hydrate source document slots even before extraction has created inputs.
+  useEffect(() => {
+    const currentRunId = currentRun?.id || currentRun?.run_id;
+    if (!runIdFromUrl || !currentRun || String(currentRunId) !== String(runIdFromUrl)) {
+      return;
+    }
+
+    if (currentRun.name || currentRun.address || currentRun.inputs?.project) {
+      setProjectData((prev) => hydrateProjectDataFromRun(prev, currentRun));
+      savedMeta.current = {
+        name: currentRun.name || "",
+        address: currentRun.address || currentRun.inputs?.project?.address || null,
+      };
+    }
+
+    const hydratedDocs = buildSelectedDocsFromRun(currentRun);
+    if (Object.values(hydratedDocs).some(Boolean)) {
+      setSelectedDocs(hydratedDocs);
+    }
+  }, [
+    runIdFromUrl,
+    currentRun,
+    currentRun?.id,
+    currentRun?.run_id,
+    currentRun?.name,
+    currentRun?.address,
+    currentRun?.inputs,
+    currentRun?.document_ids,
+    currentRun?.source_documents,
+  ]);
+
+  // When a run is loaded post-extraction, populate extracted inputs and citations.
   useEffect(() => {
     const currentRunId = currentRun?.id || currentRun?.run_id;
     if (!runIdFromUrl || !currentRun?.inputs || String(currentRunId) !== String(runIdFromUrl)) {
@@ -314,17 +332,10 @@ export default function UnderwritingWizard() {
     }
 
     if (currentRun.name || currentRun.address || currentRun.inputs.project) {
-      const { name: _ignoredName, ...projectInputs } = currentRun.inputs.project || {};
-
-      setProjectData((prev) => ({
-        ...prev,
-        ...projectInputs,
-        name: currentRun.name || prev.name,
-        address: currentRun.address || projectInputs.address || prev.address,
-      }));
+      setProjectData((prev) => hydrateProjectDataFromRun(prev, currentRun));
       savedMeta.current = {
         name: currentRun.name || "",
-        address: currentRun.address || projectInputs.address || null,
+        address: currentRun.address || currentRun.inputs.project?.address || null,
       };
     }
     setInputs((prev) => {
@@ -339,10 +350,6 @@ export default function UnderwritingWizard() {
       };
     });
     setDraftFieldCitations(currentRun.field_citations || null);
-    const hydratedDocs = buildSelectedDocsFromRun(currentRun);
-    if (Object.values(hydratedDocs).some(Boolean)) {
-      setSelectedDocs(hydratedDocs);
-    }
     hydratedInputsKey.current = runHydrationKey;
   }, [
     runIdFromUrl,
@@ -360,13 +367,7 @@ export default function UnderwritingWizard() {
   const anyDocSelected = Object.values(selectedDocs).some(Boolean)
     || (currentRun?.document_ids?.length > 0)
     || !!runIdFromUrl;
-  const extractionDocuments = Object.values(selectedDocs).some(Boolean)
-    ? Object.values(selectedDocs)
-        .filter(Boolean)
-        .map(({ document_id, doc_type }) => ({ document_id, doc_type }))
-    : (currentRun?.document_ids || []).filter(
-        (doc) => doc && typeof doc === 'object' && doc.document_id && doc.doc_type
-      );
+  const extractionDocuments = buildExtractionDocuments(selectedDocs, currentRun?.document_ids);
   const hasOmForExtraction = Boolean(selectedDocs.om)
     || Boolean(extractionDocuments.some((doc) => doc.doc_type === 'om'));
   const extractionDone = currentRun?.inputs != null;
@@ -413,14 +414,11 @@ export default function UnderwritingWizard() {
   };
 
   const handleDocumentSelect = (docType, document) => {
-    if (document) {
+    const selectedDoc = buildSelectedDoc(docType, document);
+    if (selectedDoc) {
       setSelectedDocs((prev) => ({
         ...prev,
-        [docType]: {
-          document_id: document.id,
-          doc_type: docType,
-          name: document.name || document.filename || 'Document',
-        },
+        [docType]: selectedDoc,
       }));
     }
     setDocPickerOpen(null);
@@ -440,15 +438,25 @@ export default function UnderwritingWizard() {
     setError(null);
 
     try {
-      const run = await createUnderwritingRun(getToken, {
-        name: projectData.name,
-        asset_type: projectData.asset_type,
-        address: projectData.address,
-        documents: extractionDocuments,
-      });
+      const existingRunId = currentRun?.run_id || currentRun?.id || runIdFromUrl;
+      const run = existingRunId
+        ? await startUnderwritingExtraction(getToken, existingRunId, extractionDocuments)
+        : await createUnderwritingRun(getToken, {
+            name: projectData.name,
+            asset_type: projectData.asset_type,
+            address: projectData.address,
+            documents: extractionDocuments,
+          });
 
-      setCurrentRun(run);
-      navigate(`/app/re/underwriting/new?run_id=${run.run_id}`, { replace: true });
+      setCurrentRun({
+        ...(currentRun || {}),
+        ...run,
+        id: existingRunId || run.run_id,
+        run_id: existingRunId || run.run_id,
+        status: 'extracting',
+        document_ids: extractionDocuments,
+      });
+      navigate(`/app/re/underwriting/new?run_id=${existingRunId || run.run_id}`, { replace: true });
 
       const cleanup = await streamJobProgress(run.extraction_job_id, getToken, {
         onProgress: (data) => updateExtractionProgress({
@@ -640,6 +648,14 @@ export default function UnderwritingWizard() {
     !!currentRun &&
     (projectData.name !== savedMeta.current.name ||
       (projectData.address || "") !== (savedMeta.current.address || ""));
+  const acquisitionSource = currentRun?.source_metadata?.source === 'acquisition_candidate'
+    ? currentRun.source_metadata
+    : null;
+  const acquisitionDocSummary = [
+    selectedDocs.om ? 'OM attached' : 'OM missing',
+    selectedDocs.rent_roll ? 'Rent roll attached' : 'Rent roll missing',
+    selectedDocs.t12 ? 'T-12 attached' : 'T-12 missing',
+  ].join(' · ');
 
   // Show skeleton while loading run data from URL
   if (runIdFromUrl && !currentRun) {
@@ -707,7 +723,6 @@ export default function UnderwritingWizard() {
                       )}
                     </div>
                   </div>
-
                   <div className="uw-mode-switch justify-self-center">
                     <button type="button" className="uw-mode-btn uw-mode-btn-active">
                       Input
@@ -762,6 +777,31 @@ export default function UnderwritingWizard() {
                     ) : null}
                   </div>
                 </div>
+                {acquisitionSource ? (
+                  <div className="mt-3 rounded-lg border border-primary/20 bg-primary/5 px-3 py-2 text-sm">
+                    <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+                      <div>
+                        <p className="font-semibold text-foreground">Created from Acquisition Workspace</p>
+                        <p className="mt-0.5 text-xs text-muted-foreground">
+                          {acquisitionSource.candidate_source_name || 'Sourced candidate'}
+                          {acquisitionSource.asset_class_confidence != null
+                            ? ` · Self-storage ${Math.round(Number(acquisitionSource.asset_class_confidence) * 100)}%`
+                            : ''}
+                          {' · '}{acquisitionDocSummary}
+                        </p>
+                      </div>
+                      {acquisitionSource.acquisition_candidate_id ? (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={() => navigate(`/app/re/acquisitions?candidate_id=${acquisitionSource.acquisition_candidate_id}`)}
+                        >
+                          Open candidate
+                        </Button>
+                      ) : null}
+                    </div>
+                  </div>
+                ) : null}
               </div>
 
 

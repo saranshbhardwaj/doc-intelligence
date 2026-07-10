@@ -73,6 +73,30 @@ class TestCRUDOperations:
         assert data["status"] == "extracting"
         assert task_stub.call_count == 1
 
+    def test_post_extract_existing_run_dispatches_saved_documents(self, api_client, run_factory, monkeypatch):
+        """POST /runs/{id}/extract starts extraction for a drafted run using attached docs."""
+        task_stub = DispatchOnlyTaskStub()
+        monkeypatch.setattr(
+            "app.verticals.real_estate.api.underwriting.start_re_underwriting_chain",
+            task_stub,
+        )
+        document_specs = [
+            {"document_id": str(uuid4()), "doc_type": "om"},
+            {"document_id": str(uuid4()), "doc_type": "rent_roll"},
+            {"document_id": str(uuid4()), "doc_type": "t12"},
+        ]
+        run = run_factory(name="Acquisition Draft", status="needs_review", document_ids=document_specs)
+
+        response = api_client.post(f"/api/v1/re/underwriting/runs/{run.id}/extract", json={})
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["run_id"] == run.id
+        assert data["extraction_job_id"] == run.id
+        assert data["status"] == "extracting"
+        assert task_stub.call_count == 1
+        assert task_stub.last_args[0] == (run.id, document_specs, run.id)
+
     def test_get_runs_empty_list_for_new_user(self, api_client):
         """GET /runs for new user → empty runs, total=0."""
         response = api_client.get("/api/v1/re/underwriting/runs")
